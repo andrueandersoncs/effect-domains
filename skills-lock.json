@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "absurd-code-review": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "absurd-code-review/SKILL.md",
+      "computedHash": "576d67a2489f7c456a0ec38c4b50c1b7c872638009c3e00e986fd9f9d3dad64e"
+    },
+    "implement-happy-path": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "implement-happy-path/SKILL.md",
+      "computedHash": "f9b672bbdade1fe6a465bfaabc2a6d7e2193dc72e7797033733fb8746d60a6d0"
+    },
+    "llm-wiki": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "llm-wiki/SKILL.md",
+      "computedHash": "391a225cbe3368a28838746e20be7fb720f4a72536c6a95ff35baed38187a8b4"
+    },
+    "manage-project": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "manage-project/SKILL.md",
+      "computedHash": "15d3c5d032e319e9e400dc937bff7f0769957f225a7613c10e16811b37dde0f3"
+    },
+    "npm-publish-tool": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "npm-publish-tool/SKILL.md",
+      "computedHash": "5b988d0d5d5a07f4372731b51b330f93351ff3edc078f18f5633eb418fdcfd84"
+    },
+    "plan-happy-path": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "plan-happy-path/SKILL.md",
+      "computedHash": "d1a13f4bfcdce2e85dbf95e07cfaf654ee82ce859f57a545fa2b38c802f8250f"
+    },
+    "software-laws": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "software-laws/SKILL.md",
+      "computedHash": "1c2d37cfdaeaec657d11a583a847176435dea52712fdb46a91941b2f248ab81d"
+    },
+    "workflows": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "workflows/SKILL.md",
+      "computedHash": "52a6bc52b787157e779294a022cdda9dd4d2583c6ae8f271392d98b221433d56"
+    }
+  }
+}
