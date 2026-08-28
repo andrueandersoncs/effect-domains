@@ -4,7 +4,7 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains implementation workspace. The wiki tracks domain concepts, architecture, experiments, decisions, evidence gaps, and conclusions about deriving application representations from Effect Schemas.
 
-The governing project thesis is preserved as the immutable source [Project thesis](raw/project-thesis.md).
+The governing sources are the [Project thesis](raw/project-thesis.md) and the later [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md).
 
 ## Roles and Review
 
@@ -41,6 +41,8 @@ Create only pages that currently earn their place. Use lowercase kebab-case file
 Follow these source-backed project rules unless newer human-curated evidence changes them:
 
 - Model domain concepts and operation contracts with Effect Schemas.
+- Implement project capabilities with Effect and program against narrow interfaces whose concrete implementations are supplied at runtime.
+- Make final user-facing interfaces declarative across the project. Ask users for inspectable schemas, configuration, or annotations rather than authored functions or procedures on the normal path.
 - Derive a representation only when the mapping is mechanical and lossless.
 - Use explicit typed transformations when domain, storage, transport, or business semantics differ.
 - Keep persistence, wire, testing, and documentation concerns in separate interpreters rather than loading them into the canonical domain schema.
@@ -48,7 +50,7 @@ Follow these source-backed project rules unless newer human-curated evidence cha
 - Validate the hypothesis through materially different vertical slices before generalizing a framework.
 - Prefer deep modules and straightforward escape hatches over annotation-heavy thin wrappers.
 
-See the [Project thesis](raw/project-thesis.md) for the complete source wording.
+See the [Project thesis](raw/project-thesis.md) and [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) for the complete source wording.
 
 ## Workflows
 

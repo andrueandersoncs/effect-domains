@@ -25,10 +25,12 @@ For every slice, record:
 - How much duplicate declaration disappeared?
 - Did domain changes propagate safely?
 - How much annotation machinery was required?
+- Did the normal user path remain declarative, without requiring authored functions or procedures?
+- Did Effect requirements keep concrete infrastructure replaceable behind a narrow interface?
 - Were escape hatches straightforward?
 - Is the result easier to understand than handwritten adapters?
 
-Compare evidence across materially different domains before extracting a general algebra. One successful slice can validate a technique, but it cannot establish that the technique generalizes. ([Project thesis](raw/project-thesis.md))
+Compare evidence across materially different domains before extracting a general algebra. One successful slice can validate a technique, but it cannot establish that the technique generalizes. ([Project thesis](raw/project-thesis.md)) The interface and implementation questions reflect the later project-wide direction toward declarative APIs and Effect requirements. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
 ## Evidence Standard
 

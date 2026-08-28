@@ -13,14 +13,14 @@ The project asks how much application structure can be derived safely from rich 
 ## Wiki Operations and Sources
 
 - [Wiki instructions](AGENTS.md) — structure, citation rules, review policy, and maintenance workflows.
-- [Bun project guidance](../../CLAUDE.md) — runtime and tooling conventions for implementation work.
-- [Original project thesis](raw/project-thesis.md) — the first immutable human-curated source.
+- [Original project thesis](raw/project-thesis.md) — the initial derivation thesis and architectural boundaries.
+- [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) — the human direction for Effect-based implementations and declarative public APIs.
 
 Files under `raw/` are immutable source material. Maintained pages synthesize those sources and should cite them close to supported claims.
 
 ## Current Status
 
-The repository is at the hypothesis stage. The thesis defines what may be derived and what must remain explicit, but no vertical slice has yet produced implementation evidence. The next useful milestone is one narrow experiment that exercises a branded value, an entity transition, a typed operation, persistence, versioned transport, and a migration.
+The repository is at the hypothesis stage. Persistence is the first desired capability. Its public interface must be declarative, while its compiled operations use Effect requirements to depend on runtime-provided persistence implementations. The next planning step is to define the smallest complete persistence declaration and the interface contract its adapters must satisfy. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
 ## Development
 

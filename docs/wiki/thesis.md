@@ -6,6 +6,14 @@ Model domain concepts and operation contracts as Effect Schemas. Derive other re
 
 Effect Schema is relevant because a schema is an inspectable runtime value as well as a source of TypeScript types. In principle, multiple interpreters can consume the same domain description without repeating declarations. ([Project thesis](raw/project-thesis.md))
 
+## Core Interface Principles
+
+All project implementations use Effect and depend on interfaces rather than fixed concrete infrastructure. Effect Context and Requirements make runtime dependencies explicit, while runtime-provided implementations satisfy those requirements. A capability such as persistence may therefore derive mappings and execute operations without coupling its public contract to one database implementation. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+
+The final user-facing product is declarative across every capability, not only persistence. Its normal interface asks users to supply inspectable schemas, configurations, annotations, or similar descriptions rather than author functions or procedures. Effect Domains interprets those declarations and constructs the Effect programs that perform the work. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+
+This declarative constraint does not make non-mechanical behavior derivable. Business behavior and semantic transformations still need explicit authorship, but that authored behavior must remain distinct from the normal mechanically derived path. ([Project thesis](raw/project-thesis.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+
 ## Derivation Boundary
 
 The strongest candidates for derivation are representations whose meaning is already present in the schema:
