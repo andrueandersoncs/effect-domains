@@ -1,88 +1,92 @@
-# Effect Domains
+# Effect Domains Wiki Instructions
 
-## Original Idea
+## Purpose
 
-A meta-framework around Effect where you base your entire application on domain models implemented as Effect Schemas.
+This repository is a persistent, source-grounded wiki and implementation workspace for testing the Effect Domains design hypothesis. The wiki tracks domain concepts, architecture, experiments, decisions, evidence gaps, and conclusions about deriving application representations from Effect Schemas.
 
-- Define those models in Effect https://www.effect.website/docs/v4/api/effect/Schema
+The governing project thesis is preserved as the immutable source [Project thesis](raw/project-thesis.md).
 
-- Define the domain once in a rich, executable form, then derive other representations wherever the mapping is mechanical and lossless.
+## Roles and Review
 
-Effect Schema is a promising foundation because schemas are inspectable values rather than TypeScript types alone. This allows multiple interpreters to consume the same domain description.
+- The human curates files in `raw/`, sets direction, asks questions, and makes architectural or ambiguous judgment calls.
+- The LLM maintains all synthesis outside `raw/`, including summaries, cross-links, consistency, indexing, structure, and Git history.
+- Apply safe, evidence-backed synthesis and bookkeeping changes directly.
+- Flag ambiguous interpretations, conflicting architectural choices, and changes to the thesis for human review.
 
-### Thesis
+## Source Contract
 
-Model domain concepts and operation contracts as Effect Schemas. Derive representations and routine behavior wherever the derivation is lossless. Use explicit, typed transformations where storage, transport, or business concerns differ from the domain.
+- Treat every file in `raw/` as immutable. Never rewrite, rename, move, or delete one during wiki work.
+- A human may add new source files to `raw/`.
+- Cite sources close to the claims they support with standard relative Markdown links.
+- Distinguish source-backed facts from wiki analysis, proposals, and unresolved questions.
+- Preserve disagreement between sources and name the provenance of each position.
 
-### Good Candidates for Derivation
+## Wiki Structure
 
-- Runtime validation and TypeScript types
-- Wire codecs
-- Branded identifiers and value objects
-- Test data generators
-- Equality, formatting, and redaction behavior
-- Basic database columns and constraints
-- Operation input, output, and error contracts
+Keep the repository flat until several dozen maintained pages or a clear topic cluster makes the root hard to scan.
 
-These are useful derivations because they remove duplicate declarations and reduce drift.
+Page types:
 
-### What Must Still Be Authored
+1. **Synthesis pages** explain established concepts, boundaries, and relationships across sources.
+2. **Experiment pages** describe a vertical slice, its implementation evidence, and its evaluation.
+3. **Decision pages** record an accepted architectural choice, its context, and consequences.
+4. **Research-agenda pages** collect unresolved questions and evidence needed to answer them.
 
-A data schema does not contain enough information to derive all application behavior. The following usually require explicit design and implementation:
+Create only pages that currently earn their place. Use lowercase kebab-case filenames, except for conventional files such as `README.md` and `AGENTS.md`. Use descriptive Markdown headings and standard relative links such as `[Thesis](thesis.md)`, never wikilinks.
 
-- Business decisions and policies
-- State transitions over time
-- Authorization
-- Transactions and consistency rules
-- Database indexes and query-driven denormalization
-- Relationships and aggregate ownership
-- Historical database migrations
-- Wire-format compatibility and versioning
-- Operational behavior such as retries and idempotency
+`README.md` is the landing page and content map. Read it first. Update it whenever a maintained page is created, renamed, moved, deleted, or materially changed. Every maintained root page must appear there with a short description.
 
-A schema can describe valid `Order` data, for example. It cannot determine whether a paid order may be cancelled, who may cancel it, or which compensating actions must run.
+## Domain Boundaries
 
-Therefore, business operations should be **defined in terms of** domain models rather than assumed to be mechanically derivable from them. Their contracts and supporting machinery may be derived, but their policy and behavior must be authored.
+Follow these source-backed project rules unless newer human-curated evidence changes them:
 
-### Design Rules
+- Model domain concepts and operation contracts with Effect Schemas.
+- Derive a representation only when the mapping is mechanical and lossless.
+- Use explicit typed transformations when domain, storage, transport, or business semantics differ.
+- Keep persistence, wire, testing, and documentation concerns in separate interpreters rather than loading them into the canonical domain schema.
+- Treat business policies, authorization, transactions, migrations, compatibility, and operational behavior as authored concerns.
+- Validate the hypothesis through materially different vertical slices before generalizing a framework.
+- Prefer deep modules and straightforward escape hatches over annotation-heavy thin wrappers.
 
-1. **Keep the domain model clean.** Do not turn the canonical schema into a god object filled with database, HTTP, UI, and authorization details.
-2. **Use separate interpreters.** Persistence, transport, testing, and documentation should consume the domain description without becoming part of it.
-3. **Derive only when the mapping is lossless.** If two representations have different semantics, use an explicit transformation.
-4. **Make differences visible and typed.** Storage models and wire models may differ from domain models. This is healthy when the distinction reflects a real concern.
-5. **Treat behavior as first-class.** Constructors, invariants, policies, and operations belong in domain modules alongside the schemas, not hidden inside infrastructure derivation.
-6. **Keep migrations independent.** A current schema describes the desired present state; a migration records the historical path between states.
-7. **Provide escape hatches.** A derivation system should make common cases easy without making exceptional cases impossible.
-8. **Prefer deep modules.** Derivation machinery should hide complexity behind small interfaces. Avoid thin wrappers and annotation-heavy interfaces that merely move complexity around.
+See the [Project thesis](raw/project-thesis.md) for the complete source wording.
 
-A useful conceptual shape is:
+## Workflows
 
-```text
-Domain schemas and operations
-    ├── Wire interpreter
-    ├── Persistence interpreter
-    ├── Test-data interpreter
-    └── Documentation interpreter
-```
+### Ingest
 
-### Validation Strategy
+1. Read this file, `README.md`, the new immutable source, and every affected maintained page.
+2. Identify new facts, changed confidence, contradictions, connections, and gaps.
+3. Integrate the evidence across all affected pages. Add citations close to claims.
+4. Update cross-links and `README.md`.
+5. Commit the complete ingest once. Name the source and explain which synthesis changed and why in the commit body.
+6. Report the changes and any question that needs human direction.
 
-Before building a general framework, prove the approach with narrow vertical slices. Each slice should include:
+### Query
 
-- Branded domain values
-- An entity with a meaningful state transition
-- A business operation with typed domain errors
-- A database representation
-- A versioned wire representation
-- Explicit transformations where representations differ
-- A database migration
+1. Read this file and `README.md`; consult Git history when sequence matters.
+2. Follow maintained pages first, then inspect raw sources when confirmation is needed or a gap appears.
+3. Answer with links to both the maintained synthesis and supporting raw sources. State contradictions and missing knowledge directly.
+4. If the answer adds durable analysis, integrate it, update the index and links, and commit it as one query-driven change. Keep one-off answers in the conversation.
 
-Evaluate each slice by asking:
+### Lint
 
-1. How much duplicate declaration disappeared?
-2. Did domain changes propagate safely?
-3. How much annotation machinery was required?
-4. Were escape hatches straightforward?
-5. Is the result easier to understand than handwritten adapters?
+Check all maintained pages, relevant sources, links, and recent Git history for hidden contradictions, stale claims, missing or orphaned pages, broken citations, weak cross-links, evidence gaps, and structural debt. Apply safe fixes directly. Route judgment calls to the human. If files change, update the index and commit all lint fixes once.
 
-If the approach works across several materially different domains, it may justify a general algebra. Until then, treat it as a design hypothesis to test rather than a premise that every part of the application must obey.
+### Compact
+
+Merge repeated material, rewrite decayed synthesis, and remove pages that no longer earn their place. Preserve evidence and fix every inbound link, citation, and index in the same change. Add a subdirectory with its own `README.md` only when a real topic cluster makes the root hard to scan. Commit the compaction once.
+
+### Commit
+
+Finish each wiki-changing operation with one coherent commit. Use a conventional title. In the body, record what changed, why the synthesis changed, the sources involved, and unresolved gaps. Git history is the chronological record; do not create `log.md`.
+
+## Implementation Conventions
+
+Use Bun for project commands:
+
+- `bun install` for dependencies
+- `bun run <file-or-script>` to run code
+- `bun test` for tests
+- `bunx <package> <command>` for package executables
+
+Keep current implementation evidence separate from claims that the broader framework design has been validated.
