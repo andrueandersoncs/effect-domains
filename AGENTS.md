@@ -20,3 +20,7 @@ Use Bun for project commands:
 - `bun run <file-or-script>` to run code
 - `bun test` for tests
 - `bunx <package> <command>` for package executables
+
+## Rules and Advice
+
+**Every plan is a prediction. Do everything in your power to make sure yours are accurate and effective.**
