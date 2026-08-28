@@ -4,7 +4,7 @@ Effect Domains tests whether Effect Schemas can define domain concepts and opera
 
 ## Project Direction
 
-- Read the [wiki](docs/wiki/README.md) before making design decisions.
+- Read the [wiki](docs/wiki/README.md) before making design decisions. Be sure to update it regularly.
 - Follow [wiki maintenance instructions](docs/wiki/AGENTS.md) for all work under `docs/wiki/`.
 - Keep canonical domain models free of persistence, transport, UI, and authorization concerns.
 - Derive only mechanical, lossless mappings. Use explicit typed transformations when semantics differ.
