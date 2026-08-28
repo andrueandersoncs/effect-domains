@@ -6,7 +6,7 @@ The project is currently testing this idea through narrow vertical slices. Busin
 
 ## Documentation
 
-The persistent project wiki starts at [docs/wiki/README.md](docs/wiki/README.md). It contains the maintained thesis, validation strategy, research agenda, and immutable source material.
+The persistent project wiki starts at [docs/wiki/README.md](docs/wiki/README.md). It contains the maintained thesis, validation strategy, research agenda, and immutable source material. Be sure to update it every time any relevant information is discovered.
 
 ## Development
 
