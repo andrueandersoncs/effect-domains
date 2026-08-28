@@ -1,7 +1,20 @@
 {
   "name": "effect-domains",
+  "version": "0.1.0",
   "module": "index.ts",
   "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./sqlite-bun": "./src/SqliteBun.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

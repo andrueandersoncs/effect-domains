@@ -1,44 +1,51 @@
 # Research Agenda
 
-This page records **wiki analysis and unresolved questions**. The source thesis establishes the constraints, but it does not answer the questions below. ([Project thesis](raw/project-thesis.md))
+This page records established implementation findings and unresolved questions. The source thesis establishes the constraints, while implementation evidence changes which questions remain open. ([Project thesis](raw/project-thesis.md))
 
-## First Capability: Persistence
+## Established Persistence Findings
 
-Persistence is the first desired product capability. Its public surface must accept declarative descriptions, compile them into Effect programs, and express the runtime database dependency through an interface requirement. A concrete database remains a runtime-provided implementation rather than part of the public contract. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Persistence is the first implemented product capability. Its public surface accepts a declarative sidecar catalog and compiles full CRUD Effect programs. Each entity receives a distinct Context service, and runtime Layers provide concrete implementations. The first adapter uses Bun SQLite behind the database-neutral interface. ([Persistence Catalog](persistence-catalog.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
-Planning still needs to resolve:
+The initial contract is now explicit:
 
-- the smallest persistence declaration a user must author;
-- which storage mappings and row codecs can be derived losslessly from an Effect Schema;
-- the exact semantics promised by the runtime persistence interface;
-- which insert, retrieve, update, or delete operations belong in the first complete capability;
-- how adapter contract tests prove that implementations satisfy the interface; and
-- where explicit semantic transformations sit without turning the normal interface procedural.
+- users declare the canonical schema, table, caller-supplied primary key, and optional column renames;
+- `create` returns the complete entity;
+- primary-key `read` returns `Option`;
+- `update` performs complete replacement and returns `Option`;
+- idempotent `delete` returns whether a row existed; and
+- every adapter must pass one reusable CRUD contract.
 
-A later validation slice must exercise these decisions in a domain approved by the human. The project must not infer a product domain from illustrative examples in the thesis.
+The Bun SQLite test demonstrates these semantics, a renamed column, a branded key, original schema codecs with Effect service requirements, and separate entity services. This evidence is limited to the supported scalar row shape and one concrete adapter. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapterContract.ts))
+
+## Remaining Persistence Questions
+
+Further evidence must determine:
+
+- whether a materially different second database can satisfy the same CRUD contract without weakening it;
+- how an explicit typed storage representation composes when the canonical encoded schema is not a lossless row shape;
+- which additional encoded field shapes earn mechanical support;
+- how migrations and transactions remain explicit while integrating cleanly with generated CRUD; and
+- whether generated identifiers or database defaults can be described declaratively without hiding real semantics.
+
+These are unresolved capabilities, not commitments for the current persistence interface.
 
 ## Effect Schema Capabilities
 
-The project needs source-backed answers to these implementation questions:
+The current compiler uses public `Schema.toEncoded`, `SchemaAST` guards, and original schema encode/decode Effects for a narrow supported subset. Research and prototypes still need to determine:
 
-- Which Effect Schema inspection APIs are stable enough for interpreter authors?
-- How are brands, transformations, annotations, optional fields, unions, and recursive schemas represented at runtime?
-- Which behavior can be derived without depending on undocumented schema internals?
-- What limitations appear when deriving database constraints or versioned codecs?
-
-These questions require current Effect documentation and prototype evidence before the wiki can state conclusions.
+- how unions, optional fields, nested structures, records, and recursive schemas should be rejected or represented;
+- when annotations remain useful metadata versus becoming a second embedded programming language; and
+- which unstable Effect v4 APIs can be isolated without shaping the public contract.
 
 ## Interpreter Interface
 
-Interpreters must receive declarative domain descriptions while keeping persistence and transport details out of the canonical schema. Experiments must still determine:
+The compiled persistence catalog establishes one narrow interpreter shape. Future capabilities must still test:
 
-- how a sidecar declaration requests only essential concern-specific information;
-- when configuration or annotations become a second embedded programming language;
-- how Effect requirements expose infrastructure needs without leaking one adapter into the interface;
-- how escape hatches compose with the derived path; and
-- whether one shared algebra is clearer than several narrow interpreters.
+- whether sidecar catalogs remain understandable as declarations grow;
+- how explicit escape hatches compose without making the normal interface procedural; and
+- whether one shared algebra is clearer than several capability-specific interpreters.
 
-The declarative interface and Effect requirement constraints are established project direction; the precise declaration and service shapes remain open. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+The declarative interface and Effect requirement constraints are established project direction. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
 ## Success and Stop Conditions
 
