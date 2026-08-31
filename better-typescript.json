@@ -1,0 +1,82 @@
+{
+  "commands": [
+    {
+      "type": "add_exclusions",
+      "files": "**/*.ts",
+      "rules": [
+        "related-kind-files"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "index.ts",
+      "rules": [
+        "no-reexports",
+        "require-export-jsdoc"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "examples/**/*.ts",
+      "rules": [
+        "parameter-bag",
+        "redundant-alias",
+        "unused-field",
+        "duplicate-shape",
+        "prefer-effect-schema-constructor"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "src/Query.ts",
+      "rules": [
+        "missing-rationale",
+        "redundant-alias",
+        "prefer-effect-schema-record",
+        "unused-field",
+        "prefer-curried-data-last-functions"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "src/SqliteBun.ts",
+      "rules": [
+        "no-value-aliases",
+        "missing-rationale",
+        "redundant-alias"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "src/Table.ts",
+      "rules": [
+        "missing-rationale",
+        "redundant-alias",
+        "unused-field",
+        "prefer-curried-data-last-functions",
+        "unsafe-casts"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "test/SqliteBun.test.ts",
+      "rules": [
+        "parameter-bag",
+        "unused-field",
+        "closed-abstraction",
+        "duplicate-shape",
+        "missing-rationale",
+        "redundant-alias"
+      ]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "test/adapterContract.ts",
+      "rules": [
+        "missing-rationale",
+        "redundant-alias",
+        "unused-field"
+      ]
+    }
+  ]
+}

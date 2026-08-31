@@ -1,28 +1,50 @@
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Array, Effect, Equivalence, Function, Layer, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import {
-  type AnyTableDefinition,
   TableError,
   type TableField,
   TableStore,
 } from "./Table.ts"
 
-/** The database service available to authored query Effects. */
+/**
+
+Use when: authoring query Effects because this service provides the runtime
+SQL client.
+
+Example: `const db = yield* Database` accesses the active client.
+
+**/
 export const Database = SqlClient.SqlClient
+
+/**
+
+Use when: declaring Effect requirements because this type names the runtime
+SQL service.
+
+Example: include `Database` in an authored query's requirement channel.
+
+**/
 export type Database = SqlClient.SqlClient
 
+/**
+
+Use when: building the Bun SQLite layer because it needs a database filename.
+
+Example: `new SqliteBunOptions("app.sqlite")` targets a database file.
+
+**/
 export class SqliteBunOptions {
   constructor(readonly filename: string) {}
 }
 
 const tableStore = (sql: SqlClient.SqlClient) =>
   TableStore.of({
-    createTable: (table: AnyTableDefinition) => {
+    createTable: (table) => {
       const scalarIsString = Equivalence.strictEqual<"string" | "number">()
       const fieldIsIdentifier = Equivalence.strictEqual<string>()
 
-      const columnDefinition = (field: TableField) => {
+      const columnNameFromTablefield = (field: TableField) => {
         const columnType = scalarIsString(field.scalar, "string")
           ? sql.literal("TEXT")
           : sql.literal("REAL")
@@ -34,7 +56,7 @@ const tableStore = (sql: SqlClient.SqlClient) =>
         return sql`${sql(field.name)} ${columnType}${primaryKey} NOT NULL`
       }
 
-      const definitions = Array.map(table.fields, columnDefinition)
+      const definitions = Array.map(table.fields, columnNameFromTablefield)
       const columns = sql.join(", ", true)(definitions)
       const statement = sql`CREATE TABLE ${sql(table.name)} ${columns}`
 
@@ -46,12 +68,21 @@ const tableStore = (sql: SqlClient.SqlClient) =>
     },
   })
 
-/** Supplies both table creation and the database required by authored queries. */
+/**
+
+Use when: running table and query Effects because the layer supplies table
+creation and the SQL client together.
+
+Example: provide `layer(options)` to an application Effect.
+
+**/
 export const layer = (options: SqliteBunOptions) => {
   const databaseLayer = SqliteClient.layer(options)
+
   const storeEffect = SqlClient.SqlClient.use(
     Function.compose(tableStore, Effect.succeed),
   )
+
   const storeLayer = pipe(
     Layer.effect(TableStore, storeEffect),
     Layer.provide(databaseLayer),

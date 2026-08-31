@@ -17,7 +17,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.3.3",
+    "@better-typescript/better-typescript": "0.4.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {

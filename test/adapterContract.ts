@@ -5,8 +5,15 @@ type Operation<Input, Output, Error, Requirements> = Readonly<{
   execute: (input: Input) => Effect.Effect<Output, Error, Requirements>
 }>
 
-/** Validates the database-neutral behavior of an authored CRUD query set. */
-export const adapterContract = <
+/**
+
+Use when: verifying a database adapter because authored CRUD query sets must
+share database-neutral behavior.
+
+Example: yield `adapterContract(options)` from an adapter integration test.
+
+**/
+export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   Entity,
   Key,
   CreateError,
@@ -37,35 +44,46 @@ export const adapterContract = <
     UpdateRequirements
   >
   delete: Operation<Key, boolean, DeleteError, DeleteRequirements>
-}>) =>
-  Effect.gen(function* () {
-    const created = yield* options.create.execute(options.original)
-    assert.deepStrictEqual(created, options.original)
+}>) {
+  const created = yield* options.create.execute(options.original)
+  assert.deepStrictEqual(created, options.original)
 
-    const found = yield* options.read.execute(options.keyOf(created))
-    assert.ok(Option.isSome(found))
-    assert.deepStrictEqual(found.value, options.original)
+  const createdKey = options.keyOf(created)
+  const found = yield* options.read.execute(createdKey)
+  const foundIsSome = Option.isSome(found)
 
-    const updated = yield* options.update.execute(options.replacement)
-    assert.ok(Option.isSome(updated))
-    assert.deepStrictEqual(updated.value, options.replacement)
+  assert.ok(foundIsSome)
+  assert.deepStrictEqual(found.value, options.original)
 
-    const missingRead = yield* options.read.execute(options.missingKey)
-    assert.ok(Option.isNone(missingRead))
+  const updated = yield* options.update.execute(options.replacement)
+  const updatedIsSome = Option.isSome(updated)
 
-    const missingUpdate = yield* options.update.execute(
-      options.missingReplacement,
-    )
-    assert.ok(Option.isNone(missingUpdate))
+  assert.ok(updatedIsSome)
+  assert.deepStrictEqual(updated.value, options.replacement)
 
-    const deleted = yield* options.delete.execute(options.keyOf(options.original))
-    assert.equal(deleted, true)
+  const missingRead = yield* options.read.execute(options.missingKey)
+  const missingReadIsNone = Option.isNone(missingRead)
 
-    const afterDelete = yield* options.read.execute(options.keyOf(options.original))
-    assert.ok(Option.isNone(afterDelete))
+  assert.ok(missingReadIsNone)
 
-    const deletedAgain = yield* options.delete.execute(
-      options.keyOf(options.original),
-    )
-    assert.equal(deletedAgain, false)
-  })
+  const missingUpdate = yield* options.update.execute(
+    options.missingReplacement,
+  )
+
+  const missingUpdateIsNone = Option.isNone(missingUpdate)
+
+  assert.ok(missingUpdateIsNone)
+
+  const originalKey = options.keyOf(options.original)
+  const deleted = yield* options.delete.execute(originalKey)
+
+  assert.equal(deleted, true)
+
+  const afterDelete = yield* options.read.execute(originalKey)
+  const afterDeleteIsNone = Option.isNone(afterDelete)
+
+  assert.ok(afterDeleteIsNone)
+
+  const deletedAgain = yield* options.delete.execute(originalKey)
+  assert.equal(deletedAgain, false)
+})

@@ -22,6 +22,15 @@ type IdentifierFieldName<S extends AnyStruct> = {
     : never
 }[FieldName<S>]
 
+/**
+
+Use when: table derivation fails because invalid metadata must stop before
+database work begins.
+
+Example: handle this error when `Table.make` rejects a schema.
+
+**/
+// Keep a distinct definition error because it carries table and validation reason data.
 export class TableDefinitionError extends Schema.TaggedError<TableDefinitionError>()(
   "TableDefinitionError",
   {
@@ -38,10 +47,21 @@ export class TableDefinitionError extends Schema.TaggedError<TableDefinitionErro
   }
 }
 
+const CreateTableOperationSchema = Schema.Literal("createTable")
+
+/**
+
+Use when: table creation fails because callers need the database cause in a
+typed error channel.
+
+Example: handle this error from `table.createTable()`.
+
+**/
+// Keep a distinct table error because it carries operation, table, and runtime cause data.
 export class TableError extends Schema.TaggedError<TableError>()(
   "TableError",
   {
-    operation: Schema.Literal("createTable"),
+    operation: CreateTableOperationSchema,
     table: Schema.String,
     cause: Schema.Unknown,
   },
@@ -55,6 +75,14 @@ export class TableError extends Schema.TaggedError<TableError>()(
   }
 }
 
+/**
+
+Use when: rendering a table because adapters need validated physical column
+metadata.
+
+Example: map `TableField` values into SQL column definitions.
+
+**/
 export class TableField {
   constructor(
     readonly name: string,
@@ -62,6 +90,14 @@ export class TableField {
   ) {}
 }
 
+/**
+
+Use when: inspecting a table because derived metadata and its creation Effect
+must stay coupled.
+
+Example: accept a `TableDefinition` in a database adapter.
+
+**/
 export abstract class TableDefinition<
   Name extends string,
   S extends AnyStruct,
@@ -82,8 +118,24 @@ export abstract class TableDefinition<
   )
 }
 
+/**
+
+Use when: defining runtime table services because they accept every compiled
+table definition.
+
+Example: use this boundary in a `TableStore` implementation.
+
+**/
 export type AnyTableDefinition = TableDefinition<string, AnyStruct, string>
 
+/**
+
+Use when: creating tables because definitions need a narrow runtime-provided
+persistence interface.
+
+Example: provide `TableStore` before running `table.createTable()`.
+
+**/
 export class TableStore extends Context.Service<TableStore, {
   readonly createTable: (
     table: AnyTableDefinition,
@@ -110,9 +162,18 @@ const compile = Effect.fn("Table.make")(function* <
   const Name extends string,
   S extends AnyStruct,
 >(schema: S, name: Name) {
-  const encoded = Schema.toEncoded(schema).ast
+  const encodedSchema = Schema.toEncoded(schema)
 
-  if (!SchemaAST.isObjects(encoded) || encoded.indexSignatures.length > 0) {
+  if (!SchemaAST.isObjects(encodedSchema.ast)) {
+    return yield* new TableDefinitionError(
+      name,
+      "schema must encode to a flat struct",
+    )
+  }
+
+  const hasIndexSignatures = encodedSchema.ast.indexSignatures.length > 0
+
+  if (hasIndexSignatures) {
     return yield* new TableDefinitionError(
       name,
       "schema must encode to a flat struct",
@@ -120,7 +181,7 @@ const compile = Effect.fn("Table.make")(function* <
   }
 
   const compileField = Effect.fn("Table.compileField")(function* (
-    property: (typeof encoded.propertySignatures)[number],
+    property: (typeof encodedSchema.ast.propertySignatures)[number],
   ) {
     if (!Predicate.isString(property.name)) {
       return yield* new TableDefinitionError(
@@ -138,8 +199,9 @@ const compile = Effect.fn("Table.make")(function* <
 
     const isString = SchemaAST.isString(property.type)
     const isNumber = SchemaAST.isNumber(property.type)
+    const isSupportedScalar = isString || isNumber
 
-    if (!isString && !isNumber) {
+    if (!isSupportedScalar) {
       return yield* new TableDefinitionError(
         name,
         `field ${property.name} must encode to String or Number`,
@@ -150,49 +212,61 @@ const compile = Effect.fn("Table.make")(function* <
   })
 
   const fields = yield* Effect.forEach(
-    encoded.propertySignatures,
+    encodedSchema.ast.propertySignatures,
     compileField,
   )
 
   const hasIdentifierAnnotation = (field: TableField): boolean => {
-    const fieldSchema = Option.getOrThrow(
-      Option.fromNullishOr(schema.fields[field.name]),
-    )
-    const annotations = Option.fromNullishOr(
-      Schema.resolveAnnotations(fieldSchema),
-    )
+    const nullableFieldSchema = schema.fields[field.name]
+    const fieldSchemaOption = Option.fromNullishOr(nullableFieldSchema)
+    const fieldSchema = Option.getOrThrow(fieldSchemaOption)
+    const resolvedAnnotations = Schema.resolveAnnotations(fieldSchema)
+    const annotations = Option.fromNullishOr(resolvedAnnotations)
     const annotation = Option.map(annotations, Struct.get(DomainIdentifier))
-    return Option.containsWith(Equivalence.strictEqual<unknown>())(
-      annotation,
-      true,
-    )
+    const isTrue = Equivalence.strictEqual<unknown>()
+
+    return Option.containsWith(isTrue)(annotation, true)
   }
 
   const identifierFields = Array.filter(fields, hasIdentifierAnnotation)
+  const lengthIsOne = Equivalence.strictEqual<number>()
+  const hasOneIdentifier = lengthIsOne(identifierFields.length, 1)
 
-  if (identifierFields.length !== 1) {
+  if (!hasOneIdentifier) {
     return yield* new TableDefinitionError(
       name,
       "schema must contain exactly one Domain.identifier field",
     )
   }
 
-  const identifier = Option.getOrThrow(
-    Array.get(identifierFields, 0),
-  ).name as FieldName<S>
-  const identifierSchema = Option.getOrThrow(
-    Option.fromNullishOr(schema.fields[identifier]),
-  )
+  const identifierFieldOption = Array.get(identifierFields, 0)
+  const identifierField = Option.getOrThrow(identifierFieldOption)
+
+  const nullableIdentifierSchema =
+    schema.fields[identifierField.name as FieldName<S>]
+
+  const identifierSchemaOption = Option.fromNullishOr(nullableIdentifierSchema)
+
+  const identifierSchema = Option.getOrThrow(identifierSchemaOption) as
+    S["fields"][FieldName<S>]
 
   return new MadeTable(
     name,
     schema,
-    identifier,
+    identifierField.name as FieldName<S>,
     identifierSchema,
     fields,
   )
 })
 
+/**
+
+Use when: defining persistence because a canonical struct can mechanically
+compile to one table definition.
+
+Example: `Table.make(BookSchema, { name: "books" })` derives a table.
+
+**/
 export abstract class Table {
   static make<
     const Name extends string,
@@ -201,7 +275,9 @@ export abstract class Table {
     schema: S & (IdentifierFieldName<S> extends never ? never : unknown),
     config: Readonly<{ name: Name }>,
   ): TableDefinition<Name, S, IdentifierFieldName<S>> {
-    return Effect.runSync(compile(schema, config.name)) as unknown as TableDefinition<
+    const compiled = compile(schema, config.name)
+
+    return Effect.runSync(compiled) as unknown as TableDefinition<
       Name,
       S,
       IdentifierFieldName<S>
