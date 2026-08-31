@@ -1,87 +1,81 @@
 # Effect Domains
 
-Effect Domains derives mechanical, lossless application capabilities from canonical Effect Schemas while keeping business and infrastructure semantics explicit.
+Effect Domains derives mechanical, lossless application structure from canonical Effect Schemas while keeping authored behavior and runtime infrastructure explicit.
 
-Persistence is the first implemented capability. A declarative sidecar catalog compiles into typed full-CRUD Effect programs. Runtime Layers supply concrete database implementations.
+Persistence currently separates table definitions from query definitions:
 
-## Declarative Persistence
+- `Table.make(schema, config)` derives validated table metadata and fresh table creation.
+- `Query.make(table, config)` defines one operation from request/result schemas and an authored Effect implementation.
+
+## Tables and Queries
 
 ```ts
-import { Effect, Option, Schema } from "effect"
-import {
-  compilePersistenceCatalog,
-  definePersistenceCatalog,
-} from "effect-domains"
+import { Effect, Schema } from "effect"
+import { Domain, Query, Table } from "effect-domains"
 import * as SqliteBun from "effect-domains/sqlite-bun"
 
-const UserId = Schema.String.pipe(Schema.brand("UserId"))
-const User = Schema.Struct({
-  id: UserId,
+const UserIdSchema = Schema.String.pipe(
+  Schema.brand("UserId"),
+  Domain.identifier,
+)
+
+const UserSchema = Schema.Struct({
+  id: UserIdSchema,
   displayName: Schema.String,
-  score: Schema.Number,
 })
 
-const catalog = definePersistenceCatalog({
-  users: {
-    schema: User,
-    table: "users",
-    primaryKey: "id",
-    columns: { displayName: "display_name" },
-  },
+const Users = Table.make(UserSchema, { name: "users" })
+
+const FindUser = Query.make(Users, {
+  Request: UserIdSchema,
+  Result: Schema.OptionFromNullOr(UserSchema),
+  implementation: (id) =>
+    Effect.gen(function* () {
+      const db = yield* SqliteBun.Database
+      const rows = yield* db<Readonly<Record<string, unknown>>>`
+        SELECT * FROM ${db(Users.name)}
+        WHERE ${db(Users.identifier)} = ${id}
+        LIMIT 1
+      `
+      return rows[0] ?? null
+    }),
 })
 
-const persistence = Effect.runSync(compilePersistenceCatalog(catalog))
+const Live = SqliteBun.layer(
+  new SqliteBun.SqliteBunOptions("app.sqlite"),
+)
 
 const program = Effect.gen(function* () {
-  const created = yield* persistence.users.create({
-    id: Schema.decodeUnknownSync(UserId)("user-1"),
-    displayName: "Ada",
-    score: 1,
-  })
-  const found = yield* persistence.users.read(created.id)
-  const updated = yield* persistence.users.update({
-    ...created,
-    displayName: "Ada Lovelace",
-  })
-  const deleted = yield* persistence.users.delete(created.id)
-
-  return { found, updated, deleted }
+  yield* Users.createTable()
+  return yield* FindUser.execute(
+    Schema.decodeUnknownSync(UserIdSchema)("user-1"),
+  )
 })
 
-const Live = SqliteBun.layer(persistence, { filename: "app.sqlite" })
 await Effect.runPromise(program.pipe(Effect.provide(Live)))
 ```
 
-The database table must already exist. Migrations and table creation remain explicit application concerns.
+`Query.make` performs only mechanical work: it encodes `Request`, runs `implementation`, and decodes `Result`. The implementation’s Effect requirement channel carries `SqliteBun.Database` until execution. Query config therefore has no database field and no CRUD/type discriminator.
 
-### Supported declarations
+## Supported Tables
 
-The first release supports canonical `Schema.Struct` values that encode to flat, required, string-named fields. Each encoded field must be a `String` or `Number` scalar. Brands, checks, and transformations are supported when their encoded side meets that shape. The original schema codec performs every write encoding and read decoding, including any Effect service requirements.
+`Table.make` currently accepts canonical `Schema.Struct` values that encode to flat, required, string-named fields. Encoded fields must be `String` or `Number`. Exactly one field must use `Domain.identifier`; its encoded name becomes the primary key column. Other encoded field names become column names.
 
-A declaration supplies only:
+`createTable()` derives a fresh physical table. Existing-table migrations remain explicit application concerns. Queries, including CRUD, are authored because their behavior is not mechanically present in an entity schema.
 
-- the canonical schema;
-- the table name;
-- one caller-supplied primary-key field; and
-- optional column renames.
+## Examples
 
-### CRUD semantics
-
-- `create(entity)` inserts and returns the complete decoded entity.
-- `read(key)` returns `Option<Entity>`.
-- `update(entity)` replaces every non-key field and returns `Option<Entity>`.
-- `delete(key)` is idempotent and returns whether a row existed.
-
-The first release does not provide migrations, table creation, relationships, indexes, generated IDs or defaults, partial updates, arbitrary queries, transactions, authorization, or business policy.
+Runnable examples are indexed in [`examples/README.md`](examples/README.md).
 
 ## Documentation
 
-The persistent project wiki starts at [docs/wiki/README.md](docs/wiki/README.md). See [Persistence Catalog](docs/wiki/persistence-catalog.md) for the accepted design and implementation evidence.
+The persistent project wiki starts at [docs/wiki/README.md](docs/wiki/README.md). See [Tables and Queries](docs/wiki/tables-and-queries.md) for the accepted design and current evidence.
 
 ## Development
 
 ```bash
 bun install
 bun run check
+bun run lint
 bun test
 ```

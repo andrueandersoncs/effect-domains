@@ -1,99 +1,61 @@
-import { Effect, Layer, Option } from "effect"
+import { Array, Effect, Equivalence, Function, Layer, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import {
-  type CompiledEntity,
-  type CompiledPersistenceCatalog,
-  type EncodedRowStore,
-  type EntityService,
-  PersistenceError,
-  type PersistenceCatalog,
-  type StorageRow,
-  type StorageScalar,
-} from "./Persistence.ts"
+  type AnyTableDefinition,
+  TableError,
+  type TableField,
+  TableStore,
+} from "./Table.ts"
 
-export interface SqliteBunOptions {
-  readonly filename: string
+/** The database service available to authored query Effects. */
+export const Database = SqlClient.SqlClient
+export type Database = SqlClient.SqlClient
+
+export class SqliteBunOptions {
+  constructor(readonly filename: string) {}
 }
 
-type AnyCompiledEntity = CompiledEntity<string, any, string>
-type DatabaseRow = Record<string, StorageScalar>
-type RawRow = Readonly<Record<string, unknown>>
+const tableStore = (sql: SqlClient.SqlClient) =>
+  TableStore.of({
+    createTable: (table: AnyTableDefinition) => {
+      const scalarIsString = Equivalence.strictEqual<"string" | "number">()
+      const fieldIsIdentifier = Equivalence.strictEqual<string>()
 
-type EntityRequirement<E> = E extends CompiledEntity<
-  infer Name,
-  infer S,
-  infer K
-> ? EntityService<Name, S, K>
-  : never
+      const columnDefinition = (field: TableField) => {
+        const columnType = scalarIsString(field.scalar, "string")
+          ? sql.literal("TEXT")
+          : sql.literal("REAL")
 
-type CatalogRequirement<C extends PersistenceCatalog> = EntityRequirement<
-  CompiledPersistenceCatalog<C>[keyof C]
->
+        const primaryKey = fieldIsIdentifier(field.name, table.identifier)
+          ? sql.literal(" PRIMARY KEY")
+          : sql.literal("")
 
-const mapFailure = (
-  entity: AnyCompiledEntity,
-  operation: "create" | "read" | "update" | "delete",
-) => (cause: unknown): PersistenceError =>
-  new PersistenceError(operation, entity.name, cause)
+        return sql`${sql(field.name)} ${columnType}${primaryKey} NOT NULL`
+      }
 
-const makeStore = (
-  sql: SqlClient.SqlClient,
-  entity: AnyCompiledEntity,
-): EncodedRowStore => {
-  const toDatabase = (row: StorageRow): DatabaseRow =>
-    Object.fromEntries(
-      entity.fields.map(({ field, column }) => [column, row[field]!]),
-    )
+      const definitions = Array.map(table.fields, columnDefinition)
+      const columns = sql.join(", ", true)(definitions)
+      const statement = sql`CREATE TABLE ${sql(table.name)} ${columns}`
 
-  const fromDatabase = (row: RawRow): StorageRow =>
-    Object.fromEntries(
-      entity.fields.map(({ field, column }) => [field, row[column]]),
-    ) as StorageRow
-
-  const first = (rows: ReadonlyArray<RawRow>) =>
-    Option.map(Option.fromUndefinedOr(rows[0]), fromDatabase)
-
-  return entity.Service.of({
-    create: (row) =>
-      sql<RawRow>`INSERT INTO ${sql(entity.table)} ${sql.insert(toDatabase(row))} RETURNING *`.pipe(
-        Effect.map((rows) => fromDatabase(rows[0]!)),
-        Effect.mapError(mapFailure(entity, "create")),
-      ),
-    read: (key) =>
-      sql<RawRow>`SELECT * FROM ${sql(entity.table)} WHERE ${sql(entity.primaryKeyColumn)} = ${key} LIMIT 1`.pipe(
-        Effect.map(first),
-        Effect.mapError(mapFailure(entity, "read")),
-      ),
-    update: (row) => {
-      const databaseRow = toDatabase(row)
-      return sql<RawRow>`UPDATE ${sql(entity.table)} SET ${sql.update(databaseRow, [entity.primaryKeyColumn])} WHERE ${sql(entity.primaryKeyColumn)} = ${databaseRow[entity.primaryKeyColumn]} RETURNING *`.pipe(
-        Effect.map(first),
-        Effect.mapError(mapFailure(entity, "update")),
+      return pipe(
+        statement,
+        Effect.asVoid,
+        Effect.mapError((cause) => new TableError(table.name, cause)),
       )
     },
-    delete: (key: StorageScalar) =>
-      sql<RawRow>`DELETE FROM ${sql(entity.table)} WHERE ${sql(entity.primaryKeyColumn)} = ${key} RETURNING ${sql(entity.primaryKeyColumn)}`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.mapError(mapFailure(entity, "delete")),
-      ),
   })
-}
 
-export const layer = <const C extends PersistenceCatalog>(
-  catalog: CompiledPersistenceCatalog<C>,
-  options: SqliteBunOptions,
-): Layer.Layer<CatalogRequirement<C>> => {
-  const entityLayers = Object.values(catalog).map((entity) =>
-    Layer.effect(
-      entity.Service,
-      SqlClient.SqlClient.use((sql) =>
-        Effect.succeed(makeStore(sql, entity as AnyCompiledEntity))
-      ),
-    )
+/** Supplies both table creation and the database required by authored queries. */
+export const layer = (options: SqliteBunOptions) => {
+  const databaseLayer = SqliteClient.layer(options)
+  const storeEffect = SqlClient.SqlClient.use(
+    Function.compose(tableStore, Effect.succeed),
+  )
+  const storeLayer = pipe(
+    Layer.effect(TableStore, storeEffect),
+    Layer.provide(databaseLayer),
   )
 
-  return Layer.mergeAll(Layer.empty, ...entityLayers).pipe(
-    Layer.provide(SqliteClient.layer({ filename: options.filename })),
-  ) as Layer.Layer<CatalogRequirement<C>>
+  return Layer.merge(databaseLayer, storeLayer)
 }

@@ -4,7 +4,7 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains implementation workspace. The wiki tracks domain concepts, architecture, experiments, decisions, evidence gaps, and conclusions about deriving application representations from Effect Schemas.
 
-The governing sources are the [Project thesis](raw/project-thesis.md) and the later [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md).
+The governing sources are the [Project thesis](raw/project-thesis.md), the [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md), the [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md), the [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md), the [Catalog key and table direction](raw/catalog-key-table-direction.md), the [Derived table creation direction](raw/derived-table-creation-direction.md), and the newer [Table and query API direction](raw/table-and-query-api-direction.md).
 
 ## Roles and Review
 
@@ -42,15 +42,21 @@ Follow these source-backed project rules unless newer human-curated evidence cha
 
 - Model domain concepts and operation contracts with Effect Schemas.
 - Implement project capabilities with Effect and program against narrow interfaces whose concrete implementations are supplied at runtime.
-- Make final user-facing interfaces declarative across the project. Ask users for inspectable schemas, configuration, or annotations rather than authored functions or procedures on the normal path.
+- Favor inspectable schemas, configuration, and annotations for mechanically derivable interfaces. Require explicit authored Effect implementations for query behavior that is not present in schemas.
+- Do not preserve backward compatibility. Make clean cutovers and remove or rewrite legacy code rather than retaining shims, deprecations, or parallel APIs.
 - Derive a representation only when the mapping is mechanical and lossless.
 - Use explicit typed transformations when domain, storage, transport, or business semantics differ.
 - Keep persistence, wire, testing, and documentation concerns in separate interpreters rather than loading them into the canonical domain schema.
+- Express intrinsic entity identity with `Domain.identifier`; persistence derives the storage key from it.
+- Define tables with `Table.make(schema, { name })`; this newer direction supersedes the earlier catalog-key-as-capability interface.
+- Use encoded field names directly as database column names.
+- Derive fresh table creation from the table definition and encoded schema; keep existing-table migrations explicit.
+- Define one operation per `Query.make`; use request/result schemas and an authored Effect implementation whose requirements carry the runtime database.
 - Treat business policies, authorization, transactions, migrations, compatibility, and operational behavior as authored concerns.
 - Validate the hypothesis through materially different vertical slices before generalizing a framework.
 - Prefer deep modules and straightforward escape hatches over annotation-heavy thin wrappers.
 
-See the [Project thesis](raw/project-thesis.md) and [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) for the complete source wording.
+See the [Project thesis](raw/project-thesis.md), [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md), [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md), [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md), [Catalog key and table direction](raw/catalog-key-table-direction.md), and [Derived table creation direction](raw/derived-table-creation-direction.md) for the complete source wording.
 
 ## Workflows
 

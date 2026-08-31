@@ -4,34 +4,33 @@ This page records established implementation findings and unresolved questions. 
 
 ## Established Persistence Findings
 
-Persistence is the first implemented product capability. Its public surface accepts a declarative sidecar catalog and compiles full CRUD Effect programs. Each entity receives a distinct Context service, and runtime Layers provide concrete implementations. The first adapter uses Bun SQLite behind the database-neutral interface. ([Persistence Catalog](persistence-catalog.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Persistence now separates table derivation from authored queries. `Table.make` accepts a canonical schema and table name. `Query.make` defines one operation from request/result schemas and an Effect implementation. The implementation’s requirement channel carries the runtime database service until execution. ([Tables and Queries](tables-and-queries.md); [Table and query API direction](raw/table-and-query-api-direction.md))
 
-The initial contract is now explicit:
+The current table boundary is explicit:
 
-- users declare the canonical schema, table, caller-supplied primary key, and optional column renames;
-- `create` returns the complete entity;
-- primary-key `read` returns `Option`;
-- `update` performs complete replacement and returns `Option`;
-- idempotent `delete` returns whether a row existed; and
-- every adapter must pass one reusable CRUD contract.
+- exactly one `Domain.identifier` field supplies the derived primary key;
+- encoded field names supply database column names;
+- the supported encoded row is a flat required struct of `String` and `Number` fields; and
+- fresh table creation is derived while migrations remain explicit.
 
-The Bun SQLite test demonstrates these semantics, a renamed column, a branded key, original schema codecs with Effect service requirements, and separate entity services. This evidence is limited to the supported scalar row shape and one concrete adapter. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapterContract.ts))
+Each query is an authored operation rather than generated CRUD. `Query.make` mechanically preserves request encoding, result decoding, implementation errors, and Effect requirements. The Bun SQLite test authors CRUD queries and validates their behavior against a temporary database, including a branded identifier and a service-dependent schema codec. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapterContract.ts))
 
 ## Remaining Persistence Questions
 
 Further evidence must determine:
 
-- whether a materially different second database can satisfy the same CRUD contract without weakening it;
-- how an explicit typed storage representation composes when the canonical encoded schema is not a lossless row shape;
-- which additional encoded field shapes earn mechanical support;
-- how migrations and transactions remain explicit while integrating cleanly with generated CRUD; and
-- whether generated identifiers or database defaults can be described declaratively without hiding real semantics.
+- whether the same table/query interface works with a materially different database;
+- whether database-specific query Effects remain readable as query count and complexity grow;
+- how joins and multi-table operations should record their table dependencies;
+- how explicit typed storage representations compose when a canonical encoded schema is not a lossless row shape;
+- which additional encoded field shapes earn mechanical table support; and
+- how migrations and transactions remain explicit while integrating cleanly with table and query definitions.
 
-These are unresolved capabilities, not commitments for the current persistence interface.
+These are unresolved capabilities, not commitments for the current interface.
 
 ## Effect Schema Capabilities
 
-The current compiler uses public `Schema.toEncoded`, `SchemaAST` guards, and original schema encode/decode Effects for a narrow supported subset. Research and prototypes still need to determine:
+The table compiler uses public `Schema.toEncoded`, `SchemaAST` guards, and original schema codecs for a narrow supported subset. Research still needs to determine:
 
 - how unions, optional fields, nested structures, records, and recursive schemas should be rejected or represented;
 - when annotations remain useful metadata versus becoming a second embedded programming language; and
@@ -39,13 +38,13 @@ The current compiler uses public `Schema.toEncoded`, `SchemaAST` guards, and ori
 
 ## Interpreter Interface
 
-The compiled persistence catalog establishes one narrow interpreter shape. Future capabilities must still test:
+The current implementation establishes a small table interpreter and a schema-wrapped authored-query seam. Future capabilities must test:
 
-- whether sidecar catalogs remain understandable as declarations grow;
-- how explicit escape hatches compose without making the normal interface procedural; and
+- whether request/result schemas remove enough duplication to justify `Query.make`;
+- whether explicit escape hatches compose without bypassing schema contracts; and
 - whether one shared algebra is clearer than several capability-specific interpreters.
 
-The declarative interface and Effect requirement constraints are established project direction. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+The Effect requirement and clean-cutover constraints remain established project direction. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md); [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
 
 ## Success and Stop Conditions
 

@@ -1,0 +1,31 @@
+# Tables and Queries
+
+## Decision
+
+Persistence uses two composable definitions. `Table.make(schema, { name })` derives a table from a canonical entity schema. `Query.make(table, config)` defines exactly one executable operation from `Request` and `Result` schemas plus an authored Effect implementation. Query config has no operation discriminator and no database field. The implementation’s Effect requirements identify the database service only when the query executes. This cleanly supersedes the earlier `Persistence.define` catalog interface rather than preserving a compatibility path. ([Table and query API direction](raw/table-and-query-api-direction.md); [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
+
+The earlier catalog direction used one catalog key as both capability and SQL table name. The newer direction moves table identity into the explicit `Table.make` config and removes the capability catalog. The remaining mechanical rules still apply: exactly one field carries `Domain.identifier`, encoded field names become database columns, and fresh table creation is derived while migrations remain explicit. ([Table and query API direction](raw/table-and-query-api-direction.md); [Catalog key and table direction](raw/catalog-key-table-direction.md); [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md); [Derived table creation direction](raw/derived-table-creation-direction.md))
+
+## Table Derivation
+
+`Table.make` validates the encoded schema as a flat struct with required, string-named `String` or `Number` fields. It preserves the canonical schema, literal table name, identifier field and schema, and compiled scalar metadata. `createTable()` is interpreted through a narrow Effect service, so the table definition does not depend on a concrete database client. ([Table implementation](../../src/Table.ts))
+
+## Authored Queries
+
+Each `Query.make` config contains `Request`, `Result`, and `implementation`. Execution encodes the decoded request with `Request`, runs the authored implementation Effect with the encoded value, then decodes the unknown result with `Result`. Request encoding services, result decoding services, implementation failures, and implementation requirements all remain visible in the resulting Effect type. ([Query implementation](../../src/Query.ts))
+
+The implementation Effect may yield `SqliteBun.Database` or another runtime service. This makes the dependency visible at execution without duplicating a Context key in query configuration. CRUD has no privileged generated form: create, read, update, delete, joins, and other database operations are individual authored queries whose schemas state their contracts. This reflects the derivation boundary because query behavior is not mechanically contained in an entity schema. ([Table and query API direction](raw/table-and-query-api-direction.md); [Project thesis](raw/project-thesis.md))
+
+## Bun SQLite Adapter
+
+The reference adapter supplies two services from one SQLite client Layer: the database service used directly by authored query Effects and the narrow table-creation store used by derived tables. SQL APIs remain isolated in the adapter subpath rather than entering the database-neutral root module. ([Bun SQLite adapter](../../src/SqliteBun.ts))
+
+## Contract Evidence
+
+The Bun SQLite integration test derives a table and authors four separate CRUD queries. A database-neutral contract verifies complete create/read/update/delete behavior against a temporary real database. The tests also prove that database and schema-codec services remain in query Effect requirements and that one runtime Layer supports multiple table definitions. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapterContract.ts))
+
+This evidence covers one scalar table shape and one database. It does not prove portability to materially different databases or justify a general query framework. ([Validation Strategy](validation-strategy.md))
+
+## Explicit Exclusions
+
+Table derivation does not infer migrations, relationships, indexes, generated identifiers, defaults, transactions, authorization, retries, idempotency policy, or business behavior. Query implementations may author required behavior explicitly, but `Query.make` does not claim to derive it. ([Project thesis](raw/project-thesis.md))

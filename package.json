@@ -9,6 +9,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
+    "lint": "better-typescript",
     "test": "bun test"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
+    "@better-typescript/better-typescript": "0.3.3",
     "@types/bun": "latest"
   },
   "peerDependencies": {

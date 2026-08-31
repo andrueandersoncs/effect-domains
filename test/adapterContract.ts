@@ -1,57 +1,71 @@
 import assert from "node:assert/strict"
-import { Effect, Layer, Option, Schema } from "effect"
-import {
-  type CompiledEntity,
-  type EntityService,
-} from "../src/Persistence.ts"
+import { Effect, Option } from "effect"
 
+type Operation<Input, Output, Error, Requirements> = Readonly<{
+  execute: (input: Input) => Effect.Effect<Output, Error, Requirements>
+}>
+
+/** Validates the database-neutral behavior of an authored CRUD query set. */
 export const adapterContract = <
-  const Name extends string,
-  S extends Schema.Struct<Schema.Struct.Fields>,
-  K extends Extract<keyof S["fields"], string>,
->(
-  entity: CompiledEntity<Name, S, K>,
-  adapter: Layer.Layer<EntityService<Name, S, K>>,
-  fixture: Readonly<{
-    original: S["Type"]
-    replacement: S["Type"]
-    missingKey: S["fields"][K]["Type"]
-  }>,
-) =>
+  Entity,
+  Key,
+  CreateError,
+  CreateRequirements,
+  ReadError,
+  ReadRequirements,
+  UpdateError,
+  UpdateRequirements,
+  DeleteError,
+  DeleteRequirements,
+>(options: Readonly<{
+  keyOf: (entity: Entity) => Key
+  original: Entity
+  replacement: Entity
+  missingReplacement: Entity
+  missingKey: Key
+  create: Operation<Entity, Entity, CreateError, CreateRequirements>
+  read: Operation<
+    Key,
+    Option.Option<Entity>,
+    ReadError,
+    ReadRequirements
+  >
+  update: Operation<
+    Entity,
+    Option.Option<Entity>,
+    UpdateError,
+    UpdateRequirements
+  >
+  delete: Operation<Key, boolean, DeleteError, DeleteRequirements>
+}>) =>
   Effect.gen(function* () {
-    const keyOf = (value: S["Type"]): S["fields"][K]["Type"] =>
-      (value as Record<K, S["fields"][K]["Type"]>)[entity.primaryKey]
+    const created = yield* options.create.execute(options.original)
+    assert.deepStrictEqual(created, options.original)
 
-    const created = yield* entity.create(fixture.original)
-    yield* Effect.sync(() => assert.deepStrictEqual(created, fixture.original))
+    const found = yield* options.read.execute(options.keyOf(created))
+    assert.ok(Option.isSome(found))
+    assert.deepStrictEqual(found.value, options.original)
 
-    const found = yield* entity.read(keyOf(created))
-    yield* Effect.sync(() => {
-      assert.ok(Option.isSome(found))
-      assert.deepStrictEqual(found.value, fixture.original)
-    })
+    const updated = yield* options.update.execute(options.replacement)
+    assert.ok(Option.isSome(updated))
+    assert.deepStrictEqual(updated.value, options.replacement)
 
-    const updated = yield* entity.update(fixture.replacement)
-    yield* Effect.sync(() => {
-      assert.ok(Option.isSome(updated))
-      assert.deepStrictEqual(updated.value, fixture.replacement)
-    })
+    const missingRead = yield* options.read.execute(options.missingKey)
+    assert.ok(Option.isNone(missingRead))
 
-    const missingRead = yield* entity.read(fixture.missingKey)
-    yield* Effect.sync(() => assert.ok(Option.isNone(missingRead)))
+    const missingUpdate = yield* options.update.execute(
+      options.missingReplacement,
+    )
+    assert.ok(Option.isNone(missingUpdate))
 
-    const missingUpdate = yield* entity.update({
-      ...fixture.replacement,
-      [entity.primaryKey]: fixture.missingKey,
-    } as S["Type"])
-    yield* Effect.sync(() => assert.ok(Option.isNone(missingUpdate)))
+    const deleted = yield* options.delete.execute(options.keyOf(options.original))
+    assert.equal(deleted, true)
 
-    const deleted = yield* entity.delete(keyOf(fixture.original))
-    yield* Effect.sync(() => assert.equal(deleted, true))
+    const afterDelete = yield* options.read.execute(options.keyOf(options.original))
+    assert.ok(Option.isNone(afterDelete))
 
-    const afterDelete = yield* entity.read(keyOf(fixture.original))
-    yield* Effect.sync(() => assert.ok(Option.isNone(afterDelete)))
-
-    const deletedAgain = yield* entity.delete(keyOf(fixture.original))
-    yield* Effect.sync(() => assert.equal(deletedAgain, false))
-  }).pipe(Effect.provide(adapter))
+    const deletedAgain = yield* options.delete.execute(
+      options.keyOf(options.original),
+    )
+    assert.equal(deletedAgain, false)
+  })

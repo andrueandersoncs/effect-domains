@@ -7,7 +7,7 @@ The project asks how much application structure can be derived safely from rich 
 ## Content Map
 
 - [Thesis](thesis.md) — the central claim, derivation boundary, and architectural principles.
-- [Persistence Catalog](persistence-catalog.md) — the accepted declarative full-CRUD design and current implementation evidence.
+- [Tables and Queries](tables-and-queries.md) — the accepted persistence interface and current implementation evidence.
 - [Validation Strategy](validation-strategy.md) — the required vertical slices and criteria for judging the hypothesis.
 - [Research Agenda](research-agenda.md) — unresolved questions and evidence needed before a general framework is justified.
 
@@ -15,27 +15,26 @@ The project asks how much application structure can be derived safely from rich 
 
 - [Wiki instructions](AGENTS.md) — structure, citation rules, review policy, and maintenance workflows.
 - [Original project thesis](raw/project-thesis.md) — the initial derivation thesis and architectural boundaries.
-- [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) — the human direction for Effect-based implementations and declarative public APIs.
+- [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) — the human direction for Effect-based implementations and declarative public interfaces.
+- [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md) — the human direction for clean cutovers without legacy compatibility paths.
+- [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md) — the human direction for deriving persistence keys from domain identity and excluding column mapping configuration.
+- [Catalog key and table direction](raw/catalog-key-table-direction.md) — the superseded catalog interface and the still-relevant earlier table naming rationale.
+- [Derived table creation direction](raw/derived-table-creation-direction.md) — the human direction for mechanically deriving fresh table creation while leaving migrations explicit.
+- [Table and query API direction](raw/table-and-query-api-direction.md) — the newer human direction separating table derivation from one-operation authored queries.
 
 Files under `raw/` are immutable source material. Maintained pages synthesize those sources and should cite them close to supported claims.
 
 ## Current Status
 
-Persistence now has an implemented declarative full-CRUD path. A sidecar catalog compiles canonical Effect Schemas into entity-specific Effect services, and a Bun SQLite Layer supplies the first concrete adapter. A reusable contract fixes the CRUD semantics. This is evidence for one persistence path, not yet proof of a general framework or cross-database portability. ([Persistence Catalog](persistence-catalog.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Persistence now has separate implemented table and query definitions. `Table.make` derives validated physical metadata and fresh table creation from a canonical schema. `Query.make` defines one operation from request/result schemas and an authored Effect whose requirements carry the runtime database dependency. A Bun SQLite Layer supplies table creation and the database, while a reusable contract validates authored CRUD semantics. This is evidence for one persistence path, not proof of a general framework or cross-database portability. ([Tables and Queries](tables-and-queries.md); [Table and query API direction](raw/table-and-query-api-direction.md))
 
 ## Development
 
-Run these commands from the repository root.
-
-Install dependencies:
+Run these commands from the repository root:
 
 ```bash
 bun install
-```
-
-Validate the persistence implementation:
-
-```bash
 bun run check
+bun run lint
 bun test
 ```
