@@ -7,6 +7,12 @@
       "skillPath": "absurd-code-review/SKILL.md",
       "computedHash": "576d67a2489f7c456a0ec38c4b50c1b7c872638009c3e00e986fd9f9d3dad64e"
     },
+    "executable-interactive-plans": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "executable-interactive-plans/SKILL.md",
+      "computedHash": "98ce99e02beb95217bab21112ac432b4acffd27982b70f686c7d5fd5c29f67bc"
+    },
     "implement-happy-path": {
       "source": "andrueandersoncs/skills",
       "sourceType": "github",
@@ -36,6 +42,18 @@
       "sourceType": "github",
       "skillPath": "plan-happy-path/SKILL.md",
       "computedHash": "d1a13f4bfcdce2e85dbf95e07cfaf654ee82ce859f57a545fa2b38c802f8250f"
+    },
+    "predictive-planning": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "predictive-planning/SKILL.md",
+      "computedHash": "a31c5d3f64d7d96ea3928738605be8baa7b1d919b767da6d0bf3709e989d7d94"
+    },
+    "setup-better-typescript": {
+      "source": "andrueandersoncs/skills",
+      "sourceType": "github",
+      "skillPath": "setup-better-typescript/SKILL.md",
+      "computedHash": "4fb6b16933b2c6fcf0d1d27d74e16a5d2304e0b165428991f320008ade847f40"
     },
     "software-laws": {
       "source": "andrueandersoncs/skills",
