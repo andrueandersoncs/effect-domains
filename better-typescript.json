@@ -59,6 +59,17 @@
     },
     {
       "type": "add_exclusions",
+      "files": "test/Query.test.ts",
+      "rules": [
+        "parameter-bag",
+        "unused-field",
+        "duplicate-shape",
+        "missing-rationale",
+        "redundant-alias"
+      ]
+    },
+    {
+      "type": "add_exclusions",
       "files": "test/SqliteBun.test.ts",
       "rules": [
         "parameter-bag",
