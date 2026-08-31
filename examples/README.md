@@ -7,9 +7,11 @@ Run them from the repository root:
 ```bash
 bun run examples/basic-crud.ts
 bun run examples/service-codec.ts
+bun run examples/persisted-ref.ts
 ```
 
 - [`basic-crud.ts`](basic-crud.ts) keeps `Book` free of persistence identity, derives a stored row with a generated UUIDv7 `id`, and authors create and find queries against temporary SQLite.
 - [`service-codec.ts`](service-codec.ts) proves that a schema codec’s Effect service remains in an authored query’s execution requirements.
+- [`persisted-ref.ts`](persisted-ref.ts) composes authored find and update queries into a write-through `PersistedRef`, serializes ten concurrent fiber updates, and explicitly refreshes an externally changed row.
 
 Each example supplies `SqliteBun.Database` only when the query program runs. The temporary database directory is removed afterward.
