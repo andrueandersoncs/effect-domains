@@ -3,6 +3,7 @@ export { Domain } from "./src/Domain.ts"
 
 /** Use the package root when importing table definitions because they form the persistence metadata API. */
 export {
+  DefaultTableIdentifierSchema,
   Table,
   type TableDefinition,
   TableDefinitionError,

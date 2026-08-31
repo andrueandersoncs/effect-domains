@@ -4,8 +4,11 @@ import {
   Context,
   Effect,
   Equivalence,
+  flow,
   Option,
+  pipe,
   Predicate,
+  Record,
   Schema,
   SchemaAST,
   Struct,
@@ -21,6 +24,44 @@ type IdentifierFieldName<S extends AnyStruct> = {
   > ? K
     : never
 }[FieldName<S>]
+
+const uuidV7Check = Schema.isUUID(7)
+
+/**
+
+Use when: describing generated table identity because tables without an explicit
+domain identifier use the same validated UUIDv7 representation.
+
+Example: use `DefaultTableIdentifierSchema` as an operation schema for a
+generated table identifier.
+
+**/
+export const DefaultTableIdentifierSchema = Schema.String.check(uuidV7Check)
+
+const DefaultIdentifierFields = Record.singleton(
+  "id",
+  DefaultTableIdentifierSchema,
+)
+
+const addDefaultIdentifierField = Schema.fieldsAssign(DefaultIdentifierFields)
+
+type TableIdentifierName<S extends AnyStruct> =
+  [IdentifierFieldName<S>] extends [never] ? "id" : IdentifierFieldName<S>
+
+type TableRowFields<S extends AnyStruct> =
+  [IdentifierFieldName<S>] extends [never]
+    ? Readonly<typeof DefaultIdentifierFields> & S["fields"]
+    : S["fields"]
+
+type TableRowSchema<S extends AnyStruct> =
+  [IdentifierFieldName<S>] extends [never]
+    ? Schema.Struct<TableRowFields<S>>
+    : S
+
+type TableIdentifierSchema<S extends AnyStruct> =
+  [IdentifierFieldName<S>] extends [never]
+    ? typeof DefaultTableIdentifierSchema
+    : S["fields"][IdentifierFieldName<S>]
 
 /**
 
@@ -87,8 +128,18 @@ export class TableField {
   constructor(
     readonly name: string,
     readonly scalar: "string" | "number",
+    readonly generation: Option.Option<"uuidv7">,
   ) {}
 }
+
+const NoGeneration = Option.none<"uuidv7">()
+const UuidV7Generation = Option.some<"uuidv7">("uuidv7")
+
+const DefaultIdentifierField = new TableField(
+  "id",
+  "string",
+  UuidV7Generation,
+)
 
 /**
 
@@ -101,17 +152,20 @@ Example: accept a `TableDefinition` in a database adapter.
 export abstract class TableDefinition<
   Name extends string,
   S extends AnyStruct,
-  K extends FieldName<S>,
+  K extends string,
+  Row extends AnyStruct,
+  IdentifierSchema extends Schema.Constraint,
 > {
   abstract readonly name: Name
   abstract readonly schema: S
+  abstract readonly rowSchema: Row
   abstract readonly identifier: K
-  abstract readonly identifierSchema: S["fields"][K]
+  abstract readonly identifierSchema: IdentifierSchema
   abstract readonly fields: ReadonlyArray<TableField>
 
   readonly createTable = Effect.fn("Table.createTable")(
     { self: this },
-    function* (this: TableDefinition<Name, S, K>) {
+    function* (this: TableDefinition<Name, S, K, Row, IdentifierSchema>) {
       const store = yield* TableStore
       return yield* store.createTable(this)
     },
@@ -126,7 +180,13 @@ table definition.
 Example: use this boundary in a `TableStore` implementation.
 
 **/
-export type AnyTableDefinition = TableDefinition<string, AnyStruct, string>
+export type AnyTableDefinition = TableDefinition<
+  string,
+  AnyStruct,
+  string,
+  AnyStruct,
+  Schema.Constraint
+>
 
 /**
 
@@ -145,13 +205,16 @@ export class TableStore extends Context.Service<TableStore, {
 class MadeTable<
   Name extends string,
   S extends AnyStruct,
-  K extends FieldName<S>,
-> extends TableDefinition<Name, S, K> {
+  K extends string,
+  Row extends AnyStruct,
+  IdentifierSchema extends Schema.Constraint,
+> extends TableDefinition<Name, S, K, Row, IdentifierSchema> {
   constructor(
     readonly name: Name,
     readonly schema: S,
+    readonly rowSchema: Row,
     readonly identifier: K,
-    readonly identifierSchema: S["fields"][K],
+    readonly identifierSchema: IdentifierSchema,
     readonly fields: ReadonlyArray<TableField>,
   ) {
     super()
@@ -208,7 +271,11 @@ const compile = Effect.fn("Table.make")(function* <
       )
     }
 
-    return new TableField(property.name, isString ? "string" : "number")
+    return new TableField(
+      property.name,
+      isString ? "string" : "number",
+      NoGeneration,
+    )
   })
 
   const fields = yield* Effect.forEach(
@@ -229,40 +296,69 @@ const compile = Effect.fn("Table.make")(function* <
   }
 
   const identifierFields = Array.filter(fields, hasIdentifierAnnotation)
-  const lengthIsOne = Equivalence.strictEqual<number>()
-  const hasOneIdentifier = lengthIsOne(identifierFields.length, 1)
 
-  if (!hasOneIdentifier) {
+  if (identifierFields.length > 1) {
     return yield* new TableDefinitionError(
       name,
-      "schema must contain exactly one Domain.identifier field",
+      "schema must contain at most one Domain.identifier field",
     )
   }
 
   const identifierFieldOption = Array.get(identifierFields, 0)
-  const identifierField = Option.getOrThrow(identifierFieldOption)
 
-  const nullableIdentifierSchema =
-    schema.fields[identifierField.name as FieldName<S>]
+  if (Option.isSome(identifierFieldOption)) {
+    const identifierField = Option.getOrThrow(identifierFieldOption)
 
-  const identifierSchemaOption = Option.fromNullishOr(nullableIdentifierSchema)
+    const nullableIdentifierSchema =
+      schema.fields[identifierField.name as FieldName<S>]
 
-  const identifierSchema = Option.getOrThrow(identifierSchemaOption) as
-    S["fields"][FieldName<S>]
+    const identifierSchemaOption = Option.fromNullishOr(nullableIdentifierSchema)
+    const identifierSchema = Option.getOrThrow(identifierSchemaOption)
+
+    return new MadeTable(
+      name,
+      schema,
+      schema,
+      identifierField.name,
+      identifierSchema,
+      fields,
+    )
+  }
+
+  const fieldNameIsId = Equivalence.strictEqual<string>()
+  const matchesId = (fieldName: string) => fieldNameIsId(fieldName, "id")
+
+  const fieldIsReserved: (field: TableField) => boolean = flow(
+    Struct.get("name"),
+    matchesId,
+  )
+
+  const idIsReserved = Array.some(fields, fieldIsReserved)
+
+  if (idIsReserved) {
+    return yield* new TableDefinitionError(
+      name,
+      "field id must use Domain.identifier when overriding the default UUIDv7 identifier",
+    )
+  }
+
+  const rowSchema = pipe(schema, addDefaultIdentifierField)
 
   return new MadeTable(
     name,
     schema,
-    identifierField.name as FieldName<S>,
-    identifierSchema,
-    fields,
+    rowSchema,
+    "id",
+    rowSchema.fields.id,
+    [DefaultIdentifierField, ...fields],
   )
 })
 
 /**
 
 Use when: defining persistence because a canonical struct can mechanically
-compile to one table definition.
+compile to one table definition. A missing domain identifier adds a generated
+UUIDv7 `id` to the physical row schema.
 
 Example: `Table.make(BookSchema, { name: "books" })` derives a table.
 
@@ -272,15 +368,23 @@ export abstract class Table {
     const Name extends string,
     const S extends AnyStruct,
   >(
-    schema: S & (IdentifierFieldName<S> extends never ? never : unknown),
+    schema: S,
     config: Readonly<{ name: Name }>,
-  ): TableDefinition<Name, S, IdentifierFieldName<S>> {
+  ): TableDefinition<
+    Name,
+    S,
+    TableIdentifierName<S>,
+    TableRowSchema<S>,
+    TableIdentifierSchema<S>
+  > {
     const compiled = compile(schema, config.name)
 
     return Effect.runSync(compiled) as unknown as TableDefinition<
       Name,
       S,
-      IdentifierFieldName<S>
+      TableIdentifierName<S>,
+      TableRowSchema<S>,
+      TableIdentifierSchema<S>
     >
   }
 }

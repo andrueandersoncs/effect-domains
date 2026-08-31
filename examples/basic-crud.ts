@@ -2,32 +2,22 @@ import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Array, Effect, Option, pipe, Schema } from "effect"
-import { Domain, Query, Table } from "effect-domains"
+import { Query, Table } from "effect-domains"
 import * as SqliteBun from "effect-domains/sqlite-bun"
 
-const BookIdSchema = pipe(
-  Schema.String,
-  Schema.brand("BookId"),
-  Domain.identifier,
-)
-
-// The decoded BookId type stays distinct because identifiers must retain their brand at compile time.
-type BookId = Schema.Schema.Type<typeof BookIdSchema>
-
 const BookSchema = Schema.Struct({
-  id: BookIdSchema,
   title: Schema.String,
   pageCount: Schema.Number,
 })
 
-// Book names the decoded domain value because the schema also represents its encoded form at runtime.
+// Use Book because the decoded domain value excludes the generated physical table identity.
 interface Book extends Schema.Schema.Type<typeof BookSchema> {}
 
 const Books = Table.make(BookSchema, { name: "books" })
 
 const CreateBook = Query.make(Books, {
   Request: BookSchema,
-  Result: BookSchema,
+  Result: Books.rowSchema,
   implementation: Effect.fn("CreateBook.implementation")(function* (book) {
     const db = yield* SqliteBun.Database
 
@@ -40,11 +30,11 @@ const CreateBook = Query.make(Books, {
   }),
 })
 
-const OptionalBookSchema = Schema.OptionFromNullOr(BookSchema)
+const OptionalStoredBookSchema = Schema.OptionFromNullOr(Books.rowSchema)
 
 const FindBook = Query.make(Books, {
-  Request: BookIdSchema,
-  Result: OptionalBookSchema,
+  Request: Books.identifierSchema,
+  Result: OptionalStoredBookSchema,
   implementation: Effect.fn("FindBook.implementation")(function* (id) {
     const db = yield* SqliteBun.Database
 
@@ -84,14 +74,12 @@ const program = Effect.gen(function* () {
   const operations = Effect.gen(function* () {
     yield* Books.createTable()
 
-    const id = BookIdSchema.make("book-1")
-
-    const created = yield* CreateBook.execute({
-      id,
+    const book: Book = BookSchema.make({
       title: "A Field Guide",
       pageCount: 120,
     })
 
+    const created = yield* CreateBook.execute(book)
     const found = yield* FindBook.execute(created.id)
 
     return { created, found: Option.getOrNull(found) }

@@ -140,6 +140,31 @@ const DeleteUser = Query.make(Users, {
   }),
 })
 
+const ArticleSchema = Schema.Struct({
+  name: Schema.String,
+  rating: Schema.Number,
+})
+
+/** Use Article because generated-row tests need the decoded source value type. */
+interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
+
+const Articles = Table.make(ArticleSchema, { name: "articles" })
+
+const CreateArticle = Query.make(Articles, {
+  Request: ArticleSchema,
+  Result: Articles.rowSchema,
+  implementation: Effect.fn("CreateArticle.implementation")(function* (article) {
+    const db = yield* Database
+
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      INSERT INTO ${db(Articles.name)} ${db.insert(article)}
+      RETURNING *
+    `
+
+    return pipe(rows, Array.get(0), Option.getOrUndefined)
+  }),
+})
+
 const PrefixLive = Layer.succeed(CodecPrefix, { prefix: "stored:" })
 
 const toDatabaseDirectoryPrefix = (directory: string) =>
@@ -173,6 +198,20 @@ const withTemporaryDatabase = <A, E, R>(
     }),
     Effect.scoped,
   )
+
+const createArticleWithGeneratedIdentifier = Effect.fn(
+  "SqliteBun.createArticleWithGeneratedIdentifier",
+)(function* (adapter: ReturnType<typeof layer>) {
+  const result = yield* pipe(
+    Effect.gen(function* () {
+      yield* Articles.createTable()
+      return yield* CreateArticle.execute({ name: "Declarative Data", rating: 5 })
+    }),
+    Effect.provide(adapter),
+  )
+
+  return result
+})
 
 const runCrudContract = (adapter: ReturnType<typeof layer>) =>
   pipe(
@@ -237,12 +276,48 @@ const expectTablesCreated = (created: ReadonlyArray<void>) => {
   return created
 }
 
+const expectGeneratedArticle = (
+  article: Schema.Schema.Type<typeof Articles.rowSchema>,
+) => {
+  expect(article.name).toBe("Declarative Data")
+  expect(article.rating).toBe(5)
+  expect(article.id).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  )
+  expect(Articles.identifier).toBe("id")
+  expect(Articles.identifierSchema).toBe(Articles.rowSchema.fields.id)
+
+  const firstField = pipe(Articles.fields, Array.get(0), Option.getOrThrow)
+  const generation = Option.getOrThrow(firstField.generation)
+
+  expect(generation).toBe("uuidv7")
+
+  return article
+}
+
 describe("Bun SQLite tables and queries", () => {
   test("creates a derived table and runs authored CRUD queries", () =>
     pipe(
       withTemporaryDatabase(runCrudContract),
       Effect.runPromise,
     ))
+
+  test("adds and generates a UUIDv7 identifier when the schema has none", () =>
+    pipe(
+      withTemporaryDatabase(createArticleWithGeneratedIdentifier),
+      Effect.runPromise,
+    ).then(expectGeneratedArticle))
+
+  test("uses an explicit domain identifier instead of the UUIDv7 default", () => {
+    expect(Users.identifier).toBe("id")
+    expect(Users.identifierSchema).toBe(UserIdSchema)
+    expect(Users.rowSchema).toBe(UserSchema)
+
+    const firstField = pipe(Users.fields, Array.get(0), Option.getOrThrow)
+    const hasGeneration = Option.isSome(firstField.generation)
+
+    expect(hasGeneration).toBeFalse()
+  })
 
   test("keeps database and codec services as execution requirements", () => {
     const queryRequiresDatabase = true satisfies (

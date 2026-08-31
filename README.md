@@ -10,33 +10,26 @@ Persistence currently separates table definitions from query definitions:
 ## Tables and Queries
 
 ```ts
-import { Effect, Schema } from "effect"
-import { Domain, Query, Table } from "effect-domains"
+import { Array, Effect, Option, Schema } from "effect"
+import { Query, Table } from "effect-domains"
 import * as SqliteBun from "effect-domains/sqlite-bun"
 
-const UserIdSchema = Schema.String.pipe(
-  Schema.brand("UserId"),
-  Domain.identifier,
-)
-
-const UserSchema = Schema.Struct({
-  id: UserIdSchema,
-  displayName: Schema.String,
+const BookSchema = Schema.Struct({
+  title: Schema.String,
+  pageCount: Schema.Number,
 })
 
-const Users = Table.make(UserSchema, { name: "users" })
+const Books = Table.make(BookSchema, { name: "books" })
 
-const FindUser = Query.make(Users, {
-  Request: UserIdSchema,
-  Result: Schema.OptionFromNullOr(UserSchema),
-  implementation: Effect.fn("FindUser.implementation")(function* (id) {
+const CreateBook = Query.make(Books, {
+  Request: BookSchema,
+  Result: Books.rowSchema,
+  implementation: Effect.fn("CreateBook.implementation")(function* (book) {
     const db = yield* SqliteBun.Database
     const rows = yield* db<Readonly<Record<string, unknown>>>`
-      SELECT * FROM ${db(Users.name)}
-      WHERE ${db(Users.identifier)} = ${id}
-      LIMIT 1
+      INSERT INTO ${db(Books.name)} ${db.insert(book)} RETURNING *
     `
-    return rows[0] ?? null
+    return Option.getOrUndefined(Array.get(rows, 0))
   }),
 })
 
@@ -45,10 +38,11 @@ const Live = SqliteBun.layer(
 )
 
 const program = Effect.gen(function* () {
-  yield* Users.createTable()
-  return yield* FindUser.execute(
-    Schema.decodeUnknownSync(UserIdSchema)("user-1"),
-  )
+  yield* Books.createTable()
+  return yield* CreateBook.execute({
+    title: "A Field Guide",
+    pageCount: 120,
+  })
 })
 
 await Effect.runPromise(program.pipe(Effect.provide(Live)))
@@ -58,9 +52,11 @@ await Effect.runPromise(program.pipe(Effect.provide(Live)))
 
 ## Supported Tables
 
-`Table.make` currently accepts canonical `Schema.Struct` values that encode to flat, required, string-named fields. Encoded fields must be `String` or `Number`. Exactly one field must use `Domain.identifier`; its encoded name becomes the primary key column. Other encoded field names become column names.
+`Table.make` accepts canonical `Schema.Struct` values that encode to flat, required, string-named fields. Encoded fields must be `String` or `Number`. When the schema has no `Domain.identifier`, the table adds a generated UUIDv7 `id` primary-key column. `table.schema` remains the original domain schema, while `table.rowSchema` exposes the persisted row shape including that generated identifier.
 
-`createTable()` derives a fresh physical table. Existing-table migrations remain explicit application concerns. Queries, including CRUD, are authored because their behavior is not mechanically present in an entity schema.
+A schema may instead mark one field with `Domain.identifier`. That field becomes the primary key and suppresses the generated `id`. An unannotated source field named `id` is rejected rather than overwritten.
+
+`createTable()` derives a fresh physical table. The SQLite adapter generates fallback UUIDv7 values in the database. Existing-table migrations remain explicit application concerns. Queries, including CRUD, are authored because their behavior is not mechanically present in an entity schema.
 
 ## Examples
 

@@ -26,7 +26,7 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
-Persistence now has separate implemented table and query definitions. `Table.make` derives validated physical metadata and fresh table creation from a canonical schema. `Query.make` defines one operation from request/result schemas and an authored Effect whose requirements carry the runtime database dependency. A Bun SQLite Layer supplies table creation and the database, while a reusable contract validates authored CRUD semantics. This is evidence for one persistence path, not proof of a general framework or cross-database portability. ([Tables and Queries](tables-and-queries.md); [Table and query API direction](raw/table-and-query-api-direction.md))
+Persistence now has separate implemented table and query definitions. `Table.make` preserves its canonical source schema and derives a persisted `rowSchema`, adding an adapter-generated UUIDv7 `id` when no `Domain.identifier` overrides it. `Query.make` defines one operation from request/result schemas and an authored Effect whose requirements carry the runtime database dependency. A Bun SQLite Layer supplies table creation, UUIDv7 generation, and the database, while integration tests validate authored CRUD and generated identity. This is evidence for one persistence path, not proof of a general framework or cross-database portability. ([Tables and Queries](tables-and-queries.md); [Table implementation](../../src/Table.ts); [Table and query API direction](raw/table-and-query-api-direction.md))
 
 ## Development
 
