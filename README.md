@@ -29,16 +29,15 @@ const Users = Table.make(UserSchema, { name: "users" })
 const FindUser = Query.make(Users, {
   Request: UserIdSchema,
   Result: Schema.OptionFromNullOr(UserSchema),
-  implementation: (id) =>
-    Effect.gen(function* () {
-      const db = yield* SqliteBun.Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        SELECT * FROM ${db(Users.name)}
-        WHERE ${db(Users.identifier)} = ${id}
-        LIMIT 1
-      `
-      return rows[0] ?? null
-    }),
+  implementation: Effect.fn("FindUser.implementation")(function* (id) {
+    const db = yield* SqliteBun.Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      SELECT * FROM ${db(Users.name)}
+      WHERE ${db(Users.identifier)} = ${id}
+      LIMIT 1
+    `
+    return rows[0] ?? null
+  }),
 })
 
 const Live = SqliteBun.layer(

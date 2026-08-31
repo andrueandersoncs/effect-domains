@@ -56,64 +56,60 @@ const OptionalUser = Schema.OptionFromNullOr(User)
 const CreateUser = Query.make(Users, {
   Request: User,
   Result: User,
-  implementation: (user) =>
-    Effect.gen(function* () {
-      const db = yield* Database
-      const insert = db.insert(user)
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        INSERT INTO ${db(Users.name)} ${insert}
-        RETURNING *
-      `
-      return rows[0]
-    }),
+  implementation: Effect.fn("CreateUser.implementation")(function* (user) {
+    const db = yield* Database
+    const insert = db.insert(user)
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      INSERT INTO ${db(Users.name)} ${insert}
+      RETURNING *
+    `
+    return rows[0]
+  }),
 })
 
 const FindUser = Query.make(Users, {
   Request: UserId,
   Result: OptionalUser,
-  implementation: (id) =>
-    Effect.gen(function* () {
-      const db = yield* Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        SELECT * FROM ${db(Users.name)}
-        WHERE ${db(Users.identifier)} = ${id}
-        LIMIT 1
-      `
-      return rows[0] ?? null
-    }),
+  implementation: Effect.fn("FindUser.implementation")(function* (id) {
+    const db = yield* Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      SELECT * FROM ${db(Users.name)}
+      WHERE ${db(Users.identifier)} = ${id}
+      LIMIT 1
+    `
+    return rows[0] ?? null
+  }),
 })
 
 const UpdateUser = Query.make(Users, {
   Request: User,
   Result: OptionalUser,
-  implementation: (user) =>
-    Effect.gen(function* () {
-      const db = yield* Database
-      const identifier = user[Users.identifier]
-      const changes = db.update(user, [Users.identifier])
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        UPDATE ${db(Users.name)}
-        SET ${changes}
-        WHERE ${db(Users.identifier)} = ${identifier}
-        RETURNING *
-      `
-      return rows[0] ?? null
-    }),
+  implementation: Effect.fn("UpdateUser.implementation")(function* (user) {
+    const db = yield* Database
+    const identifier = user[Users.identifier]
+    const changes = db.update(user, [Users.identifier])
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      UPDATE ${db(Users.name)}
+      SET ${changes}
+      WHERE ${db(Users.identifier)} = ${identifier}
+      RETURNING *
+    `
+    return rows[0] ?? null
+  }),
 })
 
 const DeleteUser = Query.make(Users, {
   Request: UserId,
   Result: Schema.Boolean,
-  implementation: (id) =>
-    Effect.gen(function* () {
-      const db = yield* Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        DELETE FROM ${db(Users.name)}
-        WHERE ${db(Users.identifier)} = ${id}
-        RETURNING ${db(Users.identifier)}
-      `
-      return rows.length > 0
-    }),
+  implementation: Effect.fn("DeleteUser.implementation")(function* (id) {
+    const db = yield* Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      DELETE FROM ${db(Users.name)}
+      WHERE ${db(Users.identifier)} = ${id}
+      RETURNING ${db(Users.identifier)}
+    `
+    return rows.length > 0
+  }),
 })
 
 const PrefixLive = Layer.succeed(CodecPrefix, { prefix: "stored:" })

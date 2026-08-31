@@ -22,29 +22,27 @@ const Books = Table.make(Book, { name: "books" })
 const CreateBook = Query.make(Books, {
   Request: Book,
   Result: Book,
-  implementation: (book) =>
-    Effect.gen(function* () {
-      const db = yield* SqliteBun.Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        INSERT INTO ${db(Books.name)} ${db.insert(book)} RETURNING *
-      `
-      return rows[0]
-    }),
+  implementation: Effect.fn("CreateBook.implementation")(function* (book) {
+    const db = yield* SqliteBun.Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      INSERT INTO ${db(Books.name)} ${db.insert(book)} RETURNING *
+    `
+    return rows[0]
+  }),
 })
 
 const FindBook = Query.make(Books, {
   Request: BookId,
   Result: Schema.OptionFromNullOr(Book),
-  implementation: (id) =>
-    Effect.gen(function* () {
-      const db = yield* SqliteBun.Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        SELECT * FROM ${db(Books.name)}
-        WHERE ${db(Books.identifier)} = ${id}
-        LIMIT 1
-      `
-      return rows[0] ?? null
-    }),
+  implementation: Effect.fn("FindBook.implementation")(function* (id) {
+    const db = yield* SqliteBun.Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      SELECT * FROM ${db(Books.name)}
+      WHERE ${db(Books.identifier)} = ${id}
+      LIMIT 1
+    `
+    return rows[0] ?? null
+  }),
 })
 
 const temporaryDirectory = Effect.acquireRelease(

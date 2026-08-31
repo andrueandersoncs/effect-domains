@@ -41,14 +41,13 @@ const Notes = Table.make(Note, { name: "notes" })
 const CreateNote = Query.make(Notes, {
   Request: Note,
   Result: Note,
-  implementation: (note) =>
-    Effect.gen(function* () {
-      const db = yield* SqliteBun.Database
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        INSERT INTO ${db(Notes.name)} ${db.insert(note)} RETURNING *
-      `
-      return rows[0]
-    }),
+  implementation: Effect.fn("CreateNote.implementation")(function* (note) {
+    const db = yield* SqliteBun.Database
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      INSERT INTO ${db(Notes.name)} ${db.insert(note)} RETURNING *
+    `
+    return rows[0]
+  }),
 })
 
 const createKeepsCodecRequirement = true satisfies (
