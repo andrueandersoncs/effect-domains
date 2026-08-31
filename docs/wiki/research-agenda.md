@@ -17,6 +17,8 @@ The current table boundary is explicit:
 
 Each query is an authored operation rather than generated CRUD. `Query.make` mechanically preserves request encoding, result decoding, implementation errors, and Effect requirements. The Bun SQLite test authors CRUD queries and validates their behavior against a temporary database, including a branded identifier and a service-dependent schema codec. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapterContract.ts))
 
+`PersistedRef` now establishes one process-local composition over authored operations. It loads one authoritative value, serializes fiber mutations with `SynchronizedRef`, commits before publishing, preserves memory on commit failure, publishes persistence-returned values, and refreshes only when explicitly requested. The SQLite integration uses existing read and update queries rather than deriving persistence behavior from `Table`. This evidence does not cover external writers or multi-process coordination. ([PersistedRef implementation](../../src/PersistedRef.ts); [PersistedRef tests](../../test/PersistedRef.test.ts); [Bun SQLite test](../../test/SqliteBun.test.ts))
+
 ## Remaining Persistence Questions
 
 Further evidence must determine:
@@ -27,7 +29,9 @@ Further evidence must determine:
 - how explicit typed storage representations compose when a canonical encoded schema is not a lossless row shape beyond the implemented generated-identity extension;
 - whether UUIDv7 generation remains portable and appropriately ordered across materially different databases;
 - which additional encoded field shapes earn mechanical table support; and
-- how migrations and transactions remain explicit while integrating cleanly with table and query definitions.
+- how migrations and transactions remain explicit while integrating cleanly with table and query definitions;
+- whether query-backed persisted references need optimistic versions, database notifications, or only explicit refresh when external writers exist; and
+- whether interruption and ambiguous database outcomes need stronger reconciliation semantics than reload-on-restart or explicit refresh.
 
 These are unresolved capabilities, not commitments for the current interface.
 

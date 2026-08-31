@@ -16,3 +16,6 @@ export {
   type QueryConfig,
   type QueryDefinition,
 } from "./src/Query.ts"
+
+/** Use the package root because persisted references compose authored persistence operations. */
+export { PersistedRef } from "./src/PersistedRef.ts"

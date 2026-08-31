@@ -14,7 +14,7 @@ import {
   SchemaGetter,
   Struct,
 } from "effect"
-import { Domain, Query, Table } from "../index.ts"
+import { Domain, PersistedRef, Query, Table } from "../index.ts"
 import { Database, layer, SqliteBunOptions } from "../src/SqliteBun.ts"
 import { adapterContract } from "./adapterContract.ts"
 
@@ -63,6 +63,12 @@ const UserSchema = Schema.Struct({
 
 /** Use User because decoded test rows need the schema's canonical type. */
 interface User extends Schema.Schema.Type<typeof UserSchema> {}
+
+const incrementUserScore = (user: User): User =>
+  UserSchema.make({
+    ...user,
+    score: user.score + 1,
+  })
 
 const Users = Table.make(UserSchema, { name: "users" })
 const OptionalUserSchema = Schema.OptionFromNullOr(UserSchema)
@@ -256,6 +262,69 @@ const runCrudContract = (adapter: ReturnType<typeof layer>) =>
     Effect.provide(PrefixLive),
   )
 
+const runPersistedRefContract = (adapter: ReturnType<typeof layer>) =>
+  pipe(
+    Effect.gen(function* () {
+      yield* Users.createTable()
+
+      const id = UserIdSchema.make("persisted-ref-user")
+
+      const original = UserSchema.make({
+        id,
+        displayName: "Grace Hopper",
+        secret: "compiler",
+        score: 0,
+      })
+
+      yield* CreateUser.execute(original)
+
+      const loadUser = Effect.fn("PersistedRefTest.loadUser")(function* () {
+        const found = yield* FindUser.execute(id)
+
+        if (Option.isNone(found)) {
+          return yield* Effect.fail({
+            _tag: "PersistedUserNotFound" as const,
+            id,
+          })
+        }
+
+        return found.value
+      })
+
+      const commitUser = Effect.fn("PersistedRefTest.commitUser")(function* (
+        _previous: User,
+        next: User,
+      ) {
+        const updated = yield* UpdateUser.execute(next)
+
+        if (Option.isNone(updated)) {
+          return yield* Effect.fail({
+            _tag: "PersistedUserNotFound" as const,
+            id,
+          })
+        }
+
+        return updated.value
+      })
+
+      const load = loadUser()
+      const userRef = yield* PersistedRef.make(commitUser)(load)
+      const update = userRef.update(incrementUserScore)
+      const updates = Array.replicate(update, 10)
+
+      yield* Effect.all(updates, { concurrency: "unbounded" })
+
+      const cached = yield* userRef.get
+      const stored = yield* FindUser.execute(id)
+      const storedUser = Option.getOrThrow(stored)
+
+      expect(cached.score).toBe(10)
+      expect(storedUser).toEqual(cached)
+    }),
+    Effect.provide(adapter),
+    Effect.provide(PrefixLive),
+  )
+
 const FirstUsers = Table.make(UserSchema, { name: "first_users" })
 const SecondUsers = Table.make(UserSchema, { name: "second_users" })
 
@@ -299,6 +368,12 @@ describe("Bun SQLite tables and queries", () => {
   test("creates a derived table and runs authored CRUD queries", () =>
     pipe(
       withTemporaryDatabase(runCrudContract),
+      Effect.runPromise,
+    ))
+
+  test("backs a shared persisted reference with authored queries", () =>
+    pipe(
+      withTemporaryDatabase(runPersistedRefContract),
       Effect.runPromise,
     ))
 
