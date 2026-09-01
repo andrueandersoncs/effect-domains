@@ -72,5 +72,5 @@ The persistent project wiki starts at [docs/wiki/README.md](docs/wiki/README.md)
 bun install
 bun run check
 bun run lint
-bun test
+bun run test
 ```

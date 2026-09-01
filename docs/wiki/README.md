@@ -36,5 +36,5 @@ Run these commands from the repository root:
 bun install
 bun run check
 bun run lint
-bun test
+bun run test
 ```

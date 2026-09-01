@@ -1,4 +1,4 @@
-import assert from "node:assert/strict"
+import * as assert from "@effect/vitest/utils"
 import { Effect, Option } from "effect"
 
 type Operation<Input, Output, Error, Requirements> = Readonly<{
@@ -52,19 +52,19 @@ export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   const found = yield* options.read.execute(createdKey)
   const foundIsSome = Option.isSome(found)
 
-  assert.ok(foundIsSome)
+  assert.assertTrue(foundIsSome)
   assert.deepStrictEqual(found.value, options.original)
 
   const updated = yield* options.update.execute(options.replacement)
   const updatedIsSome = Option.isSome(updated)
 
-  assert.ok(updatedIsSome)
+  assert.assertTrue(updatedIsSome)
   assert.deepStrictEqual(updated.value, options.replacement)
 
   const missingRead = yield* options.read.execute(options.missingKey)
   const missingReadIsNone = Option.isNone(missingRead)
 
-  assert.ok(missingReadIsNone)
+  assert.assertTrue(missingReadIsNone)
 
   const missingUpdate = yield* options.update.execute(
     options.missingReplacement,
@@ -72,18 +72,18 @@ export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
 
   const missingUpdateIsNone = Option.isNone(missingUpdate)
 
-  assert.ok(missingUpdateIsNone)
+  assert.assertTrue(missingUpdateIsNone)
 
   const originalKey = options.keyOf(options.original)
   const deleted = yield* options.delete.execute(originalKey)
 
-  assert.equal(deleted, true)
+  assert.strictEqual(deleted, true)
 
   const afterDelete = yield* options.read.execute(originalKey)
   const afterDeleteIsNone = Option.isNone(afterDelete)
 
-  assert.ok(afterDeleteIsNone)
+  assert.assertTrue(afterDeleteIsNone)
 
   const deletedAgain = yield* options.delete.execute(originalKey)
-  assert.equal(deletedAgain, false)
+  assert.strictEqual(deletedAgain, false)
 })

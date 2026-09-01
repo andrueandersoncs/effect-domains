@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -148,7 +148,7 @@ const DeleteUser = Query.make(Users, {
 
 const ArticleSchema = Schema.Struct({
   name: Schema.String,
-  rating: Schema.Number,
+  rating: Schema.Finite,
 })
 
 /** Use Article because generated-row tests need the decoded source value type. */
@@ -186,38 +186,35 @@ const removeDatabaseDirectory = Effect.fn("Database.removeDirectory")(
   },
 )
 
-const withTemporaryDatabase = <A, E, R>(
-  use: (adapter: ReturnType<typeof layer>) => Effect.Effect<A, E, R>,
-) =>
-  pipe(
-    Effect.gen(function* () {
-      const directory = yield* Effect.acquireRelease(
-        makeDatabaseDirectory,
-        removeDatabaseDirectory,
-      )
+const withTemporaryDatabase = Effect.fn("SqliteBun.withTemporaryDatabase")(
+  function* <A, E, R>(
+    use: (adapter: ReturnType<typeof layer>) => Effect.Effect<A, E, R>,
+  ) {
+    const directory = yield* Effect.acquireRelease(
+      makeDatabaseDirectory,
+      removeDatabaseDirectory,
+    )
 
-      const filename = join(directory.path, "test.sqlite")
-      const options = new SqliteBunOptions(filename)
-      const adapter = layer(options)
+    const filename = join(directory.path, "test.sqlite")
+    const options = new SqliteBunOptions(filename)
+    const adapter = layer(options)
 
-      return yield* use(adapter)
-    }),
-    Effect.scoped,
-  )
+    return yield* use(adapter)
+  },
+)
 
-const createArticleWithGeneratedIdentifier = Effect.fn(
-  "SqliteBun.createArticleWithGeneratedIdentifier",
-)(function* (adapter: ReturnType<typeof layer>) {
-  const result = yield* pipe(
-    Effect.gen(function* () {
-      yield* Articles.createTable()
-      return yield* CreateArticle.execute({ name: "Declarative Data", rating: 5 })
-    }),
-    Effect.provide(adapter),
-  )
-
-  return result
-})
+const createArticleWithGeneratedIdentifier = (article: Article) =>
+  Effect.fn("SqliteBun.createArticleWithGeneratedIdentifier")(function* (
+    adapter: ReturnType<typeof layer>,
+  ) {
+    return yield* pipe(
+      Effect.gen(function* () {
+        yield* Articles.createTable()
+        return yield* CreateArticle.execute(article)
+      }),
+      Effect.provide(adapter),
+    )
+  })
 
 const runCrudContract = (adapter: ReturnType<typeof layer>) =>
   pipe(
@@ -345,12 +342,15 @@ const expectTablesCreated = (created: ReadonlyArray<void>) => {
   return created
 }
 
-const expectGeneratedArticle = (
-  article: Schema.Schema.Type<typeof Articles.rowSchema>,
-) => {
-  expect(article.name).toBe("Declarative Data")
-  expect(article.rating).toBe(5)
-  expect(article.id).toMatch(
+const verifiesGeneratedArticle = Effect.fn(
+  "SqliteBun.verifiesGeneratedArticle",
+)(function* (article: Article) {
+  const createArticle = createArticleWithGeneratedIdentifier(article)
+  const created = yield* withTemporaryDatabase(createArticle)
+
+  expect(created.name).toBe(article.name)
+  expect(created.rating).toBe(article.rating)
+  expect(created.id).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   )
   expect(Articles.identifier).toBe("id")
@@ -360,63 +360,65 @@ const expectGeneratedArticle = (
   const generation = Option.getOrThrow(firstField.generation)
 
   expect(generation).toBe("uuidv7")
+})
 
-  return article
-}
+const verifiesMultipleTables = Effect.fn("SqliteBun.verifiesMultipleTables")(
+  function* () {
+    const created = yield* withTemporaryDatabase(createMultipleTables)
+
+    expectTablesCreated(created)
+  },
+)
 
 describe("Bun SQLite tables and queries", () => {
-  test("creates a derived table and runs authored CRUD queries", () =>
-    pipe(
-      withTemporaryDatabase(runCrudContract),
-      Effect.runPromise,
-    ))
+  it.effect("creates a derived table and runs authored CRUD queries", () =>
+    withTemporaryDatabase(runCrudContract))
 
-  test("backs a shared persisted reference with authored queries", () =>
-    pipe(
-      withTemporaryDatabase(runPersistedRefContract),
-      Effect.runPromise,
-    ))
+  it.effect("backs a shared persisted reference with authored queries", () =>
+    withTemporaryDatabase(runPersistedRefContract))
 
-  test("adds and generates a UUIDv7 identifier when the schema has none", () =>
-    pipe(
-      withTemporaryDatabase(createArticleWithGeneratedIdentifier),
-      Effect.runPromise,
-    ).then(expectGeneratedArticle))
+  it.effect.prop(
+    "adds and generates a UUIDv7 identifier when the schema has none",
+    [ArticleSchema],
+    ([article]) => verifiesGeneratedArticle(article),
+    { fastCheck: { numRuns: 10 } },
+  )
 
-  test("uses an explicit domain identifier instead of the UUIDv7 default", () => {
-    expect(Users.identifier).toBe("id")
-    expect(Users.identifierSchema).toBe(UserIdSchema)
-    expect(Users.rowSchema).toBe(UserSchema)
+  it.effect("uses an explicit domain identifier instead of the UUIDv7 default", () =>
+    Effect.sync(() => {
+      expect(Users.identifier).toBe("id")
+      expect(Users.identifierSchema).toBe(UserIdSchema)
+      expect(Users.rowSchema).toBe(UserSchema)
 
-    const firstField = pipe(Users.fields, Array.get(0), Option.getOrThrow)
-    const hasGeneration = Option.isSome(firstField.generation)
+      const firstField = pipe(Users.fields, Array.get(0), Option.getOrThrow)
+      const hasGeneration = Option.isSome(firstField.generation)
 
-    expect(hasGeneration).toBeFalse()
-  })
+      expect(hasGeneration).toBe(false)
+    }))
 
-  test("keeps database and codec services as execution requirements", () => {
-    const queryRequiresDatabase = true satisfies (
-      Context.Service.Identifier<typeof Database> extends Effect.Services<
-        ReturnType<typeof CreateUser.execute>
-      > ? true : false
-    )
+  it.effect("keeps database and codec services as execution requirements", () =>
+    Effect.sync(() => {
+      const queryRequiresDatabase = true satisfies (
+        Context.Service.Identifier<typeof Database> extends Effect.Services<
+          ReturnType<typeof CreateUser.execute>
+        > ? true : false
+      )
 
-    const queryRequiresCodec = true satisfies (
-      Context.Service.Identifier<typeof CodecPrefix> extends Effect.Services<
-        ReturnType<typeof CreateUser.execute>
-      > ? true : false
-    )
+      const queryRequiresCodec = true satisfies (
+        Context.Service.Identifier<typeof CodecPrefix> extends Effect.Services<
+          ReturnType<typeof CreateUser.execute>
+        > ? true : false
+      )
 
-    expect(queryRequiresDatabase).toBeTrue()
-    expect(queryRequiresCodec).toBeTrue()
-    expect(CreateUser.table).toBe(Users)
-    expect(FindUser.Request).toBe(UserIdSchema)
-    expect(FindUser.Result).toBe(OptionalUserSchema)
-  })
+      expect(queryRequiresDatabase).toBe(true)
+      expect(queryRequiresCodec).toBe(true)
+      expect(CreateUser.table).toBe(Users)
+      expect(FindUser.Request).toBe(UserIdSchema)
+      expect(FindUser.Result).toBe(OptionalUserSchema)
+    }))
 
-  test("supports multiple table definitions through one runtime layer", () =>
-    pipe(
-      withTemporaryDatabase(createMultipleTables),
-      Effect.runPromise,
-    ).then(expectTablesCreated))
+  it.effect(
+    "supports multiple table definitions through one runtime layer",
+    verifiesMultipleTables,
+  )
 })

@@ -1,6 +1,13 @@
-import { describe, expect, test } from "bun:test"
-import { Effect, Function, pipe, Ref, Schema } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Exit, Function, Ref, Schema } from "effect"
 import { Query, Table } from "../index.ts"
+
+const RequestNumberBounds = Schema.isBetween({
+  minimum: -1_000_000,
+  maximum: 1_000_000,
+})
+
+const RequestNumberSchema = Schema.Int.check(RequestNumberBounds)
 
 const QueryRecordSchema = Schema.Struct({
   value: Schema.String,
@@ -27,17 +34,17 @@ const recordAndIncrement = Effect.fn("QueryTest.recordAndIncrement")(
     yield* Ref.set(implementedRequest, request)
 
     const decodedRequest = Number(request)
-    const incrementedRequest = decodedRequest + 1
-
-    return String(incrementedRequest)
+    return String(decodedRequest + 1)
   },
 )
 
-const verifiesEncodingAndDecoding = Effect.gen(function* () {
+const verifiesEncodingAndDecoding = Effect.fn(
+  "QueryTest.verifiesEncodingAndDecoding",
+)(function* (request: number) {
   const implementedRequest = yield* Ref.make<unknown>(undefined)
 
-  const implementation = (request: string) =>
-    recordAndIncrement(implementedRequest, request)
+  const implementation = (encodedRequest: string) =>
+    recordAndIncrement(implementedRequest, encodedRequest)
 
   const query = Query.make(QueryRecords, {
     Request: Schema.NumberFromString,
@@ -45,11 +52,11 @@ const verifiesEncodingAndDecoding = Effect.gen(function* () {
     implementation,
   })
 
-  const result = yield* query.execute(41)
+  const result = yield* query.execute(request)
   const observedRequest = yield* Ref.get(implementedRequest)
-
-  expect(observedRequest).toBe("41")
-  expect(result).toBe(42)
+  const encodedRequest = String(request)
+  expect(observedRequest).toBe(encodedRequest)
+  expect(result).toBe(request + 1)
 })
 
 const markImplementationCalled = Effect.fn("QueryTest.markImplementationCalled")(
@@ -72,18 +79,13 @@ const verifiesInvalidRequest = Effect.gen(function* () {
     implementation,
   })
 
-  const succeeded = yield* pipe(
-    query.execute(Number.NaN),
-    Effect.match({
-      onFailure: Function.constant(false),
-      onSuccess: Function.constant(true),
-    }),
-  )
-
+  const execution = query.execute(Number.NaN)
+  const result = yield* Effect.exit(execution)
   const called = yield* Ref.get(implementationCalled)
+  const failed = Exit.isFailure(result)
 
-  expect(succeeded).toBeFalse()
-  expect(called).toBeFalse()
+  expect(failed).toBe(true)
+  expect(called).toBe(false)
 })
 
 const returnInvalidResult = Effect.fn("QueryTest.returnInvalidResult")(
@@ -110,48 +112,49 @@ const FailingQuery = Query.make(QueryRecords, {
   implementation: failQuery,
 })
 
-const expectFailure = (succeeded: boolean) => {
-  const expectation = expect(succeeded)
-  expectation.toBeFalse()
+const verifiesInvalidResult = Effect.fn("QueryTest.verifiesInvalidResult")(
+  function* () {
+    const execution = InvalidResultQuery.execute("request")
+    const result = yield* Effect.exit(execution)
+    const failed = Exit.isFailure(result)
 
-  return succeeded
-}
+    expect(failed).toBe(true)
+  },
+)
 
-const expectQueryFailure = (error: unknown) => {
-  const expectation = expect(error)
-  expectation.toBe(QueryFailure)
+const verifiesQueryFailure = Effect.fn("QueryTest.verifiesQueryFailure")(
+  function* () {
+    const execution = FailingQuery.execute("request")
+    const failure = yield* Effect.flip(execution)
 
-  return error
-}
+    expect(failure).toBe(QueryFailure)
+  },
+)
 
 describe("Query", () => {
-  test("keeps its table, schemas, and implementation inspectable", () => {
-    expect(InspectableQuery.table).toBe(QueryRecords)
-    expect(InspectableQuery.Request).toBe(Schema.String)
-    expect(InspectableQuery.Result).toBe(Schema.NumberFromString)
-    expect(InspectableQuery.implementation).toBe(encodeRequestLength)
-  })
+  it.effect("keeps its table, schemas, and implementation inspectable", () =>
+    Effect.sync(() => {
+      expect(InspectableQuery.table).toBe(QueryRecords)
+      expect(InspectableQuery.Request).toBe(Schema.String)
+      expect(InspectableQuery.Result).toBe(Schema.NumberFromString)
+      expect(InspectableQuery.implementation).toBe(encodeRequestLength)
+    }))
 
-  test("encodes the request before the implementation and decodes its result", () =>
-    pipe(verifiesEncodingAndDecoding, Effect.runPromise))
+  it.effect.prop(
+    "encodes the request before the implementation and decodes its result",
+    [RequestNumberSchema],
+    ([request]) => verifiesEncodingAndDecoding(request),
+  )
 
-  test("does not run the implementation when request encoding fails", () =>
-    pipe(verifiesInvalidRequest, Effect.runPromise))
+  it.effect(
+    "does not run the implementation when request encoding fails",
+    Function.constant(verifiesInvalidRequest),
+  )
 
-  test("fails when the implementation result does not match the result schema", () =>
-    pipe(
-      InvalidResultQuery.execute("request"),
-      Effect.match({
-        onFailure: Function.constant(false),
-        onSuccess: Function.constant(true),
-      }),
-      Effect.runPromise,
-    ).then(expectFailure))
+  it.effect(
+    "fails when the implementation result does not match the result schema",
+    verifiesInvalidResult,
+  )
 
-  test("preserves implementation failures", () =>
-    pipe(
-      FailingQuery.execute("request"),
-      Effect.flip,
-      Effect.runPromise,
-    ).then(expectQueryFailure))
+  it.effect("preserves implementation failures", verifiesQueryFailure)
 })

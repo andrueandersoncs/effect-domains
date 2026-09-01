@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Equivalence, Function, Option, pipe, Ref, Schema } from "effect"
 import {
   DefaultTableIdentifierSchema,
@@ -144,7 +144,6 @@ const ReservedIdentifierRecordError = new TableDefinitionError(
   "field id must use Domain.identifier when overriding the default UUIDv7 identifier",
 )
 
-const ValidUuidV7 = "01941f29-7c00-7000-8000-000000000000"
 const ValidUuidV4 = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 const NoGeneration = Option.none<"uuidv7">()
 const UuidV7Generation = Option.some<"uuidv7">("uuidv7")
@@ -187,12 +186,6 @@ const ExplicitFieldMetadata: ReadonlyArray<TableField> = [
 
 const isSame = Equivalence.strictEqual<unknown>()
 
-const GeneratedRowInput = {
-  id: ValidUuidV7,
-  title: "Mechanical derivation",
-  score: 5,
-} as const
-
 const MissingIdentifierRowInput = {
   title: "Mechanical derivation",
   score: 5,
@@ -203,9 +196,11 @@ const reportsSuccess = Effect.match({
   onSuccess: Function.constant(true),
 })
 
-const verifiesGeneratedIdentifier = Effect.gen(function* () {
+const verifiesGeneratedIdentifier = Effect.fn(
+  "TableTest.verifiesGeneratedIdentifier",
+)(function* (row: unknown) {
   const decoded = yield* Schema.decodeUnknownEffect(GeneratedRecords.rowSchema)(
-    GeneratedRowInput,
+    row,
   )
 
   const invalidIdentifierSucceeded = yield* pipe(
@@ -220,9 +215,9 @@ const verifiesGeneratedIdentifier = Effect.gen(function* () {
     reportsSuccess,
   )
 
-  expect(decoded).toEqual(GeneratedRowInput)
-  expect(invalidIdentifierSucceeded).toBeFalse()
-  expect(missingIdentifierSucceeded).toBeFalse()
+  expect(decoded).toEqual(row)
+  expect(invalidIdentifierSucceeded).toBe(false)
+  expect(missingIdentifierSucceeded).toBe(false)
 })
 
 const verifiesCreateTableDelegation = Effect.gen(function* () {
@@ -268,65 +263,80 @@ const verifiesCreateTableFailure = Effect.gen(function* () {
 })
 
 describe("Table", () => {
-  test("adds a validated generated UUIDv7 identifier when none is declared", () => {
-    const rowSchemaIsSourceSchema = isSame(
-      GeneratedRecords.rowSchema,
-      GeneratedRecordSchema,
-    )
+  it.effect("adds a generated UUIDv7 identifier when none is declared", () =>
+    Effect.sync(() => {
+      const rowSchemaIsSourceSchema = isSame(
+        GeneratedRecords.rowSchema,
+        GeneratedRecordSchema,
+      )
 
-    expect(GeneratedRecords.name).toBe("generated_records")
-    expect(GeneratedRecords.schema).toBe(GeneratedRecordSchema)
-    expect(rowSchemaIsSourceSchema).toBeFalse()
-    expect(GeneratedRecords.identifier).toBe("id")
-    expect(GeneratedRecords.identifierSchema).toBe(
-      GeneratedRecords.rowSchema.fields.id,
-    )
-    expect(GeneratedRecords.identifierSchema).toBe(
-      DefaultTableIdentifierSchema,
-    )
-    expect(GeneratedRecords.fields).toEqual(GeneratedFieldMetadata)
+      expect(GeneratedRecords.name).toBe("generated_records")
+      expect(GeneratedRecords.schema).toBe(GeneratedRecordSchema)
+      expect(rowSchemaIsSourceSchema).toBe(false)
+      expect(GeneratedRecords.identifier).toBe("id")
+      expect(GeneratedRecords.identifierSchema).toBe(
+        GeneratedRecords.rowSchema.fields.id,
+      )
+      expect(GeneratedRecords.identifierSchema).toBe(
+        DefaultTableIdentifierSchema,
+      )
+      expect(GeneratedRecords.fields).toEqual(GeneratedFieldMetadata)
+    }))
 
-    return pipe(verifiesGeneratedIdentifier, Effect.runPromise)
-  })
+  it.effect.prop(
+    "generates valid rows from the derived row schema",
+    [GeneratedRecords.rowSchema],
+    ([row]) => verifiesGeneratedIdentifier(row),
+  )
 
-  test("uses an explicit identifier and compiles encoded scalar metadata", () => {
-    expect(ExplicitRecords.schema).toBe(ExplicitRecordSchema)
-    expect(ExplicitRecords.rowSchema).toBe(ExplicitRecordSchema)
-    expect(ExplicitRecords.identifier).toBe("recordNumber")
-    expect(ExplicitRecords.identifierSchema).toBe(ExplicitIdentifierSchema)
-    expect(ExplicitRecords.fields).toEqual(ExplicitFieldMetadata)
-  })
+  it.effect("uses an explicit identifier and compiles encoded scalar metadata", () =>
+    Effect.sync(() => {
+      expect(ExplicitRecords.schema).toBe(ExplicitRecordSchema)
+      expect(ExplicitRecords.rowSchema).toBe(ExplicitRecordSchema)
+      expect(ExplicitRecords.identifier).toBe("recordNumber")
+      expect(ExplicitRecords.identifierSchema).toBe(ExplicitIdentifierSchema)
+      expect(ExplicitRecords.fields).toEqual(ExplicitFieldMetadata)
+    }))
 
-  test("rejects optional fields", () => {
-    expect(makeOptionalRecords).toThrow(TableDefinitionError)
-    expect(makeOptionalRecords).toThrow(OptionalRecordError.message)
-  })
+  it.effect("rejects optional fields", () =>
+    Effect.sync(() => {
+      expect(makeOptionalRecords).toThrow(TableDefinitionError)
+      expect(makeOptionalRecords).toThrow(OptionalRecordError.message)
+    }))
 
-  test("rejects fields that do not encode to a supported scalar", () => {
-    expect(makeBooleanRecords).toThrow(TableDefinitionError)
-    expect(makeBooleanRecords).toThrow(BooleanRecordError.message)
-  })
+  it.effect("rejects fields that do not encode to a supported scalar", () =>
+    Effect.sync(() => {
+      expect(makeBooleanRecords).toThrow(TableDefinitionError)
+      expect(makeBooleanRecords).toThrow(BooleanRecordError.message)
+    }))
 
-  test("rejects non-string field names", () => {
-    expect(makeSymbolRecords).toThrow(TableDefinitionError)
-    expect(makeSymbolRecords).toThrow(SymbolRecordError.message)
-  })
+  it.effect("rejects non-string field names", () =>
+    Effect.sync(() => {
+      expect(makeSymbolRecords).toThrow(TableDefinitionError)
+      expect(makeSymbolRecords).toThrow(SymbolRecordError.message)
+    }))
 
-  test("rejects multiple explicit identifiers", () => {
-    expect(makeAmbiguousRecords).toThrow(TableDefinitionError)
-    expect(makeAmbiguousRecords).toThrow(AmbiguousRecordError.message)
-  })
+  it.effect("rejects multiple explicit identifiers", () =>
+    Effect.sync(() => {
+      expect(makeAmbiguousRecords).toThrow(TableDefinitionError)
+      expect(makeAmbiguousRecords).toThrow(AmbiguousRecordError.message)
+    }))
 
-  test("rejects an unannotated id field reserved by generated identity", () => {
-    expect(makeReservedIdentifierRecords).toThrow(TableDefinitionError)
-    expect(makeReservedIdentifierRecords).toThrow(
-      ReservedIdentifierRecordError.message,
-    )
-  })
+  it.effect("rejects an unannotated id field reserved by generated identity", () =>
+    Effect.sync(() => {
+      expect(makeReservedIdentifierRecords).toThrow(TableDefinitionError)
+      expect(makeReservedIdentifierRecords).toThrow(
+        ReservedIdentifierRecordError.message,
+      )
+    }))
 
-  test("delegates creation to the runtime TableStore", () =>
-    pipe(verifiesCreateTableDelegation, Effect.runPromise))
+  it.effect(
+    "delegates creation to the runtime TableStore",
+    Function.constant(verifiesCreateTableDelegation),
+  )
 
-  test("preserves TableStore creation failures", () =>
-    pipe(verifiesCreateTableFailure, Effect.runPromise))
+  it.effect(
+    "preserves TableStore creation failures",
+    Function.constant(verifiesCreateTableFailure),
+  )
 })
