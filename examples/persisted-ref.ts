@@ -4,184 +4,192 @@ import { join } from "node:path"
 import {
   Array,
   Effect,
+  Function,
   Number,
   Option,
   pipe,
   Schema,
   Struct,
 } from "effect"
-import {
-  Domain,
-  PersistedRef,
-  Query,
-  Table,
-} from "effect-domains"
-import * as SqliteBun from "effect-domains/sqlite-bun"
+import { identifier } from "effect-domains/domain/algorithms"
+import { PersistedRef } from "effect-domains/persisted-ref/types"
+import { Query } from "effect-domains/query"
+import { Database } from "effect-domains/sqlite-bun/services"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun/types"
+import { Table } from "effect-domains/table"
 
-const CounterIdSchema = pipe(
-  Schema.String,
-  Schema.brand("CounterId"),
-  Domain.identifier,
-)
+await pipe(
+  Effect.gen(function* () {
 
-const CounterSchema = Schema.Struct({
-  id: CounterIdSchema,
-  value: Schema.Number,
-})
+    const CounterIdSchema = pipe(
+      Schema.String,
+      Schema.brand("CounterId"),
+      identifier,
+    )
 
-// Counter names the decoded row because PersistedRef shares this value across fibers.
-interface Counter extends Schema.Schema.Type<typeof CounterSchema> {}
-
-const Counters = Table.make(CounterSchema, { name: "counters" })
-const OptionalCounterSchema = Schema.OptionFromNullOr(CounterSchema)
-
-const CreateCounter = Query.make(Counters, {
-  Request: CounterSchema,
-  Result: CounterSchema,
-  implementation: Effect.fn("CreateCounter.implementation")(function* (
-    counter,
-  ) {
-    const db = yield* SqliteBun.Database
-    const insert = db.insert(counter)
-
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
-      INSERT INTO ${db(Counters.name)} ${insert}
-      RETURNING *
-    `
-
-    return pipe(rows, Array.get(0), Option.getOrUndefined)
-  }),
-})
-
-const FindCounter = Query.make(Counters, {
-  Request: CounterIdSchema,
-  Result: OptionalCounterSchema,
-  implementation: Effect.fn("FindCounter.implementation")(function* (id) {
-    const db = yield* SqliteBun.Database
-
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
-      SELECT * FROM ${db(Counters.name)}
-      WHERE ${db(Counters.identifier)} = ${id}
-      LIMIT 1
-    `
-
-    return pipe(rows, Array.get(0), Option.getOrNull)
-  }),
-})
-
-const UpdateCounter = Query.make(Counters, {
-  Request: CounterSchema,
-  Result: OptionalCounterSchema,
-  implementation: Effect.fn("UpdateCounter.implementation")(function* (
-    counter,
-  ) {
-    const db = yield* SqliteBun.Database
-    const id = counter[Counters.identifier]
-    const changes = db.update(counter, [Counters.identifier])
-
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
-      UPDATE ${db(Counters.name)}
-      SET ${changes}
-      WHERE ${db(Counters.identifier)} = ${id}
-      RETURNING *
-    `
-
-    return pipe(rows, Array.get(0), Option.getOrNull)
-  }),
-})
-
-const requireCounter = Effect.fn("Counter.require")(function* (
-  effect: Effect.Effect<
-    Option.Option<Counter>,
-    unknown,
-    SqliteBun.Database
-  >,
-) {
-  const counter = yield* effect
-
-  if (Option.isNone(counter)) {
-    return yield* Effect.fail("Counter not found" as const)
-  }
-
-  return counter.value
-})
-
-const commitCounter = Effect.fn("Counter.commit")(function* (
-  _previous: Counter,
-  next: Counter,
-) {
-  const update = UpdateCounter.execute(next)
-
-  return yield* requireCounter(update)
-})
-
-const incrementedValue = Struct.evolve<
-  Counter,
-  { readonly value: typeof Number.increment }
->({
-  value: Number.increment,
-})
-
-const systemTemporaryDirectory = tmpdir()
-
-const temporaryDirectoryPrefix = join(
-  systemTemporaryDirectory,
-  "effect-domains-persisted-ref-",
-)
-
-const acquireTemporaryDirectory = Effect.sync(
-  () => mkdtempDisposableSync(temporaryDirectoryPrefix),
-)
-
-const makePersistedRefRemove = (
-  directory: ReturnType<typeof mkdtempDisposableSync>,
-) => Effect.sync(directory.remove)
-
-const temporaryDirectory = Effect.acquireRelease(
-  acquireTemporaryDirectory,
-  makePersistedRefRemove,
-)
-
-const program = Effect.gen(function* () {
-  const directory = yield* temporaryDirectory
-  const databasePath = join(directory.path, "example.sqlite")
-  const databaseOptions = new SqliteBun.SqliteBunOptions(databasePath)
-  const DatabaseLive = SqliteBun.layer(databaseOptions)
-
-  const operations = Effect.gen(function* () {
-    yield* Counters.createTable()
-
-    const id = CounterIdSchema.make("visits")
-    const initial = CounterSchema.make({ id, value: 0 })
-
-    yield* CreateCounter.execute(initial)
-
-    const find = FindCounter.execute(id)
-    const load = requireCounter(find)
-    const counter = yield* PersistedRef.make(commitCounter)(load)
-    const update = counter.update(incrementedValue)
-    const concurrentUpdates = Array.replicate(update, 10)
-
-    yield* Effect.all(concurrentUpdates, { concurrency: "unbounded" })
-
-    const afterWrites = yield* counter.get
-
-    const externallyWritten = CounterSchema.make({
-      ...afterWrites,
-      value: 100,
+    const CounterFields = Function.identity({
+      id: CounterIdSchema,
+      value: Schema.Number,
     })
 
-    yield* UpdateCounter.execute(externallyWritten)
+    const CounterSchema = pipe(CounterFields, Schema.Struct)
+    const Counters = Table.make({ name: "counters", schema: CounterSchema })
+    const OptionalCounterSchema = Schema.OptionFromNullOr(CounterSchema)
 
-    const staleBeforeRefresh = yield* counter.get
-    const refreshed = yield* counter.refresh
+    const createCounter = Effect.fn("CreateCounter.implementation")(
+      function* (counter: typeof CounterSchema.Encoded) {
+        const database = yield* Database
+        const insert = database.insert(counter)
 
-    return { afterWrites, staleBeforeRefresh, refreshed }
-  })
+        const rows = yield* database<Readonly<Record<string, unknown>>>`
+          INSERT INTO ${database(Counters.name)} ${insert}
+          RETURNING *
+        `
 
-  const result = yield* pipe(operations, Effect.provide(DatabaseLive))
+        return pipe(rows, Array.get(0), Option.getOrUndefined)
+      },
+    )
 
-  yield* Effect.log("PersistedRef result", result)
-})
+    const CreateCounter = Query.make({
+      table: Counters,
+      Request: CounterSchema,
+      Result: CounterSchema,
+      implementation: createCounter,
+    })
 
-await pipe(program, Effect.scoped, Effect.runPromise)
+    const findCounter = Effect.fn("FindCounter.implementation")(
+      function* (id: typeof CounterIdSchema.Encoded) {
+        const database = yield* Database
+
+        const rows = yield* database<Readonly<Record<string, unknown>>>`
+          SELECT * FROM ${database(Counters.name)}
+          WHERE ${database(Counters.identifier)} = ${id}
+          LIMIT 1
+        `
+
+        return pipe(rows, Array.get(0), Option.getOrNull)
+      },
+    )
+
+    const FindCounter = Query.make({
+      table: Counters,
+      Request: CounterIdSchema,
+      Result: OptionalCounterSchema,
+      implementation: findCounter,
+    })
+
+    const updateCounter = Effect.fn("UpdateCounter.implementation")(
+      function* (counter: typeof CounterSchema.Encoded) {
+        const database = yield* Database
+        const id = counter[Counters.identifier]
+        const changes = database.update(counter, [Counters.identifier])
+
+        const rows = yield* database<Readonly<Record<string, unknown>>>`
+          UPDATE ${database(Counters.name)}
+          SET ${changes}
+          WHERE ${database(Counters.identifier)} = ${id}
+          RETURNING *
+        `
+
+        return pipe(rows, Array.get(0), Option.getOrNull)
+      },
+    )
+
+    const UpdateCounter = Query.make({
+      table: Counters,
+      Request: CounterSchema,
+      Result: OptionalCounterSchema,
+      implementation: updateCounter,
+    })
+
+    const requireCounter = Effect.fn("Counter.require")(function* (
+      effect: Effect.Effect<
+        Option.Option<typeof CounterSchema.Type>,
+        unknown,
+        Database
+      >,
+    ) {
+      const counter = yield* effect
+
+      if (Option.isNone(counter)) {
+        return yield* Effect.fail("Counter not found" as const)
+      }
+
+      return counter.value
+    })
+
+    const commitCounter = Effect.fn("Counter.commit")(function* (
+      _previous: typeof CounterSchema.Type,
+      next: typeof CounterSchema.Type,
+    ) {
+      const update = UpdateCounter.execute(next)
+
+      return yield* requireCounter(update)
+    })
+
+    const incrementedValue = Struct.evolve<
+      typeof CounterSchema.Type,
+      { readonly value: typeof Number.increment }
+    >({ value: Number.increment })
+
+    const systemTemporaryDirectory = tmpdir()
+
+    const temporaryDirectoryPrefix = join(
+      systemTemporaryDirectory,
+      "effect-domains-persisted-ref-",
+    )
+
+    const acquireTemporaryDirectory = Effect.sync(
+      () => mkdtempDisposableSync(temporaryDirectoryPrefix),
+    )
+
+    const removeFromMkdtempdisposablesync = (
+      directory: ReturnType<typeof mkdtempDisposableSync>,
+    ) => Effect.sync(directory.remove)
+
+    const directory = yield* Effect.acquireRelease(
+      acquireTemporaryDirectory,
+      removeFromMkdtempdisposablesync,
+    )
+
+    const databasePath = join(directory.path, "example.sqlite")
+    const databaseLayer = SqliteBunRuntime.sqlClient(databasePath)
+
+    const operations = Effect.gen(function* () {
+      yield* Counters.write()
+
+      const id = CounterIdSchema.make("visits")
+      const initial = CounterSchema.make({ id, value: 0 })
+
+      yield* CreateCounter.execute(initial)
+
+      const find = FindCounter.execute(id)
+      const load = requireCounter(find)
+      const counter = yield* PersistedRef.make({ commit: commitCounter, load })
+      const update = counter.update(incrementedValue)
+      const concurrentUpdates = Array.replicate(update, 10)
+
+      yield* Effect.all(concurrentUpdates, { concurrency: "unbounded" })
+
+      const afterWrites = yield* counter.get
+
+      const externallyWritten = CounterSchema.make({
+        ...afterWrites,
+        value: 100,
+      })
+
+      yield* UpdateCounter.execute(externallyWritten)
+
+      const staleBeforeRefresh = yield* counter.get
+      const refreshed = yield* counter.refresh
+
+      return { afterWrites, staleBeforeRefresh, refreshed }
+    })
+
+    const result = yield* pipe(operations, Effect.provide(databaseLayer))
+
+    yield* Effect.log("PersistedRef result", result)
+  }),
+  Effect.scoped,
+  Effect.runPromise,
+)

@@ -1,18 +1,21 @@
 import * as assert from "@effect/vitest/utils"
 import { Effect, Option } from "effect"
 
-type Operation<Input, Output, Error, Requirements> = Readonly<{
-  execute: (input: Input) => Effect.Effect<Output, Error, Requirements>
-}>
-
 /**
-
-Use when: verifying a database adapter because authored CRUD query sets must
-share database-neutral behavior.
-
-Example: yield `adapterContract(options)` from an adapter integration test.
-
-**/
+ *
+ * Scope: public
+ *
+ * When to use: Adapter tests share this contract because authored CRUD query
+ * sets need database-neutral behavior.
+ *
+ * Example:
+ * ```ts
+ * import { adapterContract } from "./effects.ts"
+ *
+ * const verification = adapterContract(options)
+ * ```
+ *
+ */
 export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   Entity,
   Key,
@@ -30,20 +33,26 @@ export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   replacement: Entity
   missingReplacement: Entity
   missingKey: Key
-  create: Operation<Entity, Entity, CreateError, CreateRequirements>
-  read: Operation<
-    Key,
-    Option.Option<Entity>,
-    ReadError,
-    ReadRequirements
-  >
-  update: Operation<
-    Entity,
-    Option.Option<Entity>,
-    UpdateError,
-    UpdateRequirements
-  >
-  delete: Operation<Key, boolean, DeleteError, DeleteRequirements>
+  create: Readonly<{
+    execute: (input: Entity) => Effect.Effect<Entity, CreateError, CreateRequirements>
+  }>
+  read: Readonly<{
+    execute: (input: Key) => Effect.Effect<
+      Option.Option<Entity>,
+      ReadError,
+      ReadRequirements
+    >
+  }>
+  update: Readonly<{
+    execute: (input: Entity) => Effect.Effect<
+      Option.Option<Entity>,
+      UpdateError,
+      UpdateRequirements
+    >
+  }>
+  delete: Readonly<{
+    execute: (input: Key) => Effect.Effect<boolean, DeleteError, DeleteRequirements>
+  }>
 }>) {
   const created = yield* options.create.execute(options.original)
   assert.deepStrictEqual(created, options.original)
@@ -85,5 +94,6 @@ export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   assert.assertTrue(afterDeleteIsNone)
 
   const deletedAgain = yield* options.delete.execute(originalKey)
+
   assert.strictEqual(deletedAgain, false)
 })

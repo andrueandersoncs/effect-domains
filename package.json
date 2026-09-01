@@ -1,11 +1,22 @@
 {
   "name": "effect-domains",
   "version": "0.1.0",
-  "module": "index.ts",
   "type": "module",
   "exports": {
-    ".": "./index.ts",
-    "./sqlite-bun": "./src/SqliteBun.ts"
+    "./domain/algorithms": "./src/domain/algorithms.ts",
+    "./domain/constants": "./src/domain/constants.ts",
+    "./persisted-ref/types": "./src/persisted-ref/types.ts",
+    "./query": "./src/query/types.ts",
+    "./sqlite-bun/algorithms": "./src/sqlite-bun/algorithms.ts",
+    "./sqlite-bun/services": "./src/sqlite-bun/services.ts",
+    "./sqlite-bun/types": "./src/sqlite-bun/types.ts",
+    "./table": "./src/table/types.ts",
+    "./table-identifier/constants": "./src/table-identifier/constants.ts",
+    "./table/constants": "./src/table/constants.ts",
+    "./table/errors": "./src/table/errors.ts",
+    "./table/schemas": "./src/table/schemas.ts",
+    "./table/services": "./src/table/services.ts",
+    "./table/types": "./src/table/types.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
@@ -17,7 +28,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.1",
+    "@better-typescript/better-typescript": "0.4.5",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "latest",
     "vitest": "4.1.11"

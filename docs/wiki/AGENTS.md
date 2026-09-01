@@ -47,12 +47,12 @@ Follow these source-backed project rules unless newer human-curated evidence cha
 - Derive a representation only when the mapping is mechanical and lossless.
 - Use explicit typed transformations when domain, storage, transport, or business semantics differ.
 - Keep persistence, wire, testing, and documentation concerns in separate interpreters rather than loading them into the canonical domain schema.
-- Express intrinsic entity identity with `Domain.identifier`; persistence derives the storage key from it.
-- When a schema has no intrinsic identifier, keep it unchanged and let `Table.make` add the persistence-only UUIDv7 `id` exposed by `rowSchema`; an explicit `Domain.identifier` overrides this default.
-- Define tables with `Table.make(schema, { name })`; this newer direction supersedes the earlier catalog-key-as-capability interface.
+- Express intrinsic entity identity with `identifier`; persistence derives the storage key from it.
+- When a schema has no intrinsic identifier, keep it unchanged and let `Table.make` add the persistence-only UUIDv7 `id` exposed by `rowSchema`; an explicit `identifier` overrides this default.
+- Define tables with `Table.make({ name, schema })`; this named construction record preserves the explicit table name from the newer direction while superseding the interim positional and curried forms and the earlier catalog-key-as-capability interface.
 - Use encoded field names directly as database column names.
 - Derive fresh table creation from the table definition and encoded schema; keep existing-table migrations explicit.
-- Define one operation per `Query.make`; use request/result schemas and an authored Effect implementation whose requirements carry the runtime database.
+- Define one operation per `Query.make({ table, Request, Result, implementation })`; use request/result schemas and an authored Effect implementation whose requirements carry the runtime database.
 - Treat business policies, authorization, transactions, migrations, compatibility, and operational behavior as authored concerns.
 - Validate the hypothesis through materially different vertical slices before generalizing a framework.
 - Prefer deep modules and straightforward escape hatches over annotation-heavy thin wrappers.

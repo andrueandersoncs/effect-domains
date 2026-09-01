@@ -1,92 +1,105 @@
 import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Array, Effect, Option, pipe, Schema } from "effect"
-import { Query, Table } from "effect-domains"
-import * as SqliteBun from "effect-domains/sqlite-bun"
+import { Array, Effect, Function, Option, pipe, Schema } from "effect"
+import { Query } from "effect-domains/query"
+import { Database } from "effect-domains/sqlite-bun/services"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun/types"
+import { Table } from "effect-domains/table"
 
-const BookSchema = Schema.Struct({
-  title: Schema.String,
-  pageCount: Schema.Number,
-})
-
-// Use Book because the decoded domain value excludes the generated physical table identity.
-interface Book extends Schema.Schema.Type<typeof BookSchema> {}
-
-const Books = Table.make(BookSchema, { name: "books" })
-
-const CreateBook = Query.make(Books, {
-  Request: BookSchema,
-  Result: Books.rowSchema,
-  implementation: Effect.fn("CreateBook.implementation")(function* (book) {
-    const db = yield* SqliteBun.Database
-
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
-      INSERT INTO ${db(Books.name)} ${db.insert(book)} RETURNING *
-    `
-
-    const firstRow = Array.get(rows, 0)
-    return Option.getOrUndefined(firstRow)
-  }),
-})
-
-const OptionalStoredBookSchema = Schema.OptionFromNullOr(Books.rowSchema)
-
-const FindBook = Query.make(Books, {
-  Request: Books.identifierSchema,
-  Result: OptionalStoredBookSchema,
-  implementation: Effect.fn("FindBook.implementation")(function* (id) {
-    const db = yield* SqliteBun.Database
-
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
-      SELECT * FROM ${db(Books.name)}
-      WHERE ${db(Books.identifier)} = ${id}
-      LIMIT 1
-    `
-
-    const firstRow = Array.get(rows, 0)
-    return Option.getOrNull(firstRow)
-  }),
-})
-
-const systemTemporaryDirectory = tmpdir()
-const temporaryDirectoryPrefix = join(systemTemporaryDirectory, "effect-domains-basic-")
-
-const acquireTemporaryDirectory = Effect.sync(
-  () => mkdtempDisposableSync(temporaryDirectoryPrefix),
-)
-
-const makeRemove = (
-  directory: ReturnType<typeof mkdtempDisposableSync>,
-) => Effect.sync(directory.remove)
-
-const temporaryDirectory = Effect.acquireRelease(
-  acquireTemporaryDirectory,
-  makeRemove,
-)
-
-const program = Effect.gen(function* () {
-  const directory = yield* temporaryDirectory
-  const databasePath = join(directory.path, "example.sqlite")
-  const databaseOptions = new SqliteBun.SqliteBunOptions(databasePath)
-  const Live = SqliteBun.layer(databaseOptions)
-
-  const operations = Effect.gen(function* () {
-    yield* Books.createTable()
-
-    const book: Book = BookSchema.make({
-      title: "A Field Guide",
-      pageCount: 120,
+await pipe(
+  Effect.gen(function* () {
+    const BookFields = Function.identity({
+      title: Schema.String,
+      pageCount: Schema.Number,
     })
 
-    const created = yield* CreateBook.execute(book)
-    const found = yield* FindBook.execute(created.id)
+    const BookSchema = pipe(BookFields, Schema.Struct)
+    const Books = Table.make({ name: "books", schema: BookSchema })
 
-    return { created, found: Option.getOrNull(found) }
-  })
+    const createBook = Effect.fn("CreateBook.implementation")(function* (
+      book: typeof BookSchema.Type,
+    ) {
+      const database = yield* Database
 
-  const result = yield* pipe(operations, Effect.provide(Live))
-  yield* Effect.log("Query result", result)
-})
+      const rows = yield* database<Readonly<Record<string, unknown>>>`
+        INSERT INTO ${database(Books.name)} ${database.insert(book)} RETURNING *
+      `
 
-await pipe(program, Effect.scoped, Effect.runPromise)
+      return pipe(rows, Array.get(0), Option.getOrUndefined)
+    })
+
+    const CreateBook = Query.make({
+      table: Books,
+      Request: BookSchema,
+      Result: Books.rowSchema,
+      implementation: createBook,
+    })
+
+    const OptionalStoredBookSchema = Schema.OptionFromNullOr(Books.rowSchema)
+
+    const findBook = Effect.fn("FindBook.implementation")(function* (
+      id: typeof Books.identifierSchema.Encoded,
+    ) {
+      const database = yield* Database
+
+      const rows = yield* database<Readonly<Record<string, unknown>>>`
+        SELECT * FROM ${database(Books.name)}
+        WHERE ${database(Books.identifier)} = ${id}
+        LIMIT 1
+      `
+
+      return pipe(rows, Array.get(0), Option.getOrNull)
+    })
+
+    const FindBook = Query.make({
+      table: Books,
+      Request: Books.identifierSchema,
+      Result: OptionalStoredBookSchema,
+      implementation: findBook,
+    })
+
+    const systemTemporaryDirectory = tmpdir()
+
+    const temporaryDirectoryPrefix = join(
+      systemTemporaryDirectory,
+      "effect-domains-basic-",
+    )
+
+    const acquireTemporaryDirectory = Effect.sync(
+      () => mkdtempDisposableSync(temporaryDirectoryPrefix),
+    )
+
+    const removeFromMkdtempdisposablesync = (
+      directory: ReturnType<typeof mkdtempDisposableSync>,
+    ) => Effect.sync(directory.remove)
+
+    const directory = yield* Effect.acquireRelease(
+      acquireTemporaryDirectory,
+      removeFromMkdtempdisposablesync,
+    )
+
+    const databasePath = join(directory.path, "example.sqlite")
+    const databaseLayer = SqliteBunRuntime.sqlClient(databasePath)
+
+    const operations = Effect.gen(function* () {
+      yield* Books.write()
+
+      const book = BookSchema.make({
+        title: "A Field Guide",
+        pageCount: 120,
+      })
+
+      const created = yield* CreateBook.execute(book)
+      const found = yield* FindBook.execute(created.id)
+
+      return { created, found: Option.getOrNull(found) }
+    })
+
+    const result = yield* pipe(operations, Effect.provide(databaseLayer))
+
+    yield* Effect.log("Query result", result)
+  }),
+  Effect.scoped,
+  Effect.runPromise,
+)

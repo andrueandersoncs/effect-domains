@@ -1,137 +1,137 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Function, Ref, Schema } from "effect"
-import { Query, Table } from "../index.ts"
+import { Effect, Exit, Function, Ref, Schema, Struct, pipe } from "effect"
+import { Query } from "../src/query/types.ts"
+import { Table } from "../src/table/types.ts"
 
-const RequestNumberBounds = Schema.isBetween({
-  minimum: -1_000_000,
-  maximum: 1_000_000,
-})
+describe("Query", () => {
 
-const RequestNumberSchema = Schema.Int.check(RequestNumberBounds)
+  const RequestNumberBounds = Schema.isBetween({
+    minimum: -1_000_000,
+    maximum: 1_000_000,
+  })
 
-const QueryRecordSchema = Schema.Struct({
-  value: Schema.String,
-})
+  const RequestNumberSchema = Schema.Int.check(RequestNumberBounds)
+  const QueryRecordFields = Function.identity({ value: Schema.String })
+  const QueryRecordSchema = pipe(QueryRecordFields, Schema.Struct)
+  const QueryRecords = Table.make({ name: "query_records", schema: QueryRecordSchema })
 
-interface QueryRecord extends Schema.Schema.Type<typeof QueryRecordSchema> {}
+  const encodeRequestLength = Effect.fn("QueryTest.encodeRequestLength")(
+    function* (request: string) {
+      return String(request.length)
+    },
+  )
 
-const QueryRecords = Table.make(QueryRecordSchema, { name: "query_records" })
-
-const encodeRequestLength = Effect.fn("QueryTest.encodeRequestLength")(
-  function* (request: string) {
-    return String(request.length)
-  },
-)
-
-const InspectableQuery = Query.make(QueryRecords, {
-  Request: Schema.String,
-  Result: Schema.NumberFromString,
-  implementation: encodeRequestLength,
-})
-
-const recordAndIncrement = Effect.fn("QueryTest.recordAndIncrement")(
-  function* (implementedRequest: Ref.Ref<unknown>, request: string) {
-    yield* Ref.set(implementedRequest, request)
-
-    const decodedRequest = Number(request)
-    return String(decodedRequest + 1)
-  },
-)
-
-const verifiesEncodingAndDecoding = Effect.fn(
-  "QueryTest.verifiesEncodingAndDecoding",
-)(function* (request: number) {
-  const implementedRequest = yield* Ref.make<unknown>(undefined)
-
-  const implementation = (encodedRequest: string) =>
-    recordAndIncrement(implementedRequest, encodedRequest)
-
-  const query = Query.make(QueryRecords, {
-    Request: Schema.NumberFromString,
+  const InspectableQuery = Query.make({
+    table: QueryRecords,
+    Request: Schema.String,
     Result: Schema.NumberFromString,
-    implementation,
+    implementation: encodeRequestLength,
   })
 
-  const result = yield* query.execute(request)
-  const observedRequest = yield* Ref.get(implementedRequest)
-  const encodedRequest = String(request)
-  expect(observedRequest).toBe(encodedRequest)
-  expect(result).toBe(request + 1)
-})
+  const recordAndIncrement = (implementedRequest: Ref.Ref<unknown>) =>
+    Effect.fn("QueryTest.recordAndIncrement")(function* (request: string) {
+      yield* Ref.set(implementedRequest, request)
 
-const markImplementationCalled = Effect.fn("QueryTest.markImplementationCalled")(
-  function* (implementationCalled: Ref.Ref<boolean>, request: number) {
-    yield* Ref.set(implementationCalled, true)
+      const decoded = Number(request)
 
-    return request
-  },
-)
+      return String(decoded + 1)
+    })
 
-const verifiesInvalidRequest = Effect.gen(function* () {
-  const implementationCalled = yield* Ref.make(false)
+  const verifiesEncodingAndDecoding = Effect.fn(
+    "QueryTest.verifiesEncodingAndDecoding",
+  )(function* (request: number) {
+    const implementedRequest = yield* Ref.make<unknown>(undefined)
+    const implementation = recordAndIncrement(implementedRequest)
 
-  const implementation = (request: number) =>
-    markImplementationCalled(implementationCalled, request)
+    const query = Query.make({
+      table: QueryRecords,
+      Request: Schema.NumberFromString,
+      Result: Schema.NumberFromString,
+      implementation,
+    })
 
-  const query = Query.make(QueryRecords, {
-    Request: Schema.Finite,
-    Result: Schema.Number,
-    implementation,
+    const result = yield* query.execute(request)
+    const observedRequest = yield* Ref.get(implementedRequest)
+    const encodedRequest = String(request)
+
+    expect(observedRequest).toBe(encodedRequest)
+    expect(result).toBe(request + 1)
   })
 
-  const execution = query.execute(Number.NaN)
-  const result = yield* Effect.exit(execution)
-  const called = yield* Ref.get(implementationCalled)
-  const failed = Exit.isFailure(result)
+  const markImplementationCalled = (implementationCalled: Ref.Ref<boolean>) =>
+    Effect.fn("QueryTest.markImplementationCalled")(function* (
+      request: number,
+    ) {
+      yield* Ref.set(implementationCalled, true)
 
-  expect(failed).toBe(true)
-  expect(called).toBe(false)
-})
+      return request
+    })
 
-const returnInvalidResult = Effect.fn("QueryTest.returnInvalidResult")(
-  function* () {
-    return "not-a-number"
-  },
-)
+  const verifiesInvalidRequest = Effect.gen(function* () {
+    const implementationCalled = yield* Ref.make(false)
+    const implementation = markImplementationCalled(implementationCalled)
 
-const InvalidResultQuery = Query.make(QueryRecords, {
-  Request: Schema.String,
-  Result: Schema.Number,
-  implementation: returnInvalidResult,
-})
+    const query = Query.make({
+      table: QueryRecords,
+      Request: Schema.Finite,
+      Result: Schema.Number,
+      implementation,
+    })
 
-const QueryFailure = "operation failed" as const
-
-const failQuery = Effect.fn("QueryTest.failQuery")(function* () {
-  return yield* Effect.fail(QueryFailure)
-})
-
-const FailingQuery = Query.make(QueryRecords, {
-  Request: Schema.String,
-  Result: Schema.String,
-  implementation: failQuery,
-})
-
-const verifiesInvalidResult = Effect.fn("QueryTest.verifiesInvalidResult")(
-  function* () {
-    const execution = InvalidResultQuery.execute("request")
+    const execution = query.execute(Number.NaN)
     const result = yield* Effect.exit(execution)
+    const called = yield* Ref.get(implementationCalled)
     const failed = Exit.isFailure(result)
 
     expect(failed).toBe(true)
-  },
-)
+    expect(called).toBe(false)
+  })
 
-const verifiesQueryFailure = Effect.fn("QueryTest.verifiesQueryFailure")(
-  function* () {
-    const execution = FailingQuery.execute("request")
-    const failure = yield* Effect.flip(execution)
+  const returnInvalidResult = Effect.fn("QueryTest.returnInvalidResult")(
+    function* () {
+      return "not-a-number"
+    },
+  )
 
-    expect(failure).toBe(QueryFailure)
-  },
-)
+  const InvalidResultQuery = Query.make({
+    table: QueryRecords,
+    Request: Schema.String,
+    Result: Schema.Number,
+    implementation: returnInvalidResult,
+  })
 
-describe("Query", () => {
+  const QueryFailure = "operation failed" as const
+
+  const failQuery = Effect.fn("QueryTest.failQuery")(function* () {
+    return yield* Effect.fail(QueryFailure)
+  })
+
+  const FailingQuery = Query.make({
+    table: QueryRecords,
+    Request: Schema.String,
+    Result: Schema.String,
+    implementation: failQuery,
+  })
+
+  const verifiesInvalidResult = Effect.fn("QueryTest.verifiesInvalidResult")(
+    function* () {
+      const execution = InvalidResultQuery.execute("request")
+      const result = yield* Effect.exit(execution)
+      const failed = Exit.isFailure(result)
+
+      expect(failed).toBe(true)
+    },
+  )
+
+  const verifiesQueryFailure = Effect.fn("QueryTest.verifiesQueryFailure")(
+    function* () {
+      const execution = FailingQuery.execute("request")
+      const failure = yield* Effect.flip(execution)
+
+      expect(failure).toBe(QueryFailure)
+    },
+  )
+
   it.effect("keeps its table, schemas, and implementation inspectable", () =>
     Effect.sync(() => {
       expect(InspectableQuery.table).toBe(QueryRecords)
