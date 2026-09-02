@@ -1,0 +1,12 @@
+{
+    "commands": [
+      {
+        "type": "add_exclusions",
+        "files": "**/*.ts",
+        "rules": [
+          "no-nested-calls",
+          "no-inline-closures"
+        ]
+      }
+    ]
+  }
