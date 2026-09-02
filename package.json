@@ -19,7 +19,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.6",
+    "@better-typescript/better-typescript": "0.4.7",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "latest",
     "vitest": "4.1.11"
