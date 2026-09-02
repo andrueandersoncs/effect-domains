@@ -3,8 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Array, Effect, Function, Option, pipe, Schema } from "effect"
 import { Query } from "effect-domains/query"
-import { Database } from "effect-domains/sqlite-bun/services"
-import { SqliteBunRuntime } from "effect-domains/sqlite-bun/types"
+import { Database, SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 
 await pipe(

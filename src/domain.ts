@@ -1,5 +1,22 @@
 import { Schema } from "effect"
-import { DomainIdentifier } from "./constants.ts"
+
+/**
+ *
+ * Scope: public
+ *
+ * When to use: Schema tooling needs to inspect the annotation that marks
+ * canonical domain identity because adapters must distinguish it from generated
+ * identity.
+ *
+ * Example:
+ * ```ts
+ * import { DomainIdentifier } from "effect-domains/domain"
+ *
+ * const value = DomainIdentifier
+ * ```
+ *
+ */
+export const DomainIdentifier = "@effect-domains/domain/identifier"
 
 /**
  *
@@ -11,7 +28,7 @@ import { DomainIdentifier } from "./constants.ts"
  * Example:
  * ```ts
  * import { Schema } from "effect"
- * import { identifier } from "effect-domains/domain/algorithms"
+ * import { identifier } from "effect-domains/domain"
  *
  * const UserId = identifier(Schema.String)
  * ```

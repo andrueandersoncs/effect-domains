@@ -11,11 +11,10 @@ import {
   Schema,
   Struct,
 } from "effect"
-import { identifier } from "effect-domains/domain/algorithms"
-import { PersistedRef } from "effect-domains/persisted-ref/types"
+import { identifier } from "effect-domains/domain"
+import { PersistedRef } from "effect-domains/persisted-ref"
 import { Query } from "effect-domains/query"
-import { Database } from "effect-domains/sqlite-bun/services"
-import { SqliteBunRuntime } from "effect-domains/sqlite-bun/types"
+import { Database, SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 
 await pipe(

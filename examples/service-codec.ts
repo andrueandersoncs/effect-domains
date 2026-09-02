@@ -12,10 +12,9 @@ import {
   Schema,
   SchemaGetter,
 } from "effect"
-import { identifier } from "effect-domains/domain/algorithms"
+import { identifier } from "effect-domains/domain"
 import { Query } from "effect-domains/query"
-import { Database } from "effect-domains/sqlite-bun/services"
-import { SqliteBunRuntime } from "effect-domains/sqlite-bun/types"
+import { Database, SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 
 await pipe(

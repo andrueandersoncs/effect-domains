@@ -16,12 +16,11 @@ import {
   SchemaGetter,
   Struct,
 } from "effect"
-import { identifier } from "../src/domain/algorithms.ts"
-import { PersistedRef } from "../src/persisted-ref/types.ts"
-import { Query } from "../src/query/types.ts"
-import { Database } from "../src/sqlite-bun/services.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun/types.ts"
-import { Table } from "../src/table/types.ts"
+import { identifier } from "../src/domain.ts"
+import { PersistedRef } from "../src/persisted-ref.ts"
+import { Query } from "../src/query.ts"
+import { Database, SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { Table } from "../src/table.ts"
 import { adapterContract } from "./adapter-contract/effects.ts"
 
 describe("Bun SQLite tables and queries", () => {

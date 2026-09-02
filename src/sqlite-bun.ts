@@ -1,27 +1,33 @@
-import { Array, Effect, Equivalence, Option, pipe } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
-import { TableError } from "../table/errors.ts"
-import { TableStore } from "../table/services.ts"
-import type { TableField } from "../table/schemas.ts"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { Array, Context, Effect, Equivalence, Function, Layer, Option, pipe } from "effect"
+import { SqlClient } from "effect/unstable/sql"
+import { TableError, TableStore, type TableField } from "./table.ts"
 
 /**
  *
  * Scope: public
  *
- * When to use: A Bun SQLite runtime needs table rendering because compiled
- * scalar metadata must become SQL without domain semantics.
+ * When to use: An authored query needs the SQL statement constructor supplied
+ * by the active Bun SQLite layer because the operation must retain its runtime
+ * requirement.
  *
  * Example:
  * ```ts
  * import { Effect } from "effect"
- * import { SqlClient } from "effect/unstable/sql"
- * import { tableStoreFromSqlclient } from "effect-domains/sqlite-bun/algorithms"
+ * import { Database } from "effect-domains/sqlite-bun"
  *
- * const store = Effect.map(SqlClient.SqlClient, tableStoreFromSqlclient)
+ * const statement = Effect.gen(function* () {
+ *   const database = yield* Database
+ *   return database`SELECT 1`
+ * })
  * ```
  *
  */
-export const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
+export class Database extends Context.Service<Database, SqlClient.SqlClient>()(
+  "@effect-domains/SqliteBun/Database",
+) {}
+
+const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
   TableStore.of({
     write: Effect.fn("TableStore.write")(function* (table) {
       const scalarIsString = Equivalence.strictEqual<"string" | "number">()
@@ -67,3 +73,43 @@ export const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
       )
     }),
   })
+
+/**
+ *
+ * Scope: public
+ *
+ * When to use: An application needs Bun SQLite services because authored
+ * queries and table writes share one runtime.
+ *
+ * Example:
+ * ```ts
+ * import { Effect } from "effect"
+ * import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+ *
+ * const databaseLayer = SqliteBunRuntime.sqlClient("app.sqlite")
+ * const program = Effect.void.pipe(Effect.provide(databaseLayer))
+ * ```
+ *
+ */
+export class SqliteBunRuntime {
+  private constructor() {}
+
+  static sqlClient(filename: string) {
+    const options = Function.identity({ filename })
+    const clientLayer = SqliteClient.layer(options)
+
+    const databaseLayer = pipe(
+      Layer.effect(Database, SqlClient.SqlClient),
+      Layer.provide(clientLayer),
+    )
+
+    const tableStore = Effect.map(Database, tableStoreFromSqlclient)
+
+    const tableStoreLayer = pipe(
+      Layer.effect(TableStore, tableStore),
+      Layer.provide(databaseLayer),
+    )
+
+    return Layer.merge(databaseLayer, tableStoreLayer)
+  }
+}

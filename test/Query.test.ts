@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Function, Ref, Schema, Struct, pipe } from "effect"
-import { Query } from "../src/query/types.ts"
-import { Table } from "../src/table/types.ts"
+import { Query } from "../src/query.ts"
+import { Table } from "../src/table.ts"
 
 describe("Query", () => {
 

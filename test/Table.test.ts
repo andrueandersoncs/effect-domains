@@ -1,11 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Equivalence, Function, Option, pipe, Ref, Schema } from "effect"
-import { identifier } from "../src/domain/algorithms.ts"
-import { Table } from "../src/table/types.ts"
-import { TableDefinitionError, TableError } from "../src/table/errors.ts"
-import { DefaultTableIdentifierSchema } from "../src/table/schemas.ts"
-import { TableStore } from "../src/table/services.ts"
-import { TableFieldSchema, type TableField } from "../src/table/schemas.ts"
+import { identifier } from "../src/domain.ts"
+import {
+  DefaultTableIdentifierSchema,
+  Table,
+  TableDefinitionError,
+  TableError,
+  TableFieldSchema,
+  TableStore,
+  type TableField,
+} from "../src/table.ts"
 
 describe("Table", () => {
   const GeneratedRecordFields = Function.identity({
