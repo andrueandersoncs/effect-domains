@@ -1,5 +1,5 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, Context, Effect, Equivalence, Function, Layer, Option, pipe } from "effect"
+import { Array, Context, Effect, Equivalence, Layer, Option, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { TableError, TableStore, type TableField } from "./table.ts"
 
@@ -59,7 +59,7 @@ const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
             ))`)
           : sql.literal("")
 
-        return sql`${sql(field.name)} ${columnType}${primaryKey} NOT NULL${generated} /* ${sql.literal(field._tag)} */`
+        return sql`${sql(field.name)} ${columnType}${primaryKey} NOT NULL${generated}`
       }
 
       const definitions = Array.map(table.fields, nameFromTablefield)
@@ -73,6 +73,22 @@ const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
       )
     }),
   })
+
+const sqlClient = (filename: string) => {
+  const clientLayer = SqliteClient.layer({ filename })
+
+  const databaseLayer = pipe(
+    Layer.effect(Database, SqlClient.SqlClient),
+    Layer.provide(clientLayer),
+  )
+
+  const tableStoreLayer = pipe(
+    Layer.effect(TableStore, Effect.map(Database, tableStoreFromSqlclient)),
+    Layer.provide(databaseLayer),
+  )
+
+  return Layer.merge(databaseLayer, tableStoreLayer)
+}
 
 /**
  *
@@ -91,25 +107,6 @@ const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
  * ```
  *
  */
-export class SqliteBunRuntime {
-  private constructor() {}
-
-  static sqlClient(filename: string) {
-    const options = Function.identity({ filename })
-    const clientLayer = SqliteClient.layer(options)
-
-    const databaseLayer = pipe(
-      Layer.effect(Database, SqlClient.SqlClient),
-      Layer.provide(clientLayer),
-    )
-
-    const tableStore = Effect.map(Database, tableStoreFromSqlclient)
-
-    const tableStoreLayer = pipe(
-      Layer.effect(TableStore, tableStore),
-      Layer.provide(databaseLayer),
-    )
-
-    return Layer.merge(databaseLayer, tableStoreLayer)
-  }
+export const SqliteBunRuntime = {
+  sqlClient,
 }

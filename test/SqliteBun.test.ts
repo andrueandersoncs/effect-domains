@@ -8,7 +8,6 @@ import {
   Effect,
   Equivalence,
   flow,
-  Function,
   Layer,
   Option,
   pipe,
@@ -60,14 +59,14 @@ describe("Bun SQLite tables and queries", () => {
     identifier,
   )
 
-  const UserFields = Function.identity({
+  const UserSchema = Schema.Struct({
     id: UserIdSchema,
     displayName: Schema.String,
     secret: StoredStringSchema,
     score: Schema.Number,
   })
 
-  const UserSchema = pipe(UserFields, Schema.Struct)
+  interface User extends Schema.Schema.Type<typeof UserSchema> {}
 
   const incrementUserScore = (user: typeof UserSchema.Type) =>
     UserSchema.make({
@@ -160,12 +159,12 @@ describe("Bun SQLite tables and queries", () => {
   const sqliteFiniteFilter = Schema.makeFilter(excludeNegativeZero)
   const SqliteFiniteSchema = Schema.Finite.check(sqliteFiniteFilter)
 
-  const ArticleFields = Function.identity({
+  const ArticleSchema = Schema.Struct({
     name: Schema.String,
     rating: SqliteFiniteSchema,
   })
 
-  const ArticleSchema = pipe(ArticleFields, Schema.Struct)
+  interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
   const Articles = Table.make({ name: "articles", schema: ArticleSchema })
 
   const CreateArticle = Query.make({

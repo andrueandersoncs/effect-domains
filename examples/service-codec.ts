@@ -5,7 +5,6 @@ import {
   Array,
   Context,
   Effect,
-  Function,
   Layer,
   Option,
   pipe,
@@ -57,12 +56,12 @@ await pipe(
       identifier,
     )
 
-    const NoteFields = Function.identity({
+    const NoteSchema = Schema.Struct({
       id: NoteIdSchema,
       text: StoredTextSchema,
     })
 
-    const NoteSchema = pipe(NoteFields, Schema.Struct)
+    interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
     const Notes = Table.make({ name: "notes", schema: NoteSchema })
 
     const createNote = Effect.fn("CreateNote.implementation")(function* (

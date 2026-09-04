@@ -6,18 +6,17 @@ import {
   Table,
   TableDefinitionError,
   TableError,
-  TableFieldSchema,
+  TableField,
   TableStore,
-  type TableField,
 } from "../src/table.ts"
 
 describe("Table", () => {
-  const GeneratedRecordFields = Function.identity({
+  const GeneratedRecordSchema = Schema.Struct({
     title: Schema.String,
     score: Schema.Number,
   })
 
-  const GeneratedRecordSchema = pipe(GeneratedRecordFields, Schema.Struct)
+  interface GeneratedRecord extends Schema.Schema.Type<typeof GeneratedRecordSchema> {}
   const GeneratedRecords = Table.make({ name: "generated_records", schema: GeneratedRecordSchema })
 
   const ExplicitIdentifierSchema = pipe(
@@ -25,21 +24,21 @@ describe("Table", () => {
     identifier,
   )
 
-  const ExplicitRecordFields = Function.identity({
+  const ExplicitRecordSchema = Schema.Struct({
     recordNumber: ExplicitIdentifierSchema,
     title: Schema.String,
     score: Schema.Number,
   })
 
-  const ExplicitRecordSchema = pipe(ExplicitRecordFields, Schema.Struct)
+  interface ExplicitRecord extends Schema.Schema.Type<typeof ExplicitRecordSchema> {}
   const ExplicitRecords = Table.make({ name: "explicit_records", schema: ExplicitRecordSchema })
   const OptionalTitleSchema = Schema.optionalKey(Schema.String)
 
-  const OptionalRecordFields = Function.identity({
+  const OptionalRecordSchema = Schema.Struct({
     title: OptionalTitleSchema,
   })
 
-  const OptionalRecordSchema = pipe(OptionalRecordFields, Schema.Struct)
+  interface OptionalRecord extends Schema.Schema.Type<typeof OptionalRecordSchema> {}
 
   const makeOptionalRecords = () =>
     Table.make({ name: "optional_records", schema: OptionalRecordSchema })
@@ -49,11 +48,11 @@ describe("Table", () => {
     "field title must be required",
   )
 
-  const BooleanRecordFields = Function.identity({
+  const BooleanRecordSchema = Schema.Struct({
     active: Schema.Boolean,
   })
 
-  const BooleanRecordSchema = pipe(BooleanRecordFields, Schema.Struct)
+  interface BooleanRecord extends Schema.Schema.Type<typeof BooleanRecordSchema> {}
 
   const makeBooleanRecords = () =>
     Table.make({ name: "boolean_records", schema: BooleanRecordSchema })
@@ -65,11 +64,11 @@ describe("Table", () => {
 
   const SymbolField = Symbol("value")
 
-  const SymbolRecordFields = Function.identity({
+  const SymbolRecordSchema = Schema.Struct({
     [SymbolField]: Schema.String,
   })
 
-  const SymbolRecordSchema = pipe(SymbolRecordFields, Schema.Struct)
+  interface SymbolRecord extends Schema.Schema.Type<typeof SymbolRecordSchema> {}
 
   const makeSymbolRecords = () =>
     Table.make({ name: "symbol_records", schema: SymbolRecordSchema })
@@ -82,12 +81,12 @@ describe("Table", () => {
   const FirstIdentifierSchema = pipe(Schema.String, identifier)
   const SecondIdentifierSchema = pipe(Schema.Number, identifier)
 
-  const AmbiguousRecordFields = Function.identity({
+  const AmbiguousRecordSchema = Schema.Struct({
     firstId: FirstIdentifierSchema,
     secondId: SecondIdentifierSchema,
   })
 
-  const AmbiguousRecordSchema = pipe(AmbiguousRecordFields, Schema.Struct)
+  interface AmbiguousRecord extends Schema.Schema.Type<typeof AmbiguousRecordSchema> {}
 
   const makeAmbiguousRecords = () =>
     Table.make({ name: "ambiguous_records", schema: AmbiguousRecordSchema })
@@ -97,12 +96,12 @@ describe("Table", () => {
     "schema must contain at most one Domain.identifier field",
   )
 
-  const ReservedIdentifierRecordFields = Function.identity({
+  const ReservedIdentifierRecordSchema = Schema.Struct({
     id: Schema.String,
     title: Schema.String,
   })
 
-  const ReservedIdentifierRecordSchema = pipe(ReservedIdentifierRecordFields, Schema.Struct)
+  interface ReservedIdentifierRecord extends Schema.Schema.Type<typeof ReservedIdentifierRecordSchema> {}
 
   const makeReservedIdentifierRecords = () =>
     Table.make({ name: "reserved_id_records", schema: ReservedIdentifierRecordSchema })
@@ -117,17 +116,17 @@ describe("Table", () => {
   const UuidV7Generation = Option.some<"uuidv7">("uuidv7")
 
   const GeneratedFieldMetadata: ReadonlyArray<TableField> = [
-    TableFieldSchema.make({
+    TableField.make({
       name: "id",
       scalar: "string",
       generation: UuidV7Generation,
     }),
-    TableFieldSchema.make({
+    TableField.make({
       name: "title",
       scalar: "string",
       generation: NoGeneration,
     }),
-    TableFieldSchema.make({
+    TableField.make({
       name: "score",
       scalar: "number",
       generation: NoGeneration,
@@ -135,17 +134,17 @@ describe("Table", () => {
   ]
 
   const ExplicitFieldMetadata: ReadonlyArray<TableField> = [
-    TableFieldSchema.make({
+    TableField.make({
       name: "recordNumber",
       scalar: "string",
       generation: NoGeneration,
     }),
-    TableFieldSchema.make({
+    TableField.make({
       name: "title",
       scalar: "string",
       generation: NoGeneration,
     }),
-    TableFieldSchema.make({
+    TableField.make({
       name: "score",
       scalar: "number",
       generation: NoGeneration,

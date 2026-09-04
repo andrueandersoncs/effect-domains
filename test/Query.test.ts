@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Function, Ref, Schema, Struct, pipe } from "effect"
+import { Effect, Exit, Function, Ref, Schema } from "effect"
 import { Query } from "../src/query.ts"
 import { Table } from "../src/table.ts"
 
@@ -11,8 +11,8 @@ describe("Query", () => {
   })
 
   const RequestNumberSchema = Schema.Int.check(RequestNumberBounds)
-  const QueryRecordFields = Function.identity({ value: Schema.String })
-  const QueryRecordSchema = pipe(QueryRecordFields, Schema.Struct)
+  const QueryRecordSchema = Schema.Struct({ value: Schema.String })
+  interface QueryRecord extends Schema.Schema.Type<typeof QueryRecordSchema> {}
   const QueryRecords = Table.make({ name: "query_records", schema: QueryRecordSchema })
 
   const encodeRequestLength = Effect.fn("QueryTest.encodeRequestLength")(

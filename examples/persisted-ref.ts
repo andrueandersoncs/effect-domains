@@ -4,7 +4,6 @@ import { join } from "node:path"
 import {
   Array,
   Effect,
-  Function,
   Number,
   Option,
   pipe,
@@ -26,12 +25,12 @@ await pipe(
       identifier,
     )
 
-    const CounterFields = Function.identity({
+    const CounterSchema = Schema.Struct({
       id: CounterIdSchema,
       value: Schema.Number,
     })
 
-    const CounterSchema = pipe(CounterFields, Schema.Struct)
+    interface Counter extends Schema.Schema.Type<typeof CounterSchema> {}
     const Counters = Table.make({ name: "counters", schema: CounterSchema })
     const OptionalCounterSchema = Schema.OptionFromNullOr(CounterSchema)
 

@@ -4,8 +4,6 @@ import {
   Context,
   Effect,
   Equivalence,
-  flow,
-  Function,
   Option,
   pipe,
   Predicate,
@@ -15,20 +13,6 @@ import {
   Struct,
 } from "effect"
 import { DomainIdentifier } from "./domain.ts"
-
-const uuidV7Check = Schema.isUUID(7)
-const TableFieldScalarSchema = Schema.Literals(["string", "number"])
-const UuidV7GenerationSchema = Schema.Literal("uuidv7")
-
-const TableFieldGenerationSchema = Schema.Option(
-  UuidV7GenerationSchema,
-)
-
-const TableFieldFields = Function.identity({
-  name: Schema.String,
-  scalar: TableFieldScalarSchema,
-  generation: TableFieldGenerationSchema,
-})
 
 /**
  *
@@ -46,7 +30,7 @@ const TableFieldFields = Function.identity({
  * ```
  *
  */
-export const DefaultTableIdentifierSchema = Schema.String.check(uuidV7Check)
+export const DefaultTableIdentifierSchema = Schema.String.check(Schema.isUUID(7))
 
 const CreateTableOperationSchema = Schema.Literal("createTable")
 
@@ -60,35 +44,17 @@ const CreateTableOperationSchema = Schema.Literal("createTable")
  * Example:
  * ```ts
  * import { Option } from "effect"
- * import { TableFieldSchema } from "effect-domains/table"
+ * import { TableField } from "effect-domains/table"
  *
- * const title = TableFieldSchema.make({ name: "title", scalar: "string", generation: Option.none() })
+ * const title = TableField.make({ name: "title", scalar: "string", generation: Option.none() })
  * ```
  *
  */
-export const TableFieldSchema = Schema.TaggedStruct(
-  "TableField",
-  TableFieldFields,
-)
-
-/**
- *
- * Scope: public
- *
- * When to use: Adapter code needs tagged field metadata because physical column
- * records form an independently evolving boundary.
- *
- * Example:
- * ```ts
- * import type { TableField } from "effect-domains/table"
- *
- * const render = (field: TableField) => field.name
- * ```
- *
- */
-export interface TableField extends Schema.Schema.Type<typeof TableFieldSchema> {
-  readonly _tag: "TableField"
-}
+export class TableField extends Schema.TaggedClass<TableField>()("TableField", {
+  name: Schema.String,
+  scalar: Schema.Literals(["string", "number"]),
+  generation: Schema.Option(Schema.Literal("uuidv7")),
+}) {}
 
 const DefaultIdentifierFields = Record.singleton(
   "id",
@@ -98,7 +64,7 @@ const DefaultIdentifierFields = Record.singleton(
 const NoGeneration = Option.none<"uuidv7">()
 const GeneratedIdentifierGeneration = Option.some<"uuidv7">("uuidv7")
 
-const DefaultIdentifierField = TableFieldSchema.make({
+const DefaultIdentifierField = TableField.make({
   name: "id",
   scalar: "string",
   generation: GeneratedIdentifierGeneration,
@@ -173,39 +139,6 @@ export class TableError extends Schema.TaggedError<TableError>()(
  *
  * Scope: public
  *
- * When to use: Runtime code must inspect compiled metadata because table
- * creation belongs to a runtime adapter.
- *
- * Example:
- * ```ts
- * import { Schema } from "effect"
- * import { Table } from "effect-domains/table"
- *
- * const Books = Table.make({ name: "books", schema: Schema.Struct({ title: Schema.String }) })
- * const value = Books.fields
- * ```
- *
- */
-export interface TableDefinition<
-  Name extends string,
-  S extends Schema.Struct<Schema.Struct.Fields>,
-  K extends string,
-  Row extends Schema.Struct<Schema.Struct.Fields>,
-  IdentifierSchema extends Schema.Constraint,
-> {
-  readonly name: Name
-  readonly schema: S
-  readonly rowSchema: Row
-  readonly identifier: K
-  readonly identifierSchema: IdentifierSchema
-  readonly fields: ReadonlyArray<TableField>
-  readonly write: () => Effect.Effect<void, TableError, TableStore>
-}
-
-/**
- *
- * Scope: public
- *
  * When to use: A runtime adapter must implement physical table creation for
  * compiled table definitions because effects require a narrow runtime boundary.
  *
@@ -220,13 +153,7 @@ export interface TableDefinition<
  */
 export class TableStore extends Context.Service<TableStore, {
   readonly write: (
-    table: TableDefinition<
-      string,
-      Schema.Struct<Schema.Struct.Fields>,
-      string,
-      Schema.Struct<Schema.Struct.Fields>,
-      Schema.Constraint
-    >,
+    table: Table,
   ) => Effect.Effect<void, TableError>
 }>()("@effect-domains/TableStore") {}
 
@@ -246,33 +173,10 @@ type IdentifierSchema<S extends Schema.Struct<Schema.Struct.Fields>> =
     ? typeof DefaultIdentifierFields.id
     : S["fields"][IdentifierName<S>]
 
-/**
- *
- * Scope: public
- *
- * When to use: A canonical struct must derive table metadata because
- * persistence mappings may only be mechanical and lossless.
- *
- * Example:
- * ```ts
- * import { Schema } from "effect"
- * import { tableName } from "effect-domains/table"
- *
- * const Books = tableName("books", Schema.Struct({ title: Schema.String }))
- * ```
- *
- */
-export const tableName = <
+const compileTable = Effect.fn("Table.compile")(function* <
   const Name extends string,
   const S extends Schema.Struct<Schema.Struct.Fields>,
->(name: Name, schema: S): TableDefinition<
-  Name,
-  S,
-  [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
-  RowSchema<S>,
-  IdentifierSchema<S>
-> => {
-  const compile = Effect.gen(function* () {
+>(name: Name, schema: S) {
     const encodedSchema = Schema.toEncoded(schema)
 
     if (!SchemaAST.isObjects(encodedSchema.ast)) {
@@ -320,7 +224,7 @@ export const tableName = <
         )
       }
 
-      return TableFieldSchema.make({
+      return TableField.make({
         name: property.name,
         scalar: isString ? "string" : "number",
         generation: NoGeneration,
@@ -333,20 +237,17 @@ export const tableName = <
     )
 
     const hasIdentifierAnnotation = (field: TableField): boolean => {
-      const nullableFieldSchema = schema.fields[field.name]
-      const fieldSchemaOption = Option.fromNullishOr(nullableFieldSchema)
-      const fieldSchema = Option.getOrThrow(fieldSchemaOption)
-      const resolvedAnnotations = Schema.resolveAnnotations(fieldSchema)
-      const annotations = Option.fromNullishOr(resolvedAnnotations)
-
-      const annotation = Option.map(
-        annotations,
-        Struct.get(DomainIdentifier),
+      const fieldSchema = Option.getOrThrow(
+        Option.fromNullishOr(schema.fields[field.name]),
       )
 
-      const isTrue = Equivalence.strictEqual<unknown>()
-
-      return Option.containsWith(isTrue)(annotation, true)
+      return Option.containsWith(Equivalence.strictEqual<unknown>())(
+        Option.map(
+          Option.fromNullishOr(Schema.resolveAnnotations(fieldSchema)),
+          Struct.get(DomainIdentifier),
+        ),
+        true,
+      )
     }
 
     const identifierFields = Array.filter(fields, hasIdentifierAnnotation)
@@ -363,53 +264,26 @@ export const tableName = <
     if (Option.isSome(identifierFieldOption)) {
       const identifierField = Option.getOrThrow(identifierFieldOption)
 
-      const nullableIdentifierSchema =
-        schema.fields[
-          identifierField.name as Extract<keyof S["fields"], string>
-        ]
-
-      const identifierSchemaOption = Option.fromNullishOr(
-        nullableIdentifierSchema,
+      const identifierSchema = Option.getOrThrow(
+        Option.fromNullishOr(
+          schema.fields[
+            identifierField.name as Extract<keyof S["fields"], string>
+          ],
+        ),
       )
 
-      const identifierSchema = Option.getOrThrow(identifierSchemaOption)
-
-      const write: () => Effect.Effect<
-        void,
-        TableError,
-        TableStore
-      > = Effect.fn("Table.write")(function* () {
-        const store = yield* TableStore
-
-        return yield* store.write(definition)
-      })
-
-      const definition: TableDefinition<
-        Name,
-        S,
-        string,
-        S,
-        Schema.Constraint
-      > = Function.identity({
+      return {
         name,
         schema,
         rowSchema: schema,
         identifier: identifierField.name,
         identifierSchema,
         fields,
-        write,
-      })
-
-      return definition
+      }
     }
 
-    const fieldNameIsId = Equivalence.strictEqual<string>()
-    const matchesId = (fieldName: string) => fieldNameIsId(fieldName, "id")
-
-    const fieldIsReserved: (field: TableField) => boolean = flow(
-      Struct.get("name"),
-      matchesId,
-    )
+    const fieldIsReserved = (field: TableField) =>
+      Equivalence.strictEqual<string>()(field.name, "id")
 
     const idIsReserved = Array.some(fields, fieldIsReserved)
 
@@ -425,69 +299,15 @@ export const tableName = <
       Schema.fieldsAssign(DefaultIdentifierFields),
     )
 
-    const tableFields = [DefaultIdentifierField, ...fields]
-
-    const write: () => Effect.Effect<
-      void,
-      TableError,
-      TableStore
-    > = Effect.fn("Table.write")(function* () {
-      const store = yield* TableStore
-
-      return yield* store.write(definition)
-    })
-
-    const definition: TableDefinition<
-      Name,
-      S,
-      "id",
-      typeof rowSchema,
-      typeof rowSchema.fields.id
-    > = Function.identity({
+    return {
       name,
       schema,
       rowSchema,
       identifier: "id" as const,
       identifierSchema: rowSchema.fields.id,
-      fields: tableFields,
-      write,
-    })
-
-    return definition
+      fields: [DefaultIdentifierField, ...fields],
+    }
   })
-
-  const compiled = Effect.runSync(compile)
-
-  return (compiled as TableDefinition<
-    Name,
-    S,
-    string,
-    Schema.Struct<Schema.Struct.Fields>,
-    Schema.Constraint
-  >) as TableDefinition<
-    Name,
-    S,
-    [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
-    RowSchema<S>,
-    IdentifierSchema<S>
-  >
-}
-
-const makeTable = <
-  const Name extends string,
-  const S extends Schema.Struct<Schema.Struct.Fields>,
->(
-  options: Readonly<{
-    name: Name
-    schema: S
-  }>,
-) => tableName(options.name, options.schema) satisfies TableDefinition<
-  Name,
-  S,
-  [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
-  RowSchema<S>,
-  IdentifierSchema<S>
->
 
 /**
  *
@@ -505,6 +325,69 @@ const makeTable = <
  * ```
  *
  */
-export const Table = Function.identity({
-  make: makeTable,
-})
+export class Table extends Schema.Class<Table>("Table")({
+  name: Schema.String,
+  schema: Schema.Any,
+  rowSchema: Schema.Any,
+  identifier: Schema.String,
+  identifierSchema: Schema.Any,
+  fields: Schema.Array(TableField),
+}) {
+  static override make<
+    const Name extends string,
+    const S extends Schema.Struct<Schema.Struct.Fields>,
+  >(
+    options: Readonly<{
+      name: Name
+      schema: S
+    }>,
+  ): TableDefinition<
+    Name,
+    S,
+    [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
+    RowSchema<S>,
+    IdentifierSchema<S>
+  > {
+    const compiled = Effect.runSync(compileTable(options.name, options.schema))
+
+    const base = super.make({
+      name: compiled.name,
+      schema: compiled.schema,
+      rowSchema: compiled.rowSchema,
+      identifier: compiled.identifier,
+      identifierSchema: compiled.identifierSchema,
+      fields: compiled.fields,
+    })
+
+    const table = Struct.assign(base, {
+      write: Effect.fn("Table.write")(function* () {
+        const store = yield* TableStore
+
+        return yield* store.write(table)
+      }),
+    }) as TableDefinition<
+      Name,
+      S,
+      [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
+      RowSchema<S>,
+      IdentifierSchema<S>
+    >
+
+    return table
+  }
+}
+
+interface TableDefinition<
+  Name extends string,
+  S extends Schema.Struct<Schema.Struct.Fields>,
+  K extends string,
+  Row extends Schema.Struct<Schema.Struct.Fields>,
+  IdentifierSchema extends Schema.Constraint,
+> extends Schema.Schema.Type<typeof Table> {
+  readonly name: Name
+  readonly schema: S
+  readonly rowSchema: Row
+  readonly identifier: K
+  readonly identifierSchema: IdentifierSchema
+  readonly write: () => Effect.Effect<void, TableError, TableStore>
+}

@@ -1,43 +1,5 @@
-import { Effect, Function, Schema } from "effect"
-import type { TableDefinition } from "./table.ts"
-
-const queryFromTable = <
-  const Table extends TableDefinition<
-    string,
-    Schema.Struct<Schema.Struct.Fields>,
-    string,
-    Schema.Struct<Schema.Struct.Fields>,
-    Schema.Constraint
-  >,
-  const Request extends Schema.Constraint,
-  const Result extends Schema.Constraint,
-  E,
-  R,
->(
-  table: Table,
-  Request: Request,
-  Result: Result,
-  implementation: (
-    request: Request["Encoded"],
-  ) => Effect.Effect<unknown, E, R>,
-) => {
-  const execute = Effect.fn("Query.execute")(function* (
-    request: Request["Type"],
-  ) {
-    const encoded = yield* Schema.encodeEffect(Request)(request)
-    const implemented = yield* implementation(encoded)
-
-    return yield* Schema.decodeUnknownEffect(Result)(implemented)
-  })
-
-  return Function.identity({
-    table,
-    Request,
-    Result,
-    implementation,
-    execute,
-  })
-}
+import { Effect, Schema, Struct } from "effect"
+import { Table } from "./table.ts"
 
 /**
  *
@@ -57,17 +19,13 @@ const queryFromTable = <
  * ```
  *
  */
-export class Query {
-  private constructor() {}
-
-  static make<
-    const Table extends TableDefinition<
-      string,
-      Schema.Struct<Schema.Struct.Fields>,
-      string,
-      Schema.Struct<Schema.Struct.Fields>,
-      Schema.Constraint
-    >,
+export class Query extends Schema.Class<Query>("Query")({
+  table: Schema.Any,
+  Request: Schema.Any,
+  Result: Schema.Any,
+  implementation: Schema.Any,
+}) {
+  static override make<
     const Request extends Schema.Constraint,
     const Result extends Schema.Constraint,
     E,
@@ -82,11 +40,31 @@ export class Query {
       ) => Effect.Effect<unknown, E, R>
     }>,
   ) {
-    return queryFromTable(
-      options.table,
-      options.Request,
-      options.Result,
-      options.implementation,
-    )
+    const { table, Request, Result, implementation } = options
+
+    const execute = Effect.fn("Query.execute")(function* (
+      request: Request["Type"],
+    ) {
+      const encoded = yield* Schema.encodeEffect(Request)(request)
+      const implemented = yield* implementation(encoded)
+
+      return yield* Schema.decodeUnknownEffect(Result)(implemented)
+    })
+
+    return Struct.assign(
+      super.make({
+        table,
+        Request,
+        Result,
+        implementation,
+      }),
+      { execute },
+    ) as {
+      readonly table: Table
+      readonly Request: Request
+      readonly Result: Result
+      readonly implementation: typeof implementation
+      readonly execute: typeof execute
+    }
   }
 }

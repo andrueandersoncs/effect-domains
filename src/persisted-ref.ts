@@ -5,7 +5,8 @@ import { Effect, Function, pipe, SynchronizedRef } from "effect"
  * Scope: public
  *
  * When to use: One database-backed value must serialize fallible writes because
- * local fibers share its cache.
+ * local fibers share its cache. Compose authored load and commit Effects; do
+ * not derive this from a table or query schema.
  *
  * Example:
  * ```ts
@@ -16,10 +17,8 @@ import { Effect, Function, pipe, SynchronizedRef } from "effect"
  * ```
  *
  */
-export class PersistedRef {
-  private constructor() {}
-
-  static make<
+export const PersistedRef = {
+  make: <
     A,
     CommitError,
     CommitRequirements,
@@ -33,8 +32,8 @@ export class PersistedRef {
       ) => Effect.Effect<A, CommitError, CommitRequirements>
       load: Effect.Effect<A, LoadError, LoadRequirements>
     }>,
-  ) {
-    return Effect.fn("PersistedRef.make")(function* () {
+  ) =>
+    Effect.fn("PersistedRef.make")(function* () {
       const initial = yield* options.load
       const backing = yield* SynchronizedRef.make(initial)
       const get = SynchronizedRef.get(backing)
@@ -44,33 +43,16 @@ export class PersistedRef {
         Function.constant(options.load),
       )
 
-      const commitValue = (value: A) =>
-        Effect.fn("PersistedRef.commitValue")(function* (previous: A) {
-          return yield* options.commit(previous, value)
-        })
-
-      const commitUpdate = (f: (current: A) => A) =>
-        Effect.fn("PersistedRef.commitUpdate")(function* (previous: A) {
-          const next = f(previous)
-
-          return yield* options.commit(previous, next)
-        })
-
-      const commitModification = <B>(
-        f: (current: A) => readonly [result: B, next: A],
-      ) => Effect.fn("PersistedRef.commitModification")(function* (
-        previous: A,
-      ) {
-        const [result, next] = f(previous)
-        const persisted = yield* options.commit(previous, next)
-
-        return [result, persisted] as const
-      })
-
       const set = (value: A) => pipe(
-        SynchronizedRef.updateAndGetEffect(backing, commitValue(value)),
+        SynchronizedRef.updateAndGetEffect(
+          backing,
+          (previous) => options.commit(previous, value),
+        ),
         Effect.uninterruptible,
       )
+
+      const commitUpdate = (f: (current: A) => A) => (previous: A) =>
+        options.commit(previous, f(previous))
 
       const update = (f: (current: A) => A) => pipe(
         SynchronizedRef.updateAndGetEffect(backing, commitUpdate(f)),
@@ -80,17 +62,17 @@ export class PersistedRef {
       const modify = <B>(
         f: (current: A) => readonly [result: B, next: A],
       ) => pipe(
-        SynchronizedRef.modifyEffect(backing, commitModification(f)),
+        SynchronizedRef.modifyEffect(backing, (previous) => {
+          const [result, next] = f(previous)
+
+          return pipe(
+            options.commit(previous, next),
+            Effect.map((persisted) => [result, persisted] as const),
+          )
+        }),
         Effect.uninterruptible,
       )
 
-      return Function.identity({
-        get,
-        refresh,
-        set,
-        update,
-        modify,
-      })
-    })()
-  }
+      return { get, refresh, set, update, modify }
+    })(),
 }

@@ -1,19 +1,19 @@
 import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Array, Effect, Function, Option, pipe, Schema } from "effect"
+import { Array, Effect, Option, pipe, Schema } from "effect"
 import { Query } from "effect-domains/query"
 import { Database, SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 
 await pipe(
   Effect.gen(function* () {
-    const BookFields = Function.identity({
+    const BookSchema = Schema.Struct({
       title: Schema.String,
       pageCount: Schema.Number,
     })
 
-    const BookSchema = pipe(BookFields, Schema.Struct)
+    interface Book extends Schema.Schema.Type<typeof BookSchema> {}
     const Books = Table.make({ name: "books", schema: BookSchema })
 
     const createBook = Effect.fn("CreateBook.implementation")(function* (
