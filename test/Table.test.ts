@@ -338,7 +338,7 @@ describe("Table", () => {
       expect(ExplicitRecords.fields).toEqual(ExplicitFieldMetadata)
     }))
 
-  it.effect("recursively interprets lossless encoded scalar forms", () =>
+  it.effect("evaluates the declared SchemaAST algebra recursively", () =>
     Effect.sync(() => {
       expect(
         Array.map(InterpretedScalarRecords.fields, (field) => [

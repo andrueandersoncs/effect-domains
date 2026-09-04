@@ -5,7 +5,6 @@ import {
   Effect,
   Equivalence,
   HashSet,
-  Match,
   Option,
   pipe,
   Predicate,
@@ -15,6 +14,7 @@ import {
   Struct,
 } from "effect"
 import { DomainIdentifier } from "./domain.ts"
+import { evaluate, type SchemaASTFAlgebra } from "./schema-ast.ts"
 
 /**
  *
@@ -138,89 +138,91 @@ const classifyEnumEntry = (
   [, value]: SchemaAST.Enum["enums"][number],
 ) => Predicate.isString(value) ? "string" as const : "number" as const
 
-type CompileTableScalar = (
+type EvaluateTableScalar = (
   table: string,
   field: string,
   ast: SchemaAST.AST,
   suspends: HashSet.HashSet<SchemaAST.Suspend>,
 ) => Effect.Effect<TableField["scalar"], TableDefinitionError>
 
-const compileTableScalar: CompileTableScalar = Effect.fn(
-  "Table.compileScalar",
+const evaluateTableScalar: EvaluateTableScalar = Effect.fn(
+  "Table.evaluateScalar",
 )(function* (
   table: string,
   field: string,
   ast: SchemaAST.AST,
   suspends: HashSet.HashSet<SchemaAST.Suspend>,
 ) {
-  const compile = (ast: SchemaAST.AST) =>
-    compileTableScalar(table, field, ast, suspends)
+  const recur = (ast: SchemaAST.AST) =>
+    evaluateTableScalar(table, field, ast, suspends)
 
-  const compileEnumeration = (enumeration: SchemaAST.Enum) =>
+  const evaluateEnumeration = (enumeration: SchemaAST.Enum) =>
     commonTableScalar(
       table,
       field,
       Array.map(enumeration.enums, classifyEnumEntry),
     )
 
-  return yield* pipe(
-    Match.value(ast),
-    Match.when(SchemaAST.isString, () =>
-      Effect.succeed<TableField["scalar"]>("string")),
-    Match.when(SchemaAST.isNumber, () =>
-      Effect.succeed<TableField["scalar"]>("number")),
-    Match.when(SchemaAST.isLiteral, (literal) => {
+  const unsupported = () => unsupportedTableScalar(table, field)
+
+  const algebra: SchemaASTFAlgebra<
+    Effect.Effect<TableField["scalar"], TableDefinitionError>
+  > = {
+    Declaration: unsupported,
+    Null: unsupported,
+    Undefined: unsupported,
+    Void: unsupported,
+    Never: unsupported,
+    Unknown: unsupported,
+    Any: unsupported,
+    String: () => Effect.succeed<TableField["scalar"]>("string"),
+    Number: () => Effect.succeed<TableField["scalar"]>("number"),
+    Boolean: unsupported,
+    BigInt: unsupported,
+    Symbol: unsupported,
+    Literal: (literal) => {
       if (Predicate.isString(literal.literal)) {
         return Effect.succeed<TableField["scalar"]>("string")
       }
 
       return Predicate.isNumber(literal.literal)
         ? Effect.succeed<TableField["scalar"]>("number")
-        : unsupportedTableScalar(table, field)
-    }),
-    Match.when(SchemaAST.isTemplateLiteral, () =>
-      Effect.succeed<TableField["scalar"]>("string")),
-    Match.when(SchemaAST.isEnum, compileEnumeration),
-    Match.when(SchemaAST.isUnion, (union) => {
+        : unsupported()
+    },
+    UniqueSymbol: unsupported,
+    ObjectKeyword: unsupported,
+    Enum: evaluateEnumeration,
+    TemplateLiteral: () =>
+      Effect.succeed<TableField["scalar"]>("string"),
+    Arrays: unsupported,
+    Objects: unsupported,
+    Union: (union) => {
       const selectCommonScalar = (
         scalars: ReadonlyArray<TableField["scalar"]>,
       ) => commonTableScalar(table, field, scalars)
 
       return pipe(
-        Effect.forEach(union.types, compile),
+        Effect.forEach(union.types, recur),
         Effect.flatMap(selectCommonScalar),
       )
-    }),
-    Match.when(SchemaAST.isSuspend, (suspend) => {
+    },
+    Suspend: (suspend) => {
       if (HashSet.has(suspends, suspend)) {
-        return unsupportedTableScalar(table, field)
+        return unsupported()
       }
 
-      return compileTableScalar(
+      return evaluateTableScalar(
         table,
         field,
         suspend.thunk(),
         HashSet.add(suspends, suspend),
       )
-    }),
-    Match.whenOr(
-      SchemaAST.isDeclaration,
-      SchemaAST.isNull,
-      SchemaAST.isUndefined,
-      SchemaAST.isVoid,
-      SchemaAST.isNever,
-      SchemaAST.isUnknown,
-      SchemaAST.isAny,
-      SchemaAST.isBoolean,
-      SchemaAST.isBigInt,
-      SchemaAST.isSymbol,
-      SchemaAST.isUniqueSymbol,
-      SchemaAST.isObjectKeyword,
-      SchemaAST.isArrays,
-      SchemaAST.isObjects,
-      () => unsupportedTableScalar(table, field),
-    ),
-    Match.exhaustive,
+    },
+  }
+
+  return yield* pipe(
+    evaluate(ast, algebra),
+    Effect.flatten,
   )
 })
 
@@ -334,7 +336,7 @@ const compileTable = Effect.fn("Table.compile")(function* <
         )
       }
 
-      const scalar = yield* compileTableScalar(
+      const scalar = yield* evaluateTableScalar(
         name,
         property.name,
         property.type,

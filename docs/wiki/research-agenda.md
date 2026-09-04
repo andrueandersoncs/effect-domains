@@ -37,7 +37,7 @@ These are unresolved capabilities, not commitments for the current interface.
 
 ## Effect Schema Capabilities
 
-The table compiler uses public `Schema.toEncoded` and a total Effect `Match` interpreter over the `SchemaAST` guards. It recursively reduces homogeneous unions and suspended schemas to the existing string-or-number table scalar algebra; direct scalars, string and number literals, template literals, and homogeneous enums are also mechanically classified. Every other AST constructor is explicitly rejected, and suspension cycle detection keeps traversal total. This establishes the recursive interpretation mechanism without claiming that every schema has a lossless table representation. ([Table implementation](../../src/table.ts); [Table tests](../../test/Table.test.ts))
+The shared SchemaAST evaluator turns every public SchemaAST guard into a declared schema, combines the variants into a `Schema.TaggedUnion` F-algebra, and uses `Match.tagsExhaustive` to enforce complete interpretation. `Table` supplies one consumer algebra that recursively reduces homogeneous unions and suspended schemas to the existing string-or-number table scalar representation; direct scalars, string and number literals, template literals, and homogeneous enums are also mechanically classified. Every other AST constructor is explicitly rejected, and suspension cycle detection keeps traversal total. This establishes reusable exhaustive dispatch without claiming that every schema has a lossless table representation or that interpreters should share target semantics. ([SchemaAST evaluator](../../src/schema-ast.ts); [Table implementation](../../src/table.ts); [Table tests](../../test/Table.test.ts))
 
 Research still needs to determine:
 
