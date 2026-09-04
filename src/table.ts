@@ -4,6 +4,8 @@ import {
   Context,
   Effect,
   Equivalence,
+  HashSet,
+  Match,
   Option,
   pipe,
   Predicate,
@@ -102,6 +104,126 @@ export class TableDefinitionError extends Schema.TaggedError<TableDefinitionErro
   }
 }
 
+
+const unsupportedTableScalar = (table: string, field: string) =>
+  Effect.fail(
+    new TableDefinitionError(
+      table,
+      `field ${field} must encode to String or Number`,
+    ),
+  )
+
+const commonTableScalar = (
+  table: string,
+  field: string,
+  scalars: ReadonlyArray<TableField["scalar"]>,
+): Effect.Effect<TableField["scalar"], TableDefinitionError> => {
+  const firstScalar = Array.get(scalars, 0)
+
+  if (Option.isNone(firstScalar)) {
+    return unsupportedTableScalar(table, field)
+  }
+
+  const scalarEqualsFirst = (scalar: TableField["scalar"]) =>
+    Equivalence.strictEqual<TableField["scalar"]>()(firstScalar.value, scalar)
+
+  const hasCommonScalar = Array.every(scalars, scalarEqualsFirst)
+
+  return hasCommonScalar
+    ? Effect.succeed(firstScalar.value)
+    : unsupportedTableScalar(table, field)
+}
+
+const classifyEnumEntry = (
+  [, value]: SchemaAST.Enum["enums"][number],
+) => Predicate.isString(value) ? "string" as const : "number" as const
+
+type CompileTableScalar = (
+  table: string,
+  field: string,
+  ast: SchemaAST.AST,
+  suspends: HashSet.HashSet<SchemaAST.Suspend>,
+) => Effect.Effect<TableField["scalar"], TableDefinitionError>
+
+const compileTableScalar: CompileTableScalar = Effect.fn(
+  "Table.compileScalar",
+)(function* (
+  table: string,
+  field: string,
+  ast: SchemaAST.AST,
+  suspends: HashSet.HashSet<SchemaAST.Suspend>,
+) {
+  const compile = (ast: SchemaAST.AST) =>
+    compileTableScalar(table, field, ast, suspends)
+
+  const compileEnumeration = (enumeration: SchemaAST.Enum) =>
+    commonTableScalar(
+      table,
+      field,
+      Array.map(enumeration.enums, classifyEnumEntry),
+    )
+
+  return yield* pipe(
+    Match.value(ast),
+    Match.when(SchemaAST.isString, () =>
+      Effect.succeed<TableField["scalar"]>("string")),
+    Match.when(SchemaAST.isNumber, () =>
+      Effect.succeed<TableField["scalar"]>("number")),
+    Match.when(SchemaAST.isLiteral, (literal) => {
+      if (Predicate.isString(literal.literal)) {
+        return Effect.succeed<TableField["scalar"]>("string")
+      }
+
+      return Predicate.isNumber(literal.literal)
+        ? Effect.succeed<TableField["scalar"]>("number")
+        : unsupportedTableScalar(table, field)
+    }),
+    Match.when(SchemaAST.isTemplateLiteral, () =>
+      Effect.succeed<TableField["scalar"]>("string")),
+    Match.when(SchemaAST.isEnum, compileEnumeration),
+    Match.when(SchemaAST.isUnion, (union) => {
+      const selectCommonScalar = (
+        scalars: ReadonlyArray<TableField["scalar"]>,
+      ) => commonTableScalar(table, field, scalars)
+
+      return pipe(
+        Effect.forEach(union.types, compile),
+        Effect.flatMap(selectCommonScalar),
+      )
+    }),
+    Match.when(SchemaAST.isSuspend, (suspend) => {
+      if (HashSet.has(suspends, suspend)) {
+        return unsupportedTableScalar(table, field)
+      }
+
+      return compileTableScalar(
+        table,
+        field,
+        suspend.thunk(),
+        HashSet.add(suspends, suspend),
+      )
+    }),
+    Match.whenOr(
+      SchemaAST.isDeclaration,
+      SchemaAST.isNull,
+      SchemaAST.isUndefined,
+      SchemaAST.isVoid,
+      SchemaAST.isNever,
+      SchemaAST.isUnknown,
+      SchemaAST.isAny,
+      SchemaAST.isBoolean,
+      SchemaAST.isBigInt,
+      SchemaAST.isSymbol,
+      SchemaAST.isUniqueSymbol,
+      SchemaAST.isObjectKeyword,
+      SchemaAST.isArrays,
+      SchemaAST.isObjects,
+      () => unsupportedTableScalar(table, field),
+    ),
+    Match.exhaustive,
+  )
+})
+
 /**
  *
  * Scope: public
@@ -195,7 +317,7 @@ const compileTable = Effect.fn("Table.compile")(function* <
       )
     }
 
-    const compileName = Effect.fn("Table.compileName")(function* (
+    const compileField = Effect.fn("Table.compileField")(function* (
       property: (typeof encodedSchema.ast.propertySignatures)[number],
     ) {
       if (!Predicate.isString(property.name)) {
@@ -212,28 +334,23 @@ const compileTable = Effect.fn("Table.compile")(function* <
         )
       }
 
-      const isString = SchemaAST.isString(property.type)
-      const isNumber = SchemaAST.isNumber(property.type)
-      const isSupportedScalar = isString || isNumber
-      const isUnsupportedScalar = !isSupportedScalar
-
-      if (isUnsupportedScalar) {
-        return yield* new TableDefinitionError(
-          name,
-          `field ${property.name} must encode to String or Number`,
-        )
-      }
+      const scalar = yield* compileTableScalar(
+        name,
+        property.name,
+        property.type,
+        HashSet.empty(),
+      )
 
       return TableField.make({
         name: property.name,
-        scalar: isString ? "string" : "number",
+        scalar,
         generation: NoGeneration,
       })
     })
 
     const fields = yield* Effect.forEach(
       encodedSchema.ast.propertySignatures,
-      compileName,
+      compileField,
     )
 
     const hasIdentifierAnnotation = (field: TableField): boolean => {

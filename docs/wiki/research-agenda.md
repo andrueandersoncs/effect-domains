@@ -37,9 +37,12 @@ These are unresolved capabilities, not commitments for the current interface.
 
 ## Effect Schema Capabilities
 
-The table compiler uses public `Schema.toEncoded`, `SchemaAST` guards, and original schema codecs for a narrow supported subset. Research still needs to determine:
+The table compiler uses public `Schema.toEncoded` and a total Effect `Match` interpreter over the `SchemaAST` guards. It recursively reduces homogeneous unions and suspended schemas to the existing string-or-number table scalar algebra; direct scalars, string and number literals, template literals, and homogeneous enums are also mechanically classified. Every other AST constructor is explicitly rejected, and suspension cycle detection keeps traversal total. This establishes the recursive interpretation mechanism without claiming that every schema has a lossless table representation. ([Table implementation](../../src/table.ts); [Table tests](../../test/Table.test.ts))
 
-- how unions, optional fields, nested structures, records, and recursive schemas should be rejected or represented;
+Research still needs to determine:
+
+- how optional fields, nullable fields, nested structures, records, heterogeneous unions, opaque declarations, and genuinely recursive values should be rejected or represented;
+- which additional encoded shapes earn a mechanical, lossless physical representation;
 - when annotations remain useful metadata versus becoming a second embedded programming language; and
 - which unstable Effect v4 APIs can be isolated without shaping the public contract.
 

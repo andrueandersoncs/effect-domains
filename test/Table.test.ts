@@ -1,5 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Equivalence, Function, Option, pipe, Ref, Schema } from "effect"
+import {
+  Array,
+  Effect,
+  Equivalence,
+  Function,
+  Option,
+  pipe,
+  Ref,
+  Schema,
+} from "effect"
 import { identifier } from "../src/domain.ts"
 import {
   DefaultTableIdentifierSchema,
@@ -60,6 +69,70 @@ describe("Table", () => {
   const BooleanRecordError = new TableDefinitionError(
     "boolean_records",
     "field active must encode to String or Number",
+  )
+
+  enum InterpretedStatus {
+    Ready = "ready",
+    Done = "done",
+  }
+
+  const InterpretedScalarRecordSchema = Schema.Struct({
+    literal: Schema.Literal("ready"),
+    template: Schema.TemplateLiteral(["item-", Schema.Number]),
+    enumeration: Schema.Enum(InterpretedStatus),
+    union: Schema.Union([Schema.String, Schema.Literal("fallback")]),
+    suspended: Schema.suspend(() => Schema.Number),
+  })
+
+  interface InterpretedScalarRecord extends
+    Schema.Schema.Type<typeof InterpretedScalarRecordSchema>
+  {}
+
+  const InterpretedScalarRecords = Table.make({
+    name: "interpreted_scalar_records",
+    schema: InterpretedScalarRecordSchema,
+  })
+
+  const MixedScalarUnionRecordSchema = Schema.Struct({
+    value: Schema.Union([Schema.String, Schema.Number]),
+  })
+
+  interface MixedScalarUnionRecord extends
+    Schema.Schema.Type<typeof MixedScalarUnionRecordSchema>
+  {}
+
+  const makeMixedScalarUnionRecords = () =>
+    Table.make({
+      name: "mixed_scalar_union_records",
+      schema: MixedScalarUnionRecordSchema,
+    })
+
+  const MixedScalarUnionRecordError = new TableDefinitionError(
+    "mixed_scalar_union_records",
+    "field value must encode to String or Number",
+  )
+
+  const CyclicScalarSchema: Schema.Codec<never> = Schema.suspend(
+    (): Schema.Codec<never> => CyclicScalarSchema,
+  )
+
+  const CyclicScalarRecordSchema = Schema.Struct({
+    value: CyclicScalarSchema,
+  })
+
+  interface CyclicScalarRecord extends
+    Schema.Schema.Type<typeof CyclicScalarRecordSchema>
+  {}
+
+  const makeCyclicScalarRecords = () =>
+    Table.make({
+      name: "cyclic_scalar_records",
+      schema: CyclicScalarRecordSchema,
+    })
+
+  const CyclicScalarRecordError = new TableDefinitionError(
+    "cyclic_scalar_records",
+    "field value must encode to String or Number",
   )
 
   const SymbolField = Symbol("value")
@@ -263,6 +336,37 @@ describe("Table", () => {
       expect(ExplicitRecords.identifier).toBe("recordNumber")
       expect(ExplicitRecords.identifierSchema).toBe(ExplicitIdentifierSchema)
       expect(ExplicitRecords.fields).toEqual(ExplicitFieldMetadata)
+    }))
+
+  it.effect("recursively interprets lossless encoded scalar forms", () =>
+    Effect.sync(() => {
+      expect(
+        Array.map(InterpretedScalarRecords.fields, (field) => [
+          field.name,
+          field.scalar,
+        ]),
+      ).toEqual([
+        ["id", "string"],
+        ["literal", "string"],
+        ["template", "string"],
+        ["enumeration", "string"],
+        ["union", "string"],
+        ["suspended", "number"],
+      ])
+    }))
+
+  it.effect("rejects unions without one physical scalar representation", () =>
+    Effect.sync(() => {
+      expect(makeMixedScalarUnionRecords).toThrow(TableDefinitionError)
+      expect(makeMixedScalarUnionRecords).toThrow(
+        MixedScalarUnionRecordError.message,
+      )
+    }))
+
+  it.effect("rejects suspended cycles without unbounded recursion", () =>
+    Effect.sync(() => {
+      expect(makeCyclicScalarRecords).toThrow(TableDefinitionError)
+      expect(makeCyclicScalarRecords).toThrow(CyclicScalarRecordError.message)
     }))
 
   it.effect("rejects optional fields", () =>
