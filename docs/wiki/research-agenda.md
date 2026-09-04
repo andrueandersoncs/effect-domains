@@ -19,6 +19,14 @@ Each query is an authored operation rather than generated CRUD. `Query.make` mec
 
 `PersistedRef` now establishes one process-local composition over authored operations. It loads one authoritative value, serializes fiber mutations with `SynchronizedRef`, commits before publishing, preserves memory on commit failure, publishes persistence-returned values, and refreshes only when explicitly requested. The SQLite integration uses existing read and update queries rather than deriving persistence behavior from a table definition. This evidence does not cover external writers or multi-process coordination. ([PersistedRef implementation](../../src/persisted-ref.ts); [PersistedRef tests](../../test/PersistedRef.test.ts); [Bun SQLite test](../../test/SqliteBun.test.ts))
 
+## Application Operation Findings
+
+The [reservation slice](validation-strategy.md#reservation-slice) reuses Effect `Rpc` and `RpcGroup` as the application contract. Its operations are independent of tables and carry runtime request, success, and error schemas. Effect's HTTP RPC server and a small [CLI interpreter](../../src/rpc-cli.ts) consume the same group. No separate `Operation` abstraction was needed. ([Contracts](../../examples/reservations/contracts.ts); [HTTP binding](../../examples/reservations/http.ts))
+
+The slice composes authored queries under explicit SQLite transactions and uses a tracked historical migration. It demonstrates typed transformations among domain timestamps, database milliseconds, and wire ISO strings. Business transitions are authored declaratively; stock effects and transaction boundaries remain in the implementation. ([Storage implementation](../../examples/reservations/sqlite.ts); [Migration history](../../examples/reservations/migrations.ts); [Regression scenarios](../../test/Reservations.test.ts))
+
+The next generalization decision should wait for another materially different domain. Open application questions include whether JSON-only CLI input is sufficient, whether schema services and middleware remain manageable as contracts grow, and whether another interpreter needs more metadata than the existing RPC declarations provide.
+
 ## Remaining Persistence Questions
 
 Further evidence must determine:
@@ -48,7 +56,7 @@ Research still needs to determine:
 
 ## Interpreter Interface
 
-The current implementation establishes a small table interpreter and a schema-wrapped authored-query seam. Future capabilities must test:
+The implementation now has a table interpreter, a schema-wrapped authored-query seam, and a CLI interpreter over Effect RPC contracts. Future capabilities must test:
 
 - whether request/result schemas remove enough duplication to justify `Query.make`;
 - whether explicit escape hatches compose without bypassing schema contracts; and
