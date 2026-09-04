@@ -1,22 +1,5 @@
 import { Effect, Function, pipe, SynchronizedRef } from "effect"
 
-/**
- *
- * Scope: public
- *
- * When to use: One database-backed value must serialize fallible writes because
- * local fibers share its cache. Compose authored load and commit Effects; do
- * not derive this from a table or query schema.
- *
- * Example:
- * ```ts
- * import { Effect } from "effect"
- * import { PersistedRef } from "effect-domains/persisted-ref"
- *
- * const program = PersistedRef.make({ commit: (_previous: number, next: number) => Effect.succeed(next), load: Effect.succeed(0) })
- * ```
- *
- */
 export const PersistedRef = {
   make: <
     A,

@@ -4,7 +4,7 @@ import {
   Context,
   Effect,
   Equivalence,
-  HashSet,
+  Match,
   Option,
   pipe,
   Predicate,
@@ -14,44 +14,16 @@ import {
   Struct,
 } from "effect"
 import { DomainIdentifier } from "./domain.ts"
-import { evaluate, type SchemaASTFAlgebra } from "./schema-ast.ts"
+import {
+  evaluate,
+  type SchemaASTF,
+  type SchemaASTFAlgebra,
+} from "./schema-ast.ts"
 
-/**
- *
- * Scope: public
- *
- * When to use: An operation must accept generated identity because a table
- * without domain identity receives a physical UUIDv7 field.
- *
- * Example:
- * ```ts
- * import { Schema } from "effect"
- * import { DefaultTableIdentifierSchema } from "effect-domains/table"
- *
- * const decodeIdentifier = Schema.decodeUnknownEffect(DefaultTableIdentifierSchema)
- * ```
- *
- */
 export const DefaultTableIdentifierSchema = Schema.String.check(Schema.isUUID(7))
 
 const CreateTableOperationSchema = Schema.Literal("createTable")
 
-/**
- *
- * Scope: public
- *
- * When to use: Adapter metadata needs a validated physical field because table
- * rendering accepts only supported scalar columns.
- *
- * Example:
- * ```ts
- * import { Option } from "effect"
- * import { TableField } from "effect-domains/table"
- *
- * const title = TableField.make({ name: "title", scalar: "string", generation: Option.none() })
- * ```
- *
- */
 export class TableField extends Schema.TaggedClass<TableField>()("TableField", {
   name: Schema.String,
   scalar: Schema.Literals(["string", "number"]),
@@ -72,22 +44,6 @@ const DefaultIdentifierField = TableField.make({
   generation: GeneratedIdentifierGeneration,
 })
 
-/**
- *
- * Scope: public
- *
- * When to use: Table metadata validation must report why a canonical schema
- * cannot produce a physical table because invalid derivation must stop before
- * database work.
- *
- * Example:
- * ```ts
- * import { TableDefinitionError } from "effect-domains/table"
- *
- * const error = new TableDefinitionError("books", "schema must encode to a flat struct")
- * ```
- *
- */
 export class TableDefinitionError extends Schema.TaggedError<TableDefinitionError>()(
   "TableDefinitionError",
   {
@@ -138,110 +94,75 @@ const classifyEnumEntry = (
   [, value]: SchemaAST.Enum["enums"][number],
 ) => Predicate.isString(value) ? "string" as const : "number" as const
 
-type EvaluateTableScalar = (
+const evaluateTableScalar = Effect.fn("Table.evaluateScalar")(function* (
   table: string,
   field: string,
   ast: SchemaAST.AST,
-  suspends: HashSet.HashSet<SchemaAST.Suspend>,
-) => Effect.Effect<TableField["scalar"], TableDefinitionError>
-
-const evaluateTableScalar: EvaluateTableScalar = Effect.fn(
-  "Table.evaluateScalar",
-)(function* (
-  table: string,
-  field: string,
-  ast: SchemaAST.AST,
-  suspends: HashSet.HashSet<SchemaAST.Suspend>,
 ) {
-  const recur = (ast: SchemaAST.AST) =>
-    evaluateTableScalar(table, field, ast, suspends)
+  const unsupported = (): Effect.Effect<
+    TableField["scalar"],
+    TableDefinitionError
+  > => unsupportedTableScalar(table, field)
 
-  const evaluateEnumeration = (enumeration: SchemaAST.Enum) =>
+  const evaluateEnumeration = (
+    enumeration: Extract<
+      SchemaASTF<ReturnType<typeof unsupported>>,
+      { readonly _tag: "Enum" }
+    >,
+  ) =>
     commonTableScalar(
       table,
       field,
-      Array.map(enumeration.enums, classifyEnumEntry),
+      Array.map(enumeration.ast.enums, classifyEnumEntry),
     )
 
-  const unsupported = () => unsupportedTableScalar(table, field)
+  const selectCommonScalar = (
+    scalars: ReadonlyArray<TableField["scalar"]>,
+  ) => commonTableScalar(table, field, scalars)
 
-  const algebra: SchemaASTFAlgebra<
-    Effect.Effect<TableField["scalar"], TableDefinitionError>
-  > = {
-    Declaration: unsupported,
-    Null: unsupported,
-    Undefined: unsupported,
-    Void: unsupported,
-    Never: unsupported,
-    Unknown: unsupported,
-    Any: unsupported,
-    String: () => Effect.succeed<TableField["scalar"]>("string"),
-    Number: () => Effect.succeed<TableField["scalar"]>("number"),
-    Boolean: unsupported,
-    BigInt: unsupported,
-    Symbol: unsupported,
-    Literal: (literal) => {
-      if (Predicate.isString(literal.literal)) {
-        return Effect.succeed<TableField["scalar"]>("string")
-      }
+  const algebra: SchemaASTFAlgebra<ReturnType<typeof unsupported>> = pipe(
+    Match.type<SchemaASTF<ReturnType<typeof unsupported>>>(),
+    Match.tagsExhaustive({
+      Declaration: unsupported,
+      Null: unsupported,
+      Undefined: unsupported,
+      Void: unsupported,
+      Never: unsupported,
+      Unknown: unsupported,
+      Any: unsupported,
+      String: () => Effect.succeed<TableField["scalar"]>("string"),
+      Number: () => Effect.succeed<TableField["scalar"]>("number"),
+      Boolean: unsupported,
+      BigInt: unsupported,
+      Symbol: unsupported,
+      Literal: (literal) => {
+        if (Predicate.isString(literal.ast.literal)) {
+          return Effect.succeed<TableField["scalar"]>("string")
+        }
 
-      return Predicate.isNumber(literal.literal)
-        ? Effect.succeed<TableField["scalar"]>("number")
-        : unsupported()
-    },
-    UniqueSymbol: unsupported,
-    ObjectKeyword: unsupported,
-    Enum: evaluateEnumeration,
-    TemplateLiteral: () =>
-      Effect.succeed<TableField["scalar"]>("string"),
-    Arrays: unsupported,
-    Objects: unsupported,
-    Union: (union) => {
-      const selectCommonScalar = (
-        scalars: ReadonlyArray<TableField["scalar"]>,
-      ) => commonTableScalar(table, field, scalars)
-
-      return pipe(
-        Effect.forEach(union.types, recur),
-        Effect.flatMap(selectCommonScalar),
-      )
-    },
-    Suspend: (suspend) => {
-      if (HashSet.has(suspends, suspend)) {
-        return unsupported()
-      }
-
-      return evaluateTableScalar(
-        table,
-        field,
-        suspend.thunk(),
-        HashSet.add(suspends, suspend),
-      )
-    },
-  }
-
-  return yield* pipe(
-    evaluate(ast, algebra),
-    Effect.flatten,
+        return Predicate.isNumber(literal.ast.literal)
+          ? Effect.succeed<TableField["scalar"]>("number")
+          : unsupported()
+      },
+      UniqueSymbol: unsupported,
+      ObjectKeyword: unsupported,
+      Enum: evaluateEnumeration,
+      TemplateLiteral: () =>
+        Effect.succeed<TableField["scalar"]>("string"),
+      Arrays: unsupported,
+      Objects: unsupported,
+      Union: (union) =>
+        pipe(
+          Effect.all(union.types),
+          Effect.flatMap(selectCommonScalar),
+        ),
+      Suspend: (suspend) => suspend.thunk(),
+    }),
   )
+
+  return yield* evaluate(ast, algebra, unsupported)
 })
 
-/**
- *
- * Scope: public
- *
- * When to use: A table adapter must preserve a failed physical table-creation
- * operation in its Effect error channel because callers need the original
- * database cause.
- *
- * Example:
- * ```ts
- * import { TableError } from "effect-domains/table"
- *
- * const error = new TableError("books", new Error("database unavailable"))
- * ```
- *
- */
 export class TableError extends Schema.TaggedError<TableError>()(
   "TableError",
   {
@@ -259,22 +180,6 @@ export class TableError extends Schema.TaggedError<TableError>()(
   }
 }
 
-/**
- *
- * Scope: public
- *
- * When to use: A runtime adapter must implement physical table creation for
- * compiled table definitions because effects require a narrow runtime boundary.
- *
- * Example:
- * ```ts
- * import { Effect } from "effect"
- * import { TableStore } from "effect-domains/table"
- *
- * const store = TableStore.of({ write: () => Effect.void })
- * ```
- *
- */
 export class TableStore extends Context.Service<TableStore, {
   readonly write: (
     table: Table,
@@ -340,7 +245,6 @@ const compileTable = Effect.fn("Table.compile")(function* <
         name,
         property.name,
         property.type,
-        HashSet.empty(),
       )
 
       return TableField.make({
@@ -428,22 +332,6 @@ const compileTable = Effect.fn("Table.compile")(function* <
     }
   })
 
-/**
- *
- * Scope: public
- *
- * When to use: A canonical struct needs table metadata because persistence
- * mappings may only be mechanical and lossless.
- *
- * Example:
- * ```ts
- * import { Schema } from "effect"
- * import { Table } from "effect-domains/table"
- *
- * const Books = Table.make({ name: "books", schema: Schema.Struct({ title: Schema.String }) })
- * ```
- *
- */
 export class Table extends Schema.Class<Table>("Table")({
   name: Schema.String,
   schema: Schema.Any,

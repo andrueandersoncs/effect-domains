@@ -3,26 +3,6 @@ import { Array, Context, Effect, Equivalence, Layer, Option, pipe } from "effect
 import { SqlClient } from "effect/unstable/sql"
 import { TableError, TableStore, type TableField } from "./table.ts"
 
-/**
- *
- * Scope: public
- *
- * When to use: An authored query needs the SQL statement constructor supplied
- * by the active Bun SQLite layer because the operation must retain its runtime
- * requirement.
- *
- * Example:
- * ```ts
- * import { Effect } from "effect"
- * import { Database } from "effect-domains/sqlite-bun"
- *
- * const statement = Effect.gen(function* () {
- *   const database = yield* Database
- *   return database`SELECT 1`
- * })
- * ```
- *
- */
 export class Database extends Context.Service<Database, SqlClient.SqlClient>()(
   "@effect-domains/SqliteBun/Database",
 ) {}
@@ -90,23 +70,6 @@ const sqlClient = (filename: string) => {
   return Layer.merge(databaseLayer, tableStoreLayer)
 }
 
-/**
- *
- * Scope: public
- *
- * When to use: An application needs Bun SQLite services because authored
- * queries and table writes share one runtime.
- *
- * Example:
- * ```ts
- * import { Effect } from "effect"
- * import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
- *
- * const databaseLayer = SqliteBunRuntime.sqlClient("app.sqlite")
- * const program = Effect.void.pipe(Effect.provide(databaseLayer))
- * ```
- *
- */
 export const SqliteBunRuntime = {
   sqlClient,
 }
