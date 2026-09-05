@@ -1,91 +1,50 @@
 # Research Agenda
 
-This page records established implementation findings and unresolved questions. The source thesis establishes the constraints, while implementation evidence changes which questions remain open. ([Project thesis](raw/project-thesis.md))
+This page separates implemented behavior from evidence still needed to judge the project hypothesis. The governing constraints remain mechanical, lossless derivation and explicit business policy. ([Project thesis](raw/project-thesis.md))
 
 ## Framework Direction
 
-The human clarified the intended product in the current conversation: derive SQL table structure from the domain schemas, provide "a LOT more automation," and think "Rails (as in Ruby on Rails) for Effect." This is direction for the product, not a claim about the current implementation.
+The human clarified the intended product as "Rails (as in Ruby on Rails) for Effect": derive SQL table structure from domain schemas and automate routine application code. Application authors declare canonical schemas, select resource capabilities, and supply business commands and policy. The first implementation now follows that direction; one database and one business slice do not establish generality.
 
-The application author should declare canonical Effect schemas, select resource capabilities, and supply business commands and policy. Framework conventions should supply routine persistence, interfaces, and runtime composition. Standard CRUD semantics can be defined once by the framework and selected declaratively; they need not be rediscovered from a schema or handwritten in every application.
+### Implemented contract
 
-### Proposed contract, not yet implemented
+- `Resource.make({ name, schema, operations })` derives a table, typed repository, selected RPC contracts, and their handlers. Registration does not publish unrestricted mutations. The repository remains available to authored business handlers. ([Resource](../../src/resource.ts))
+- `Table.make` derives reversible storage codecs, identity, SQL scalar types, and recognized constraints. Canonical timestamps and booleans need no second application storage model. Arbitrary predicates remain schema validation, not advertised SQL constraints. ([Table](../../src/table.ts); [SQLite DDL](../../src/sqlite-ddl.ts))
+- `Application.make` combines resources and authored Effect RPC commands. `ApplicationBun` supplies HTTP and CLI composition; `RpcCli` derives scalar field flags, validation, help, and a JSON escape hatch. ([Application](../../src/application.ts); [Bun runtime](../../src/application-bun.ts); [CLI](../../src/rpc-cli.ts))
+- The SQLite runtime provides table, repository, and schema stores over one client. Authored commands use that same client for explicit transactions. ([SQLite runtime](../../src/sqlite-bun.ts); [Reservation policy](../../examples/reservations/sqlite.ts))
+- Migration planning produces immutable schema snapshots and reviewable steps. Rename, backfill, and transformation intent remain explicit; execution checks history and schema drift and applies changes transactionally. ([Migration planner and executor](../../src/sqlite-migrations.ts); [Migration regressions](../../test/SqliteMigrations.test.ts))
 
-- One application definition registers canonical schemas and the enabled resource operations. Model registration alone does not publish unrestricted mutations.
-- The persistence interpreter derives fresh table structure, identity, supported SQL constraints, and reversible row codecs. Ordinary timestamps and column naming do not require a second field-by-field storage model. Unknown predicates must not be advertised as database-enforced constraints, and lossy representations require an explicit alternative.
-- Standard repositories and their input, output, and error schemas follow the registered resource capabilities. Custom queries retain the authored `Query.make` escape hatch.
-- Resource operations and authored command contracts feed Effect RPC, HTTP, CLI arguments, validation, and help. Applications do not repeat per-operation adapter bindings or ordinary row-copy functions.
-- Runtime Layers provide concrete services. Database preparation and migration execution are framework machinery; historical schema snapshots, rename intent, backfills, authorization, transaction scope, and reservation policy remain explicit.
-
-Prefer this application-level convention layer over persistence and transport annotations on every domain field. Intrinsic identity and declared relationships belong in the domain; physical representation and publication choices belong in the application or adapter. This extends the existing [table/query](tables-and-queries.md) and [RPC](../../examples/reservations/contracts.ts) seams rather than introducing another operation algebra.
-
-### Measured gap
-
-The reservation slice duplicates its canonical fields into `StockStorageSchema` and `ReservationStorageSchema`, copies rows in both directions, authors ordinary reads and writes, and handwrites initial `CREATE TABLE` statements. These are not examples of necessary business policy. ([Domain](../../examples/reservations/domain.ts); [Storage](../../examples/reservations/sqlite.ts); [Migrations](../../examples/reservations/migrations.ts))
-
-A live in-memory SQLite probe against the current compiler showed that the canonical stock schema receives a generated `id` rather than a SKU primary key, `available` becomes `REAL`, and direct SQL accepts a negative stock value. The canonical reservation schema fails derivation at `createdAt`. The stock schema omits its intrinsic identity annotation, while the compiler supports only encoded strings and numbers and does not project the numeric checks into SQL. These are concrete domain-declaration and interpreter gaps, not reasons to require duplicate application schemas. ([Table compiler](../../src/table.ts); [SQLite interpreter](../../src/sqlite-bun.ts); [Domain](../../examples/reservations/domain.ts))
+Publication and runtime configuration stay outside canonical schemas. Intrinsic identity is still domain metadata. This extends the existing table/query and Effect RPC APIs rather than introducing another operation language. ([Table and query direction](raw/table-and-query-api-direction.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
 ## Established Persistence Findings
 
-Persistence now separates table derivation from authored queries. `Table.make` accepts a canonical schema and table name. `Query.make` defines one operation from request/result schemas and an Effect implementation. The implementation’s requirement channel carries the runtime database service until execution. ([Tables and Queries](tables-and-queries.md); [Table and query API direction](raw/table-and-query-api-direction.md))
+The compiler supports flat required rows with string, numeric, boolean, nullable scalar, and reversible timestamp representations. An explicit `identifier` supplies the primary key; otherwise the adapter generates a persistence-only UUIDv7 `id`. Multiple identifiers, optional keys, nested rows, and shapes without a scalar codec are rejected. `OptionFromNullOr` can encode a nullable scalar; a bare `Option` is not a row scalar. ([Table](../../src/table.ts); [Table tests](../../test/Table.test.ts))
 
-The current table boundary is explicit:
+Generated repositories handle ordinary persistence. `Query.make` remains the escape hatch for an authored request/result operation, preserving codec services, implementation errors, and runtime requirements. The Bun SQLite integration still exercises authored queries and query-backed persisted references. ([Query](../../src/query.ts); [SQLite integration](../../test/SqliteBun.test.ts))
 
-- zero or one `Domain.identifier` field is accepted;
-- an explicit domain identifier supplies the primary key and overrides persistence identity;
-- otherwise a UUIDv7 `id` is added to the persisted `rowSchema` and generated by the adapter;
-- encoded field names supply database column names;
-- the supported encoded source is a flat required struct of `String` and `Number` fields; and
-- fresh table creation is derived while migrations remain explicit.
+`PersistedRef` loads an authoritative value, serializes local mutations, commits before publishing, preserves memory on failure, and refreshes explicitly. This is process-local synchronization, not multi-process coherence. ([PersistedRef](../../src/persisted-ref.ts); [PersistedRef tests](../../test/PersistedRef.test.ts))
 
-Each query is an authored operation rather than generated CRUD. `Query.make` mechanically preserves request encoding, result decoding, implementation errors, and Effect requirements. The Bun SQLite test authors CRUD queries and validates their behavior against a temporary database, including a branded identifier and a service-dependent schema codec. ([Bun SQLite test](../../test/SqliteBun.test.ts); [Adapter contract](../../test/adapter-contract/effects.ts))
+## Application Evidence
 
-`PersistedRef` now establishes one process-local composition over authored operations. It loads one authoritative value, serializes fiber mutations with `SynchronizedRef`, commits before publishing, preserves memory on commit failure, publishes persistence-returned values, and refreshes only when explicitly requested. The SQLite integration uses existing read and update queries rather than deriving persistence behavior from a table definition. This evidence does not cover external writers or multi-process coordination. ([PersistedRef implementation](../../src/persisted-ref.ts); [PersistedRef tests](../../test/PersistedRef.test.ts); [Bun SQLite test](../../test/SqliteBun.test.ts))
+The reservation slice now uses its canonical stock and reservation schemas directly. It has no duplicate storage schemas, field-copy codecs, ordinary reservation SQL, or handwritten initial DDL. SKU identity is declared in `StockSchema`. Reserve, confirm, release, stock accounting, and transaction scope remain authored. Only stock and reservation reads are published as resource operations. ([Domain](../../examples/reservations/domain.ts); [Resources](../../examples/reservations/resources.ts); [Application](../../examples/reservations/application.ts); [Policy](../../examples/reservations/sqlite.ts))
 
-## Application Operation Findings
+The [recorded acceptance evidence](validation-strategy.md#schema-first-acceptance-criteria) includes a fresh-database experiment where adding one integer field changed SQL, generated resource contracts, HTTP behavior, and CLI flags without adapter edits. Reservation regressions retain no-oversell, rollback, terminal-transition, and historical replay checks. Frozen migration artifacts replace the previous application-authored table creation. ([Reservation tests](../../test/Reservations.test.ts); [Migration history](../../examples/reservations/migrations.ts))
 
-The [reservation slice](validation-strategy.md#reservation-slice) reuses Effect `Rpc` and `RpcGroup` as the application contract. Its operations are independent of tables and carry runtime request, success, and error schemas. Effect's HTTP RPC server and a small [CLI interpreter](../../src/rpc-cli.ts) consume the same group. No separate `Operation` abstraction was needed. ([Contracts](../../examples/reservations/contracts.ts); [HTTP binding](../../examples/reservations/http.ts))
-
-The slice composes authored queries under explicit SQLite transactions and uses a tracked historical migration. It demonstrates typed transformations among domain timestamps, database milliseconds, and wire ISO strings. Business transitions are authored declaratively; stock effects and transaction boundaries remain in the implementation. ([Storage implementation](../../examples/reservations/sqlite.ts); [Migration history](../../examples/reservations/migrations.ts); [Regression scenarios](../../test/Reservations.test.ts))
-
-The immediate task is to remove mechanical duplication from this slice before treating it as evidence for the desired framework. Another materially different domain is still needed to test whether the resulting conventions generalize. Open application questions include generated field-level CLI arguments, schema services and middleware, and how resource capabilities compose with custom command contracts.
-
-## Remaining Persistence Questions
+## Remaining Questions
 
 Further evidence must determine:
 
-- whether the same table/query interface works with a materially different database;
-- whether database-specific query Effects remain readable as query count and complexity grow;
-- how joins and multi-table operations should record their table dependencies;
-- how explicit typed storage representations compose when a canonical encoded schema is not a lossless row shape beyond the implemented generated-identity extension;
-- whether UUIDv7 generation remains portable and appropriately ordered across materially different databases;
-- which additional encoded field shapes earn mechanical table support; and
-- how migrations and transactions remain explicit while integrating cleanly with table and query definitions;
-- whether query-backed persisted references need optimistic versions, database notifications, or only explicit refresh when external writers exist; and
-- whether interruption and ambiguous database outcomes need stronger reconciliation semantics than reload-on-restart or explicit refresh.
+- whether these conventions fit a materially different business domain and database;
+- how relationships, joins, and multi-table query dependencies should be declared;
+- how explicit storage transformations compose when a canonical value has no lossless scalar representation;
+- how schema services and RPC middleware behave in a complete authenticated application;
+- which additional encoded shapes earn mechanical storage or CLI support;
+- whether migration planning remains readable for larger histories and database-specific changes;
+- whether persisted references need optimistic versions or notifications for external writers; and
+- how interruption and ambiguous database outcomes should be reconciled.
 
-These are unresolved capabilities, not commitments for the current interface.
-
-## Effect Schema Capabilities
-
-The shared `SchemaASTF<A>` evaluator turns every public SchemaAST guard into a declared case, anchors the case map to `SchemaAST.AST["_tag"]`, and combines it with `Schema.TaggedUnion`. Its recursive slots are parameterized by `A`, so the pure `evaluate` function can project trusted AST values directly and fold every recursive child position. Consumer algebras use `Match.tagsExhaustive` to enforce complete interpretation. `Table` supplies one algebra that reduces homogeneous unions and suspended schemas to the existing string-or-number table scalar representation; direct scalars, string and number literals, template literals, and homogeneous enums are also mechanically classified. Every other AST constructor is explicitly rejected, and an explicit suspension-cycle result keeps traversal total. This establishes reusable exhaustive recursion without claiming that every schema has a lossless table representation or that interpreters should share target semantics. ([SchemaAST evaluator](../../src/schema-ast.ts); [SchemaAST evaluator tests](../../test/SchemaAST.test.ts); [Table implementation](../../src/table.ts); [Table tests](../../test/Table.test.ts))
-
-Research still needs to determine:
-
-- how optional fields, nullable fields, nested structures, records, heterogeneous unions, opaque declarations, and genuinely recursive values should be rejected or represented;
-- which additional encoded shapes earn a mechanical, lossless physical representation;
-- when annotations remain useful metadata versus becoming a second embedded programming language; and
-- which unstable Effect v4 APIs can be isolated without shaping the public contract.
-
-## Interpreter Interface
-
-The implementation now has a table interpreter, a schema-wrapped authored-query seam, and a CLI interpreter over Effect RPC contracts. Future capabilities must test:
-
-- whether request/result schemas remove enough duplication to justify `Query.make`;
-- whether explicit escape hatches compose without bypassing schema contracts; and
-- whether one shared algebra is clearer than several capability-specific interpreters.
-
-The Effect requirement and clean-cutover constraints remain established project direction. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md); [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
+The shared `SchemaASTF` evaluator provides exhaustive traversal and explicit cycle handling. It does not imply that every schema has a lossless table representation or that all interpreters should share target semantics. ([AST evaluator](../../src/schema-ast.ts); [AST tests](../../test/SchemaAST.test.ts))
 
 ## Success and Stop Conditions
 
-The [schema-first acceptance criteria](validation-strategy.md#schema-first-acceptance-criteria) make the next proof concrete: eliminate duplicate field declarations and ordinary persistence and adapter code while preserving business invariants. Compare the resulting conventions across domains before extracting a general algebra. The implementation may use several deep modules; the user-facing objective is an integrated, convention-first application framework.
+The implemented SQLite slice removes the measured mechanical duplication. The next architectural evidence must come from a materially different slice rather than more abstractions around reservations. Compare change propagation, annotation cost, escape hatches, and clarity against the [validation criteria](validation-strategy.md) before claiming a general framework. The clean-cutover policy remains in force. ([Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))

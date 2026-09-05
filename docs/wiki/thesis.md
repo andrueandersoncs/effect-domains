@@ -34,7 +34,7 @@ The intended benefit is less duplicate declaration and less drift between mechan
 
 A schema does not contain enough information to derive business decisions, state transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migrations, compatibility policy, retries, or idempotency. These concerns require explicit design and implementation. Operations should be defined in terms of domain models, but their policy and behavior remain authored. ([Project thesis](raw/project-thesis.md))
 
-Explicit policy does not require handwritten machinery. A framework can define CRUD semantics, reversible storage conventions, transport bindings, and migration execution once. The application selects capabilities and supplies policy where meaning cannot be inferred. This is the proposed distinction between schema-derived structure, framework conventions, and authored business behavior. ([Framework direction](research-agenda.md#framework-direction))
+Explicit policy does not require handwritten machinery. The framework defines CRUD semantics, reversible storage conventions, transport bindings, and migration execution once. Applications select capabilities and supply policy where meaning cannot be inferred. The SQLite reservation slice implements this distinction; its broader applicability remains a hypothesis. ([Framework direction](research-agenda.md#framework-direction); [Acceptance evidence](validation-strategy.md#schema-first-acceptance-criteria))
 
 ## Architectural Shape
 

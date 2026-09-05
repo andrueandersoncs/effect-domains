@@ -2,14 +2,14 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains design hypothesis and implementation workspace.
 
-Effect Domains aims to be a schema-first, convention-over-configuration application framework for Effect. Canonical schemas should supply SQL table structure and routine application code; application authors should supply business policy. The [framework direction](research-agenda.md#framework-direction) distinguishes this target from what is implemented today.
+Effect Domains is a schema-first, convention-over-configuration application framework for Effect. Canonical schemas supply table structure, reversible codecs, repositories, and selected resource interfaces; application authors supply business policy. The [framework direction](research-agenda.md#framework-direction) records the implemented contract and the limits of the current evidence.
 
 ## Content Map
 
 - [Thesis](thesis.md) — the central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — the accepted persistence interface and current implementation evidence.
 - [Validation Strategy](validation-strategy.md) — required vertical slices, reservation application evidence, and criteria for judging the hypothesis.
-- [Research Agenda](research-agenda.md) — the convention-first framework direction, measured automation gaps, and open questions.
+- [Research Agenda](research-agenda.md) — the implemented framework contract, findings, and unresolved questions.
 
 ## Wiki Operations and Sources
 
@@ -26,9 +26,9 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
-Persistence now has separate implemented table and query definitions. `Table` and `Query` are Effect Schema classes whose `make` overrides Schema's static constructor: `Table.make({ name, schema })` preserves its canonical source schema and derives a persisted `rowSchema`, adding an adapter-generated UUIDv7 `id` when no `identifier` annotation overrides it. A shared `SchemaASTF<A>` tagged base functor and recursive `evaluate` fold project trusted Schema AST values directly into the table-specific scalar algebra. `Query.make({ table, Request, Result, implementation })` defines one operation whose Effect requirements carry the runtime database dependency. Column metadata is `TableField`, a tagged Schema class. `PersistedRef.make({ commit, load })` remains an Effectful namespace constructor because it loads and caches a runtime value rather than constructing a schema record. `SqliteBunRuntime` supplies table writes, UUIDv7 generation, and the database, while integration tests validate authored CRUD, generated identity, and query-backed persisted references.
+`Resource.make` derives a table, typed repository, selected Effect RPC operations, and handlers from a canonical schema. `Application.make` combines resources and authored commands; `ApplicationBun` composes the HTTP server and generated CLI. `Table.make` and `Query.make` remain available for direct table derivation and custom queries. `PersistedRef` composes query-backed, process-local write-through state. ([Persistence reference](tables-and-queries.md))
 
-The [reservation slice](validation-strategy.md#reservation-slice) defines five application operations with Effect `RpcGroup`, independently of tables. The group serves HTTP RPC and a generated unary JSON CLI. SQLite handlers author transactions and transitions explicitly; a tracked migration converts historical timestamp seconds to milliseconds. The slice still duplicates storage models, row mappings, ordinary queries, and initial DDL. It establishes executable behavior but does not meet the intended automation level.
+The [reservation slice](validation-strategy.md#reservation-slice) uses canonical models directly, with generated storage and read interfaces and explicit stock accounting, transitions, and transactions. Frozen migration artifacts convert historical timestamp seconds to the canonical ISO representation. Live verification demonstrated one scalar schema edit propagating through SQLite, resource contracts, HTTP, and native CLI flags without adapter changes. Another business domain and another database remain unproven.
 
 ## Development
 

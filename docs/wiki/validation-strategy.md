@@ -2,80 +2,57 @@
 
 ## Goal
 
-Treat Effect Domains as a design hypothesis to test through narrow vertical slices. Each slice should be complete enough to expose semantic differences between the domain, behavior, storage, and transport instead of demonstrating schema syntax alone. ([Project thesis](raw/project-thesis.md))
+Test Effect Domains through complete vertical slices that expose differences between domain behavior, storage, and transport. A schema demonstration alone cannot establish useful application conventions. ([Project thesis](raw/project-thesis.md))
 
 ## Required Shape of a Slice
 
-Each experiment should include:
+Each slice should include branded values, a meaningful state transition, a business operation with typed errors, database and versioned wire representations, explicit transformations where semantics differ, and a historical migration. These test both derivable structure and authored policy. ([Project thesis](raw/project-thesis.md))
 
-1. branded domain values;
-2. an entity with a meaningful state transition;
-3. a business operation with typed domain errors;
-4. a database representation;
-5. a versioned wire representation;
-6. explicit transformations wherever representations differ; and
-7. a historical database migration.
-
-These elements are required by the source thesis because they test both derivable structure and concerns that must remain authored. ([Project thesis](raw/project-thesis.md))
-
-## Evaluation Questions
-
-For every slice, record:
-
-- How much duplicate declaration disappeared?
-- Did domain changes propagate safely?
-- How much annotation machinery was required?
-- Did the normal user path remain declarative, without requiring authored functions or procedures?
-- Did Effect requirements keep concrete infrastructure replaceable behind a narrow interface?
-- Were escape hatches straightforward?
-- Is the result easier to understand than handwritten adapters?
-
-Compare evidence across materially different domains before extracting a general algebra. One successful slice can validate a technique, but it cannot establish that the technique generalizes. ([Project thesis](raw/project-thesis.md)) The interface and implementation questions reflect the later project-wide direction toward declarative APIs and Effect requirements. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Record how much duplication disappears, whether changes propagate safely, annotation cost, whether the normal interface stays declarative, runtime service boundaries, escape hatches, and clarity compared with handwritten adapters. Compare materially different domains before claiming generality. ([Project thesis](raw/project-thesis.md); [Declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
 ## Evidence Standard
 
-An experiment page should link to its implementation and tests, state what was authored versus derived, and answer each evaluation question. It should also report failures and awkward cases rather than presenting only the successful path. This reporting format is **wiki analysis** derived from the thesis’s evaluation criteria; it is not an additional claim from the source.
+Link implementation and regressions, distinguish authored policy from derived machinery, and record failures and limits. A live experiment is evidence for the exercised scenario, not a promise that all schema evolution works. This reporting standard is wiki analysis derived from the thesis's evaluation criteria.
 
 ## Reservation Slice
 
-The [reservation application](../../examples/README.md#reservation-application) supplies the first executable application experiment. Its [domain](../../examples/reservations/domain.ts) has branded SKU and reservation identifiers, positive quantities, and an explicit `held → confirmed | released` transition table. [RPC contracts](../../examples/reservations/contracts.ts) describe requests, successes, and typed failures independently of the database.
+The [reservation application](../../examples/README.md#reservation-application) has branded SKU and reservation identifiers, positive quantities, and an explicit `held → confirmed | released` transition table. Canonical models have no transport or persistence field annotations beyond intrinsic identity. ([Domain](../../examples/reservations/domain.ts))
 
 ### Authored and derived
 
 | Concern | Implementation |
 | --- | --- |
-| Operation contracts | Authored once with Effect `Rpc.make` and `RpcGroup.make` |
-| HTTP dispatch and codecs | Effect's RPC server interprets the group |
-| CLI commands and codecs | [`RpcCli.make`](../../src/rpc-cli.ts) interprets the same group |
-| Policies and transactions | Explicit [`Inventory`](../../examples/reservations/inventory.ts) implementation in [`sqlite.ts`](../../examples/reservations/sqlite.ts) |
-| Representations | Domain `DateTime.Utc`, storage `created_at_ms`, wire v1 ISO `createdAt`; conversion is explicit |
-| Migration history | [`001_initial` and `002_milliseconds`](../../examples/reservations/migrations.ts), applied by Effect's SQLite migrator |
+| Models and policy | Canonical schemas, reserve/confirm/release contracts, transition table, guarded stock accounting, and transactions are authored |
+| Storage | Tables, recognized constraints, reversible codecs, and ordinary repository operations derive from resources |
+| Resource publication | Only `stock.get` and `reservations.get` are enabled |
+| HTTP and CLI | The combined Effect RPC group supplies HTTP dispatch, native scalar flags, help, validation, and JSON fallback |
+| Timestamps | Framework codecs round-trip canonical UTC values through ISO storage and JSON without application row-copy functions |
+| History | Frozen `001_initial` and `002_timestamp` artifacts preserve historical schema and convert timestamp seconds explicitly |
 
-The [regression scenarios](../../test/Reservations.test.ts) cover competing reservations for the last item, rollback when reservation insertion fails, terminal transitions that cannot restore stock twice, and migration of historical reservations without resetting stock. The [CLI regression](../../test/RpcCli.test.ts) exercises the real executable's failure exit and separate output streams.
+Sources: [resources](../../examples/reservations/resources.ts), [application](../../examples/reservations/application.ts), [command contracts](../../examples/reservations/contracts.ts), [business implementation](../../examples/reservations/sqlite.ts), [migration history](../../examples/reservations/migrations.ts), [runtime](../../src/application-bun.ts).
 
 ### Evaluation
 
-- **Duplicate declarations:** five CLI commands are generated without per-operation parsers or dispatch handlers. HTTP uses the same RPC definitions, but storage schemas, initial DDL, row mappings, and ordinary queries remain handwritten. The slice does not meet the intended framework automation level. No handwritten-adapter baseline or total line-count saving has been measured.
-- **Change propagation:** a live experiment changed a shared request field from optional to required. Both HTTP and CLI rejected the old payload and accepted the new one without adapter edits. This proves that contract change, not arbitrary schema evolution.
-- **Annotation cost:** stock identity is declared only in the storage schema rather than the canonical stock schema. There are no HTTP or CLI annotations on the canonical reservation model.
-- **Declarative user path:** operation contracts and transitions are data. Handler binding, transaction boundaries, stock policy, and migrations are authored Effects.
-- **Infrastructure boundary:** the domain-facing `Inventory` service has no SQLite dependency. Only one concrete database implementation has been exercised.
-- **Escape hatches:** existing `Query.make` operations and direct transactional SQL compose without changing the RPC or CLI contracts.
-- **Clarity judgment:** reusing Effect's RPC contracts avoids a competing operation framework. JSON payloads avoid inventing field-to-flag policies, at the cost of a less ergonomic CLI than individually designed flags.
+- Duplicate storage schemas, ordinary reservation queries, row mappings, initial DDL, and per-operation HTTP/CLI bindings are removed. Business command inputs and policy remain explicit. No total line-count saving or handwritten-adapter baseline has been measured.
+- SKU identity is declared in the canonical stock schema. Timestamps no longer need an application-specific storage representation.
+- Resource capabilities and command contracts are declarative. Stock effects and transaction boundaries remain authored Effects over the same runtime client.
+- The `Inventory` service is independent of SQLite. Only one concrete database implementation has been exercised.
+- Authored queries and direct transactional SQL remain escape hatches. Generated resource mutations are not published for reservations.
+- Native flags improve the ordinary scalar path; nullable and structured payloads can use JSON. No claim is made that generated flags replace domain-specific CLI design.
 
-Live verification also exercised cross-interface reserve/release/confirm calls, typed failures, timestamp encoding, concurrent HTTP requests, and restart persistence. The example is unauthenticated and loopback-only. Evidence does not establish multi-process coordination, idempotent reservation creation, cancellation recovery, or production deployment readiness.
+The [reservation regressions](../../test/Reservations.test.ts) cover competing reservations for the last item, rollback on failed insertion, terminal transitions that cannot restore stock twice, and historical replay without resetting stock. The [CLI regression](../../test/RpcCli.test.ts) launches the executable and verifies validation failure on stderr with clean JSON stdout.
 
 ## Schema-First Acceptance Criteria
 
-The next proof should meet the [clarified framework direction](research-agenda.md#framework-direction):
+The implemented proof covers the [framework direction](research-agenda.md#framework-direction):
 
-1. Derive fresh SQL tables from the canonical stock and reservation schemas, including their identity and supported numeric and enum constraints. Do not author duplicate storage fields or initial DDL.
-2. Round-trip canonical timestamps through persistence and transport without application-authored field-copy functions.
-3. Supply ordinary repository operations and enabled resource contracts by convention. Keep reserve, confirm, release, and their transaction scope explicitly authored.
-4. Add a normal scalar field in one canonical schema. On a fresh database, persistence, resource input/output contracts, and HTTP/CLI validation must follow without per-layer field edits.
-5. Preserve no-oversell, rollback, and terminal-transition guarantees. Generated resource exposure must not let callers bypass those policies with unrestricted reservation updates.
-6. Produce reviewable schema changes for existing databases. Historical migration replay must not change when the current model changes; renames and backfills require explicit intent.
+1. Canonical stock and reservation schemas derive SQL tables, identity, supported numeric and enum constraints, and initial migration artifacts. There is no duplicate storage model or handwritten initial DDL.
+2. Native UTC timestamps round-trip through generated storage and JSON codecs without application field-copy functions. Codec regressions also cover booleans, nullable scalar codecs, and preserved root checks. ([Table tests](../../test/Table.test.ts))
+3. Resources supply typed repositories and selected RPC operations. Reserve, confirm, release, and their transaction scope stay explicit.
+4. A live fresh-database experiment added `priority: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))` to one canonical schema while leaving application, HTTP server, and CLI definitions unchanged. SQLite gained the column and constraint; generated CLI help gained `--priority`; create/get/list/update/remove traversed HTTP and SQLite. Negative values were rejected, `false` remained false, and timestamp milliseconds survived. The throwaway experiment was removed after verification; its outcome is recorded here rather than retained as a second application.
+5. Reservation regression scenarios preserve no-oversell, rollback, and terminal-state guarantees. Live verification also attempted an unpublished reservation update over RPC and confirmed rejection without changing the reservation.
+6. Existing databases use reviewed artifacts. Migration regressions cover explicit rename/backfill intent, literal-aware drift checks, column-order differences after additions, and rollback of failed transformations. Historical reservation replay uses frozen files independent of the current model. ([Migration regressions](../../test/SqliteMigrations.test.ts))
 
 ## Remaining Gap
 
-First remove the measured mechanical duplication from the reservation slice. Then test the conventions against a materially different domain and another infrastructure implementation before claiming generality. See the [Research Agenda](research-agenda.md).
+The example is unauthenticated and loopback-only. Evidence does not establish multi-process coordination, idempotent reservation creation, cancellation recovery, production deployment readiness, another database, or a materially different business domain. The next architectural evidence should test those conventions in another slice rather than expand abstractions around reservations. See the [Research Agenda](research-agenda.md).
