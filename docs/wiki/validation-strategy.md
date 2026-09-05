@@ -38,7 +38,7 @@ An experiment page should link to its implementation and tests, state what was a
 
 ## Reservation Slice
 
-The [reservation application](../../examples/README.md#reservation-application) supplies the first complete slice. Its [domain](../../examples/reservations/domain.ts) has branded SKU and reservation identifiers, positive quantities, and an explicit `held → confirmed | released` transition table. [RPC contracts](../../examples/reservations/contracts.ts) describe requests, successes, and typed failures independently of the database.
+The [reservation application](../../examples/README.md#reservation-application) supplies the first executable application experiment. Its [domain](../../examples/reservations/domain.ts) has branded SKU and reservation identifiers, positive quantities, and an explicit `held → confirmed | released` transition table. [RPC contracts](../../examples/reservations/contracts.ts) describe requests, successes, and typed failures independently of the database.
 
 ### Authored and derived
 
@@ -55,9 +55,9 @@ The [regression scenarios](../../test/Reservations.test.ts) cover competing rese
 
 ### Evaluation
 
-- **Duplicate declarations:** five CLI commands are generated without per-operation parsers or dispatch handlers. HTTP uses the same RPC definitions. No handwritten-adapter baseline or total line-count saving has been measured.
+- **Duplicate declarations:** five CLI commands are generated without per-operation parsers or dispatch handlers. HTTP uses the same RPC definitions, but storage schemas, initial DDL, row mappings, and ordinary queries remain handwritten. The slice does not meet the intended framework automation level. No handwritten-adapter baseline or total line-count saving has been measured.
 - **Change propagation:** a live experiment changed a shared request field from optional to required. Both HTTP and CLI rejected the old payload and accepted the new one without adapter edits. This proves that contract change, not arbitrary schema evolution.
-- **Annotation cost:** identity annotations identify entity keys; there are no HTTP or CLI annotations on the canonical reservation model.
+- **Annotation cost:** stock identity is declared only in the storage schema rather than the canonical stock schema. There are no HTTP or CLI annotations on the canonical reservation model.
 - **Declarative user path:** operation contracts and transitions are data. Handler binding, transaction boundaries, stock policy, and migrations are authored Effects.
 - **Infrastructure boundary:** the domain-facing `Inventory` service has no SQLite dependency. Only one concrete database implementation has been exercised.
 - **Escape hatches:** existing `Query.make` operations and direct transactional SQL compose without changing the RPC or CLI contracts.
@@ -65,6 +65,17 @@ The [regression scenarios](../../test/Reservations.test.ts) cover competing rese
 
 Live verification also exercised cross-interface reserve/release/confirm calls, typed failures, timestamp encoding, concurrent HTTP requests, and restart persistence. The example is unauthenticated and loopback-only. Evidence does not establish multi-process coordination, idempotent reservation creation, cancellation recovery, or production deployment readiness.
 
+## Schema-First Acceptance Criteria
+
+The next proof should meet the [clarified framework direction](research-agenda.md#framework-direction):
+
+1. Derive fresh SQL tables from the canonical stock and reservation schemas, including their identity and supported numeric and enum constraints. Do not author duplicate storage fields or initial DDL.
+2. Round-trip canonical timestamps through persistence and transport without application-authored field-copy functions.
+3. Supply ordinary repository operations and enabled resource contracts by convention. Keep reserve, confirm, release, and their transaction scope explicitly authored.
+4. Add a normal scalar field in one canonical schema. On a fresh database, persistence, resource input/output contracts, and HTTP/CLI validation must follow without per-layer field edits.
+5. Preserve no-oversell, rollback, and terminal-transition guarantees. Generated resource exposure must not let callers bypass those policies with unrestricted reservation updates.
+6. Produce reviewable schema changes for existing databases. Historical migration replay must not change when the current model changes; renames and backfills require explicit intent.
+
 ## Remaining Gap
 
-A second materially different domain and another infrastructure implementation are still needed before generalization. See the [Research Agenda](research-agenda.md).
+First remove the measured mechanical duplication from the reservation slice. Then test the conventions against a materially different domain and another infrastructure implementation before claiming generality. See the [Research Agenda](research-agenda.md).

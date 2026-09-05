@@ -2,6 +2,28 @@
 
 This page records established implementation findings and unresolved questions. The source thesis establishes the constraints, while implementation evidence changes which questions remain open. ([Project thesis](raw/project-thesis.md))
 
+## Framework Direction
+
+The human clarified the intended product in the current conversation: derive SQL table structure from the domain schemas, provide "a LOT more automation," and think "Rails (as in Ruby on Rails) for Effect." This is direction for the product, not a claim about the current implementation.
+
+The application author should declare canonical Effect schemas, select resource capabilities, and supply business commands and policy. Framework conventions should supply routine persistence, interfaces, and runtime composition. Standard CRUD semantics can be defined once by the framework and selected declaratively; they need not be rediscovered from a schema or handwritten in every application.
+
+### Proposed contract, not yet implemented
+
+- One application definition registers canonical schemas and the enabled resource operations. Model registration alone does not publish unrestricted mutations.
+- The persistence interpreter derives fresh table structure, identity, supported SQL constraints, and reversible row codecs. Ordinary timestamps and column naming do not require a second field-by-field storage model. Unknown predicates must not be advertised as database-enforced constraints, and lossy representations require an explicit alternative.
+- Standard repositories and their input, output, and error schemas follow the registered resource capabilities. Custom queries retain the authored `Query.make` escape hatch.
+- Resource operations and authored command contracts feed Effect RPC, HTTP, CLI arguments, validation, and help. Applications do not repeat per-operation adapter bindings or ordinary row-copy functions.
+- Runtime Layers provide concrete services. Database preparation and migration execution are framework machinery; historical schema snapshots, rename intent, backfills, authorization, transaction scope, and reservation policy remain explicit.
+
+Prefer this application-level convention layer over persistence and transport annotations on every domain field. Intrinsic identity and declared relationships belong in the domain; physical representation and publication choices belong in the application or adapter. This extends the existing [table/query](tables-and-queries.md) and [RPC](../../examples/reservations/contracts.ts) seams rather than introducing another operation algebra.
+
+### Measured gap
+
+The reservation slice duplicates its canonical fields into `StockStorageSchema` and `ReservationStorageSchema`, copies rows in both directions, authors ordinary reads and writes, and handwrites initial `CREATE TABLE` statements. These are not examples of necessary business policy. ([Domain](../../examples/reservations/domain.ts); [Storage](../../examples/reservations/sqlite.ts); [Migrations](../../examples/reservations/migrations.ts))
+
+A live in-memory SQLite probe against the current compiler showed that the canonical stock schema receives a generated `id` rather than a SKU primary key, `available` becomes `REAL`, and direct SQL accepts a negative stock value. The canonical reservation schema fails derivation at `createdAt`. The stock schema omits its intrinsic identity annotation, while the compiler supports only encoded strings and numbers and does not project the numeric checks into SQL. These are concrete domain-declaration and interpreter gaps, not reasons to require duplicate application schemas. ([Table compiler](../../src/table.ts); [SQLite interpreter](../../src/sqlite-bun.ts); [Domain](../../examples/reservations/domain.ts))
+
 ## Established Persistence Findings
 
 Persistence now separates table derivation from authored queries. `Table.make` accepts a canonical schema and table name. `Query.make` defines one operation from request/result schemas and an Effect implementation. The implementation’s requirement channel carries the runtime database service until execution. ([Tables and Queries](tables-and-queries.md); [Table and query API direction](raw/table-and-query-api-direction.md))
@@ -25,7 +47,7 @@ The [reservation slice](validation-strategy.md#reservation-slice) reuses Effect 
 
 The slice composes authored queries under explicit SQLite transactions and uses a tracked historical migration. It demonstrates typed transformations among domain timestamps, database milliseconds, and wire ISO strings. Business transitions are authored declaratively; stock effects and transaction boundaries remain in the implementation. ([Storage implementation](../../examples/reservations/sqlite.ts); [Migration history](../../examples/reservations/migrations.ts); [Regression scenarios](../../test/Reservations.test.ts))
 
-The next generalization decision should wait for another materially different domain. Open application questions include whether JSON-only CLI input is sufficient, whether schema services and middleware remain manageable as contracts grow, and whether another interpreter needs more metadata than the existing RPC declarations provide.
+The immediate task is to remove mechanical duplication from this slice before treating it as evidence for the desired framework. Another materially different domain is still needed to test whether the resulting conventions generalize. Open application questions include generated field-level CLI arguments, schema services and middleware, and how resource capabilities compose with custom command contracts.
 
 ## Remaining Persistence Questions
 
@@ -66,4 +88,4 @@ The Effect requirement and clean-cutover constraints remain established project 
 
 ## Success and Stop Conditions
 
-The [Validation Strategy](validation-strategy.md) gives evaluation questions, but quantitative or practical thresholds are not defined. Before generalizing, the project should decide what amount of removed duplication justifies the machinery and what signs should stop framework extraction. A valid outcome may be a set of domain-specific patterns rather than a general meta-framework.
+The [schema-first acceptance criteria](validation-strategy.md#schema-first-acceptance-criteria) make the next proof concrete: eliminate duplicate field declarations and ordinary persistence and adapter code while preserving business invariants. Compare the resulting conventions across domains before extracting a general algebra. The implementation may use several deep modules; the user-facing objective is an integrated, convention-first application framework.

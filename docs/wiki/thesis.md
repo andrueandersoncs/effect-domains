@@ -10,7 +10,7 @@ Effect Schema is relevant because a schema is an inspectable runtime value as we
 
 All project implementations use Effect and depend on interfaces rather than fixed concrete infrastructure. Effect Context and Requirements make runtime dependencies explicit, while runtime-provided implementations satisfy those requirements. A capability such as persistence may therefore derive mappings and execute operations without coupling its public contract to one database implementation. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
 
-The final user-facing product favors inspectable schemas, configurations, and annotations across capabilities. Mechanical behavior is derived from those declarations. Behavior that is not present in a schema remains explicitly authored: the persistence interface therefore accepts an Effect implementation for each query while still deriving its request and result codecs. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md); [Table and query API direction](raw/table-and-query-api-direction.md))
+The final user-facing product favors inspectable schemas, configurations, and annotations across capabilities. Mechanical behavior is derived from those declarations. The [current framework direction](research-agenda.md#framework-direction) also calls for standard application behavior supplied by convention: ordinary CRUD should not require an authored query in every application. The existing `Query.make` interface remains a lower-level seam for explicit behavior. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md); [Table and query API direction](raw/table-and-query-api-direction.md))
 
 The project does not preserve backward compatibility. Refactors should make a clean cutover to the best current design and remove or rewrite superseded code instead of retaining deprecated functions, shims, or parallel interfaces. ([Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
 
@@ -33,6 +33,8 @@ The strongest candidates for derivation are representations whose meaning is alr
 The intended benefit is less duplicate declaration and less drift between mechanically equivalent representations. ([Project thesis](raw/project-thesis.md))
 
 A schema does not contain enough information to derive business decisions, state transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migrations, compatibility policy, retries, or idempotency. These concerns require explicit design and implementation. Operations should be defined in terms of domain models, but their policy and behavior remain authored. ([Project thesis](raw/project-thesis.md))
+
+Explicit policy does not require handwritten machinery. A framework can define CRUD semantics, reversible storage conventions, transport bindings, and migration execution once. The application selects capabilities and supplies policy where meaning cannot be inferred. This is the proposed distinction between schema-derived structure, framework conventions, and authored business behavior. ([Framework direction](research-agenda.md#framework-direction))
 
 ## Architectural Shape
 

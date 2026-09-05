@@ -2,14 +2,14 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains design hypothesis and implementation workspace.
 
-The project asks how much application structure can be derived safely from rich domain schemas without hiding business behavior or forcing different representations to share semantics they do not have.
+Effect Domains aims to be a schema-first, convention-over-configuration application framework for Effect. Canonical schemas should supply SQL table structure and routine application code; application authors should supply business policy. The [framework direction](research-agenda.md#framework-direction) distinguishes this target from what is implemented today.
 
 ## Content Map
 
 - [Thesis](thesis.md) — the central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — the accepted persistence interface and current implementation evidence.
 - [Validation Strategy](validation-strategy.md) — required vertical slices, reservation application evidence, and criteria for judging the hypothesis.
-- [Research Agenda](research-agenda.md) — unresolved questions and evidence needed before a general framework is justified.
+- [Research Agenda](research-agenda.md) — the convention-first framework direction, measured automation gaps, and open questions.
 
 ## Wiki Operations and Sources
 
@@ -28,7 +28,7 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 Persistence now has separate implemented table and query definitions. `Table` and `Query` are Effect Schema classes whose `make` overrides Schema's static constructor: `Table.make({ name, schema })` preserves its canonical source schema and derives a persisted `rowSchema`, adding an adapter-generated UUIDv7 `id` when no `identifier` annotation overrides it. A shared `SchemaASTF<A>` tagged base functor and recursive `evaluate` fold project trusted Schema AST values directly into the table-specific scalar algebra. `Query.make({ table, Request, Result, implementation })` defines one operation whose Effect requirements carry the runtime database dependency. Column metadata is `TableField`, a tagged Schema class. `PersistedRef.make({ commit, load })` remains an Effectful namespace constructor because it loads and caches a runtime value rather than constructing a schema record. `SqliteBunRuntime` supplies table writes, UUIDv7 generation, and the database, while integration tests validate authored CRUD, generated identity, and query-backed persisted references.
 
-The [reservation slice](validation-strategy.md#reservation-slice) now defines five application operations with Effect `RpcGroup`, independently of tables. The group serves HTTP RPC and a generated unary JSON CLI. SQLite handlers author transactions and transitions explicitly; a tracked migration converts historical timestamp seconds to milliseconds. This establishes one application slice, not general framework validation.
+The [reservation slice](validation-strategy.md#reservation-slice) defines five application operations with Effect `RpcGroup`, independently of tables. The group serves HTTP RPC and a generated unary JSON CLI. SQLite handlers author transactions and transitions explicitly; a tracked migration converts historical timestamp seconds to milliseconds. The slice still duplicates storage models, row mappings, ordinary queries, and initial DDL. It establishes executable behavior but does not meet the intended automation level.
 
 ## Development
 
