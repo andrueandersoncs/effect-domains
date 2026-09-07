@@ -1,10 +1,10 @@
-import { Schema } from "effect"
+import { type Brand, Schema } from "effect"
 
 export const DomainIdentifier = "@effect-domains/domain/identifier"
 
-export const identifier = <S extends Schema.ConstraintRebuildable>(
+export const identifier = <S extends Schema.Top>(
   schema: S,
 ) =>
-  Schema.brand(DomainIdentifier)(schema).annotate({
+  schema.annotate({
     [DomainIdentifier]: true,
-  })
+  }) as S & Brand.Brand<typeof DomainIdentifier>

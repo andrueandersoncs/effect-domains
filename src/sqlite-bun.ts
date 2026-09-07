@@ -1,73 +1,154 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, Context, Effect, Equivalence, Layer, Option, pipe } from "effect"
+import { Array, Context, Effect, Equivalence, Layer, Option, pipe, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { TableError, TableStore, type TableField } from "./table.ts"
+import { RepositoryError, RepositoryStore } from "./repository-store.ts"
+import { SchemaStore } from "./migrations.ts"
+import { renderCreateTable } from "./sqlite-ddl.ts"
+import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
+import { Table, TableError, TableStore } from "./table.ts"
 
 export class Database extends Context.Service<Database, SqlClient.SqlClient>()(
   "@effect-domains/SqliteBun/Database",
 ) {}
 
-const tableStoreFromSqlclient = (sql: SqlClient.SqlClient) =>
+const makeTableStore = (sqlClient: SqlClient.SqlClient) =>
   TableStore.of({
     write: Effect.fn("TableStore.write")(function* (table) {
-      const scalarIsString = Equivalence.strictEqual<"string" | "number">()
-      const fieldIsIdentifier = Equivalence.strictEqual<string>()
-      const generatedIsUuidV7 = Equivalence.strictEqual<"uuidv7">()
+      const snapshot = Table.snapshot(table)
+      const statement = renderCreateTable(snapshot)
+      const createTable = sqlClient`${sqlClient.literal(statement)}`
 
-      const nameFromTablefield = (field: TableField) => {
-        const columnType = scalarIsString(field.scalar, "string")
-          ? sql.literal("TEXT")
-          : sql.literal("REAL")
-
-        const primaryKey = fieldIsIdentifier(field.name, table.identifier)
-          ? sql.literal(" PRIMARY KEY")
-          : sql.literal("")
-
-        const isGeneratedUuidV7 = Option.containsWith(generatedIsUuidV7)(
-          field.generation,
-          "uuidv7",
-        )
-
-        const generated = isGeneratedUuidV7
-          ? sql.literal(` DEFAULT (lower(
-              substr(printf('%012x', cast(unixepoch('subsec') * 1000 as integer)), 1, 8) || '-' ||
-              substr(printf('%012x', cast(unixepoch('subsec') * 1000 as integer)), 9, 4) || '-7' ||
-              substr(hex(randomblob(2)), 2, 3) || '-' ||
-              substr('89ab', (random() & 3) + 1, 1) ||
-              substr(hex(randomblob(2)), 2, 3) || '-' ||
-              hex(randomblob(6))
-            ))`)
-          : sql.literal("")
-
-        return sql`${sql(field.name)} ${columnType}${primaryKey} NOT NULL${generated}`
-      }
-
-      const definitions = Array.map(table.fields, nameFromTablefield)
-      const columns = sql.join(", ", true)(definitions)
-      const statement = sql`CREATE TABLE ${sql(table.name)} ${columns}`
+      const tableError = (cause: unknown) => TableError.make({
+        operation: "createTable",
+        table: table.name,
+        cause,
+      })
 
       return yield* pipe(
-        statement,
+        createTable,
         Effect.asVoid,
-        Effect.mapError((cause) => new TableError(table.name, cause)),
+        Effect.mapError(tableError),
       )
     }),
   })
 
-const sqlClient = (filename: string) => {
+const repositoryFailure = (resource: string) => (cause: unknown) =>
+  RepositoryError.make({ resource, cause })
+
+class InsertWithoutReturnedRow extends Schema.TaggedError<InsertWithoutReturnedRow>()(
+  "InsertWithoutReturnedRow",
+  {},
+) {}
+
+const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
+  RepositoryStore.of({
+    find: Effect.fn("RepositoryStore.find")(function* (table, key) {
+      const rows = yield* pipe(
+        sqlClient<Readonly<Record<string, unknown>>>`
+          SELECT * FROM ${sqlClient(table.name)}
+          WHERE ${sqlClient(table.identifier)} = ${key}
+          LIMIT 1
+        `,
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+
+      return pipe(rows, Array.get(0))
+    }),
+    list: Effect.fn("RepositoryStore.list")(function* (table) {
+      return yield* pipe(
+        sqlClient<Readonly<Record<string, unknown>>>`SELECT * FROM ${sqlClient(table.name)}`,
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+    }),
+    insert: Effect.fn("RepositoryStore.insert")(function* (table, value) {
+      const rows = yield* pipe(
+        sqlClient<Readonly<Record<string, unknown>>>`
+          INSERT INTO ${sqlClient(table.name)} ${sqlClient.insert(value as Record<string, unknown>)}
+          RETURNING *
+        `,
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+
+      const row = pipe(rows, Array.get(0))
+      return yield* Option.match(row, {
+        onNone: () => {
+          const noRow = InsertWithoutReturnedRow.make({})
+          const failure = repositoryFailure(table.name)
+          const repositoryError = failure(noRow)
+
+          return Effect.fail(repositoryError)
+        },
+        onSome: Effect.succeed,
+      })
+    }),
+    update: Effect.fn("RepositoryStore.update")(function* (table, value) {
+      const key = value[table.identifier]
+
+      const rows = yield* pipe(
+        sqlClient<Readonly<Record<string, unknown>>>`
+          UPDATE ${sqlClient(table.name)}
+          SET ${sqlClient.update(value as Record<string, unknown>, [table.identifier])}
+          WHERE ${sqlClient(table.identifier)} = ${key}
+          RETURNING *
+        `,
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+
+      return pipe(rows, Array.get(0))
+    }),
+    remove: Effect.fn("RepositoryStore.remove")(function* (table, key) {
+      const rows = yield* pipe(
+        sqlClient<Readonly<Record<string, unknown>>>`
+          DELETE FROM ${sqlClient(table.name)}
+          WHERE ${sqlClient(table.identifier)} = ${key}
+          RETURNING ${sqlClient(table.identifier)}
+        `,
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+
+      return Array.isReadonlyArrayNonEmpty(rows)
+    }),
+  })
+
+const sqlClient = (
+  filename: string,
+  options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
+) => {
   const clientLayer = SqliteClient.layer({ filename })
+  const databaseLayer = Layer.effect(Database, SqlClient.SqlClient)
+  const tableStore = pipe(Database, Effect.map(makeTableStore))
 
-  const databaseLayer = pipe(
-    Layer.effect(Database, SqlClient.SqlClient),
-    Layer.provide(clientLayer),
+  const tableStoreLayer = Layer.effect(
+    TableStore,
+    tableStore,
   )
 
-  const tableStoreLayer = pipe(
-    Layer.effect(TableStore, Effect.map(Database, tableStoreFromSqlclient)),
-    Layer.provide(databaseLayer),
+  const repositoryStore = pipe(Database, Effect.map(makeRepositoryStore))
+
+  const repositoryStoreLayer = Layer.effect(
+    RepositoryStore,
+    repositoryStore,
   )
 
-  return Layer.merge(databaseLayer, tableStoreLayer)
+  const makeSchemaStore = (sqlClient: SqlClient.SqlClient) =>
+    makeMigrationStore(sqlClient, options.migrations)
+
+  const schemaStore = pipe(Database, Effect.map(makeSchemaStore))
+
+  const schemaStoreLayer = Layer.effect(
+    SchemaStore,
+    schemaStore,
+  )
+
+  const storesLayer = Layer.mergeAll(
+    tableStoreLayer,
+    repositoryStoreLayer,
+    schemaStoreLayer,
+  )
+
+  const servicesLayer = Layer.provideMerge(storesLayer, databaseLayer)
+
+  return Layer.provide(servicesLayer, clientLayer)
 }
 
 export const SqliteBunRuntime = {

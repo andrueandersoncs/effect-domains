@@ -33,13 +33,15 @@ export class Query extends Schema.Class<Query>("Query")({
       return yield* Schema.decodeUnknownEffect(Result)(implemented)
     })
 
+    const query = super.make({
+      table,
+      Request,
+      Result,
+      implementation,
+    })
+
     return Struct.assign(
-      super.make({
-        table,
-        Request,
-        Result,
-        implementation,
-      }),
+      query,
       { execute },
     ) as {
       readonly table: Table

@@ -1,413 +1,177 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  Array,
-  Effect,
-  Equivalence,
-  Function,
-  Option,
-  pipe,
-  Ref,
-  Schema,
-} from "effect"
+import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
 import { identifier } from "../src/domain.ts"
-import {
-  DefaultTableIdentifierSchema,
-  Table,
-  TableDefinitionError,
-  TableError,
-  TableField,
-  TableStore,
-} from "../src/table.ts"
+import { Table, TableDefinitionError } from "../src/table.ts"
 
 describe("Table", () => {
-  const GeneratedRecordSchema = Schema.Struct({
-    title: Schema.String,
-    score: Schema.Number,
-  })
+  const isMinimumLabelLength = Schema.isMinLength(2)
+  const isMaximumLabelLength = Schema.isMaxLength(20)
+  const EventLabelSchema = Schema.String.check(isMinimumLabelLength, isMaximumLabelLength)
+  const isEventQuantity = Schema.isBetween({ minimum: 1, maximum: 99 })
+  const EventQuantitySchema = Schema.Int.check(isEventQuantity)
+  const EventStateSchema = Schema.Literals(["queued", "confirmed"])
+  const EventNoteSchema = Schema.NullOr(Schema.String)
 
-  interface GeneratedRecord extends Schema.Schema.Type<typeof GeneratedRecordSchema> {}
-  const GeneratedRecords = Table.make({ name: "generated_records", schema: GeneratedRecordSchema })
-
-  const ExplicitIdentifierSchema = pipe(
-    Schema.NumberFromString,
-    identifier,
-  )
-
-  const ExplicitRecordSchema = Schema.Struct({
-    recordNumber: ExplicitIdentifierSchema,
-    title: Schema.String,
-    score: Schema.Number,
-  })
-
-  interface ExplicitRecord extends Schema.Schema.Type<typeof ExplicitRecordSchema> {}
-  const ExplicitRecords = Table.make({ name: "explicit_records", schema: ExplicitRecordSchema })
-  const OptionalTitleSchema = Schema.optionalKey(Schema.String)
-
-  const OptionalRecordSchema = Schema.Struct({
-    title: OptionalTitleSchema,
-  })
-
-  interface OptionalRecord extends Schema.Schema.Type<typeof OptionalRecordSchema> {}
-
-  const makeOptionalRecords = () =>
-    Table.make({ name: "optional_records", schema: OptionalRecordSchema })
-
-  const OptionalRecordError = new TableDefinitionError(
-    "optional_records",
-    "field title must be required",
-  )
-
-  const BooleanRecordSchema = Schema.Struct({
+  const EventSchema = Schema.Struct({
+    label: EventLabelSchema,
+    quantity: EventQuantitySchema,
+    state: EventStateSchema,
     active: Schema.Boolean,
+    occurredAt: Schema.DateTimeUtc,
+    note: EventNoteSchema,
   })
 
-  interface BooleanRecord extends Schema.Schema.Type<typeof BooleanRecordSchema> {}
+  interface Event extends Schema.Schema.Type<typeof EventSchema> {}
+  const Events = Table.make({ name: "events", schema: EventSchema })
+  const DateSchema = Schema.Struct({ date: Schema.DateFromString })
+  interface Date extends Schema.Schema.Type<typeof DateSchema> {}
+  const Dates = Table.make({ name: "dates", schema: DateSchema })
 
-  const makeBooleanRecords = () =>
-    Table.make({ name: "boolean_records", schema: BooleanRecordSchema })
+  const OrderedFieldsSchema = Schema.Struct({
+    lower: Schema.Int,
+    upper: Schema.Int,
+  })
 
-  const BooleanRecordError = new TableDefinitionError(
-    "boolean_records",
-    "field active must encode to String or Number",
+  interface OrderedFields extends Schema.Schema.Type<typeof OrderedFieldsSchema> {}
+
+  const orderedFilter = Schema.makeFilter(
+    (value: OrderedFields) => value.lower < value.upper,
   )
 
-  enum InterpretedStatus {
-    Ready = "ready",
-    Done = "done",
-  }
+  const OrderedSchema = OrderedFieldsSchema.check(orderedFilter)
+  interface Ordered extends Schema.Schema.Type<typeof OrderedSchema> {}
+  const Ordered = Table.make({ name: "ordered", schema: OrderedSchema })
+  const NullableOptionSchema = Schema.OptionFromNullOr(Schema.String)
+  const NullableOptionsSchema = Schema.Struct({ value: NullableOptionSchema })
+  interface NullableOptions extends Schema.Schema.Type<typeof NullableOptionsSchema> {}
 
-  const InterpretedScalarRecordSchema = Schema.Struct({
-    literal: Schema.Literal("ready"),
-    template: Schema.TemplateLiteral(["item-", Schema.Number]),
-    enumeration: Schema.Enum(InterpretedStatus),
-    union: Schema.Union([Schema.String, Schema.Literal("fallback")]),
-    suspended: Schema.suspend(() => Schema.Number),
+  const NullableOptionsTable = Table.make({
+    name: "nullable_options",
+    schema: NullableOptionsSchema,
   })
-
-  interface InterpretedScalarRecord extends
-    Schema.Schema.Type<typeof InterpretedScalarRecordSchema>
-  {}
-
-  const InterpretedScalarRecords = Table.make({
-    name: "interpreted_scalar_records",
-    schema: InterpretedScalarRecordSchema,
-  })
-
-  const MixedScalarUnionRecordSchema = Schema.Struct({
-    value: Schema.Union([Schema.String, Schema.Number]),
-  })
-
-  interface MixedScalarUnionRecord extends
-    Schema.Schema.Type<typeof MixedScalarUnionRecordSchema>
-  {}
-
-  const makeMixedScalarUnionRecords = () =>
-    Table.make({
-      name: "mixed_scalar_union_records",
-      schema: MixedScalarUnionRecordSchema,
-    })
-
-  const MixedScalarUnionRecordError = new TableDefinitionError(
-    "mixed_scalar_union_records",
-    "field value must encode to String or Number",
-  )
-
-  const CyclicScalarSchema: Schema.Codec<never> = Schema.suspend(
-    (): Schema.Codec<never> => CyclicScalarSchema,
-  )
-
-  const CyclicScalarRecordSchema = Schema.Struct({
-    value: CyclicScalarSchema,
-  })
-
-  interface CyclicScalarRecord extends
-    Schema.Schema.Type<typeof CyclicScalarRecordSchema>
-  {}
-
-  const makeCyclicScalarRecords = () =>
-    Table.make({
-      name: "cyclic_scalar_records",
-      schema: CyclicScalarRecordSchema,
-    })
-
-  const CyclicScalarRecordError = new TableDefinitionError(
-    "cyclic_scalar_records",
-    "field value must encode to String or Number",
-  )
-
-  const SymbolField = Symbol("value")
-
-  const SymbolRecordSchema = Schema.Struct({
-    [SymbolField]: Schema.String,
-  })
-
-  interface SymbolRecord extends Schema.Schema.Type<typeof SymbolRecordSchema> {}
-
-  const makeSymbolRecords = () =>
-    Table.make({ name: "symbol_records", schema: SymbolRecordSchema })
-
-  const SymbolRecordError = new TableDefinitionError(
-    "symbol_records",
-    "field names must be strings",
-  )
-
-  const FirstIdentifierSchema = pipe(Schema.String, identifier)
-  const SecondIdentifierSchema = pipe(Schema.Number, identifier)
-
-  const AmbiguousRecordSchema = Schema.Struct({
-    firstId: FirstIdentifierSchema,
-    secondId: SecondIdentifierSchema,
-  })
-
-  interface AmbiguousRecord extends Schema.Schema.Type<typeof AmbiguousRecordSchema> {}
-
-  const makeAmbiguousRecords = () =>
-    Table.make({ name: "ambiguous_records", schema: AmbiguousRecordSchema })
-
-  const AmbiguousRecordError = new TableDefinitionError(
-    "ambiguous_records",
-    "schema must contain at most one Domain.identifier field",
-  )
-
-  const ReservedIdentifierRecordSchema = Schema.Struct({
-    id: Schema.String,
-    title: Schema.String,
-  })
-
-  interface ReservedIdentifierRecord extends Schema.Schema.Type<typeof ReservedIdentifierRecordSchema> {}
-
-  const makeReservedIdentifierRecords = () =>
-    Table.make({ name: "reserved_id_records", schema: ReservedIdentifierRecordSchema })
-
-  const ReservedIdentifierRecordError = new TableDefinitionError(
-    "reserved_id_records",
-    "field id must use Domain.identifier when overriding the default UUIDv7 identifier",
-  )
-
-  const ValidUuidV4 = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-  const NoGeneration = Option.none<"uuidv7">()
-  const UuidV7Generation = Option.some<"uuidv7">("uuidv7")
-
-  const GeneratedFieldMetadata: ReadonlyArray<TableField> = [
-    TableField.make({
-      name: "id",
-      scalar: "string",
-      generation: UuidV7Generation,
-    }),
-    TableField.make({
-      name: "title",
-      scalar: "string",
-      generation: NoGeneration,
-    }),
-    TableField.make({
-      name: "score",
-      scalar: "number",
-      generation: NoGeneration,
-    }),
-  ]
-
-  const ExplicitFieldMetadata: ReadonlyArray<TableField> = [
-    TableField.make({
-      name: "recordNumber",
-      scalar: "string",
-      generation: NoGeneration,
-    }),
-    TableField.make({
-      name: "title",
-      scalar: "string",
-      generation: NoGeneration,
-    }),
-    TableField.make({
-      name: "score",
-      scalar: "number",
-      generation: NoGeneration,
-    }),
-  ]
-
-  const isSame = Equivalence.strictEqual<unknown>()
-
-  const MissingIdentifierRowInput = GeneratedRecordSchema.make({
-    title: "Mechanical derivation",
-    score: 5,
-  })
-
-  const reportsSuccess = Effect.match({
-    onFailure: Function.constant(false),
-    onSuccess: Function.constant(true),
-  })
-
-  const verifiesGeneratedIdentifier = Effect.fn(
-    "TableTest.verifiesGeneratedIdentifier",
-  )(function* (row: unknown) {
-    const decoded = yield* Schema.decodeUnknownEffect(GeneratedRecords.rowSchema)(
-      row,
-    )
-
-    const invalidIdentifierSucceeded = yield* pipe(
-      Schema.decodeUnknownEffect(DefaultTableIdentifierSchema)(ValidUuidV4),
-      reportsSuccess,
-    )
-
-    const missingIdentifierSucceeded = yield* pipe(
-      Schema.decodeUnknownEffect(GeneratedRecords.rowSchema)(
-        MissingIdentifierRowInput,
-      ),
-      reportsSuccess,
-    )
-
-    expect(decoded).toEqual(row)
-    expect(invalidIdentifierSucceeded).toBe(false)
-    expect(missingIdentifierSucceeded).toBe(false)
-  })
-
-  const verifiesCreateTableDelegation = Effect.gen(function* () {
-    const receivedTable = yield* Ref.make<unknown>(undefined)
-
-    const store = TableStore.of({
-      write: (table) => Ref.set(receivedTable, table),
-    })
-
-    const createTable = GeneratedRecords.write()
-
-    yield* pipe(
-      createTable,
-      Effect.provideService(TableStore, store),
-    )
-
-    const observedTable = yield* Ref.get(receivedTable)
-
-    expect(observedTable).toBe(GeneratedRecords)
-  })
-
-  const verifiesCreateTableFailure = Effect.gen(function* () {
-    const cause = "database unavailable"
-    const tableError = new TableError(GeneratedRecords.name, cause)
-
-    const store = TableStore.of({
-      write: () => Effect.fail(tableError),
-    })
-
-    const createTable = GeneratedRecords.write()
-
-    const failure = yield* pipe(
-      createTable,
-      Effect.provideService(TableStore, store),
-      Effect.flip,
-    )
-
-    expect(failure).toBe(tableError)
-    expect(failure.operation).toBe("createTable")
-    expect(failure.table).toBe("generated_records")
-    expect(failure.cause).toBe(cause)
-    expect(failure.message).toBe("Table creation failed for generated_records")
-  })
-
-
-  it.effect("adds a generated UUIDv7 identifier when none is declared", () =>
-    Effect.sync(() => {
-      const rowSchemaIsSourceSchema = isSame(
-        GeneratedRecords.rowSchema,
-        GeneratedRecordSchema,
-      )
-
-      expect(GeneratedRecords.name).toBe("generated_records")
-      expect(GeneratedRecords.schema).toBe(GeneratedRecordSchema)
-      expect(rowSchemaIsSourceSchema).toBe(false)
-      expect(GeneratedRecords.identifier).toBe("id")
-      expect(GeneratedRecords.identifierSchema).toBe(
-        GeneratedRecords.rowSchema.fields.id,
-      )
-      expect(GeneratedRecords.identifierSchema).toBe(
-        DefaultTableIdentifierSchema,
-      )
-      expect(GeneratedRecords.fields).toEqual(GeneratedFieldMetadata)
-    }))
-
-  it.effect.prop(
-    "generates valid rows from the derived row schema",
-    [GeneratedRecords.rowSchema],
-    ([row]) => verifiesGeneratedIdentifier(row),
-  )
-
-  it.effect("uses an explicit identifier and compiles encoded scalar metadata", () =>
-    Effect.sync(() => {
-      expect(ExplicitRecords.schema).toBe(ExplicitRecordSchema)
-      expect(ExplicitRecords.rowSchema).toBe(ExplicitRecordSchema)
-      expect(ExplicitRecords.identifier).toBe("recordNumber")
-      expect(ExplicitRecords.identifierSchema).toBe(ExplicitIdentifierSchema)
-      expect(ExplicitRecords.fields).toEqual(ExplicitFieldMetadata)
-    }))
-
-  it.effect("evaluates the declared SchemaAST algebra recursively", () =>
-    Effect.sync(() => {
-      expect(
-        Array.map(InterpretedScalarRecords.fields, (field) => [
-          field.name,
-          field.scalar,
-        ]),
-      ).toEqual([
-        ["id", "string"],
-        ["literal", "string"],
-        ["template", "string"],
-        ["enumeration", "string"],
-        ["union", "string"],
-        ["suspended", "number"],
-      ])
-    }))
-
-  it.effect("rejects unions without one physical scalar representation", () =>
-    Effect.sync(() => {
-      expect(makeMixedScalarUnionRecords).toThrow(TableDefinitionError)
-      expect(makeMixedScalarUnionRecords).toThrow(
-        MixedScalarUnionRecordError.message,
-      )
-    }))
-
-  it.effect("rejects suspended cycles without unbounded recursion", () =>
-    Effect.sync(() => {
-      expect(makeCyclicScalarRecords).toThrow(TableDefinitionError)
-      expect(makeCyclicScalarRecords).toThrow(CyclicScalarRecordError.message)
-    }))
-
-  it.effect("rejects optional fields", () =>
-    Effect.sync(() => {
-      expect(makeOptionalRecords).toThrow(TableDefinitionError)
-      expect(makeOptionalRecords).toThrow(OptionalRecordError.message)
-    }))
-
-  it.effect("rejects fields that do not encode to a supported scalar", () =>
-    Effect.sync(() => {
-      expect(makeBooleanRecords).toThrow(TableDefinitionError)
-      expect(makeBooleanRecords).toThrow(BooleanRecordError.message)
-    }))
-
-  it.effect("rejects non-string field names", () =>
-    Effect.sync(() => {
-      expect(makeSymbolRecords).toThrow(TableDefinitionError)
-      expect(makeSymbolRecords).toThrow(SymbolRecordError.message)
-    }))
-
-  it.effect("rejects multiple explicit identifiers", () =>
-    Effect.sync(() => {
-      expect(makeAmbiguousRecords).toThrow(TableDefinitionError)
-      expect(makeAmbiguousRecords).toThrow(AmbiguousRecordError.message)
-    }))
-
-  it.effect("rejects an unannotated id field reserved by generated identity", () =>
-    Effect.sync(() => {
-      expect(makeReservedIdentifierRecords).toThrow(TableDefinitionError)
-      expect(makeReservedIdentifierRecords).toThrow(
-        ReservedIdentifierRecordError.message,
-      )
-    }))
 
   it.effect(
-    "delegates creation to the runtime TableStore",
-    Function.constant(verifiesCreateTableDelegation),
+    "round-trips native storage codecs without application storage models",
+    Effect.fn("Table.roundTripsStorageCodecs")(function* () {
+      const dateTime = DateTime.make("2025-01-02T03:04:05.000Z")
+      const occurredAt = Option.getOrThrow(dateTime)
+
+      const event = Events.rowSchema.make({
+        id: "0192f8d1-ef4e-7dd4-a8f0-ec3d1fe71826",
+        label: "arrived",
+        quantity: 2,
+        state: "queued",
+        active: true,
+        occurredAt,
+        note: null,
+      })
+
+      const insert = EventSchema.make({
+        label: "arrived",
+        quantity: 2,
+        state: "queued",
+        active: true,
+        occurredAt,
+        note: null,
+      })
+
+      const storedRow = yield* Schema.encodeEffect(Events.storageSchema)(event)
+      const decodedRow = yield* Schema.decodeUnknownEffect(Events.storageSchema)(storedRow)
+      const storedInsert = yield* Schema.encodeEffect(Events.insertSchema)(insert)
+      const decodedInsert = yield* Schema.decodeUnknownEffect(Events.insertSchema)(storedInsert)
+      const date = new Date("2025-01-02T00:00:00.000Z")
+      const dateValue = DateSchema.make({ date })
+      const storedDate = yield* Schema.encodeEffect(Dates.insertSchema)(dateValue)
+      const decodedDate = yield* Schema.decodeUnknownEffect(Dates.insertSchema)(storedDate)
+      const none = Option.none()
+      const storedNone = yield* Schema.encodeEffect(NullableOptionsTable.insertSchema)({ value: none })
+      const loadedSome = yield* Schema.decodeUnknownEffect(NullableOptionsTable.insertSchema)({ value: "retained" })
+
+      expect(storedRow).toMatchObject({ active: 1, note: null })
+      expect(storedRow.occurredAt).toBe("2025-01-02T03:04:05.000Z")
+      expect(decodedRow).toEqual(event)
+
+      const storedInsertExpectation = expect(storedInsert)
+
+      storedInsertExpectation.not.toHaveProperty("id")
+      expect(decodedInsert).toEqual(insert)
+      expect(typeof storedDate.date).toBe("string")
+      const decodedDateMillis = decodedDate.date.getTime()
+      const expectedDateMillis = Date.parse("2025-01-02T00:00:00.000Z")
+      expect(decodedDateMillis).toBe(expectedDateMillis)
+      expect(storedNone).toEqual({ value: null })
+      const expectedSome = Option.some("retained")
+      expect(loadedSome).toEqual({ value: expectedSome })
+    }),
   )
 
   it.effect(
-    "preserves TableStore creation failures",
-    Function.constant(verifiesCreateTableFailure),
+    "preserves root struct checks after compiling storage fields",
+    Effect.fn("Table.preservesRootStructChecks")(function* () {
+      const invalidOrdered = OrderedFieldsSchema.make({ lower: 4, upper: 1 })
+      const decoded = Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered)
+
+      const failure = yield* pipe(
+        decoded,
+        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+      )
+
+      expect(failure).toBe(true)
+    }),
   )
+
+  it.effect("publishes storage-level integer and check metadata", () =>
+    Effect.sync(() => {
+      const snapshot = Table.snapshot(Events)
+
+      const named = (name: string) => (field: (typeof snapshot.fields)[number]) =>
+        Equivalence.strictEqual<string>()(field.name, name)
+
+      const active = Array.findFirst(snapshot.fields, named("active"))
+      const quantity = Array.findFirst(snapshot.fields, named("quantity"))
+
+      expect(active).toMatchObject({
+        value: {
+          scalar: "integer",
+          checks: [{ _tag: "OneOf", values: [0, 1] }],
+        },
+      })
+      expect(quantity).toMatchObject({
+        value: {
+          scalar: "integer",
+          checks: [
+            { _tag: "GreaterThanOrEqualTo", value: 1 },
+            { _tag: "LessThanOrEqualTo", value: 99 },
+          ],
+        },
+      })
+    }))
+
+  it.effect("rejects ambiguous or lossy representations", () =>
+    Effect.sync(() => {
+      const IdentifiedStringSchema = pipe(Schema.String, identifier)
+      const IdentifiedNumberSchema = pipe(Schema.Number, identifier)
+
+      const AmbiguousSchema = Schema.Struct({
+        first: IdentifiedStringSchema,
+        second: IdentifiedNumberSchema,
+      })
+
+      interface Ambiguous extends Schema.Schema.Type<typeof AmbiguousSchema> {}
+      const OptionalNameSchema = Schema.optionalKey(Schema.String)
+      const OptionalSchema = Schema.Struct({ name: OptionalNameSchema })
+      interface Optional extends Schema.Schema.Type<typeof OptionalSchema> {}
+      const OptionValueSchema = Schema.Option(Schema.String)
+      const OptionSchema = Schema.Struct({ value: OptionValueSchema })
+      interface Option extends Schema.Schema.Type<typeof OptionSchema> {}
+      const NestedValueSchema = Schema.Struct({ value: Schema.String })
+      interface NestedValue extends Schema.Schema.Type<typeof NestedValueSchema> {}
+      const NestedSchema = Schema.Struct({ nested: NestedValueSchema })
+      interface Nested extends Schema.Schema.Type<typeof NestedSchema> {}
+      expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow(TableDefinitionError)
+      expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow(TableDefinitionError)
+      expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow(TableDefinitionError)
+      expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow(TableDefinitionError)
+
+    }))
 })

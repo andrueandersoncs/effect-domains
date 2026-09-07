@@ -1,0 +1,393 @@
+{
+  "id": "002_timestamp",
+  "from": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "stock",
+        "identifier": "sku",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "sku",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "available",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "reservations",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "sku",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "quantity",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              },
+              {
+                "_tag": "GreaterThan",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "held",
+                  "confirmed",
+                  "released"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "created_at_seconds",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    ]
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "stock",
+        "identifier": "sku",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "sku",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "available",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "reservations",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "sku",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "quantity",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              },
+              {
+                "_tag": "GreaterThan",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "held",
+                  "confirmed",
+                  "released"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "createdAt",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteRebuildTable",
+      "table": {
+        "name": "reservations",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "sku",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "quantity",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              },
+              {
+                "_tag": "GreaterThan",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "held",
+                  "confirmed",
+                  "released"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "createdAt",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      },
+      "copies": [
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "id",
+          "source": "id"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "sku",
+          "source": "sku"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "quantity",
+          "source": "quantity"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "status",
+          "source": "status"
+        },
+        {
+          "_tag": "SqliteColumnExpression",
+          "column": "createdAt",
+          "expression": "strftime('%Y-%m-%dT%H:%M:%fZ', \"created_at_seconds\", 'unixepoch')"
+        }
+      ]
+    }
+  ]
+}

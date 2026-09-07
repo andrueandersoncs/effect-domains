@@ -4,6 +4,8 @@ Effect Domains tests whether Effect Schemas can define domain concepts and opera
 
 We are **never** worried about backward compatibility, always make the changes and refactors as clean as possible and constantly and ruthlessly remove and/or rewrite old legacy code where appropriate
 
+We're essentially trying to build Rails (as in, Ruby on Rails) for Effect. Everything as magical and automatic as possible.
+
 ## Project Direction
 
 - Read the [wiki](docs/wiki/README.md) before making design decisions. Be sure to update it regularly.

@@ -79,7 +79,7 @@ await pipe(
     )
 
     const databasePath = join(directory.path, "example.sqlite")
-    const databaseLayer = SqliteBunRuntime.sqlClient(databasePath)
+    const databaseLayer = SqliteBunRuntime.sqlClient(databasePath, { migrations: [] })
 
     const operations = Effect.gen(function* () {
       yield* Books.write()

@@ -5,11 +5,12 @@
     "": {
       "name": "effect-domains",
       "dependencies": {
+        "@effect/platform-bun": "4.0.0-rc.112",
         "@effect/sql-sqlite-bun": "4.0.0-rc.112",
         "effect": "4.0.0-rc.112",
       },
       "devDependencies": {
-        "@better-typescript/better-typescript": "0.4.9",
+        "@better-typescript/better-typescript": "0.4.11",
         "@effect/vitest": "4.0.0-rc.112",
         "@types/bun": "latest",
         "vitest": "4.1.11",
@@ -20,11 +21,19 @@
     },
   },
   "packages": {
-    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.9", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.9", "@better-typescript/better-typescript-darwin-arm64": "0.4.9", "@better-typescript/better-typescript-linux-amd64": "0.4.9", "@better-typescript/better-typescript-linux-arm64": "0.4.9" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-15zd8ZnPLFiP/XLytOmRuL+sl/t+C0opl6g60GCUjYM+N5vUvIU1UVqFsv0IPEoM/oKVhGH7a/oYr15xKnaAug=="],
+    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.11", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.11", "@better-typescript/better-typescript-darwin-arm64": "0.4.11", "@better-typescript/better-typescript-linux-amd64": "0.4.11", "@better-typescript/better-typescript-linux-arm64": "0.4.11" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-OO7bfPJibqyahTLxuXLrmogUVkHQQWkgfj4g5z8nr5VzjgEGXcXDXHHutoca22ZSjqscsGhJ+lvmHaojGhZKig=="],
 
-    "@better-typescript/better-typescript-darwin-arm64": ["@better-typescript/better-typescript-darwin-arm64@0.4.9", "", { "os": "darwin", "cpu": "arm64" }, "sha512-2Tsp4w8i0w1LU+4EF1NReroxVGVwBfhX9jgQuc3rXocCso2WdHwVJXBkFeETo2PMgh/6ehtEYi+8Fm/zj+wCVw=="],
+    "@better-typescript/better-typescript-darwin-amd64": ["@better-typescript/better-typescript-darwin-amd64@0.4.11", "", { "os": "darwin", "cpu": "x64" }, "sha512-O/Zwh/yRn4s3DWQlMEBx4w4Wvwzu+Q2951WXXJF6i8tHGNNh2+s8h0RUaHa9JiMgXwC9TuIIx3Hul9twkrL/WA=="],
 
-    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.9", "", { "os": "linux", "cpu": "x64" }, "sha512-neC2of5CZkQedNUKdr3Rbsf09ZM7uB9WmQWqRDG3EaxWTNTV14q2iCpO4qTRNBYYS3ATfDZBM0mxzOYviowZdw=="],
+    "@better-typescript/better-typescript-darwin-arm64": ["@better-typescript/better-typescript-darwin-arm64@0.4.11", "", { "os": "darwin", "cpu": "arm64" }, "sha512-F5KSeYnalGTguow+yVWdkxdcUSZYkYTa5vq9ebNPbCsaEO2d6XfXs9fpNhi1yGulKy3xoWIlL736IX7NsqRv1Q=="],
+
+    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.11", "", { "os": "linux", "cpu": "x64" }, "sha512-LHoS1vdunuax8t1Wcfom77YPFLQ59KOMurjUH1p6sa5utfe5azPEIoyiFu4gEnWrnHMEG7wJYWhcoG0+xQ354A=="],
+
+    "@better-typescript/better-typescript-linux-arm64": ["@better-typescript/better-typescript-linux-arm64@0.4.11", "", { "os": "linux", "cpu": "arm64" }, "sha512-ig8ajB1qPTG537eROYAMJMkw+ZCdovspOMTcXcyjDA9z0R0OnjUZQjxITuRu4tETx9loiSoQ3MwLUQtBRSoU1A=="],
+
+    "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.112", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.112" }, "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-Y5n2HhV/vsbrJls9ukX42RL7zqXQxISHegWFsP9njsCyDmGTnq7QYSO82rglwrLPwtTrv5dkSRTuGw4+oXxgMg=="],
+
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-rc.112", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.21.3" }, "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-ttjz0xKamFN7vL8pNDYVwddJLjZvqKePc05djlz2VcdaKbLsnYbtMnL1rbOfHgEnIUSHGh7FkjaN4DM1Ov81sQ=="],
 
     "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-rc.112", "", { "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-EqR8pWZo3VzedRvP6qo5HcfqNmFvSa+sQLWQl3oBMx2KY1FCc8NYjep79wYjNkW0qABnffrPUXCMTOncd1A+5g=="],
 
@@ -89,6 +98,8 @@
     "@types/estree": ["@types/estree@1.0.9", "", {}, "sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg=="],
 
     "@types/node": ["@types/node@26.4.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ=="],
+
+    "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 
     "@typescript/typescript-aix-ppc64": ["@typescript/typescript-aix-ppc64@7.0.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ=="],
 
@@ -241,5 +252,7 @@
     "vitest": ["vitest@4.1.11", "", { "dependencies": { "@vitest/expect": "4.1.11", "@vitest/mocker": "4.1.11", "@vitest/pretty-format": "4.1.11", "@vitest/runner": "4.1.11", "@vitest/snapshot": "4.1.11", "@vitest/spy": "4.1.11", "@vitest/utils": "4.1.11", "es-module-lexer": "^2.0.0", "expect-type": "^1.3.0", "magic-string": "^0.30.21", "obug": "^2.1.1", "pathe": "^2.0.3", "picomatch": "^4.0.3", "std-env": "^4.0.0-rc.1", "tinybench": "^2.9.0", "tinyexec": "^1.0.2", "tinyglobby": "^0.2.15", "tinyrainbow": "^3.1.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0", "why-is-node-running": "^2.3.0" }, "peerDependencies": { "@edge-runtime/vm": "*", "@opentelemetry/api": "^1.9.0", "@types/node": "^20.0.0 || ^22.0.0 || >=24.0.0", "@vitest/browser-playwright": "4.1.11", "@vitest/browser-preview": "4.1.11", "@vitest/browser-webdriverio": "4.1.11", "@vitest/coverage-istanbul": "4.1.11", "@vitest/coverage-v8": "4.1.11", "@vitest/ui": "4.1.11", "happy-dom": "*", "jsdom": "*" }, "optionalPeers": ["@edge-runtime/vm", "@opentelemetry/api", "@types/node", "@vitest/browser-playwright", "@vitest/browser-preview", "@vitest/browser-webdriverio", "@vitest/coverage-istanbul", "@vitest/coverage-v8", "@vitest/ui", "happy-dom", "jsdom"], "bin": { "vitest": "./vitest.mjs" } }, "sha512-fhACrNXUidIbGSBr5FlbuBkO7VWC1ZyLl0DO4CU2DrQoAPxX84Ysxs+HeGQpii5lZWV1Q4gBZTTu49mF+A6Edw=="],
 
     "why-is-node-running": ["why-is-node-running@2.3.0", "", { "dependencies": { "siginfo": "^2.0.0", "stackback": "0.0.2" }, "bin": { "why-is-node-running": "cli.js" } }, "sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w=="],
+
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
   }
 }

@@ -181,10 +181,12 @@ const project = <A>(
   pipe(
     Match.value(ast),
     Match.tagsExhaustive({
-      Declaration: (declaration) =>
-        Struct.assign(retainAST(declaration), {
-          typeParameters: Array.map(declaration.typeParameters, recur),
-        }),
+      Declaration: (declaration) => {
+        const retained = retainAST(declaration)
+        const typeParameters = Array.map(declaration.typeParameters, recur)
+
+        return Struct.assign(retained, { typeParameters })
+      },
       Null: retainAST,
       Undefined: retainAST,
       Void: retainAST,
@@ -200,38 +202,55 @@ const project = <A>(
       UniqueSymbol: retainAST,
       ObjectKeyword: retainAST,
       Enum: retainAST,
-      TemplateLiteral: (templateLiteral) =>
-        Struct.assign(retainAST(templateLiteral), {
-          parts: Array.map(templateLiteral.parts, recur),
-        }),
-      Arrays: (arrays) =>
-        Struct.assign(retainAST(arrays), {
-          elements: Array.map(arrays.elements, recur),
-          rest: Array.map(arrays.rest, recur),
-        }),
-      Objects: (objects) =>
-        Struct.assign(retainAST(objects), {
-          propertySignatures: Array.map(
-            objects.propertySignatures,
-            flow(Struct.get("type"), recur),
-          ),
-          indexSignatureParameters: Array.map(
-            objects.indexSignatures,
-            flow(Struct.get("parameter"), recur),
-          ),
-          indexSignatureTypes: Array.map(
-            objects.indexSignatures,
-            flow(Struct.get("type"), recur),
-          ),
-        }),
-      Union: (union) =>
-        Struct.assign(retainAST(union), {
-          types: Array.map(union.types, recur),
-        }),
-      Suspend: (suspend) =>
-        Struct.assign(retainAST(suspend), {
-          thunk: flow(suspend.thunk, recur),
-        }),
+      TemplateLiteral: (templateLiteral) => {
+        const retained = retainAST(templateLiteral)
+        const parts = Array.map(templateLiteral.parts, recur)
+
+        return Struct.assign(retained, { parts })
+      },
+      Arrays: (arrays) => {
+        const retained = retainAST(arrays)
+        const elements = Array.map(arrays.elements, recur)
+        const rest = Array.map(arrays.rest, recur)
+
+        return Struct.assign(retained, { elements, rest })
+      },
+      Objects: (objects) => {
+        const retained = retainAST(objects)
+
+        const propertySignatures = Array.map(
+          objects.propertySignatures,
+          flow(Struct.get("type"), recur),
+        )
+
+        const indexSignatureParameters = Array.map(
+          objects.indexSignatures,
+          flow(Struct.get("parameter"), recur),
+        )
+
+        const indexSignatureTypes = Array.map(
+          objects.indexSignatures,
+          flow(Struct.get("type"), recur),
+        )
+
+        return Struct.assign(retained, {
+          propertySignatures,
+          indexSignatureParameters,
+          indexSignatureTypes,
+        })
+      },
+      Union: (union) => {
+        const retained = retainAST(union)
+        const types = Array.map(union.types, recur)
+
+        return Struct.assign(retained, { types })
+      },
+      Suspend: (suspend) => {
+        const retained = retainAST(suspend)
+        const thunk = flow(suspend.thunk, recur)
+
+        return Struct.assign(retained, { thunk })
+      },
     }),
   )
 
@@ -254,8 +273,13 @@ export const evaluate = <A>(
       ? HashSet.add(suspends, ast)
       : suspends
 
-    return algebra(project(ast, (child) => go(child, nextSuspends)))
+    const recur = (child: SchemaAST.AST) => go(child, nextSuspends)
+    const projected = project(ast, recur)
+
+    return algebra(projected)
   }
 
-  return go(ast, HashSet.empty())
+  const emptySuspends = HashSet.empty<SchemaAST.Suspend>()
+
+  return go(ast, emptySuspends)
 }

@@ -3,23 +3,33 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    "./application": "./src/application.ts",
+    "./application-bun": "./src/application-bun.ts",
     "./domain": "./src/domain.ts",
+    "./migrations": "./src/migrations.ts",
     "./persisted-ref": "./src/persisted-ref.ts",
     "./query": "./src/query.ts",
+    "./resource": "./src/resource.ts",
+    "./repository-store": "./src/repository-store.ts",
+    "./rpc-cli": "./src/rpc-cli.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
+    "./sqlite-migrations": "./src/sqlite-migrations.ts",
     "./table": "./src/table.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript",
-    "test": "bun --bun vitest run"
+    "test": "bun --bun vitest run",
+    "reservations:server": "bun run examples/reservations/server.ts",
+    "reservations": "bun run examples/reservations/cli.ts"
   },
   "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.112",
     "@effect/sql-sqlite-bun": "4.0.0-rc.112",
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.9",
+    "@better-typescript/better-typescript": "0.4.11",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "latest",
     "vitest": "4.1.11"

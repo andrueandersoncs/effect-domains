@@ -1,22 +1,22 @@
 import { Effect, Function, pipe, SynchronizedRef } from "effect"
 
 export const PersistedRef = {
-  make: <
-    A,
-    CommitError,
-    CommitRequirements,
-    LoadError,
-    LoadRequirements,
-  >(
-    options: Readonly<{
-      commit: (
-        previous: A,
-        next: A,
-      ) => Effect.Effect<A, CommitError, CommitRequirements>
-      load: Effect.Effect<A, LoadError, LoadRequirements>
-    }>,
-  ) =>
-    Effect.fn("PersistedRef.make")(function* () {
+  make: Effect.fn("PersistedRef.make")(
+    function* <
+      A,
+      CommitError,
+      CommitRequirements,
+      LoadError,
+      LoadRequirements,
+    >(
+      options: Readonly<{
+        commit: (
+          previous: A,
+          next: A,
+        ) => Effect.Effect<A, CommitError, CommitRequirements>
+        load: Effect.Effect<A, LoadError, LoadRequirements>
+      }>,
+    ) {
       const initial = yield* options.load
       const backing = yield* SynchronizedRef.make(initial)
       const get = SynchronizedRef.get(backing)
@@ -26,16 +26,21 @@ export const PersistedRef = {
         Function.constant(options.load),
       )
 
+      const commit = (previous: A, value: A) => options.commit(previous, value)
+
       const set = (value: A) => pipe(
         SynchronizedRef.updateAndGetEffect(
           backing,
-          (previous) => options.commit(previous, value),
+          (previous) => commit(previous, value),
         ),
         Effect.uninterruptible,
       )
 
-      const commitUpdate = (f: (current: A) => A) => (previous: A) =>
-        options.commit(previous, f(previous))
+      const commitUpdate = (f: (current: A) => A) => (previous: A) => {
+        const next = f(previous)
+
+        return options.commit(previous, next)
+      }
 
       const update = (f: (current: A) => A) => pipe(
         SynchronizedRef.updateAndGetEffect(backing, commitUpdate(f)),
@@ -57,5 +62,6 @@ export const PersistedRef = {
       )
 
       return { get, refresh, set, update, modify }
-    })(),
+    },
+  ),
 }

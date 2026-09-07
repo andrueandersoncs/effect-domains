@@ -42,30 +42,37 @@ const countNodes: SchemaASTFAlgebra<number> = pipe(
   }),
 )
 
+const declarationTypeParameter = new SchemaAST.BigInt()
+
 const declaration = new SchemaAST.Declaration(
-  [new SchemaAST.BigInt()],
+  [declarationTypeParameter],
   () => () => Effect.succeed(undefined),
 )
 
-const union = new SchemaAST.Union(
-  [
-    new SchemaAST.String(),
-    new SchemaAST.Suspend(() => new SchemaAST.Number()),
-  ],
-  "anyOf",
-)
+const unionString = new SchemaAST.String()
+const unionNumber = new SchemaAST.Number()
+const unionSuspend = new SchemaAST.Suspend(Function.constant(unionNumber))
+
+const union = new SchemaAST.Union([unionString, unionSuspend], "anyOf")
+
+const templateLiteralPrefix = new SchemaAST.Literal("item-")
+const templateLiteralNumber = new SchemaAST.Number()
 
 const templateLiteral = new SchemaAST.TemplateLiteral([
-  new SchemaAST.Literal("item-"),
-  new SchemaAST.Number(),
+  templateLiteralPrefix,
+  templateLiteralNumber,
 ])
 
 const arrays = new SchemaAST.Arrays(false, [union], [templateLiteral])
+const itemsProperty = new SchemaAST.PropertySignature("items", arrays)
+const indexSignatureParameter = new SchemaAST.String()
 
-const root = new SchemaAST.Objects(
-  [new SchemaAST.PropertySignature("items", arrays)],
-  [new SchemaAST.IndexSignature(new SchemaAST.String(), declaration)],
+const indexSignature = new SchemaAST.IndexSignature(
+  indexSignatureParameter,
+  declaration,
 )
+
+const root = new SchemaAST.Objects([itemsProperty], [indexSignature])
 
 const CyclicSchema: Schema.Codec<never> = Schema.suspend(
   (): Schema.Codec<never> => CyclicSchema,
@@ -73,10 +80,14 @@ const CyclicSchema: Schema.Codec<never> = Schema.suspend(
 
 describe("SchemaAST evaluator", () => {
   it("folds every recursive child position", () => {
-    expect(evaluate(root, countNodes, Function.constant(0))).toBe(12)
+    const result = evaluate(root, countNodes, Function.constant(0))
+
+    expect(result).toBe(12)
   })
 
   it("delegates suspended cycles to the algebra boundary", () => {
-    expect(evaluate(CyclicSchema.ast, countNodes, Function.constant(40))).toBe(41)
+    const result = evaluate(CyclicSchema.ast, countNodes, Function.constant(40))
+
+    expect(result).toBe(41)
   })
 })

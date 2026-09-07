@@ -208,7 +208,7 @@ describe("Bun SQLite tables and queries", () => {
       )
 
       const filename = join(directory.path, "test.sqlite")
-      const adapter = SqliteBunRuntime.sqlClient(filename)
+      const adapter = SqliteBunRuntime.sqlClient(filename, { migrations: [] })
 
       return yield* use(adapter)
     },
