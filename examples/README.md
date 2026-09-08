@@ -41,13 +41,13 @@ Client settings follow the database naming convention: `BASIC_CRUD_URL`, `RESOUR
 
 - `domain.ts`: canonical values and errors.
 - `resources.ts`: storage registration and selected generated operations.
-- `contracts.ts`: command contracts where the application has authored commands.
+- `contracts.ts`: native RPC definitions and groups where the application has authored commands.
 - `application.ts`: resources and explicit command-descriptor registration.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, and generated remote commands.
 
-`Application.make({ name, resources, commands: [descriptor] })` combines resource and command-descriptor groups; absent groups use empty arrays. `main.ts` resolves the manifest to an absolute path and calls `ApplicationBun.run(app, { database: { manifest, filename: Option.none() }, services, initialize })`; callers that already own decoded history may instead pass `database: { migrations, filename: Option.none() }`. Use `Layer.empty` for no authored services and `Effect.void` for no initialization. The same runner supplies the loopback server, generated RPC client, local `schema` commands, and `inspect`; `*:server` package scripts are aliases for `main.ts serve`. Authored-command applications use `Commands.make({ name, contracts })` and install implementations through the resulting descriptor. Resource-only applications use generated handlers directly. Framework imports use the public `effect-domains/*` entry points.
+`Application.make({ name, resources, commands: [descriptor] })` combines resource and command-descriptor groups; absent groups use empty arrays. `main.ts` resolves the manifest to an absolute path and calls `ApplicationBun.run(app, { database: { manifest, filename: Option.none() }, services, initialize })`; callers that already own decoded history may instead pass `database: { migrations, filename: Option.none() }`. Use `Layer.empty` for no authored services and `Effect.void` for no initialization. The same runner supplies the loopback server, generated RPC client, local `schema` commands, and `inspect`; `*:server` package scripts are aliases for `main.ts serve`. Authored-command applications pass native RPC groups to `Commands.make({ name, group })` and install implementations through the resulting descriptor. Resource-only applications use generated handlers directly. Framework imports use the public `effect-domains/*` entry points.
 
 ## Reservation application
 

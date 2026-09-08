@@ -1,18 +1,16 @@
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Schema, pipe } from "effect"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Commands } from "../src/commands.ts"
 
 class Greeting extends Context.Service<Greeting, { readonly value: string }>()("test/Commands/Greeting") {}
 
+const greetRpc = Rpc.make("greet", { success: Schema.String })
+const greeterRpcs = RpcGroup.make(greetRpc)
+
 const Greeter = Commands.make({
   name: "test/Commands/Greeter",
-  contracts: {
-    greet: {
-      input: Schema.Void,
-      output: Schema.String,
-      error: Schema.Never,
-    },
-  },
+  group: greeterRpcs,
 })
 
 const greet = Effect.fn("Greeter.greet")(function* () {

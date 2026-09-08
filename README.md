@@ -46,9 +46,9 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-`Commands.make({ name, contracts })` derives an injectable service and RPC group from named `{ input, output, error }` schemas. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares the resource tables through the migration store.
+`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. Declare operations with `Rpc.make(tag, { payload, success, error })`; apply `Schema.toCodecJson` explicitly where JSON wire codecs are needed. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares the resource tables through the migration store.
 
-Contracts may share shapes without sharing business behavior: the [reservation contracts](examples/reservations/contracts.ts) reuse a transition contract for `confirm` and `release`. Names, schemas, and policy remain explicit; RPC wrappers and group membership are derived once.
+RPCs may share schemas without sharing business behavior: the [reservation RPCs](examples/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
 
 ## Storage conventions
 

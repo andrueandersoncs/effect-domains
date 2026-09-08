@@ -30,6 +30,15 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-08: Native RPC contract verification
+
+The user-approved cutover replaces custom input/output/error records with native `Rpc.make` and `RpcGroup.make` declarations. `Commands.make({ name, group })` retains the supplied group and provides the existing injectable unary service behavior. JSON codec derivation is explicit in the examples. ([Commands](../../src/commands.ts); [Book RPCs](../../examples/basic-crud/contracts.ts); [Reservation RPCs](../../examples/reservations/contracts.ts); [Counter RPCs](../../examples/persisted-ref/contracts.ts))
+
+- `bun run check` and `bun run lint` pass without suppressions. All 24 tests in nine files pass, including captured handler dependencies and invocation-context precedence. ([Command regression](../../test/Commands.test.ts); [Tests](../../test/))
+- Real Bun HTTP servers with isolated in-memory SQLite databases exercised all three migrated applications through their generated CLIs: book create/get/list/update/remove and `BookNotFound`; counter get/increment/set, a stale cached read, and refresh; reservation reserve/release/confirm, `InvalidReservationState`, and stock accounting. Reservation timestamps remained ISO strings over JSON. Local `inspect books.create` selected the native RPC contract. The servers were stopped afterward; no smoke files or databases were retained. ([Book entrypoint](../../examples/basic-crud/main.ts); [Counter entrypoint](../../examples/persisted-ref/main.ts); [Reservation entrypoint](../../examples/reservations/main.ts))
+
+These checks establish the migrated unary contracts, not streaming RPC support, authentication middleware, or additional transports.
+
 ### 2026-09-08: Lint remediation verification
 
 - `bun run lint` passes with no diagnostics; no exclusions or rule suppressions were added. `bun run check` passes, and all 24 tests in nine files pass. The cutover uses explicit construction records and runtime options, Effect-native operations, and schema-validated dynamic boundaries. Callers and documentation use the updated contracts. ([Lint configuration](../../better-typescript.json); [Application](../../src/application.ts); [Tests](../../test/))
