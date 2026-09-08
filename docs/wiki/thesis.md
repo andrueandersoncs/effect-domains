@@ -2,25 +2,21 @@
 
 ## Central Claim
 
-Model domain concepts and operation contracts as Effect Schemas. Derive other representations and routine behavior only where the mapping is mechanical and lossless. Where storage, transport, or business concerns have different semantics, make the difference visible through an explicit typed transformation. This is the project’s core hypothesis, not yet a proven premise. ([Project thesis](raw/project-thesis.md))
+Model domain concepts and operation contracts as Effect Schemas. Derive representations and routine behavior only where the mapping is mechanical and lossless. Where storage, transport, or business concerns have different semantics, expose an explicit typed transformation. This remains a hypothesis, not a proven premise. ([Project thesis](raw/project-thesis.md))
 
-Effect Schema is relevant because a schema is an inspectable runtime value as well as a source of TypeScript types. In principle, multiple interpreters can consume the same domain description without repeating declarations. ([Project thesis](raw/project-thesis.md))
+Effect Schema is an inspectable runtime value as well as a source of TypeScript types, so multiple interpreters can consume one domain description without repeating mechanically equivalent declarations. ([Project thesis](raw/project-thesis.md))
 
 ## Core Interface Principles
 
-All project implementations use Effect and depend on interfaces rather than fixed concrete infrastructure. Effect Context and Requirements make runtime dependencies explicit, while runtime-provided implementations satisfy those requirements. A capability such as persistence may therefore derive mappings and execute operations without coupling its public contract to one database implementation. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Project implementations use Effect and narrow runtime interfaces rather than fixed infrastructure. `Commands.make` is the current command declaration: it derives an injectable handler service and RPC group from named input/output/error contracts; `Application.make` composes command descriptors with resources. `ApplicationBun.run` supplies the one Bun CLI/HTTP entrypoint. These are implementations of the direction, not evidence that the direction generalizes beyond the exercised slice. ([Commands](../../src/commands.ts); [Application](../../src/application.ts); [Bun runtime](../../src/application-bun.ts); [Effect direction](raw/effect-and-declarative-interface-direction.md))
 
-The final user-facing product favors inspectable schemas, configurations, and annotations across capabilities. Mechanical behavior is derived from those declarations. The [current framework direction](research-agenda.md#framework-direction) also calls for standard application behavior supplied by convention: ordinary CRUD should not require an authored query in every application. The existing `Query.make` interface remains a lower-level seam for explicit behavior. ([Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md); [Table and query API direction](raw/table-and-query-api-direction.md))
+The project does not preserve backward compatibility. Refactors make a clean cutover and remove superseded records, services, shims, and parallel APIs. ([Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
 
-The project does not preserve backward compatibility. Refactors should make a clean cutover to the best current design and remove or rewrite superseded code instead of retaining deprecated functions, shims, or parallel interfaces. ([Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
-
-Intrinsic domain meaning should be declared once and interpreted mechanically. When identity has domain meaning, it is marked directly with `identifier`, and persistence derives its storage key from that annotation rather than requiring duplicate key configuration. Current table derivation does not force persistence-only identity into the canonical schema: when no domain identifier exists, `Table.make` adds a generated UUIDv7 `id` only to its persisted `rowSchema`. This fallback is persistence policy, not inferred domain meaning, and it supersedes the older raw-source requirement for exactly one annotation. `Table.make` otherwise accepts only the physical table name and canonical schema, while encoded field names supply column names. Fresh table creation remains derived and migrations remain explicit. ([Table implementation](../../src/table.ts); [Table and query API direction](raw/table-and-query-api-direction.md); [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md); [Catalog key and table direction](raw/catalog-key-table-direction.md); [Derived table creation direction](raw/derived-table-creation-direction.md))
-
-This declarative constraint does not make non-mechanical behavior derivable. Business behavior and semantic transformations still need explicit authorship, but that authored behavior must remain distinct from the normal mechanically derived path. ([Project thesis](raw/project-thesis.md); [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md))
+Intrinsic identity is declared directly with `identifier`; persistence derives its storage key from it. Without domain identity, `Table.make` adds a UUIDv7 `id` to the persistence row only. `Resource.make` keeps a canonical schema distinct from an optional reversible storage schema, so codecs can differ physically without becoming wire contracts. ([Table](../../src/table.ts); [Resource](../../src/resource.ts))
 
 ## Derivation Boundary
 
-The strongest candidates for derivation are representations whose meaning is already present in the schema:
+Strong candidates for derivation are:
 
 - runtime validation and TypeScript types;
 - wire codecs;
@@ -28,28 +24,26 @@ The strongest candidates for derivation are representations whose meaning is alr
 - test-data generators;
 - equality, formatting, and redaction behavior;
 - basic database columns and constraints; and
-- operation input, output, and error contracts.
+- routine resource operation contracts.
 
-The intended benefit is less duplicate declaration and less drift between mechanically equivalent representations. ([Project thesis](raw/project-thesis.md))
+The benefit sought is less duplicate declaration and less drift between mechanically equivalent representations. ([Project thesis](raw/project-thesis.md))
 
-A schema does not contain enough information to derive business decisions, state transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migrations, compatibility policy, retries, or idempotency. These concerns require explicit design and implementation. Operations should be defined in terms of domain models, but their policy and behavior remain authored. ([Project thesis](raw/project-thesis.md))
-
-Explicit policy does not require handwritten machinery. The framework defines CRUD semantics, reversible storage conventions, transport bindings, and migration execution once. Applications select capabilities and supply policy where meaning cannot be inferred. The SQLite reservation slice implements this distinction; its broader applicability remains a hypothesis. ([Framework direction](research-agenda.md#framework-direction); [Acceptance evidence](validation-strategy.md#schema-first-acceptance-criteria))
+A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; an authored query or command still carries semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Query](../../src/query.ts))
 
 ## Architectural Shape
 
-The canonical domain model stays clean. Separate interpreters consume domain schemas for persistence, transport, testing, and documentation. When an interpreter’s representation differs semantically from the domain, an explicit transformation connects them. ([Project thesis](raw/project-thesis.md))
+The canonical domain model stays clean. Separate interpreters consume schemas for persistence, transport, testing, and documentation. A storage representation with different physical encoding is an explicit reversible transformation, not a second wire model. ([Project thesis](raw/project-thesis.md); [Tables and Queries](tables-and-queries.md#canonical-and-storage-representations))
 
 ```text
-Domain schemas and operations
+Domain schemas and operation contracts
     ├── Wire interpreter
     ├── Persistence interpreter
     ├── Test-data interpreter
     └── Documentation interpreter
 ```
 
-This arrangement aims for deep interpreter modules with small interfaces. It rejects both a domain-schema “god object” and thin wrappers that merely move complexity into annotations. Exceptional cases need clear escape hatches. ([Project thesis](raw/project-thesis.md))
+This arrangement aims for deep modules with clear escape hatches rather than annotation-heavy thin wrappers. Persisted resource state is deliberately only in-process synchronization; migration generation requires explicit intent for semantic changes. ([PersistedRef](../../src/persisted-ref.ts); [Migrations](../../src/sqlite-migrations.ts))
 
 ## Constraints on Generalization
 
-The project should not begin with a general algebra. It must first demonstrate the approach in several materially different vertical slices. A framework is justified only if those experiments show that useful declarations disappear, changes propagate safely, annotation cost stays low, exceptions remain straightforward, and the result is easier to understand than handwritten adapters. ([Validation Strategy](validation-strategy.md); [Project thesis](raw/project-thesis.md))
+The project should not begin with a general algebra. It must demonstrate several materially different vertical slices before claiming a framework. Current evidence covers one SQLite adapter, reservations, and supporting integration applications; it explicitly does not prove another database or materially different business-policy domain. ([Validation Strategy](validation-strategy.md#evidence-boundary); [Project thesis](raw/project-thesis.md))

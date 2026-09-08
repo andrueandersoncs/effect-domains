@@ -2,35 +2,37 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains design hypothesis and implementation workspace.
 
-Effect Domains is a schema-first, convention-over-configuration application framework for Effect. Canonical schemas supply table structure, reversible codecs, repositories, and selected resource interfaces; application authors supply business policy. The [framework direction](research-agenda.md#framework-direction) records the implemented contract and the limits of the current evidence.
+Effect Domains derives routine application machinery from canonical Effect Schemas while leaving semantic storage transformations, business policy, and migration intent explicit. The maintained [framework contract](research-agenda.md#implemented-contract) records the current API; the [validation record](validation-strategy.md#verification-record) separates exercised behavior from historical and unproven claims.
 
 ## Content Map
 
-- [Thesis](thesis.md) — the central claim, derivation boundary, and architectural principles.
-- [Tables and Queries](tables-and-queries.md) — the accepted persistence interface and current implementation evidence.
-- [Validation Strategy](validation-strategy.md) — required vertical slices, reservation and persistent-application evidence, and criteria for judging the hypothesis.
-- [Research Agenda](research-agenda.md) — the implemented framework contract, findings, and unresolved questions.
+- [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
+- [Tables and Queries](tables-and-queries.md) — resource, command, persistence, migration, and runtime contracts.
+- [Validation Strategy](validation-strategy.md) — slice criteria, dated exercised evidence, and limits.
+- [Research Agenda](research-agenda.md) — current implementation contract and unresolved questions.
 
 ## Wiki Operations and Sources
 
 - [Wiki instructions](AGENTS.md) — structure, citation rules, review policy, and maintenance workflows.
-- [Original project thesis](raw/project-thesis.md) — the initial derivation thesis and architectural boundaries.
-- [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) — the human direction for Effect-based implementations and declarative public interfaces.
-- [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md) — the human direction for clean cutovers without legacy compatibility paths.
-- [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md) — the human direction for deriving persistence keys from domain identity and excluding column mapping configuration.
-- [Catalog key and table direction](raw/catalog-key-table-direction.md) — the superseded catalog interface and the still-relevant earlier table naming rationale.
-- [Derived table creation direction](raw/derived-table-creation-direction.md) — the human direction for mechanically deriving fresh table creation while leaving migrations explicit.
-- [Table and query API direction](raw/table-and-query-api-direction.md) — the newer human direction separating table derivation from one-operation authored queries.
+- [Original project thesis](raw/project-thesis.md) — initial derivation thesis and architectural boundaries.
+- [Effect and declarative interface direction](raw/effect-and-declarative-interface-direction.md) — human direction for Effect-based implementations and declarative public interfaces.
+- [Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md) — clean-cutover direction.
+- [Domain identifier and basic persistence direction](raw/domain-identifier-and-basic-persistence-direction.md) — domain identity and derived persistence-key direction.
+- [Catalog key and table direction](raw/catalog-key-table-direction.md) — superseded catalog interface and earlier table-naming rationale.
+- [Derived table creation direction](raw/derived-table-creation-direction.md) — fresh-table derivation and explicit migration direction.
+- [Table and query API direction](raw/table-and-query-api-direction.md) — table derivation and authored-query direction.
 
-Files under `raw/` are immutable source material. Maintained pages synthesize those sources and should cite them close to supported claims.
+Files under `raw/` are immutable source material. Maintained pages synthesize them and cite implementation evidence close to claims.
 
 ## Current Status
 
-`Resource.make` derives a table, typed repository, selected Effect RPC operations, and handlers from a canonical schema. `Application.make` derives RPCs and group membership from named `{ input, output, error }` command declarations, combines them with resources, and uses the same declarations for `CommandService` handler types. `ApplicationBun` composes the HTTP server and generated CLI. `Table.make` and `Query.make` remain available for direct table derivation and custom queries. `PersistedRef` composes query-backed, process-local write-through state. ([Framework contract](research-agenda.md#implemented-contract); [Persistence reference](tables-and-queries.md))
+`Resource.make({ name, schema, storage?, operations, create?, list? })` keeps canonical and reversible storage schemas distinct, derives selected CRUD/patch RPCs, and can apply absent-only defaults or runtime `uuidV7`/`now` values. Declared list policy supplies exact filters, stable ordering, bounded pages, and cursors; patch requests are `{ identifier, patch }` and cannot change the identifier. ([Resource](../../src/resource.ts); [resource regressions](../../test/ResourceCrud.test.ts))
 
-The [reservation slice](validation-strategy.md#reservation-slice) uses canonical models directly, with generated storage and read interfaces and explicit stock accounting, transitions, and transactions. Frozen migration artifacts convert historical timestamp seconds to the canonical ISO representation. Live verification demonstrated one scalar schema edit propagating through SQLite, resource contracts, HTTP, and native CLI flags without adapter changes. Another business domain and another database remain unproven.
+`Commands.make(name, contracts)` creates an injectable service descriptor, RPC group, and `.layer` for handlers. `Application.make({ name, resources?, commands? })` combines descriptor and resource handlers. One `ApplicationBun.run` entrypoint exposes generated remote commands plus `serve`, `schema`, and `inspect`; startup prepares the database, builds services, runs optional initialization, then launches the server. ([Commands](../../src/commands.ts); [Application](../../src/application.ts); [Bun runtime](../../src/application-bun.ts))
 
-Five [supporting applications](validation-strategy.md#persistent-example-applications) now expose authored book queries, generated todo CRUD, service-dependent note codecs, a persisted counter, and versioned documents through persistent SQLite, HTTP RPC, and generated CLIs. Live verification covered CRUD, restart persistence, counter concurrency/refresh, and historical rename/backfill. These examples broaden integration evidence without establishing another materially different business-policy slice.
+SQLite migration history is either decoded with `SqliteMigrations.history(raw)` or loaded from an explicit manifest. `schema generate <name>` writes a validated artifact before atomically replacing that manifest, and reports blocked plans without registering them. `inspect` documents resource schemas, creation/list policy, storage representation, and generated operation schemas. ([Migrations](../../src/sqlite-migrations.ts); [inspection](../../src/application-inspect.ts); [migration regressions](../../test/SqliteMigrations.test.ts))
+
+The current verification entry records six exercised applications, 33 passing tests across 11 files, and a passing type check; it does not establish another database adapter or materially different business-policy slice. Lint is not clean: its final run reported 772 diagnostics across 30 files. ([Verification record](validation-strategy.md#2026-09-08-current-verification))
 
 ## Development
 
