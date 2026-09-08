@@ -30,6 +30,14 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-08: Lint remediation verification
+
+- `bun run lint` passes with no diagnostics; no exclusions or rule suppressions were added. `bun run check` passes, and all 24 tests in nine files pass. The cutover uses explicit construction records and runtime options, Effect-native operations, and schema-validated dynamic boundaries. Callers and documentation use the updated contracts. ([Lint configuration](../../better-typescript.json); [Application](../../src/application.ts); [Tests](../../test/))
+- Isolated Bun HTTP servers exercised generated todo creation with defaults, nested boolean patch flags, filtered pagination, and removal. Local inspection emitted the selected schema and rejected an unknown operation. A service-dependent note creation returned canonical text while direct SQLite inspection showed `stored:Canonical smoke`. ([Todo entrypoint](../../examples/resource-crud/main.ts); [Note codec](../../examples/service-codec/storage.ts); [CLI](../../src/rpc-cli.ts))
+- A disposable SQLite scenario exercised `PersistedRef.fromResource` with an already-decoded numeric codec input, an omitted default, an omitted generated value, bound-key persistence, and reuse of an existing row. The derived `createInputSchema` validates canonical creation input without reapplying codecs or requiring a complete row. The smoke script and databases were removed afterward. ([PersistedRef](../../src/persisted-ref.ts); [Resource](../../src/resource.ts))
+
+These checks cover the listed paths; the broader six-application observations below remain historical evidence.
+
 ### 2026-09-08: Simplification verification
 
 The user-approved cutover requires initial migration history, removes the framework Query wrapper in favor of Effect primitives, and preserves generated native CLI flags. Source size fell from 5,428 to 4,128 lines; the generic AST algebra, direct table-write service, database alias, opaque descriptor schema classes, and migration bootstrap/adoption state were removed. ([Table](../../src/table.ts); [Runtime](../../src/sqlite-bun.ts); [Migrations](../../src/sqlite-migrations.ts); [Authored SQL](../../examples/basic-crud/sqlite.ts))
