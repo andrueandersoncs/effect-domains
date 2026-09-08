@@ -1,11 +1,17 @@
 import { BunRuntime } from "@effect/platform-bun"
+import { Effect, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { BasicCrudApplication } from "./application.ts"
 import { BooksSqlite } from "./sqlite.ts"
 
-const manifest = Bun.fileURLToPath(new URL("./migrations/manifest.json", import.meta.url))
+const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
+const manifest = Bun.fileURLToPath(manifestUrl)
+const filename = Option.none()
 
-BunRuntime.runMain(ApplicationBun.run(BasicCrudApplication, {
-  database: { manifest },
+const program = ApplicationBun.run(BasicCrudApplication, {
+  database: { manifest, filename },
   services: BooksSqlite,
-}))
+  initialize: Effect.void,
+})
+
+BunRuntime.runMain(program)

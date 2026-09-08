@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { existsSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Effect, FileSystem, Function, pipe, Result, Schema } from "effect"
+import { Effect, Equivalence, FileSystem, Function, Option, pipe, Result, Schema } from "effect"
 import { Command } from "effect/unstable/cli"
 import { Table } from "../src/table.ts"
 import { renderCreateTable } from "../src/sqlite-ddl.ts"
@@ -158,12 +158,13 @@ const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(
     const store = makeMigrationStore(database, [initial])
     yield* store.prepare(source.tables)
     yield* database`DROP TABLE labels`
-    yield* pipe(
-      database`${database.literal(renderCreateTable(Table.snapshot(changed.table)))}`,
-      Effect.asVoid,
-    )
+    const changedSnapshot = Table.snapshot(changed.table)
+    const changedTableSql = renderCreateTable(changedSnapshot)
+    const changedTable = database.literal(changedTableSql)
+    yield* pipe(database`${changedTable}`, Effect.asVoid)
     const record = yield* changed.repository.create({ label: "two spaces" })
-    const outcome = yield* Effect.result(store.prepare(source.tables))
+    const prepareSource = store.prepare(source.tables)
+    const outcome = yield* Effect.result(prepareSource)
     const loadedRecord = yield* changed.repository.get(record.id)
 
     expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
@@ -184,13 +185,18 @@ const missingInitialHistoryAction = Effect.fn(
   "SqliteMigrations.missingInitialHistory",
 )(function* () {
   const database = yield* SqlClient.SqlClient
+
   const resource = Resource.make({
     name: "requires_initial_history",
     schema: TitleSchema,
     operations: [],
   })
+
   const target = SqliteMigrations.snapshot([resource.table])
-  const outcome = yield* Effect.result(makeMigrationStore(database, []).prepare(target.tables))
+  const emptyStore = makeMigrationStore(database, [])
+  const prepareTarget = emptyStore.prepare(target.tables)
+  const outcome = yield* Effect.result(prepareTarget)
+
   const tables = yield* database`
     SELECT name FROM sqlite_master
     WHERE type = 'table' AND name = 'requires_initial_history'
@@ -202,6 +208,7 @@ const missingInitialHistoryAction = Effect.fn(
       _tag: "MigrationError",
     },
   })
+
   expect(tables).toEqual([])
 })()
 
@@ -302,167 +309,213 @@ it.effect(
 const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
   "SqliteMigrations.generatedHistoryIsNeverRegisteredOnFailure",
 )(function* () {
-  const directory = yield* Effect.acquireRelease(
-    Effect.sync(() => mkdtempDisposableSync(join(tmpdir(), "effect-domains-migrations-"))),
-    (directory) => Effect.sync(() => directory.remove()),
-  )
+  const temporaryRoot = tmpdir()
+  const temporaryPrefix = join(temporaryRoot, "effect-domains-migrations-")
+  const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
+
+  const releaseDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) =>
+    Effect.sync(() => directory.remove())
+
+  const directory = yield* Effect.acquireRelease(createDirectory, releaseDirectory)
   const manifest = join(directory.path, "manifest.json")
   const initialPath = join(directory.path, "001_initial.json")
   const InitialSchema = Schema.Struct({ title: Schema.String })
+  interface Initial extends Schema.Schema.Type<typeof InitialSchema> {}
+
   const TargetSchema = Schema.Struct({
     title: Schema.String,
     required: Schema.Number,
   })
+
+  interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
+
   const initialResource = Resource.make({
     name: "generated_history",
     schema: InitialSchema,
     operations: [],
   })
+
   const targetResource = Resource.make({
     name: "generated_history",
     schema: TargetSchema,
     operations: [],
   })
+
+
+  const initialTarget = SqliteMigrations.snapshot([initialResource.table])
+
   const initial = SqliteMigrations.plan({
     id: "001_initial",
     from: empty,
-    to: SqliteMigrations.snapshot([initialResource.table]),
+    to: initialTarget,
   })
+
   const encodedInitial = encodeMigration(initial)
-  const history = SqliteMigrations.history([encodedInitial])
-  writeFileSync(initialPath, JSON.stringify(encodedInitial, null, 2))
-  writeFileSync(
-    manifest,
-    JSON.stringify({ migrations: ["001_initial.json"] }, null, 2),
-  )
+  const history = yield* SqliteMigrations.decodeHistory([encodedInitial])
+  const initialText = JSON.stringify(encodedInitial, null, 2)
+  writeFileSync(initialPath, initialText)
+  const initialManifest = JSON.stringify({ migrations: ["001_initial.json"] }, null, 2)
+  writeFileSync(manifest, initialManifest)
   const initialBytes = readFileSync(initialPath, "utf8")
+  const historyOption = Option.some(history)
+  const manifestOption = Option.some(manifest)
+
+
   const accepted = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: history,
-    manifest,
+    migrations: historyOption,
+    manifest: manifestOption,
   })
-  const generated = yield* Effect.exit(
-    Command.runWith(accepted, { version: "test", renderErrors: false })([
-      "generate",
-      "reviewed",
-    ]),
-  )
 
+  const acceptedRun = Command.runWith(accepted, { version: "test", renderErrors: false })
+  const reviewedGeneration = acceptedRun(["generate", "reviewed"])
+  const generated = yield* Effect.exit(reviewedGeneration)
+  const reviewedPath = join(directory.path, "002_reviewed.json")
+  const reviewedExists = existsSync(reviewedPath)
   expect(generated._tag).toBe("Success")
-  expect(existsSync(join(directory.path, "002_reviewed.json"))).toBe(true)
+  expect(reviewedExists).toBe(true)
+
   const generatedHistory = yield* SqliteMigrations.load(manifest)
+  const generatedHistoryFrozen = Object.isFrozen(generatedHistory)
   expect(generatedHistory).toHaveLength(2)
-  expect(Object.isFrozen(generatedHistory)).toBe(true)
+  expect(generatedHistoryFrozen).toBe(true)
 
   const before = readFileSync(manifest, "utf8")
   const fileSystem = yield* FileSystem.FileSystem
+
+  const renameWithFailure = (from: string, to: string) => {
+    const targetsManifest = Equivalence.strictEqual<string>()(to, manifest)
+    return targetsManifest ? Effect.die("simulated manifest rename failure") : fileSystem.rename(from, to)
+  }
+
   const bookkeepingFailureFileSystem = {
     ...fileSystem,
-    rename: (from: string, to: string) =>
-      to === manifest ? Effect.die("simulated manifest rename failure") : fileSystem.rename(from, to),
+    rename: renameWithFailure,
   }
+
+  const generatedHistoryOption = Option.some(generatedHistory)
+
   const bookkeeping = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: generatedHistory,
-    manifest,
+    migrations: generatedHistoryOption,
+    manifest: manifestOption,
   })
-  const bookkeepingFailure = yield* Effect.exit(
-    pipe(
-      Command.runWith(bookkeeping, { version: "test", renderErrors: false })([
-        "generate",
-        "bookkeeping",
-      ]),
-      Effect.provideService(FileSystem.FileSystem, bookkeepingFailureFileSystem),
-    ),
+
+  const bookkeepingRun = Command.runWith(bookkeeping, { version: "test", renderErrors: false })
+  const bookkeepingGeneration = bookkeepingRun(["generate", "bookkeeping"])
+
+  const bookkeepingWithFailure = pipe(
+    bookkeepingGeneration,
+    Effect.provideService(FileSystem.FileSystem, bookkeepingFailureFileSystem),
   )
 
+  const bookkeepingFailure = yield* Effect.exit(bookkeepingWithFailure)
+  const manifestAfterBookkeepingFailure = readFileSync(manifest, "utf8")
+  const initialAfterBookkeepingFailure = readFileSync(initialPath, "utf8")
+  const bookkeepingPath = join(directory.path, "003_bookkeeping.json")
+  const bookkeepingArtifactExists = existsSync(bookkeepingPath)
   expect(bookkeepingFailure._tag).toBe("Failure")
-  expect(readFileSync(manifest, "utf8")).toBe(before)
-  expect(readFileSync(initialPath, "utf8")).toBe(initialBytes)
-  expect(existsSync(join(directory.path, "003_bookkeeping.json"))).toBe(true)
+  expect(manifestAfterBookkeepingFailure).toBe(before)
+  expect(initialAfterBookkeepingFailure).toBe(initialBytes)
+  expect(bookkeepingArtifactExists).toBe(true)
+
   const historyAfterBookkeepingFailure = yield* SqliteMigrations.load(manifest)
   expect(historyAfterBookkeepingFailure).toHaveLength(2)
 
   const command = SqliteMigrations.command({
     name: "schema",
     tables: [targetResource.table],
-    migrations: generatedHistory,
-    manifest,
+    migrations: generatedHistoryOption,
+    manifest: manifestOption,
   })
-  const blocked = yield* Effect.exit(
-    Command.runWith(command, { version: "test", renderErrors: false })([
-      "generate",
-      "required",
-    ]),
-  )
 
+  const commandRun = Command.runWith(command, { version: "test", renderErrors: false })
+  const requiredGeneration = commandRun(["generate", "required"])
+  const blocked = yield* Effect.exit(requiredGeneration)
+  const manifestAfterBlockedGeneration = readFileSync(manifest, "utf8")
+  const requiredPath = join(directory.path, "003_required.json")
+  const requiredArtifactExists = existsSync(requiredPath)
   expect(blocked._tag).toBe("Failure")
-  expect(readFileSync(manifest, "utf8")).toBe(before)
-  expect(existsSync(join(directory.path, "003_required.json"))).toBe(false)
+  expect(manifestAfterBlockedGeneration).toBe(before)
+  expect(requiredArtifactExists).toBe(false)
+  const emptyHistoryOption = Option.some<ReadonlyArray<SqliteMigration>>([])
 
   const incoherent = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: [],
-    manifest,
+    migrations: emptyHistoryOption,
+    manifest: manifestOption,
   })
-  const incoherentFailure = yield* Effect.exit(
-    Command.runWith(incoherent, { version: "test", renderErrors: false })([
-      "generate",
-      "reviewed",
-    ]),
-  )
 
+  const incoherentRun = Command.runWith(incoherent, { version: "test", renderErrors: false })
+  const incoherentGeneration = incoherentRun(["generate", "reviewed"])
+  const incoherentFailure = yield* Effect.exit(incoherentGeneration)
+  const manifestAfterIncoherentFailure = readFileSync(manifest, "utf8")
+  const incoherentPath = join(directory.path, "003_reviewed.json")
+  const incoherentArtifactExists = existsSync(incoherentPath)
   expect(incoherentFailure._tag).toBe("Failure")
-  expect(readFileSync(manifest, "utf8")).toBe(before)
-  expect(existsSync(join(directory.path, "003_reviewed.json"))).toBe(false)
+  expect(manifestAfterIncoherentFailure).toBe(before)
+  expect(incoherentArtifactExists).toBe(false)
+
   const repeat = SqliteMigrations.plan({
     id: "002_repeat",
     from: initial.to,
     to: initial.to,
   })
+
   const final = SqliteMigrations.plan({
     id: "001_final",
     from: repeat.to,
     to: repeat.to,
   })
+
   const encodedRepeat = encodeMigration(repeat)
   const encodedFinal = encodeMigration(final)
-  const nonMonotonicHistory = SqliteMigrations.history([
+
+  const nonMonotonicHistory = yield* SqliteMigrations.decodeHistory([
     encodedInitial,
     encodedRepeat,
     encodedFinal,
   ])
-  writeFileSync(join(directory.path, "seed.json"), JSON.stringify(encodedRepeat, null, 2))
-  writeFileSync(join(directory.path, "final.json"), JSON.stringify(encodedFinal, null, 2))
-  writeFileSync(
-    manifest,
-    JSON.stringify(
-      { migrations: ["001_initial.json", "seed.json", "final.json"] },
-      null,
-      2,
-    ),
+
+  const seedPath = join(directory.path, "seed.json")
+  const finalPath = join(directory.path, "final.json")
+  const seedText = JSON.stringify(encodedRepeat, null, 2)
+  const finalText = JSON.stringify(encodedFinal, null, 2)
+  writeFileSync(seedPath, seedText)
+  writeFileSync(finalPath, finalText)
+
+  const duplicateManifest = JSON.stringify(
+    { migrations: ["001_initial.json", "seed.json", "final.json"] },
+    null,
+    2,
   )
+
+  writeFileSync(manifest, duplicateManifest)
+
   const duplicateBefore = readFileSync(manifest, "utf8")
+  const nonMonotonicHistoryOption = Option.some(nonMonotonicHistory)
+
   const duplicateId = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: nonMonotonicHistory,
-    manifest,
+    migrations: nonMonotonicHistoryOption,
+    manifest: manifestOption,
   })
-  const duplicateIdFailure = yield* Effect.exit(
-    Command.runWith(duplicateId, { version: "test", renderErrors: false })([
-      "generate",
-      "repeat",
-    ]),
-  )
 
+  const duplicateRun = Command.runWith(duplicateId, { version: "test", renderErrors: false })
+  const duplicateGeneration = duplicateRun(["generate", "repeat"])
+  const duplicateIdFailure = yield* Effect.exit(duplicateGeneration)
+  const manifestAfterDuplicateFailure = readFileSync(manifest, "utf8")
+  const repeatPath = join(directory.path, "002_repeat.json")
+  const repeatArtifactExists = existsSync(repeatPath)
   expect(duplicateIdFailure._tag).toBe("Failure")
-  expect(readFileSync(manifest, "utf8")).toBe(duplicateBefore)
-  expect(existsSync(join(directory.path, "002_repeat.json"))).toBe(false)
+  expect(manifestAfterDuplicateFailure).toBe(duplicateBefore)
+  expect(repeatArtifactExists).toBe(false)
 })
+
 
 it.effect(
   "generate leaves the manifest unchanged for blocked, incoherent, and duplicate histories",

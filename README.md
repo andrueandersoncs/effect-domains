@@ -24,12 +24,13 @@ const Books = Resource.make({
 export const Library = Application.make({
   name: "library",
   resources: [Books],
+  commands: [],
 })
 ```
 
 This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.run(application, { database: { manifest }, services?, initialize? })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. The [generated CRUD application](examples/resource-crud/application.ts) registers resources; the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+`ApplicationBun.run(application, { database: { manifest, filename }, services, initialize })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. Use `Option.none()` for the environment/default filename, `Layer.empty` when no authored services are needed, and `Effect.void` when no initialization is needed. The [generated CRUD application](examples/resource-crud/application.ts) registers resources; the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -45,7 +46,7 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-`Commands.make(name, contracts)` derives an injectable service and RPC group from named `{ input, output, error }` schemas. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications need no command service.
+`Commands.make({ name, contracts })` derives an injectable service and RPC group from named `{ input, output, error }` schemas. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares the resource tables through the migration store.
 
 Contracts may share shapes without sharing business behavior: the [reservation contracts](examples/reservations/contracts.ts) reuse a transition contract for `confirm` and `release`. Names, schemas, and policy remain explicit; RPC wrappers and group membership are derived once.
 
@@ -62,6 +63,8 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 ## Migrations
 
 `SqliteMigrations.snapshot` captures a physical schema. `SqliteMigrations.plan` compares frozen snapshots and emits a reviewable JSON artifact. Its native CLI can generate snapshots and plans from an application without a running server.
+
+`SqliteMigrations.decodeHistory(raw)` validates raw artifacts as an Effect; `SqliteMigrations.load(manifest)` reads an ordered manifest. Direct schema-command configuration represents optional history and manifest values with `Option`.
 
 Fresh tables and nullable additions are mechanical. Renames, required-field backfills, and storage transformations require explicit intent. Historical artifacts contain frozen metadata, not imports of the latest domain schema. One migration ledger records applied history; the runtime checks artifact contents and actual schema drift, refuses untracked objects, and applies rebuilds transactionally.
 

@@ -1,45 +1,89 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Option, Result, Schema } from "effect"
-import { identifier } from "../src/domain.ts"
+import { Effect, Option, Result, pipe } from "effect"
+import {
+  CounterIdSchema,
+  CounterSchema,
+  type Counter,
+  VisitsCounterId,
+} from "../examples/persisted-ref/domain.ts"
 import { PersistedRef } from "../src/persisted-ref.ts"
 import { Resource } from "../src/resource.ts"
 import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
 import { prepareTables } from "./prepare-tables.ts"
 
+const incrementCounter = (row: Counter) =>
+  CounterSchema.make({ ...row, value: row.value + 1 })
+
 const Counters = Resource.make({
   name: "reference_counters",
-  schema: Schema.Struct({ id: identifier(Schema.String), value: Schema.Int }),
+  schema: CounterSchema,
   operations: [],
 })
 
-it.effect("a resource reference cannot redirect writes or recreate a deleted row on refresh", () =>
-  Effect.gen(function* () {
-    yield* prepareTables([Counters.table])
-    const ref = yield* PersistedRef.fromResource(Counters, {
-      key: "visits",
-      ifMissing: { value: 0 },
-    })
-    yield* Counters.repository.create({ id: "other", value: 99 })
-    yield* ref.update((row) => ({ ...row, value: row.value + 1 }))
-    const redirected = yield* Effect.result(ref.set({ id: "other", value: 7 }))
-    expect(Result.isFailure(redirected)).toBe(true)
-    if (Result.isFailure(redirected)) {
-      expect(redirected.failure._tag).toBe("PersistedRefKeyError")
-    }
-    expect(yield* ref.get).toEqual({ id: "visits", value: 1 })
-    expect(yield* Counters.repository.get("other")).toEqual({ id: "other", value: 99 })
+const otherCounterId = CounterIdSchema.make("other")
 
-    yield* Counters.repository.update({ id: "visits", value: 10 })
-    expect(yield* ref.get).toEqual({ id: "visits", value: 1 })
-    expect(yield* ref.refresh).toEqual({ id: "visits", value: 10 })
+const otherCounter = CounterSchema.make({
+  id: otherCounterId,
+  value: 99,
+})
 
-    yield* Counters.repository.remove("visits")
-    const refreshed = yield* Effect.result(ref.refresh)
-    expect(Result.isFailure(refreshed)).toBe(true)
-    if (Result.isFailure(refreshed)) {
-      expect(refreshed.failure._tag).toBe("ResourceNotFound")
-    }
-    expect(yield* ref.get).toEqual({ id: "visits", value: 10 })
-    expect(Option.isNone(yield* Counters.repository.find("visits"))).toBe(true)
-  }).pipe(Effect.provide(SqliteBunRuntime.sqlClient(":memory:", { migrations: [] }))),
+const redirectedCounter = CounterSchema.make({
+  id: otherCounterId,
+  value: 7,
+})
+
+const updatedVisitsCounter = CounterSchema.make({
+  id: VisitsCounterId,
+  value: 10,
+})
+
+const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
+
+const persistedResourceProgram = Effect.gen(function* () {
+  yield* prepareTables([Counters.table])
+
+  const ref = yield* PersistedRef.fromResource(Counters, {
+    key: VisitsCounterId,
+    ifMissing: { value: 0 },
+  })
+
+  yield* Counters.repository.create(otherCounter)
+  yield* ref.update(incrementCounter)
+
+  const redirection = ref.set(redirectedCounter)
+  const redirected = yield* Effect.result(redirection)
+  const redirectionFailed = Result.isFailure(redirected)
+  expect(redirectionFailed).toBe(true)
+  if (redirectionFailed) {
+    expect(redirected.failure._tag).toBe("PersistedRefKeyError")
+  }
+
+  const visits = yield* ref.get
+  expect(visits).toEqual({ id: "visits", value: 1 })
+  const other = yield* Counters.repository.get(otherCounterId)
+  expect(other).toEqual({ id: "other", value: 99 })
+
+  yield* Counters.repository.update(updatedVisitsCounter)
+  const cachedVisits = yield* ref.get
+  expect(cachedVisits).toEqual({ id: "visits", value: 1 })
+  const refreshedVisits = yield* ref.refresh
+  expect(refreshedVisits).toEqual({ id: "visits", value: 10 })
+
+  yield* Counters.repository.remove(VisitsCounterId)
+  const refreshed = yield* Effect.result(ref.refresh)
+  const refreshFailed = Result.isFailure(refreshed)
+  expect(refreshFailed).toBe(true)
+  if (refreshFailed) {
+    expect(refreshed.failure._tag).toBe("ResourceNotFound")
+  }
+  const retainedVisits = yield* ref.get
+  expect(retainedVisits).toEqual({ id: "visits", value: 10 })
+  const missing = yield* Counters.repository.find(VisitsCounterId)
+  const visitsAreMissing = Option.isNone(missing)
+  expect(visitsAreMissing).toBe(true)
+})
+
+it.effect(
+  "a resource reference cannot redirect writes or recreate a deleted row on refresh",
+  () => pipe(persistedResourceProgram, Effect.provide(sqlite)),
 )

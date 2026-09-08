@@ -10,6 +10,7 @@ import {
 import { CounterResource } from "./resources.ts"
 
 const unavailable = () => CounterUnavailable.make({})
+
 const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   pipe(effect, Effect.mapError(unavailable))
 
@@ -18,7 +19,7 @@ const incrementedValue = Struct.evolve<
   { readonly value: typeof Number.increment }
 >({ value: Number.increment })
 
-export const CounterSqlite = CounterCommands.layer(Effect.gen(function* () {
+const counterHandlers = Effect.gen(function* () {
   const persisted = yield* PersistedRef.fromResource(CounterResource, {
     key: VisitsCounterId,
     ifMissing: { value: 0 },
@@ -27,14 +28,19 @@ export const CounterSqlite = CounterCommands.layer(Effect.gen(function* () {
   const get = Effect.fn("Counter.get")(function* () {
     return yield* persisted.get
   })
+
   const increment = Effect.fn("Counter.increment")(function* () {
-    return yield* persistence(persisted.update(incrementedValue))
+    const updated = persisted.update(incrementedValue)
+    return yield* persistence(updated)
   })
-  // This deliberately bypasses the cache; refresh makes the external write visible.
+
+  // Bypass the cache because refresh makes the external write visible.
   const set = Effect.fn("Counter.set")(function* ({ value }: SetCounterPayload) {
     const next = CounterSchema.make({ id: VisitsCounterId, value })
-    return yield* persistence(CounterResource.repository.update(next))
+    const updated = CounterResource.repository.update(next)
+    return yield* persistence(updated)
   })
+
   const refresh = Effect.fn("Counter.refresh")(function* () {
     return yield* persistence(persisted.refresh)
   })
@@ -45,4 +51,6 @@ export const CounterSqlite = CounterCommands.layer(Effect.gen(function* () {
     "counters.set": set,
     "counters.refresh": refresh,
   }
-}))
+})
+
+export const CounterSqlite = CounterCommands.layer(counterHandlers)

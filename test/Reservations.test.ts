@@ -16,6 +16,7 @@ import {
 import { InventoryMigrations } from "../examples/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
 import { InventorySqlite, seedStock } from "../examples/reservations/sqlite.ts"
+import { Application } from "../src/application.ts"
 import { RepositoryStore } from "../src/repository-store.ts"
 import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
 import { SqlClient } from "effect/unstable/sql"
@@ -41,7 +42,7 @@ const withInventory = <A, E>(
 ) =>
   pipe(
     Effect.fn("Reservations.withInventory")(function* () {
-      yield* ReservationApplication.prepare
+      yield* Application.prepare(ReservationApplication)
       yield* seedStock(initialStock)
 
       return yield* pipe(effect, Effect.provide(InventorySqlite))
@@ -211,8 +212,8 @@ const historicalSecondsMigrationAction = Effect.fn(
   yield* database`INSERT INTO stock (sku, available) VALUES (${sku}, 0)`
   yield* database`INSERT INTO reservations (id, sku, quantity, status, created_at_seconds)
     VALUES (${id}, ${sku}, 1, 'held', ${seconds})`
-  yield* ReservationApplication.prepare
-  yield* ReservationApplication.prepare
+  yield* Application.prepare(ReservationApplication)
+  yield* Application.prepare(ReservationApplication)
   const historicalStock = StockSchema.make({ sku, available: 99 })
   yield* seedStock(historicalStock)
 

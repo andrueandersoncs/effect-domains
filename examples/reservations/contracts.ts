@@ -39,7 +39,7 @@ const reservationContracts = {
   release: transitionContract,
 } satisfies CommandContracts
 
-export const Inventory = Commands.make(
-  "examples/reservations/Inventory",
-  reservationContracts,
-)
+export const Inventory = Commands.make({
+  name: "examples/reservations/Inventory",
+  contracts: reservationContracts,
+})

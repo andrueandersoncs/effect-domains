@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, type Scope, Schema } from "effect"
+import { Array, Context, Effect, Layer, Record, type Scope, Schema, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 
 export type CommandContract = Readonly<{
@@ -16,11 +16,11 @@ type CommandRpc<Name extends string, Contract extends CommandContract> = Rpc.Rpc
   Schema.toCodecJson<Contract["error"]>
 >
 
-export type CommandRpcs<Contracts extends CommandContracts> = {
+type CommandRpcs<Contracts extends CommandContracts> = {
   readonly [Name in keyof Contracts & string]: CommandRpc<Name, Contracts[Name]>
 }[keyof Contracts & string]
 
-export type CommandHandlers<Contracts extends CommandContracts, R = never> = {
+type CommandHandlers<Contracts extends CommandContracts, R = never> = {
   readonly [Name in keyof Contracts]: (
     input: Contracts[Name]["input"]["Type"],
   ) => Effect.Effect<
@@ -30,98 +30,77 @@ export type CommandHandlers<Contracts extends CommandContracts, R = never> = {
   >
 }
 
-type CommandGroup<Contracts extends CommandContracts> = RpcGroup.RpcGroup<
-  CommandRpcs<Contracts>
->
-
-export interface CommandBundle<
-  Name extends string,
-  Contracts extends CommandContracts,
-> extends Context.Service<CommandBundle<Name, Contracts>, CommandHandlers<Contracts>> {
-  readonly name: Name
-  readonly contracts: Contracts
-  readonly group: CommandGroup<Contracts>
-  readonly handlers: Layer.Layer<Rpc.ToHandler<CommandRpcs<Contracts>>, never, CommandBundle<Name, Contracts>>
-  readonly layer: <Handlers extends CommandHandlers<Contracts, any>, E = never, R = never>(
-    handlers: Handlers | Effect.Effect<Handlers, E, R>,
-  ) => Layer.Layer<
-    CommandBundle<Name, Contracts>,
-    E,
-    Exclude<R, Scope.Scope> | RpcGroup.HandlersServices<CommandRpcs<Contracts>, Handlers>
-  >
-}
-
 export interface AnyCommandBundle {
-  readonly group: unknown
-  readonly handlers: unknown
+  readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.AnyWithProps>, "requests">
+  readonly handlers: Layer.Layer<never, any, any>
 }
 
 const withCapturedContext = <Contracts extends CommandContracts>(
   captured: Context.Context<any>,
   handlers: CommandHandlers<Contracts, any>,
-): CommandHandlers<Contracts> =>
-  Object.fromEntries(
-    Object.entries(handlers).map(([name, handler]) => [
-      name,
-      (input: unknown) =>
-        Effect.contextWith((current) =>
-          Effect.provide(handler(input), Context.merge(captured, current))
-        ),
-    ]),
-  ) as CommandHandlers<Contracts>
+) => {
+  const capture = (handler: CommandHandlers<Contracts, any>[keyof Contracts]) => {
+    const invoke = (input: Contracts[keyof Contracts]["input"]["Type"]) =>
+      Effect.contextWith((current) => {
+        const context = Context.merge(captured, current)
+        return pipe(handler(input), Effect.provide(context))
+      })
 
-const toRpcHandlers = <Contracts extends CommandContracts>(
-  handlers: CommandHandlers<Contracts>,
-): RpcGroup.HandlersFrom<CommandRpcs<Contracts>> =>
-  handlers as unknown as RpcGroup.HandlersFrom<CommandRpcs<Contracts>>
+    return invoke
+  }
+
+  return Record.map(handlers, capture) as CommandHandlers<Contracts>
+}
+
+const toRpcHandlers = <Contracts extends CommandContracts>(handlers: CommandHandlers<Contracts>) =>
+  handlers as CommandHandlers<Contracts> & RpcGroup.HandlersFrom<CommandRpcs<Contracts>>
 
 const make = <const Name extends string, const Contracts extends CommandContracts>(
-  name: Name,
-  contracts: Contracts,
-): CommandBundle<Name, Contracts> => {
-  const procedures = Object.entries(contracts).map(([name, contract]) =>
-    Rpc.make(name, {
-      payload: Schema.toCodecJson(contract.input),
-      success: Schema.toCodecJson(contract.output),
-      error: Schema.toCodecJson(contract.error),
-    }),
-  ) as Array<CommandRpcs<Contracts>>
+  options: Readonly<{ name: Name; contracts: Contracts }>,
+) => {
+  const procedure = ([name, contract]: [string, CommandContract]) => {
+    const payloadSchema = Schema.toCodecJson(contract.input)
+    const successSchema = Schema.toCodecJson(contract.output)
+    const errorSchema = Schema.toCodecJson(contract.error)
+    return Rpc.make(name, { payload: payloadSchema, success: successSchema, error: errorSchema })
+  }
 
-  const group = RpcGroup.make(...procedures) as CommandGroup<Contracts>
-  const service = Context.Service<
-    CommandBundle<Name, Contracts>,
-    CommandHandlers<Contracts>
-  >(name)
+  const procedures = pipe(options.contracts, Record.toEntries, Array.map(procedure)) as Array<CommandRpcs<Contracts>>
+  const group = RpcGroup.make(...procedures)
 
-  const handlers = group.toLayer(
-    Effect.map(service, toRpcHandlers),
-  ) as CommandBundle<Name, Contracts>["handlers"]
-  const layer = <Handlers extends CommandHandlers<Contracts, any>, E = never, R = never>(
-    value: Handlers | Effect.Effect<Handlers, E, R>,
-  ): Layer.Layer<
-    CommandBundle<Name, Contracts>,
-    E,
-    Exclude<R, Scope.Scope> | RpcGroup.HandlersServices<CommandRpcs<Contracts>, Handlers>
-  > =>
-    Layer.effect(service)(
-      Effect.gen(function* () {
+  const handlerLayer = (service: Context.Service<CommandService, CommandHandlers<Contracts>>) =>
+    pipe(service, Effect.map(toRpcHandlers<Contracts>), group.toLayer.bind(group))
+
+  class CommandService extends Context.Service<CommandService, CommandHandlers<Contracts>>()(options.name) {
+    static readonly group = group
+
+    static readonly handlers = handlerLayer(CommandService) as Layer.Layer<
+      Rpc.ToHandler<CommandRpcs<Contracts>>,
+      never,
+      CommandService
+    >
+
+    static layer<Handlers extends CommandHandlers<Contracts, any>, E = never, R = never>(
+      value: Handlers | Effect.Effect<Handlers, E, R>,
+    ) {
+      const construction = Effect.gen(function* () {
         const captured = yield* Effect.context<
           R | RpcGroup.HandlersServices<CommandRpcs<Contracts>, Handlers>
         >()
+
         const handlers = yield* (Effect.isEffect(value) ? value : Effect.succeed(value))
         return withCapturedContext(captured, handlers)
-      }),
-    ) as Layer.Layer<
-      CommandBundle<Name, Contracts>,
-      E,
-      Exclude<R, Scope.Scope> | RpcGroup.HandlersServices<CommandRpcs<Contracts>, Handlers>
-    >
+      })
 
-  Object.defineProperty(service, "name", { value: name })
-  return Object.assign(service, { contracts, group, handlers, layer }) as CommandBundle<
-    Name,
-    Contracts
-  >
+      return Layer.effect(CommandService)(construction) as Layer.Layer<
+        CommandService,
+        E,
+        Exclude<R, Scope.Scope> | RpcGroup.HandlersServices<CommandRpcs<Contracts>, Handlers>
+      >
+    }
+  }
+
+  return CommandService
 }
 
 export const Commands = { make }

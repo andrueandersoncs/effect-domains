@@ -1,20 +1,38 @@
 import { Context, Effect, Option, Schema } from "effect"
 import type { Table } from "./table.ts"
 
-export interface RepositoryListOrder {
-  readonly field: string
-  readonly direction: "asc" | "desc"
-}
+const RepositoryListDirectionSchema = Schema.Literals(["asc", "desc"])
+const RepositoryListValuesSchema = Schema.Array(Schema.Unknown)
+const RepositoryListFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
 
-export interface RepositoryListQuery {
-  readonly filter: Readonly<Record<string, unknown>>
-  readonly order: ReadonlyArray<RepositoryListOrder>
-  readonly cursor: Readonly<{ readonly values: ReadonlyArray<unknown>; readonly identifier: unknown }> | undefined
-  readonly limit: number
-}
+export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
+  "RepositoryListOrder",
+)({
+  field: Schema.String,
+  direction: RepositoryListDirectionSchema,
+}) {}
 
-export interface RepositoryListPage {
-  readonly rows: ReadonlyArray<unknown>
+export class RepositoryListCursor extends Schema.Class<RepositoryListCursor>(
+  "RepositoryListCursor",
+)({
+  values: RepositoryListValuesSchema,
+  identifier: Schema.Unknown,
+}) {}
+
+const RepositoryListOrdersSchema = Schema.Array(RepositoryListOrder)
+const RepositoryListCursorSchema = Schema.Option(RepositoryListCursor)
+
+export class RepositoryListQuery extends Schema.Class<RepositoryListQuery>(
+  "RepositoryListQuery",
+)({
+  filter: RepositoryListFilterSchema,
+  order: RepositoryListOrdersSchema,
+  cursor: RepositoryListCursorSchema,
+  limit: Schema.Number,
+}) {}
+
+interface RepositoryListPage {
+  readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>
   readonly hasMore: boolean
 }
 

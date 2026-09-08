@@ -1,192 +1,169 @@
 import { BunHttpServer, BunServices } from "@effect/platform-bun"
-import { Config, Context, Effect, Layer, type PlatformError, Schema, type Scope, pipe } from "effect"
+import { Array, Config, Context, Effect, Function, Layer, Option, type PlatformError, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
-import type { Application } from "./application.ts"
+import { Application } from "./application.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { RpcCli } from "./rpc-cli.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { SqliteMigrations, type SqliteMigration } from "./sqlite-migrations.ts"
-import { Table } from "./table.ts"
 import type { MigrationError } from "./migrations.ts"
 
 type DatabaseOptions =
-  | Readonly<{
-    manifest: string
-    filename?: string
-  }>
-  | Readonly<{
-    migrations: ReadonlyArray<SqliteMigration>
-    filename?: string
-    manifest?: never
-  }>
+  | Readonly<{ manifest: string; filename: Option.Option<string> }>
+  | Readonly<{ migrations: ReadonlyArray<SqliteMigration>; filename: Option.Option<string> }>
 
-type RuntimeLayer = Layer.Layer<any, any, any>
+type RuntimeLayer = Layer.Layer<never, any, any>
 type Initialization = Effect.Effect<any, any, any>
 
-type RunOptions<
-  Services extends RuntimeLayer | undefined,
-  Initialize extends Initialization | undefined,
-> = Readonly<{
+type RunOptions<Services extends RuntimeLayer, Initialize extends Initialization> = Readonly<{
   database: DatabaseOptions
-  services?: Services
-  initialize?: Initialize
-}>
-
-type RuntimeApplication = Readonly<{
-  name: string
-  resources: Application["resources"]
-  group: RpcGroup.RpcGroup<any>
-  tables: ReadonlyArray<Table>
-  handlers: RuntimeLayer
-  prepare: Initialization
+  services: Services
+  initialize: Initialize
 }>
 
 type ProvidedRuntime = Layer.Success<ReturnType<typeof SqliteBunRuntime.sqlClient>> | BunServices.BunServices | Scope.Scope
-type RunRequirements<App extends RuntimeApplication, Services extends RuntimeLayer | undefined, Initialize extends Initialization | undefined> =
-  | Exclude<Effect.Services<App["prepare"]> | Layer.Services<NonNullable<Services>>, ProvidedRuntime>
-  | Exclude<Layer.Services<App["handlers"]> | Effect.Services<NonNullable<Initialize>>, ProvidedRuntime | Layer.Success<NonNullable<Services>>>
+
+type RunRequirements<App extends Application, Services extends RuntimeLayer, Initialize extends Initialization> =
+  | Exclude<Layer.Services<Services>, ProvidedRuntime>
+  | Exclude<Layer.Services<App["handlers"]> | Effect.Services<Initialize>, ProvidedRuntime | Layer.Success<Services>>
   | Exclude<Rpc.ServicesClient<RpcGroup.Rpcs<App["group"]>> | Rpc.ServicesServer<RpcGroup.Rpcs<App["group"]>> | Rpc.MiddlewareClient<RpcGroup.Rpcs<App["group"]>>, BunServices.BunServices | Scope.Scope>
 
-type RunErrors<App extends RuntimeApplication, Services extends RuntimeLayer | undefined, Initialize extends Initialization | undefined> =
+type RunErrors<App extends Application, Services extends RuntimeLayer, Initialize extends Initialization> =
   | Config.ConfigError | MigrationError | PlatformError.PlatformError | Schema.SchemaError | CliError.CliError
   | Layer.Error<ReturnType<typeof BunHttpServer.layer>> | Layer.Error<ReturnType<typeof SqliteBunRuntime.sqlClient>>
-  | Layer.Error<App["handlers"]> | Effect.Error<App["prepare"]>
-  | Layer.Error<NonNullable<Services>> | Effect.Error<NonNullable<Initialize>>
+  | Layer.Error<App["handlers"]>
+  | Layer.Error<Services> | Effect.Error<Initialize>
 
-type InspectionApplication = Pick<RuntimeApplication, "name" | "resources" | "group">
+const databaseEnvironmentVariable = (name: string) =>
+  `${name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_DB`
 
-const databaseEnvironmentVariable = (application: Readonly<{ name: string }>) =>
-  `${application.name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_DB`
+const serviceUrlEnvironmentVariable = (name: string) =>
+  `${name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_URL`
 
-const serviceUrlEnvironmentVariable = (application: Readonly<{ name: string }>) =>
-  `${application.name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_URL`
-
-const databaseFilename = (application: Readonly<{ name: string }>, configured?: string) =>
-  configured === undefined
-    ? pipe(
-      Config.schema(Schema.NonEmptyString, databaseEnvironmentVariable(application)),
-      Config.withDefault(`${application.name}.sqlite`),
-    )
-    : Effect.succeed(configured)
+const databaseFilename = (name: string, configured: Option.Option<string>) => {
+  const environment = databaseEnvironmentVariable(name)
+  const fallback = pipe(Config.schema(Schema.NonEmptyString, environment), Config.withDefault(`${name}.sqlite`))
+  return Option.match(configured, { onNone: Function.constant(fallback), onSome: Effect.succeed })
+}
 
 const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
-  App extends RuntimeApplication,
-  Services extends RuntimeLayer | undefined = undefined,
-  Initialize extends Initialization | undefined = undefined,
->(
-  application: App,
-  options: RunOptions<Services, Initialize>,
-) {
-  const filename = yield* databaseFilename(application, options.database.filename)
+  App extends Application,
+  Services extends RuntimeLayer,
+  Initialize extends Initialization,
+>(application: App, options: RunOptions<Services, Initialize>) {
+  const filename = yield* databaseFilename(application.name, options.database.filename)
+
   const migrations = "migrations" in options.database
     ? options.database.migrations
     : yield* SqliteMigrations.load(options.database.manifest)
+
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
   const database = SqliteBunRuntime.sqlClient(filename, { migrations })
 
   const routes = pipe(
-    RpcServer.layerHttp({
-      group: application.group,
-      path: "/rpc/v1",
-      protocol: "http",
-    }),
+    RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" }),
     Layer.provide(application.handlers),
     Layer.provide(RpcSerialization.layerJson),
   )
-  const server = pipe(
-    HttpRouter.serve(routes),
-    Layer.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port })),
-  )
 
-  return yield* Effect.scoped(Effect.gen(function* () {
-    const databaseContext = yield* Layer.build(database)
-    yield* Effect.provideContext(application.prepare, databaseContext)
+  const httpServer = BunHttpServer.layer({ hostname: "127.0.0.1", port })
+  const server = pipe(HttpRouter.serve(routes), Layer.provide(httpServer))
 
-    const serviceContext = options.services === undefined
-      ? databaseContext
-      : yield* pipe(
-        Layer.build(options.services),
-        Effect.provideContext(databaseContext),
-        Effect.map((services) => Context.merge(databaseContext, services)),
-      )
-
-    if (options.initialize !== undefined) {
+  return yield* pipe(
+    Effect.gen(function* () {
+      const databaseContext = yield* Layer.build(database)
+      yield* pipe(Application.prepare(application), Effect.provideContext(databaseContext))
+      const services = yield* pipe(Layer.build(options.services), Effect.provideContext(databaseContext))
+      const serviceContext = Context.merge(databaseContext, services)
       yield* Effect.provideContext(options.initialize, serviceContext)
-    }
-
-    return yield* Effect.provideContext(Layer.launch(server), serviceContext)
-  }))
+      return yield* pipe(Layer.launch(server), Effect.provideContext(serviceContext))
+    }),
+    Effect.scoped,
+  )
 })
 
-const inspectCommand = (application: InspectionApplication) => {
+const inspectCommand = (application: Application) => {
   const operation = pipe(Argument.string("operation"), Argument.optional)
 
-  return Command.make("inspect", { operation }, ({ operation }) => {
-    const selected = operation._tag === "Some" ? operation.value : undefined
-    const inspection = ApplicationInspect.describe(application, selected)
-    if (selected !== undefined && inspection.operations.length === 0) {
-      return CliError.UserError.make({
-        cause: selected,
-        userMessage: `Unknown application operation ${selected}`,
+  const inspect = Effect.fn("ApplicationBun.inspect")(function* ({ operation }: Readonly<{ operation: Option.Option<string> }>) {
+    const inspection = ApplicationInspect.describe(application, operation)
+    const selected = Option.isSome(operation)
+    const missing = Array.isReadonlyArrayEmpty(inspection.operations)
+    const unknownOperation = selected && missing
+
+    if (unknownOperation) {
+      return yield* CliError.UserError.make({
+        cause: operation.value,
+        userMessage: `Unknown application operation ${operation.value}`,
       })
     }
 
-    return Effect.sync(() => {
-      process.stdout.write(`${JSON.stringify(inspection, null, 2)}\n`)
-    })
+    const output = JSON.stringify(inspection, null, 2)
+    const stdio = yield* Stdio.Stdio
+    const stream = Stream.make(`${output}\n`)
+    const stdout = stdio.stdout()
+    yield* Stream.run(stream, stdout)
   })
+
+  return Command.make("inspect", { operation }, inspect)
 }
 
+const clientProtocol = (url: URL) => pipe(
+  RpcClient.layerProtocolHttp({ url: url.href }),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(RpcSerialization.layerJson),
+)
+
 const runApplication = Effect.fn("ApplicationBun.run")(function* <
-  App extends RuntimeApplication,
-  Services extends RuntimeLayer | undefined = undefined,
-  Initialize extends Initialization | undefined = undefined,
->(
-  application: App,
-  options: RunOptions<Services, Initialize>,
-) {
-  const protocol = Layer.unwrap(pipe(
-    Config.schema(Schema.URLFromString, serviceUrlEnvironmentVariable(application)),
-    Config.withDefault(new URL("http://127.0.0.1:3000/rpc/v1")),
-    Effect.map((url) => pipe(
-      RpcClient.layerProtocolHttp({ url: url.href }),
-      Layer.provide(FetchHttpClient.layer),
-      Layer.provide(RpcSerialization.layerJson),
-    )),
-  ))
+  App extends Application,
+  Services extends RuntimeLayer,
+  Initialize extends Initialization,
+>(application: App, options: RunOptions<Services, Initialize>) {
+  const environment = serviceUrlEnvironmentVariable(application.name)
+  const defaultUrl = new URL("http://127.0.0.1:3000/rpc/v1")
+
+  const protocol = pipe(
+    Config.schema(Schema.URLFromString, environment),
+    Config.withDefault(defaultUrl),
+    Effect.map(clientProtocol),
+    Layer.unwrap,
+  )
+
+  const migrations = "migrations" in options.database ? Option.some(options.database.migrations) : Option.none()
+  const manifest = "manifest" in options.database ? Option.some(options.database.manifest) : Option.none()
+
   const schema = SqliteMigrations.command({
     name: "schema",
     tables: application.tables,
-    migrations: "migrations" in options.database ? options.database.migrations : undefined,
-    manifest: options.database.manifest,
+    migrations,
+    manifest,
   })
+
+  const serve = () => serveApplication(application, options)
+  const serveCommand = Command.make("serve", {}, serve)
+  const inspection = inspectCommand(application)
+
   const command = RpcCli.make({
     name: application.name,
     group: application.group,
     protocol,
-    subcommands: [
-      Command.make("serve", {}, () => serveApplication(application, options)),
-      schema,
-      inspectCommand(application),
-    ],
+    subcommands: [serveCommand, schema, inspection],
   })
 
   return yield* Command.run(command, { version: "0.1.0" })
 })
 
 export const ApplicationBun = {
-  run: <
-    App extends RuntimeApplication,
-    Services extends RuntimeLayer | undefined = undefined,
-    Initialize extends Initialization | undefined = undefined,
-  >(
-    application: App,
-    options: RunOptions<Services, Initialize>,
-  ) => pipe(
-    runApplication(application, options),
-    Effect.provide(BunServices.layer),
-  // The branches share one runtime scope; retain each caller's concrete dependency graph.
-  ) as Effect.Effect<void, RunErrors<App, Services, Initialize>, RunRequirements<App, Services, Initialize>>,
+  run: Effect.fn("ApplicationBun.run")(function* <
+    App extends Application,
+    Services extends RuntimeLayer,
+    Initialize extends Initialization,
+  >(application: App, options: RunOptions<Services, Initialize>) {
+    return yield* pipe(
+      runApplication(application, options),
+      Effect.provide(BunServices.layer),
+    ) as Effect.Effect<void, RunErrors<App, Services, Initialize>, RunRequirements<App, Services, Initialize>>
+  }),
 }

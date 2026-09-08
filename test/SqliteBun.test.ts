@@ -66,7 +66,10 @@ describe("Bun SQLite tables and authored operations", () => {
     secret: StoredStringSchema,
     score: Schema.Number,
   })
-  const incrementUserScore = (user: typeof UserSchema.Type) =>
+
+  interface User extends Schema.Schema.Type<typeof UserSchema> {}
+
+  const incrementUserScore = (user: User) =>
     UserSchema.make({
       ...user,
       score: user.score + 1,
@@ -145,6 +148,8 @@ describe("Bun SQLite tables and authored operations", () => {
     name: Schema.String,
     rating: SqliteFiniteSchema,
   })
+
+  interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
   const Articles = Table.make({ name: "articles", schema: ArticleSchema })
 
   const CreateArticle = SqlSchema.findOne({

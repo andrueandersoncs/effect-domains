@@ -44,7 +44,7 @@ const bookContracts = {
   },
 } satisfies CommandContracts
 
-export const BooksService = Commands.make(
-  "examples/basic-crud/BooksService",
-  bookContracts,
-)
+export const BooksService = Commands.make({
+  name: "examples/basic-crud/BooksService",
+  contracts: bookContracts,
+})

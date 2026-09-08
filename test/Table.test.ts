@@ -167,9 +167,10 @@ describe("Table", () => {
       const NestedValueSchema = Schema.Struct({ value: Schema.String })
       interface NestedValue extends Schema.Schema.Type<typeof NestedValueSchema> {}
       const NestedSchema = Schema.Struct({ nested: NestedValueSchema })
-      const CyclicValue: Schema.Codec<never> = Schema.suspend(() => CyclicValue)
-      const CyclicSchema = Schema.Struct({ value: CyclicValue })
       interface Nested extends Schema.Schema.Type<typeof NestedSchema> {}
+      const CyclicValueSchema: Schema.Codec<never> = Schema.suspend(() => CyclicValueSchema)
+      const CyclicSchema = Schema.Struct({ value: CyclicValueSchema })
+      interface Cyclic extends Schema.Schema.Type<typeof CyclicSchema> {}
       expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow(TableDefinitionError)
       expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow(TableDefinitionError)
       expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow(TableDefinitionError)

@@ -5,7 +5,8 @@ import type { Table } from "../src/table.ts"
 
 export const prepareTables = Effect.fn("test.prepareTables")(function* (tables: ReadonlyArray<Table>) {
   const to = SqliteMigrations.snapshot(tables)
-  const initial = SqliteMigrations.plan({ id: "initial", from: SqliteMigrations.snapshot([]), to })
+  const empty = SqliteMigrations.snapshot([])
+  const initial = SqliteMigrations.plan({ id: "initial", from: empty, to })
   const sql = yield* SqlClient.SqlClient
   yield* makeMigrationStore(sql, [initial]).prepare(to.tables)
 })

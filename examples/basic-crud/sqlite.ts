@@ -15,6 +15,7 @@ import { BookResource } from "./resources.ts"
 type SqliteRow = Readonly<Record<string, unknown>>
 
 const persistenceFailure = () => BookPersistenceError.make({})
+
 const createBook = SqlSchema.findOne({
   Request: BookSchema,
   Result: BookResource.table.rowSchema,

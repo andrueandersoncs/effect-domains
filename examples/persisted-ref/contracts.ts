@@ -14,13 +14,16 @@ const counterOperation = {
   error: CounterUnavailable,
 } satisfies CommandContract
 
-export const CounterCommands = Commands.make("examples/persisted-ref/Counter", {
-  "counters.get": counterOperation,
-  "counters.increment": counterOperation,
-  "counters.set": {
-    input: SetCounterPayloadSchema,
-    output: CounterSchema,
-    error: CounterUnavailable,
+export const CounterCommands = Commands.make({
+  name: "examples/persisted-ref/Counter",
+  contracts: {
+    "counters.get": counterOperation,
+    "counters.increment": counterOperation,
+    "counters.set": {
+      input: SetCounterPayloadSchema,
+      output: CounterSchema,
+      error: CounterUnavailable,
+    },
+    "counters.refresh": counterOperation,
   },
-  "counters.refresh": counterOperation,
 })

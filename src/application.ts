@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from "effect"
+import { Array, Effect, Function, HashSet, Layer, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import type { AnyCommandBundle } from "./commands.ts"
 import { SchemaStore } from "./migrations.ts"
@@ -6,7 +6,7 @@ import type { Resource } from "./resource.ts"
 import { Table } from "./table.ts"
 
 type HandlerLayer<Bundle> = Bundle extends {
-  readonly handlers: infer Handlers extends Layer.Layer<any, any, any>
+  readonly handlers: infer Handlers extends Layer.Layer<never, any, any>
 } ? Handlers : never
 
 type ApplicationGroup<
@@ -24,51 +24,61 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
 }
 
 const make = <
-  const Resources extends ReadonlyArray<Resource> = [],
-  const Commands extends ReadonlyArray<AnyCommandBundle> = [],
+  const Resources extends ReadonlyArray<Resource>,
+  const Commands extends ReadonlyArray<AnyCommandBundle>,
 >(options: Readonly<{
   name: string
-  resources?: Resources
-  commands?: Commands
+  resources: Resources
+  commands: Commands
 }>) => {
-  const resources = options.resources ?? ([] as unknown as Resources)
-  const commands = options.commands ?? ([] as unknown as Commands)
+  const { resources, commands } = options
   const bundles = [...resources, ...commands]
-  const groups = bundles.map((bundle) => bundle.group) as Array<RpcGroup.RpcGroup<Rpc.Any>>
-  const tables = resources.map((resource) => resource.table) as Array<Resources[number]["table"]>
-  const tableNames = new Set<string>()
-  const operationNames = new Set<string>()
+  const groups = Array.map(bundles, Struct.get("group"))
+  const tables = Array.map(resources, Struct.get("table")) as Array<Resources[number]["table"]>
+  const tableNames = HashSet.empty<string>()
+  const operationNames = HashSet.empty<string>()
 
-  for (const table of tables) {
-    if (tableNames.has(table.name)) {
-      throw ApplicationDefinitionError.make({ reason: `Duplicate resource table ${table.name}` })
+  const validateTable = (names: HashSet.HashSet<string>, table: Table) =>
+    HashSet.has(names, table.name)
+      ? ApplicationDefinitionError.make({ reason: `Duplicate resource table ${table.name}` })
+      : pipe(names, HashSet.add(table.name), Effect.succeed)
+
+  const validateProcedure = (names: HashSet.HashSet<string>, procedure: Rpc.AnyWithProps) => {
+    if (HashSet.has(names, procedure._tag)) {
+      return ApplicationDefinitionError.make({ reason: `Duplicate operation ${procedure._tag}` })
     }
-    tableNames.add(table.name)
-  }
-  for (const group of groups) {
-    for (const procedure of group.requests.values()) {
-      if (operationNames.has(procedure._tag)) {
-        throw ApplicationDefinitionError.make({ reason: `Duplicate operation ${procedure._tag}` })
-      }
-      if (RpcSchema.isStreamSchema((procedure as Rpc.AnyWithProps).successSchema)) {
-        throw ApplicationDefinitionError.make({ reason: `Application commands must be unary: ${procedure._tag}` })
-      }
-      operationNames.add(procedure._tag)
-    }
+
+    return RpcSchema.isStreamSchema(procedure.successSchema)
+      ? ApplicationDefinitionError.make({ reason: `Application commands must be unary: ${procedure._tag}` })
+      : pipe(names, HashSet.add(procedure._tag), Effect.succeed)
   }
 
+  const procedures = Array.flatMap(groups, (group) => [...group.requests.values()])
+
+  const validate = Effect.gen(function* () {
+    yield* Effect.reduce(tables, Function.constant(tableNames), validateTable)
+    yield* Effect.reduce(procedures, Function.constant(operationNames), validateProcedure)
+  })
+
+  Effect.runSync(validate)
   const group = RpcGroup.make().merge(...groups) as ApplicationGroup<Resources, Commands>
-  const layers = bundles.map((bundle) => bundle.handlers) as Array<HandlerLayer<Resources[number] | Commands[number]>>
-  const handlers = (layers.length === 0 ? Layer.empty : Layer.mergeAll(layers[0]!, ...layers.slice(1))) as Layer.Layer<
-    Layer.Success<(typeof layers)[number]>,
-    Layer.Error<(typeof layers)[number]>,
-    Layer.Services<(typeof layers)[number]>
-  >
-  const snapshots = tables.map(Table.snapshot)
-  const prepare = Effect.flatMap(SchemaStore, (store) => store.prepare(snapshots))
+  const layers = Array.map(bundles, Struct.get("handlers")) as Array<HandlerLayer<Resources[number] | Commands[number]>>
+  const handlers = Layer.mergeAll(Layer.empty, ...layers)
 
-  return { name: options.name, resources, commands, group, tables, handlers, prepare }
+  return Struct.assign(options, { group, tables, handlers })
 }
 
-export type Application = ReturnType<typeof make>
-export const Application = { make }
+export interface Application extends AnyCommandBundle {
+  readonly name: string
+  readonly resources: ReadonlyArray<Resource>
+  readonly tables: ReadonlyArray<Table>
+}
+
+export const Application = {
+  make,
+  prepare: Effect.fn("Application.prepare")(function* (application: Application) {
+    const snapshots = Array.map(application.tables, Table.snapshot)
+    const store = yield* SchemaStore
+    yield* store.prepare(snapshots)
+  }),
+}

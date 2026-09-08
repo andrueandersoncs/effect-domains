@@ -12,5 +12,6 @@ export const NoteSchema = Schema.Struct({
   text: Schema.String,
 })
 
-export interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
+interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
+
 

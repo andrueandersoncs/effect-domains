@@ -2,17 +2,25 @@ import { Schema } from "effect"
 import { identifier } from "../src/domain.ts"
 import { Resource } from "../src/resource.ts"
 
+const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
+
+interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}
+
 const TypeProbe = Resource.make({
   name: "resource_type_probe",
-  schema: Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean }),
+  schema: TypeProbeSchema,
   create: { defaults: { completed: false } },
   list: { filter: ["completed"], order: [{ field: "title" }] },
   operations: [...Resource.crud, "patch"] as const,
 })
 
+const NoPolicyProbeSchema = Schema.Struct({ id: identifier(Schema.String), value: Schema.Int })
+
+interface NoPolicyProbe extends Schema.Schema.Type<typeof NoPolicyProbeSchema> {}
+
 const NoPolicyProbe = Resource.make({
   name: "resource_no_policy_probe",
-  schema: Schema.Struct({ id: identifier(Schema.String), value: Schema.Int }),
+  schema: NoPolicyProbeSchema,
   operations: [],
 })
 
@@ -31,25 +39,30 @@ void patchInput
 
 void noPolicyCreate
 
-// @ts-expect-error Defaults do not make unrelated canonical fields optional.
+// @ts-expect-error because defaults do not make unrelated canonical fields optional.
 const missingTitle: Parameters<typeof TypeProbe.repository.create>[0] = {}
-// @ts-expect-error Filters must be explicitly selected in the list declaration.
+// @ts-expect-error because filters must be explicitly selected in the list declaration.
 const undeclaredFilter: Parameters<typeof TypeProbe.repository.page>[0] = { filter: { title: "hidden" } }
-// @ts-expect-error The identifier is not a mutable patch field.
+// @ts-expect-error because the identifier is not a mutable patch field.
 const redirectedPatch: Parameters<typeof TypeProbe.repository.patch>[1] = { id: "other" }
+
+const GeneratedProbeSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  title: Schema.String,
+  createdAt: Schema.DateTimeUtc,
+})
+
+interface GeneratedProbe extends Schema.Schema.Type<typeof GeneratedProbeSchema> {}
 
 const GeneratedProbe = Resource.make({
   name: "generated_type_probe",
-  schema: Schema.Struct({
-    id: identifier(Schema.String),
-    title: Schema.String,
-    createdAt: Schema.DateTimeUtc,
-  }),
+  schema: GeneratedProbeSchema,
   create: { generated: { id: "uuidV7", createdAt: "now" } },
   operations: Resource.crud,
 })
+
 const generatedInput: Parameters<typeof GeneratedProbe.repository.create>[0] = { title: "only authored input" }
-// @ts-expect-error Generated fields cannot be provided by callers.
+// @ts-expect-error because generated fields cannot be provided by callers.
 const generatedOverride: Parameters<typeof GeneratedProbe.repository.create>[0] = { id: "override", title: "bad" }
 void missingTitle
 void undeclaredFilter
