@@ -25,7 +25,7 @@ The [reservation application](../../examples/README.md#reservation-application) 
 | Models and policy | Canonical schemas, reserve/confirm/release contracts, transition table, guarded stock accounting, and transactions are authored |
 | Storage | Tables, recognized constraints, reversible codecs, and ordinary repository operations derive from resources |
 | Resource publication | Only `stock.get` and `reservations.get` are enabled |
-| HTTP and CLI | The combined Effect RPC group supplies HTTP dispatch, native scalar flags, help, validation, and JSON fallback |
+| HTTP and CLI | Named input/output/error contracts derive RPC definitions and group membership; the combined group supplies HTTP dispatch, native scalar flags, help, validation, and JSON fallback |
 | Timestamps | Framework codecs round-trip canonical UTC values through ISO storage and JSON without application row-copy functions |
 | History | Frozen `001_initial` and `002_timestamp` artifacts preserve historical schema and convert timestamp seconds explicitly |
 

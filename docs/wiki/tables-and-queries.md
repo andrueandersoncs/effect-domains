@@ -18,6 +18,12 @@ A resource supplies typed `find`, `get`, `list`, `create`, full-row `update`, an
 
 The `operations` tuple selects published RPC capabilities; it does not restrict what authored business code can do through its repository. The reservation example publishes only `stock.get` and `reservations.get`, while reserve, confirm, and release use repositories inside explicit transaction policy. ([Resources](../../examples/reservations/resources.ts); [Inventory implementation](../../examples/reservations/sqlite.ts))
 
+## Command Contracts
+
+Custom operations are named records of `{ input, output, error }` schemas satisfying `CommandContracts`. `Application.make({ name, resources, commands })` derives RPC definitions, JSON codecs, and group membership from those records and combines them with generated resource operations. Resource-only applications omit `commands`. `CommandService<typeof commands>` derives decoded handler signatures; implementations and transaction policy remain explicit. ([Application API](../../src/application.ts); [Reservation declarations](../../examples/reservations/contracts.ts))
+
+Confirm and release share one contract shape but retain different implementations. The declaration does not infer operation publication or stock effects from a table or transition map. `application.commands` remains inspectable transport-independent data; `application.group` is the derived RPC representation used by HTTP and CLI interpreters. ([Reservation contracts](../../examples/reservations/contracts.ts); [Inventory policy](../../examples/reservations/sqlite.ts); [Bun runtime](../../src/application-bun.ts))
+
 ## Authored Queries
 
 `Query.make` encodes its decoded request, runs the authored Effect with the encoded value, and decodes the result. Request encoding services, result decoding services, implementation failures, and runtime requirements remain visible in the Effect type. This supports database-specific SQL and service-dependent codecs without adding database configuration to the canonical model. ([Query](../../src/query.ts); [SQLite integration](../../test/SqliteBun.test.ts))

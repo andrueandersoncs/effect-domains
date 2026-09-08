@@ -26,7 +26,7 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
-`Resource.make` derives a table, typed repository, selected Effect RPC operations, and handlers from a canonical schema. `Application.make` combines resources and authored commands; `ApplicationBun` composes the HTTP server and generated CLI. `Table.make` and `Query.make` remain available for direct table derivation and custom queries. `PersistedRef` composes query-backed, process-local write-through state. ([Persistence reference](tables-and-queries.md))
+`Resource.make` derives a table, typed repository, selected Effect RPC operations, and handlers from a canonical schema. `Application.make` derives RPCs and group membership from named `{ input, output, error }` command declarations, combines them with resources, and uses the same declarations for `CommandService` handler types. `ApplicationBun` composes the HTTP server and generated CLI. `Table.make` and `Query.make` remain available for direct table derivation and custom queries. `PersistedRef` composes query-backed, process-local write-through state. ([Framework contract](research-agenda.md#implemented-contract); [Persistence reference](tables-and-queries.md))
 
 The [reservation slice](validation-strategy.md#reservation-slice) uses canonical models directly, with generated storage and read interfaces and explicit stock accounting, transitions, and transactions. Frozen migration artifacts convert historical timestamp seconds to the canonical ISO representation. Live verification demonstrated one scalar schema edit propagating through SQLite, resource contracts, HTTP, and native CLI flags without adapter changes. Another business domain and another database remain unproven.
 
