@@ -30,6 +30,8 @@ The benefit sought is less duplicate declaration and less drift between mechanic
 
 A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; authored SQL or commands still carry semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Authored SQL](../../examples/authored-sql/sqlite.ts))
 
+Explicit authorization can nevertheless be declarative: resource-level scope and action policy are authored once as a closed AST, then interpreted for evaluation, SQL visibility, and inspection. The 2026-09-08 authorization implementation does not infer permissions from domain fields or add them to canonical schemas; its algebra is specific to the supported policy language, not a general schema abstraction. ([Authorization](../../src/authorization.ts); [Policy](../../src/policy.ts); [authorization boundary](tables-and-queries.md#resource-authorization))
+
 ## Architectural Shape
 
 The canonical domain model stays clean. Separate interpreters consume schemas for persistence, transport, testing, and documentation. A storage representation with different physical encoding is an explicit reversible transformation, not a second wire model. ([Project thesis](raw/project-thesis.md); [Tables and Queries](tables-and-queries.md#canonical-and-storage-representations))

@@ -30,6 +30,16 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-08: Resource authorization
+
+The user-approved resource policy DSL requires explicit public, deny, or typed authorization. Canonical schemas remain authorization-free. One closed schema-backed AST and fold support evaluation, SQL visibility, reference validation, and inspection; request-local authenticated subjects reach protected generated RPCs. ([Authorization](../../src/authorization.ts); [Policy](../../src/policy.ts); [RPC authentication](../../src/authorization-rpc.ts))
+
+- `bun run check` and `bun run lint` pass without suppressions or exclusions. All 34 tests across 12 files pass. Policy regressions cover SQL/evaluator parity, nulls and hostile values, lazy evaluation, tenant/owner/admin visibility, pagination, denied mutation rollback, unreadable candidates, concurrent ownership changes, unsupported Boolean SQL encoding, and RPC identity isolation. Type checks cover missing authorization, incompatible operand types, and invalid policy phases. ([Policy regressions](../../test/Policy.test.ts); [authorization regressions](../../test/Authorization.test.ts); [RPC regressions](../../test/AuthorizationRpc.test.ts); [type boundaries](../../test/Authorization.types.ts))
+- A real Bun HTTP server and generated CLI used isolated in-memory SQLite and an authored test-session authenticator. Missing credentials yielded `Unauthenticated`; another owner's row and another tenant's row yielded `ResourceNotFound`. Two one-item cursor pages returned only the caller's documents.
+- Live CLI mutations rejected ownership transfer without changing the original owner, accepted an allowed title patch and owned create/remove, and reported the removed row missing. A forged-owner create failed with `Forbidden` and left no row. The smoke server was stopped; temporary helpers were removed.
+
+This establishes the exercised SQLite resource and request-identity boundary, not production credential issuance/revocation, authorization of arbitrary authored SQL, another database, or another business-policy domain. ([Resource](../../src/resource.ts); [SQLite adapter](../../src/sqlite-bun.ts); [Bun runner](../../src/application-bun.ts))
+
 ### 2026-09-08: CRUD and JSON codec simplification
 
 The user-approved change makes basic book CRUD a generated resource declaration and moves custom book contracts and SQL to `authored-sql`. Both use the same canonical `BookSchema`; the authored example retains its custom errors and deleted-row remove result. `Commands.rpc(tag, { payload, success, error })` derives JSON codecs and returns a native RPC, replacing wire-schema declarations in authored books, counters, and reservations without a second contract format. ([Basic resource](../../examples/basic-crud/resources.ts); [Authored contracts](../../examples/authored-sql/contracts.ts); [Commands](../../src/commands.ts))
@@ -90,6 +100,6 @@ That historical work observed generated todo CRUD, authored book queries, servic
 
 ## Evidence Boundary
 
-The examples are unauthenticated and loopback-only. Evidence does not establish multi-process coordination, idempotent reservation creation, cancellation recovery, production deployment readiness, another database, relationships, or a materially different business domain. In particular, an external write can supersede a persisted reference unless the application defines a concurrency policy; refresh alone is not one. ([PersistedRef](../../src/persisted-ref.ts); [Research agenda](research-agenda.md))
+The shipped examples remain explicitly public and loopback-only; the isolated authorization smoke application exercised authenticated requests with test sessions. Evidence does not establish production identity issuance/revocation, multi-process coordination, idempotent reservation creation, cancellation recovery, production deployment readiness, another database, relationships, or a materially different business domain. An external write can supersede a persisted reference unless the application defines a concurrency policy; refresh alone is not one. ([Authorization verification](#2026-09-08-resource-authorization); [PersistedRef](../../src/persisted-ref.ts); [Research agenda](research-agenda.md))
 
 The next architectural evidence should be another material slice rather than further generalization around the reservation application.

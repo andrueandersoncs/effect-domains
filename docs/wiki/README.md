@@ -7,7 +7,7 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 ## Content Map
 
 - [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
-- [Tables and Queries](tables-and-queries.md) — resource, command, persistence, migration, and runtime contracts.
+- [Tables and Queries](tables-and-queries.md) — resource authorization, command, persistence, migration, and runtime contracts.
 - [Validation Strategy](validation-strategy.md) — slice criteria, dated exercised evidence, and limits.
 - [Research Agenda](research-agenda.md) — current implementation contract and unresolved questions.
 
@@ -26,13 +26,13 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
-`Resource.make({ name, schema, storage?, operations, create?, list? })` keeps canonical and reversible storage schemas distinct, derives selected CRUD/patch RPCs, and can apply absent-only defaults or runtime `uuidV7`/`now` values. Declared list policy supplies exact filters, stable ordering, bounded pages, and cursors; patch requests are `{ identifier, patch }` and cannot change the identifier. ([Resource](../../src/resource.ts); [resource regressions](../../test/ResourceCrud.test.ts))
+`Resource.make({ name, schema, authorization, storage?, operations, create?, list? })` requires explicit public, deny, or typed policy authorization. Resource policy stays outside canonical schemas; generated repositories enforce scoped SQL visibility and transactional mutation checks. Request-local verified identity reaches protected RPCs through `Authenticator`. Creation defaults/generation, selected CRUD/patch operations, and declared cursor pagination remain mechanical resource capabilities. ([Resource](../../src/resource.ts); [Authorization](../../src/authorization.ts); [RPC authentication](../../src/authorization-rpc.ts))
 
 `Commands.make({ name, group })` retains a native Effect `RpcGroup` and supplies an injectable service descriptor and `.layer` for unary handlers. `Commands.rpc(tag, { payload, success, error })` derives JSON codecs from explicit schemas and returns a native RPC; `Rpc.make` remains the escape hatch. Basic book CRUD needs neither: it selects `Resource.crud`. The separate authored-SQL example retains custom errors and a remove result containing the deleted row. `Application.make({ name, resources, commands })` combines descriptors and generated resources; absent groups use empty arrays. One `ApplicationBun.run` entrypoint exposes remote commands plus `serve`, `schema`, and `inspect`. ([Commands](../../src/commands.ts); [Basic CRUD](../../examples/basic-crud/resources.ts); [Authored SQL](../../examples/authored-sql/contracts.ts); [Runtime](../../src/application-bun.ts))
 
 SQLite history is decoded by the Effectful `SqliteMigrations.decodeHistory(raw)` or loaded from an explicit manifest. Nonempty schemas require an initial migration; one applied-artifact ledger replaces bootstrap/adoption and separate schema-state tracking. `schema generate <name>` validates an artifact before atomically replacing the manifest; blocked plans are not registered. ([Migrations](../../src/sqlite-migrations.ts); [migration regressions](../../test/SqliteMigrations.test.ts))
 
-The simplification removes the generic AST algebra, opaque descriptor schema classes, standalone table writes, database alias, framework Query wrapper, and custom command-contract representation. Type checking, lint, and all 25 tests across nine files pass without exclusions. Live CLI checks cover generated and authored book CRUD with their distinct errors/remove results, counter cache/refresh, reservation transitions and timestamp JSON, and local book-contract inspection. ([Current verification](validation-strategy.md#2026-09-08-crud-and-json-codec-simplification); [Earlier native RPC verification](validation-strategy.md#2026-09-08-native-rpc-contract-verification))
+The earlier simplification removed the generic schema AST algebra, standalone table writes, database alias, framework Query wrapper, and custom command-contract representation. Authorization now has its own closed policy AST and fold, not a general schema algebra. Type checking, lint, and all 34 tests across 12 files pass without exclusions. Live authenticated CLI checks cover tenant isolation, hidden rows, cursor traversal, allowed mutations, and denied writes without partial changes. ([Current verification](validation-strategy.md#2026-09-08-resource-authorization); [Prior CRUD verification](validation-strategy.md#2026-09-08-crud-and-json-codec-simplification))
 
 ## Development
 

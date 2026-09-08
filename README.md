@@ -7,6 +7,7 @@ Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatc
 ```ts
 import { Schema } from "effect"
 import { Application } from "effect-domains/application"
+import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 
 const BookSchema = Schema.Struct({
@@ -18,6 +19,7 @@ const BookSchema = Schema.Struct({
 const Books = Resource.make({
   name: "books",
   schema: BookSchema,
+  authorization: Authorization.public,
   operations: Resource.crud,
 })
 
@@ -61,6 +63,42 @@ const createBook = Commands.rpc("books.create", {
 ```
 
 Routine CRUD needs none of these declarations: select `Resource.crud` instead. The [authored SQL example](examples/README.md#authored-sql) deliberately keeps custom SQL, errors, and a remove operation returning the deleted row.
+
+## Resource authorization
+
+Every resource declares `authorization`: `Authorization.public`, `Authorization.deny`, or a typed policy. This declaration belongs to the resource, never to its canonical schema. Public examples remain explicitly unauthenticated.
+
+```ts
+const DocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.String, title: Schema.String })
+const SubjectSchema = Schema.Struct({ tenantId: Schema.String, userId: Schema.String, roles: Schema.Array(Schema.String) })
+const p = Authorization.for({ resource: DocumentSchema, subject: SubjectSchema })
+const owned = p.eq(p.row.ownerId, p.subject.userId)
+const admin = p.includes(p.subject.roles, "admin")
+const authorization = p.policy({
+  scope: p.eq(p.row.tenantId, p.subject.tenantId),
+  allow: {
+    read: p.any(owned, admin),
+    create: p.eq(p.next.ownerId, p.subject.userId),
+    update: p.all(owned, p.unchanged("ownerId")),
+    patch: p.all(owned, p.unchanged("ownerId")),
+    remove: owned,
+  },
+})
+const Documents = Resource.make({
+  name: "documents",
+  schema: DocumentSchema,
+  authorization,
+  operations: [...Resource.crud, "patch"],
+})
+```
+
+Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults/generation or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
+
+Repositories enforce policy even when invoked by authored code. Hidden rows behave as missing; lists filter in SQL before pagination. Create/update/patch require a readable candidate, and returned rows are checked again. Checks and writes share a transaction, so a denied mutation leaves no changes. Missing or invalid identity yields `Unauthenticated`; denied actions yield `Forbidden`.
+
+Protected generated RPCs use request-local `AuthorizationSubject`, supplied by `Authenticator` from `effect-domains/authorization-rpc`. Provide that service through the application's `services` layer. Its `authenticate(headers)` Effect must verify credentials and return trusted subject claims, or fail with `Unauthenticated`; the framework does not trust caller-supplied identity headers or provide a token issuer. The generated CLI sends `<APP>_TOKEN` as an HTTP bearer token. Local authored Effects can supply `AuthorizationSubject` explicitly; `Authorization.require(definition, action, values)` evaluates the same policy outside a repository.
+
+The closed `Policy` AST supports constants, total scalar equality, collection membership, conjunction, and disjunction. Its fold drives evaluation, SQL, reference validation, and inspection. SQL visibility fields must share identity-encoded canonical/storage schemas with supported string or finite numeric physical scalars, optionally nullable. Boolean storage coercions and semantic codecs are rejected for these fields rather than approximated. Standalone evaluation supports booleans too. Native `SqlClient` and `RepositoryStore` are privileged escape hatches, not authorization boundaries.
 
 ## Storage conventions
 
