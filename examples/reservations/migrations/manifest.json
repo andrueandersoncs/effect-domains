@@ -1,0 +1,6 @@
+{
+  "migrations": [
+    "001_initial.json",
+    "002_timestamp.json"
+  ]
+}

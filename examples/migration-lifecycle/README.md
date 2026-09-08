@@ -48,7 +48,17 @@ The current schema requires a non-empty `heading`, allows `summary` to be `null`
 
 ## Review a migration plan
 
-Schema commands run locally; no server is required. These commands compare the version-one artifact with the current schema:
+Schema commands run locally; no server is required. The runtime uses the ordered registry at [`migrations/manifest.json`](migrations/manifest.json), not a source-imported history. After adding a required `status` field to the current document schema, generate the next manifest artifact:
+
+```bash
+bun run migration-lifecycle schema generate add-status \
+  --backfill 'documents:status:"draft"'
+bun run migration-lifecycle inspect documents.create
+```
+
+`generate` chooses the next numeric prefix, validates the complete history, writes the new artifact, and atomically replaces the manifest. If it finds unresolved changes, it reports their reasons and leaves the registry untouched.
+
+Use `schema plan` to review a prospective artifact without registering it. These commands compare the version-one artifact with the current schema:
 
 ```bash
 bun run migration-lifecycle schema plan --id 002_document_metadata \
@@ -60,15 +70,15 @@ bun run migration-lifecycle schema plan --id 002_document_metadata \
   --out reviewed.json
 ```
 
-The first command writes a plan containing blocked changes and exits nonzero: the planner will not guess a column rename or a value for a new required field. The second records those explicit decisions and succeeds. Neither scratch file is used at runtime; the server uses the checked-in reviewed artifact.
+The first command writes a plan containing blocked changes and exits nonzero: the planner will not guess a column rename or a value for a new required field. The second records those explicit decisions and succeeds. Neither scratch file is used at runtime; the server uses the checked-in reviewed artifact registered in the manifest.
 
-Applied artifacts are immutable history. Do not regenerate or edit an artifact that has been applied to a database: startup validates recorded history and the database schema, applies the frozen chain without resetting data, and rejects untracked database objects rather than silently adopting them.
+Applied artifacts are immutable history. Do not regenerate or edit an artifact that has been applied to a database: startup validates manifest history and the database schema, applies the frozen chain without resetting data, and rejects untracked database objects rather than silently adopting them.
 
 ## Code map
 
 - [`domain.ts`](domain.ts): the current document schema and priority invariant.
 - [`resources.ts`](resources.ts) and [`application.ts`](application.ts): generated document CRUD registration.
 - [`legacy.ts`](legacy.ts) and [`seed-v1.ts`](seed-v1.ts): the isolated version-one schema and seed path.
-- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): the historical migration chain.
-- [`server.ts`](server.ts) and [`cli.ts`](cli.ts): current runtime and local schema commands.
+- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime registry and historical migration chain.
+- [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.
 - [`../../src/sqlite-migrations.ts`](../../src/sqlite-migrations.ts): planning, artifact validation, and SQLite application machinery.

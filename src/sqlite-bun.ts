@@ -1,11 +1,12 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, Context, Effect, Equivalence, Layer, Option, pipe, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { Array, Context, DateTime, Effect, Equivalence, Layer, Option, pipe, Schema } from "effect"
+import { SqlClient, SqlError, Statement } from "effect/unstable/sql"
 import { RepositoryError, RepositoryStore } from "./repository-store.ts"
 import { SchemaStore } from "./migrations.ts"
 import { renderCreateTable } from "./sqlite-ddl.ts"
 import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
 import { Table, TableError, TableStore } from "./table.ts"
+import { Value } from "./value.ts"
 
 export class Database extends Context.Service<Database, SqlClient.SqlClient>()(
   "@effect-domains/SqliteBun/Database",
@@ -40,7 +41,93 @@ class InsertWithoutReturnedRow extends Schema.TaggedError<InsertWithoutReturnedR
   {},
 ) {}
 
+const queryStatement = (
+  sqlClient: SqlClient.SqlClient,
+  table: Table,
+  query: import("./repository-store.ts").RepositoryListQuery,
+) => {
+  const segments: Array<Statement.Segment> = [
+    Statement.literal("SELECT * FROM "),
+    Statement.identifier(table.name),
+  ]
+  const where = () => {
+    const filters = Object.entries(query.filter)
+    if (filters.length === 0 && query.cursor === undefined) return
+
+    segments.push(Statement.literal(" WHERE "))
+    const pushAnd = (index: number) => {
+      if (index > 0) segments.push(Statement.literal(" AND "))
+    }
+
+    filters.forEach(([field, value], index) => {
+      pushAnd(index)
+      segments.push(Statement.identifier(field))
+      if (value === null) {
+        segments.push(Statement.literal(" IS NULL"))
+      } else {
+        segments.push(Statement.literal(" = "), Statement.parameter(value))
+      }
+    })
+
+    if (query.cursor === undefined) return
+    if (filters.length > 0) segments.push(Statement.literal(" AND "))
+    segments.push(Statement.literal("("))
+
+    query.order.forEach((order, index) => {
+      if (index > 0) segments.push(Statement.literal(" OR "))
+      segments.push(Statement.literal("("))
+      query.order.slice(0, index).forEach((preceding, precedingIndex) => {
+        if (precedingIndex > 0) segments.push(Statement.literal(" AND "))
+        segments.push(
+          Statement.identifier(preceding.field),
+          Statement.literal(" = "),
+          Statement.parameter(query.cursor!.values[precedingIndex]),
+        )
+      })
+      if (index > 0) segments.push(Statement.literal(" AND "))
+      segments.push(
+        Statement.identifier(order.field),
+        Statement.literal(order.direction === "asc" ? " > " : " < "),
+        Statement.parameter(query.cursor!.values[index]),
+        Statement.literal(")"),
+      )
+    })
+
+    if (query.order.length > 0) segments.push(Statement.literal(" OR ("))
+    query.order.forEach((order, index) => {
+      if (index > 0) segments.push(Statement.literal(" AND "))
+      segments.push(
+        Statement.identifier(order.field),
+        Statement.literal(" = "),
+        Statement.parameter(query.cursor!.values[index]),
+      )
+    })
+    if (query.order.length > 0) segments.push(Statement.literal(" AND "))
+    segments.push(
+      Statement.identifier(table.identifier),
+      Statement.literal(" > "),
+      Statement.parameter(query.cursor.identifier),
+      Statement.literal(")"),
+    )
+    if (query.order.length > 0) segments.push(Statement.literal(")"))
+  }
+
+  where()
+  segments.push(Statement.literal(" ORDER BY "))
+  query.order.forEach((order, index) => {
+    if (index > 0) segments.push(Statement.literal(", "))
+    segments.push(
+      Statement.identifier(order.field),
+      Statement.literal(order.direction === "asc" ? " ASC" : " DESC"),
+    )
+  })
+  if (query.order.length > 0) segments.push(Statement.literal(", "))
+  segments.push(Statement.identifier(table.identifier), Statement.literal(" ASC LIMIT "), Statement.parameter(query.limit + 1))
+
+  return sqlClient<Readonly<Record<string, unknown>>>`${Statement.fragment(segments)}`
+}
 const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
+
   RepositoryStore.of({
     find: Effect.fn("RepositoryStore.find")(function* (table, key) {
       const rows = yield* pipe(
@@ -59,6 +146,17 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
         sqlClient<Readonly<Record<string, unknown>>>`SELECT * FROM ${sqlClient(table.name)}`,
         Effect.mapError(repositoryFailure(table.name)),
       )
+    }),
+    query: Effect.fn("RepositoryStore.query")(function* (table, query) {
+      const rows = yield* pipe(
+        queryStatement(sqlClient, table, query),
+        Effect.mapError(repositoryFailure(table.name)),
+      )
+
+      return {
+        rows: rows.slice(0, query.limit),
+        hasMore: rows.length > query.limit,
+      }
     }),
     insert: Effect.fn("RepositoryStore.insert")(function* (table, value) {
       const rows = yield* pipe(
@@ -108,7 +206,22 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
 
       return Array.isReadonlyArrayNonEmpty(rows)
     }),
+    transaction: Effect.fn("RepositoryStore.transaction")(function* (table, effect) {
+      return yield* pipe(
+        sqlClient.withTransaction(effect),
+        Effect.mapError((cause) =>
+          SqlError.isSqlError(cause) ? repositoryFailure(table.name)(cause) : cause,
+        ),
+      )
+    }),
   })
+const values = Layer.succeed(
+  Value,
+  Value.of({
+    uuidV7: () => Effect.sync(() => Bun.randomUUIDv7()),
+    now: () => DateTime.now,
+  }),
+)
 
 const sqlClient = (
   filename: string,
@@ -132,7 +245,6 @@ const sqlClient = (
 
   const makeSchemaStore = (sqlClient: SqlClient.SqlClient) =>
     makeMigrationStore(sqlClient, options.migrations)
-
   const schemaStore = pipe(Database, Effect.map(makeSchemaStore))
 
   const schemaStoreLayer = Layer.effect(
@@ -146,11 +258,15 @@ const sqlClient = (
     schemaStoreLayer,
   )
 
-  const servicesLayer = Layer.provideMerge(storesLayer, databaseLayer)
+  const servicesLayer = Layer.mergeAll(
+    Layer.provideMerge(storesLayer, databaseLayer),
+    values,
+  )
 
   return Layer.provide(servicesLayer, clientLayer)
 }
 
 export const SqliteBunRuntime = {
   sqlClient,
+  values,
 }

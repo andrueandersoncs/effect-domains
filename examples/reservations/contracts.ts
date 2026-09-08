@@ -1,15 +1,15 @@
+import { Commands, type CommandContract, type CommandContracts } from "effect-domains/commands"
 import { Schema } from "effect"
-import type { CommandContract, CommandContracts } from "effect-domains/application"
 import {
   InsufficientStock,
   InvalidReservationState,
+  InventoryUnavailable,
   ReservationInputSchema,
   ReservationNotFound,
   ReservationSchema,
   ReserveStockInputSchema,
   UnknownSku,
 } from "./domain.ts"
-import { InventoryUnavailable } from "./inventory.ts"
 
 const reserveErrorsSchema = Schema.Union([
   UnknownSku,
@@ -29,7 +29,7 @@ const transitionContract = {
   error: transitionErrorsSchema,
 } satisfies CommandContract
 
-export const ReservationCommands = {
+const reservationContracts = {
   reserve: {
     input: ReserveStockInputSchema,
     output: ReservationSchema,
@@ -38,3 +38,8 @@ export const ReservationCommands = {
   confirm: transitionContract,
   release: transitionContract,
 } satisfies CommandContracts
+
+export const Inventory = Commands.make(
+  "examples/reservations/Inventory",
+  reservationContracts,
+)

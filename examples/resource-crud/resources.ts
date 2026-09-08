@@ -4,5 +4,13 @@ import { TodoSchema } from "./domain.ts"
 export const TodosResource = Resource.make({
   name: "todos",
   schema: TodoSchema,
-  operations: ["get", "list", "create", "update", "remove"],
+  create: {
+    defaults: { completed: false },
+  },
+  list: {
+    filter: ["completed"],
+    order: [{ field: "title" }],
+    limit: 25,
+  },
+  operations: [...Resource.crud, "patch"] as const,
 })

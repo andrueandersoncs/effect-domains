@@ -52,9 +52,9 @@ The server is loopback-only and unauthenticated, using Effect's JSON RPC protoco
 
 Only `stock.get` and `reservations.get` are generated resource operations. There is deliberately no generated create, update, list, or remove route for either resource.
 
-[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` as transport-independent `{ input, output, error }` schemas. Confirm and release reuse one `transitionContract`; their names appear once as record keys. `Application.make` derives RPC definitions, JSON codecs, and group membership, while `CommandService` derives handler signatures. The HTTP server and generated CLI consume that derived group.
+[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` as transport-independent `{ input, output, error }` schemas. `Commands.make` turns those contracts into the injectable `Inventory` descriptor, derived RPC group, and handler layer; confirm and release reuse one `transitionContract` while retaining distinct record keys. [`sqlite.ts`](sqlite.ts) installs the authored handlers with `Inventory.layer(...)`. The layer retains fallback dependencies captured during construction, while an invocation context can provide dependencies to its handler.
 
-The implementations remain authored. `reserve` atomically verifies a SKU, decrements stock only when enough remains, creates a UUIDv7 reservation, and marks it `held`. `confirm` changes a hold to `confirmed` without restoring stock. `release` changes a hold to `released` and restores its quantity in the same transaction. The guarded SQL decrement prevents concurrent successful reservations from taking stock below zero.
+The implementations and policy remain explicit. `reserve` atomically verifies a SKU, decrements stock only when enough remains, creates a UUIDv7 reservation, and marks it `held`. `confirm` changes a hold to `confirmed` without restoring stock. `release` changes a hold to `released` and restores its quantity in the same transaction. The guarded SQL decrement prevents concurrent successful reservations from taking stock below zero.
 
 ## Policy boundaries and errors
 
@@ -68,22 +68,29 @@ The implementations remain authored. `reserve` atomically verifies a SKU, decrem
 
 The frozen [`002_timestamp`](migrations/002_timestamp.json) artifact rebuilds `reservations` and converts the historical `created_at_seconds` epoch value into the current ISO UTC `createdAt` text using SQLite's `strftime`. It is a reviewed stored-data transformation, not a transport formatting change.
 
-To inspect a prospective change locally without a server:
+Schema commands run locally; no server is required. After changing a resource schema, generate against the ordered frozen history in [`migrations/manifest.json`](migrations/manifest.json):
 
 ```bash
-bun run reservations schema snapshot --out current-schema.json
+bun run reservations schema generate change
+bun run reservations inspect reserve
+```
+
+`generate` writes the next valid artifact and atomically updates the manifest; blocked plans report their reasons and leave the registry untouched. Use `schema plan` when reviewing an unregistered prospective change:
+
+```bash
 bun run reservations schema plan --id 003_change \
   --from examples/reservations/migrations/002_timestamp.json \
   --out 003_change.json
 ```
 
-Review and retain a new artifact before adding it to the runtime history. Do not regenerate previously applied artifacts from current schemas: the runtime validates recorded history and actual table definitions before applying migrations.
+Do not regenerate previously applied artifacts from current schemas: the runtime validates recorded history and actual table definitions before applying migrations.
 
 ## Code map
 
 - [`domain.ts`](domain.ts): values, typed business errors, and the `held` → `confirmed`/`released` transition rule.
 - [`resources.ts`](resources.ts): the two permitted generated read operations.
-- [`contracts.ts`](contracts.ts) and [`inventory.ts`](inventory.ts): transport-independent command contracts and their derived service interface.
-- [`sqlite.ts`](sqlite.ts): transactional guarded stock updates, transitions, and idempotent startup seed.
-- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): database history, including the timestamp conversion.
-- [`application.ts`](application.ts), [`server.ts`](server.ts), and [`cli.ts`](cli.ts): registration, runtime configuration, and CLI entry point.
+- [`contracts.ts`](contracts.ts): transport-independent contracts and the `Inventory` command descriptor.
+- [`sqlite.ts`](sqlite.ts): `Inventory.layer`, transactional guarded stock updates, transitions, and idempotent startup seed.
+- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry, including the timestamp conversion.
+- [`application.ts`](application.ts): resource and command-descriptor registration.
+- [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.

@@ -15,3 +15,8 @@ export const CounterSchema = Schema.Struct({
 export interface Counter extends Schema.Schema.Type<typeof CounterSchema> {}
 
 export const VisitsCounterId = CounterIdSchema.make("visits")
+
+export class CounterUnavailable extends Schema.TaggedError<CounterUnavailable>()(
+  "CounterUnavailable",
+  {},
+) {}

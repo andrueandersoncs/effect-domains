@@ -5,6 +5,8 @@
   "exports": {
     "./application": "./src/application.ts",
     "./application-bun": "./src/application-bun.ts",
+    "./application-inspect": "./src/application-inspect.ts",
+    "./commands": "./src/commands.ts",
     "./domain": "./src/domain.ts",
     "./migrations": "./src/migrations.ts",
     "./persisted-ref": "./src/persisted-ref.ts",
@@ -14,24 +16,25 @@
     "./rpc-cli": "./src/rpc-cli.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",
-    "./table": "./src/table.ts"
+    "./table": "./src/table.ts",
+    "./value": "./src/value.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript",
     "test": "bun --bun vitest run",
-    "reservations:server": "bun run examples/reservations/server.ts",
-    "reservations": "bun run examples/reservations/cli.ts",
-    "basic-crud:server": "bun run examples/basic-crud/server.ts",
-    "basic-crud": "bun run examples/basic-crud/cli.ts",
-    "resource-crud:server": "bun run examples/resource-crud/server.ts",
-    "resource-crud": "bun run examples/resource-crud/cli.ts",
-    "service-codec:server": "bun run examples/service-codec/server.ts",
-    "service-codec": "bun run examples/service-codec/cli.ts",
-    "persisted-ref:server": "bun run examples/persisted-ref/server.ts",
-    "persisted-ref": "bun run examples/persisted-ref/cli.ts",
-    "migration-lifecycle:server": "bun run examples/migration-lifecycle/server.ts",
-    "migration-lifecycle": "bun run examples/migration-lifecycle/cli.ts",
+    "reservations:server": "bun run examples/reservations/main.ts serve",
+    "reservations": "bun run examples/reservations/main.ts",
+    "basic-crud:server": "bun run examples/basic-crud/main.ts serve",
+    "basic-crud": "bun run examples/basic-crud/main.ts",
+    "resource-crud:server": "bun run examples/resource-crud/main.ts serve",
+    "resource-crud": "bun run examples/resource-crud/main.ts",
+    "service-codec:server": "bun run examples/service-codec/main.ts serve",
+    "service-codec": "bun run examples/service-codec/main.ts",
+    "persisted-ref:server": "bun run examples/persisted-ref/main.ts serve",
+    "persisted-ref": "bun run examples/persisted-ref/main.ts",
+    "migration-lifecycle:server": "bun run examples/migration-lifecycle/main.ts serve",
+    "migration-lifecycle": "bun run examples/migration-lifecycle/main.ts",
     "migration-lifecycle:seed-v1": "bun run examples/migration-lifecycle/seed-v1.ts"
   },
   "dependencies": {
@@ -40,7 +43,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.12",
+    "@better-typescript/better-typescript": "0.4.13",
     "@effect/vitest": "4.0.0-rc.112",
     "@types/bun": "latest",
     "vitest": "4.1.11"

@@ -1,5 +1,5 @@
 import { Array, Effect, Equivalence, FileSystem, flow, Function, HashMap, HashSet, Match, Option, Order, pipe, Predicate, Record, Schema, Stdio, Stream } from "effect"
-import { CliError, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import { SqlClient, Statement } from "effect/unstable/sql"
 import { MigrationError, SchemaStore } from "./migrations.ts"
 import {
@@ -377,6 +377,19 @@ const SqliteSnapshotJsonSchema = Schema.toCodecJson(SqliteSchemaSnapshot)
 const SqliteSnapshotSourceSchema = Schema.fromJsonString(SqliteSnapshotJsonSchema)
 const SqliteMigrationJsonSchema = Schema.toCodecJson(SqliteMigration)
 const SqliteMigrationSourceSchema = Schema.fromJsonString(SqliteMigrationJsonSchema)
+
+const encodeSnapshot = Schema.encodeUnknownSync(SqliteSnapshotJsonSchema)
+const encodeMigration = Schema.encodeUnknownSync(SqliteMigrationJsonSchema)
+
+const SqliteMigrationHistorySchema = Schema.Array(SqliteMigrationJsonSchema)
+
+const SqliteMigrationManifestSchema = Schema.Struct({
+  migrations: Schema.Array(Schema.String),
+})
+
+const SqliteMigrationManifestSourceSchema = Schema.fromJsonString(
+  SqliteMigrationManifestSchema,
+)
 
 const decodeSnapshot = (source: string) =>
   pipe(
@@ -831,6 +844,86 @@ const validateHistory = (migrations: ReadonlyArray<SqliteMigration>) => {
   const [error] = Array.reduce(migrations, initial, validateMigration)
   return error
 }
+
+const validateDecodedHistory = (
+  migrations: ReadonlyArray<SqliteMigration>,
+): Effect.Effect<ReadonlyArray<SqliteMigration>, MigrationError> => {
+  const error = validateHistory(migrations)
+  if (Option.isSome(error)) {
+    return Effect.fail(migrationFailure(error.value))
+  }
+  return Effect.succeed(freeze(migrations))
+}
+
+const decodeHistory = (raw: unknown) =>
+  pipe(
+    Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw),
+    Effect.flatMap(validateDecodedHistory),
+  )
+
+const manifestEntryIsSafe = (entry: string) =>
+  /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/.test(entry) && !entry.includes("..")
+
+const manifestDirectory = (path: string) => {
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
+  return separator < 0 ? "." : path.slice(0, separator)
+}
+
+const manifestArtifactPath = (manifest: string, entry: string) =>
+  `${manifestDirectory(manifest)}/${entry}`
+
+interface LoadedSqliteMigrationManifest {
+  readonly entries: ReadonlyArray<string>
+  readonly migrations: ReadonlyArray<SqliteMigration>
+}
+
+const decodeManifestEntries = (source: string) =>
+  pipe(
+    Schema.decodeUnknownEffect(SqliteMigrationManifestSourceSchema)(source),
+    Effect.mapError((cause) => migrationFailure("invalid SQLite migration manifest", cause)),
+    Effect.flatMap(({ migrations }) => {
+      const invalid = Array.some(migrations, (entry) => !manifestEntryIsSafe(entry))
+      const unique = new Set(migrations)
+      const hasDuplicates = unique.size !== migrations.length
+      if (invalid || hasDuplicates) {
+        return Effect.fail(
+          migrationFailure(
+            "SQLite migration manifest entries must be unique relative JSON artifact names",
+          ),
+        )
+      }
+      return Effect.succeed(freeze(migrations))
+    }),
+  )
+
+const readMigrationManifest = Effect.fn("SqliteMigrations.readMigrationManifest")(
+  function* (manifest: string) {
+    const fileSystem = yield* FileSystem.FileSystem
+    const source = yield* pipe(
+      fileSystem.readFileString(manifest),
+      Effect.mapError((cause) => migrationFailure("could not read SQLite migration manifest", cause)),
+    )
+    const entries = yield* decodeManifestEntries(source)
+    const migrations = yield* Effect.forEach(entries, (entry) =>
+      pipe(
+        fileSystem.readFileString(manifestArtifactPath(manifest, entry)),
+        Effect.mapError((cause) =>
+          migrationFailure(`could not read SQLite migration artifact ${entry}`, cause),
+        ),
+        Effect.flatMap(decodeMigration),
+      ))
+    return {
+      entries,
+      migrations: yield* validateDecodedHistory(migrations),
+    } satisfies LoadedSqliteMigrationManifest
+  },
+)
+
+const loadHistory = (manifest: string) =>
+  pipe(readMigrationManifest(manifest), Effect.map((loaded) => loaded.migrations))
+
+const history = (raw: unknown): ReadonlyArray<SqliteMigration> =>
+  Effect.runSync(decodeHistory(raw))
 
 const isCreateOnlyInitial = (
   migration: SqliteMigration,
@@ -1346,128 +1439,289 @@ const planSqliteMigration = (input: Parameters<typeof SqliteMigrationPlanOptions
   return freeze(migration)
 }
 
-const sqliteMigrationsCommand = (options: Readonly<{ name: string; tables: ReadonlyArray<Table> }>) => {
-    const outFlag = Flag.file("out")
-    const out = Flag.optional(outFlag)
+type SqliteMigrationsCommandOptions = Readonly<{
+  name: string
+  tables: ReadonlyArray<Table>
+  migrations?: ReadonlyArray<SqliteMigration>
+  manifest?: string
+}>
 
-    const snapshotCommand = Effect.fn("SqliteMigrations.snapshotCommand")(function* ({ out }) {
-      const snapshot = snapshotFromTable(options.tables)
-      return yield* writeJson(snapshot, out)
+const sqliteMigrationsCommand = (options: SqliteMigrationsCommandOptions) => {
+  const outFlag = Flag.file("out")
+  const out = Flag.optional(outFlag)
+
+  const snapshotCommand = Effect.fn("SqliteMigrations.snapshotCommand")(function* ({ out }) {
+    const snapshot = snapshotFromTable(options.tables)
+    return yield* writeJson(encodeSnapshot(snapshot), out)
+  })
+
+  const snapshot = Command.make("snapshot", { out }, snapshotCommand)
+  const fromFlag = Flag.file("from")
+  const from = Flag.optional(fromFlag)
+  const id = Flag.string("id")
+  const renameFlag = Flag.string("rename")
+  const rename = Flag.optional(renameFlag)
+  const backfillFlag = Flag.string("backfill")
+  const backfill = Flag.optional(backfillFlag)
+  const transformFlag = Flag.string("transform")
+
+  const describedTransform = Flag.withDescription(
+    transformFlag,
+    "table:column:SQL-expression; the expression reads physical --from columns before renames",
+  )
+  const transform = Flag.optional(describedTransform)
+
+  const artifactFromIntents = Effect.fn("SqliteMigrations.artifactFromIntents")(function* (
+    input: Readonly<{
+      id: string
+      from: SqliteSchemaSnapshot
+      rename: Option.Option<string>
+      backfill: Option.Option<string>
+      transform: Option.Option<string>
+    }>,
+  ) {
+    const renameIntent = Option.flatMap(input.rename, parseSqliteRename)
+    const noBackfill = Option.none<SqliteBackfill>()
+    const backfillIntent = yield* Option.match(input.backfill, {
+      onNone: Function.constant(Effect.succeed(noBackfill)),
+      onSome: parseSqliteBackfill,
     })
+    const transformIntent = Option.flatMap(input.transform, parseSqliteTransform)
+    const invalidRenameIntent = Option.isNone(renameIntent)
+    const invalidBackfillIntent = Option.isNone(backfillIntent)
+    const invalidTransformIntent = Option.isNone(transformIntent)
+    const invalidRename = Option.match(input.rename, {
+      onNone: Function.constFalse,
+      onSome: Function.constant(invalidRenameIntent),
+    })
+    const invalidBackfill = Option.match(input.backfill, {
+      onNone: Function.constFalse,
+      onSome: Function.constant(invalidBackfillIntent),
+    })
+    const invalidTransform = Option.match(input.transform, {
+      onNone: Function.constFalse,
+      onSome: Function.constant(invalidTransformIntent),
+    })
+    if (invalidRename || invalidBackfill || invalidTransform) {
+      return yield* CliError.UserError.make({
+        cause: migrationFailure("invalid migration intent"),
+        userMessage: "--rename is table:from:to, --backfill is table:column:JSON-value, and --transform is table:column:SQL-expression",
+      })
+    }
 
-    const snapshot = Command.make("snapshot", { out }, snapshotCommand)
-    const fromFlag = Flag.file("from")
-    const from = Flag.optional(fromFlag)
-    const id = Flag.string("id")
-    const renameFlag = Flag.string("rename")
-    const rename = Flag.optional(renameFlag)
-    const backfillFlag = Flag.string("backfill")
-    const backfill = Flag.optional(backfillFlag)
-    const transformFlag = Flag.string("transform")
+    const valuesFromOption = <A>(value: Option.Option<A>) =>
+      Option.match(value, {
+        onNone: Function.constant([]),
+        onSome: (item) => [item],
+      })
 
-    const transformDescription = Flag.withDescription(
-      "table:column:SQL-expression; the expression reads physical --from columns before renames",
+    return planSqliteMigration({
+      id: input.id,
+      from: input.from,
+      to: snapshotFromTable(options.tables),
+      renames: valuesFromOption(renameIntent),
+      backfills: valuesFromOption(backfillIntent),
+      transforms: valuesFromOption(transformIntent),
+    })
+  })
+
+  const readPrevious = Effect.fn("SqliteMigrations.readPrevious")(function* (path: string) {
+    const fileSystem = yield* FileSystem.FileSystem
+    const source = yield* pipe(
+      fileSystem.readFileString(path),
+      Effect.mapError((cause) => CliError.UserError.make({
+        cause,
+        userMessage: "Could not read --from snapshot or migration artifact",
+      })),
+    )
+    return yield* pipe(
+      decodeSource(source),
+      Effect.mapError((cause) => CliError.UserError.make({
+        cause,
+        userMessage: "Could not decode --from snapshot or migration artifact",
+      })),
+    )
+  })
+
+  const unresolvedMessage = (artifact: SqliteMigration) =>
+    ["Migration plan contains unresolved changes", ...artifact.steps
+      .filter(Schema.is(SqliteBlockedChange))
+      .map((step) => step.reason)].join("\n")
+
+  const planCommand = Effect.fn("SqliteMigrations.planCommand")(function* (
+    { from, id, rename, backfill, transform, out },
+  ) {
+    const previous = yield* Option.match(from, {
+      onNone: Function.constant(Effect.succeed(emptySnapshot())),
+      onSome: readPrevious,
+    })
+    const artifact = yield* artifactFromIntents({
+      id,
+      from: previous,
+      rename,
+      backfill,
+      transform,
+    })
+    yield* writeJson(encodeMigration(artifact), out)
+    const hasBlockedChange = Array.some(artifact.steps, Schema.is(SqliteBlockedChange))
+    if (hasBlockedChange) {
+      return yield* CliError.UserError.make({
+        cause: artifact,
+        userMessage: unresolvedMessage(artifact),
+      })
+    }
+  })
+
+  const plan = Command.make(
+    "plan",
+    { from, id, rename, backfill, transform, out },
+    planCommand,
+  )
+
+  const generateName = Argument.string("name")
+
+  const registeredManifest = Effect.fn("SqliteMigrations.registeredManifest")(function* (
+    manifest: string,
+  ) {
+    const loaded = yield* pipe(
+      readMigrationManifest(manifest),
+      Effect.mapError((cause) => CliError.UserError.make({
+        cause,
+        userMessage: "Could not load the registered SQLite migration manifest",
+      })),
+    )
+    if (options.migrations !== undefined) {
+      const configured = yield* pipe(
+        validateDecodedHistory(options.migrations),
+        Effect.mapError((cause) => CliError.UserError.make({
+          cause,
+          userMessage: "Configured SQLite migration history is invalid",
+        })),
+      )
+      if (!same(configured, loaded.migrations)) {
+        return yield* CliError.UserError.make({
+          cause: migrationFailure("configured history differs from manifest history"),
+          userMessage: "Configured SQLite migration history must match the ordered manifest",
+        })
+      }
+    }
+    return loaded
+  })
+
+  const generateCommand = Effect.fn("SqliteMigrations.generateCommand")(function* (
+    input: Readonly<{
+      name: string
+      rename: Option.Option<string>
+      backfill: Option.Option<string>
+      transform: Option.Option<string>
+    }>,
+  ) {
+    const { name, rename, backfill, transform } = input
+    if (options.manifest === undefined) {
+      return yield* CliError.UserError.make({
+        cause: migrationFailure("missing SQLite migration manifest"),
+        userMessage: "generate requires a configured migration manifest",
+      })
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+      return yield* CliError.UserError.make({
+        cause: migrationFailure("invalid migration name"),
+        userMessage: "migration name must contain only letters, numbers, underscores, or hyphens",
+      })
+    }
+
+    const manifest = options.manifest
+    const loaded = yield* registeredManifest(manifest)
+    const last = Array.get(loaded.migrations, loaded.migrations.length - 1)
+    const previous = Option.match(last, {
+      onNone: emptySnapshot,
+      onSome: migrationTo,
+    })
+    const lastId = Option.map(last, (migration) => migration.id)
+    const numericPrefix = Option.flatMap(lastId, (value) => {
+      const match = /^(\d+)_/.exec(value)
+      const prefix = match === null ? undefined : match[1]
+      return prefix === undefined ? Option.none<string>() : Option.some(prefix)
+    })
+    const nextNumber = Option.match(numericPrefix, {
+      onNone: Function.constant("001"),
+      onSome: (prefix) => {
+        const value = Number(prefix)
+        return Number.isSafeInteger(value)
+          ? String(value + 1).padStart(prefix.length, "0")
+          : ""
+      },
+    })
+    if (nextNumber.length === 0) {
+      return yield* CliError.UserError.make({
+        cause: migrationFailure("invalid final SQLite migration id"),
+        userMessage: "the final registered migration id must have a safe numeric prefix",
+      })
+    }
+
+    const id = `${nextNumber}_${name}`
+    const entry = `${id}.json`
+    const artifactPath = manifestArtifactPath(manifest, entry)
+    const fileSystem = yield* FileSystem.FileSystem
+    const artifactExists = yield* fileSystem.exists(artifactPath)
+    if (artifactExists || Array.contains(loaded.entries, entry)) {
+      return yield* CliError.UserError.make({
+        cause: migrationFailure("SQLite migration artifact path collision"),
+        userMessage: `Migration artifact already exists: ${entry}`,
+      })
+    }
+
+    const artifact = yield* artifactFromIntents({
+      id,
+      from: previous,
+      rename,
+      backfill,
+      transform,
+    })
+    const hasBlockedChange = Array.some(artifact.steps, Schema.is(SqliteBlockedChange))
+    if (hasBlockedChange) {
+      return yield* CliError.UserError.make({
+        cause: artifact,
+        userMessage: unresolvedMessage(artifact),
+      })
+    }
+    yield* pipe(
+      validateDecodedHistory(Array.append(loaded.migrations, artifact)),
+      Effect.mapError((cause) => CliError.UserError.make({
+        cause,
+        userMessage: "Generated migration would make the registered history invalid",
+      })),
     )
 
-    const describedTransform = transformDescription(transformFlag)
-    const transform = Flag.optional(describedTransform)
-    const planOptions = { from, id, rename, backfill, transform, out }
-
-    const planCommand = Effect.fn("SqliteMigrations.planCommand")(function* (
-      { from, id, rename, backfill, transform, out },
-    ) {
-
-      const fileSystem = yield* FileSystem.FileSystem
-      const initialSnapshot = emptySnapshot()
-      const initialSnapshotEffect = Effect.succeed(initialSnapshot)
-      const noPrevious = Function.constant(initialSnapshotEffect)
-
-
-      const readPrevious = (path: string) => {
-        const source = fileSystem.readFileString(path)
-
-        const readError = (cause: unknown) => CliError.UserError.make({
-          cause,
-          userMessage: "Could not read --from snapshot or migration artifact",
-        })
-
-        return pipe(source, Effect.flatMap(decodeSource), Effect.mapError(readError))
-
-      }
-
-      const previous = yield* Option.match(from, { onNone: noPrevious, onSome: readPrevious })
-      const renameIntent = Option.flatMap(rename, parseSqliteRename)
-      const noBackfill = Option.none<SqliteBackfill>()
-      const noBackfillEffect = Effect.succeed(noBackfill)
-      const noBackfillIntent = Function.constant(noBackfillEffect)
-
-      const backfillIntent = yield* Option.match(backfill, {
-        onNone: noBackfillIntent,
-        onSome: parseSqliteBackfill,
-      })
-
-      const transformIntent = Option.flatMap(transform, parseSqliteTransform)
-      const invalidRenameIntent = Option.isNone(renameIntent)
-      const invalidBackfillIntent = Option.isNone(backfillIntent)
-      const invalidTransformIntent = Option.isNone(transformIntent)
-
-      const invalidRename = Option.match(rename, {
-        onNone: Function.constFalse,
-        onSome: Function.constant(invalidRenameIntent),
-      })
-
-
-      const invalidBackfill = Option.match(backfill, {
-        onNone: Function.constFalse,
-        onSome: Function.constant(invalidBackfillIntent),
-      })
-
-
-      const invalidTransform = Option.match(transform, {
-        onNone: Function.constFalse,
-        onSome: Function.constant(invalidTransformIntent),
-      })
-
-      const hasInvalidRenameOrBackfill = invalidRename || invalidBackfill
-      const hasInvalidIntent = hasInvalidRenameOrBackfill || invalidTransform
-      if (hasInvalidIntent) {
-        const cause = migrationFailure("invalid migration intent")
-        return yield* CliError.UserError.make({
-          cause,
-          userMessage: "--rename is table:from:to, --backfill is table:column:JSON-value, and --transform is table:column:SQL-expression",
-        })
-      }
-
-      const snapshot = snapshotFromTable(options.tables)
-
-      const valuesFromA = <A>(value: Option.Option<A>) =>
-        Option.match(value, {
-          onNone: Function.constant([]),
-          onSome: (item) => [item],
-        })
-
-      const renames = valuesFromA(renameIntent)
-      const backfills = valuesFromA(backfillIntent)
-      const transforms = valuesFromA(transformIntent)
-      const artifact = planSqliteMigration({ id, from: previous, to: snapshot, renames, backfills, transforms })
-      yield* writeJson(artifact, out)
-      const hasBlockedChange = Array.some(artifact.steps, Schema.is(SqliteBlockedChange))
-      if (hasBlockedChange) {
-        return yield* CliError.UserError.make({
-          cause: artifact,
-          userMessage: "Migration plan contains unresolved changes",
-        })
-      }
+    const artifactText = `${JSON.stringify(canonical(encodeMigration(artifact)), null, 2)}\n`
+    const manifestText = `${JSON.stringify(
+      canonical({ migrations: Array.append(loaded.entries, entry) }),
+      null,
+      2,
+    )}\n`
+    yield* fileSystem.writeFileString(artifactPath, artifactText, { flag: "wx" })
+    const temporaryManifest = yield* fileSystem.makeTempFile({
+      directory: manifestDirectory(manifest),
+      prefix: ".effect-domains-migrations-",
     })
+    yield* fileSystem.writeFileString(temporaryManifest, manifestText)
+    yield* fileSystem.rename(temporaryManifest, manifest)
+  })
 
-    const plan = Command.make("plan", planOptions, planCommand)
-    const command = Command.make(options.name)
-    return Command.withSubcommands(command, [snapshot, plan])
+  const generate = Command.make(
+    "generate",
+    { name: generateName, rename, backfill, transform },
+    generateCommand,
+  )
+  const command = Command.make(options.name)
+  return Command.withSubcommands(command, [snapshot, plan, generate])
 }
 
 export const SqliteMigrations = {
   snapshot: snapshotFromTable,
   plan: planSqliteMigration,
+  history,
+  load: loadHistory,
   command: sqliteMigrationsCommand,
 }
 

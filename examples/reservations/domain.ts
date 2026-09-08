@@ -78,6 +78,11 @@ export class ReservationNotFound extends Schema.TaggedError<ReservationNotFound>
   { id: ReservationIdSchema },
 ) {}
 
+export class InventoryUnavailable extends Schema.TaggedError<InventoryUnavailable>()(
+  "InventoryUnavailable",
+  {},
+) {}
+
 export const ReservationActionSchema = Schema.Literals(["confirm", "release"])
 
 export class InvalidReservationState extends Schema.TaggedError<InvalidReservationState>()(

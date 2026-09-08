@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import type { CommandContracts } from "effect-domains/application"
+import { Commands, type CommandContracts } from "effect-domains/commands"
 import {
   BookIdentifierInputSchema,
   BookNotFound,
@@ -16,7 +16,7 @@ const requiredBookErrorsSchema = Schema.Union([
 
 const StoredBooksSchema = Schema.Array(BookResource.table.rowSchema)
 
-export const BookCommands = {
+const bookContracts = {
   "books.create": {
     input: BookSchema,
     output: BookResource.table.rowSchema,
@@ -43,3 +43,8 @@ export const BookCommands = {
     error: requiredBookErrorsSchema,
   },
 } satisfies CommandContracts
+
+export const BooksService = Commands.make(
+  "examples/basic-crud/BooksService",
+  bookContracts,
+)

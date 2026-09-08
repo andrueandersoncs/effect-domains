@@ -1,9 +1,11 @@
 import { expect, it } from "@effect/vitest"
-import { Array, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
+import { Array, Context, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
 import { ReservationApplication } from "../examples/reservations/application.ts"
+import { Inventory } from "../examples/reservations/contracts.ts"
 import {
   InsufficientStock,
   InvalidReservationState,
+  InventoryUnavailable,
   ReservationIdSchema,
   ReservationInputSchema,
   ReservationSchema,
@@ -11,7 +13,6 @@ import {
   SkuSchema,
   StockSchema,
 } from "../examples/reservations/domain.ts"
-import { Inventory, InventoryUnavailable } from "../examples/reservations/inventory.ts"
 import { InventoryMigrations } from "../examples/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
 import { InventorySqlite, seedStock } from "../examples/reservations/sqlite.ts"
@@ -31,7 +32,11 @@ const ReservationCodecSchema = Schema.toCodecJson(ReservationSchema)
 const encodeReservation = Schema.encodeEffect(ReservationCodecSchema)
 
 const withInventory = <A, E>(
-  effect: Effect.Effect<A, E, Inventory | Database | RepositoryStore>,
+  effect: Effect.Effect<
+    A,
+    E,
+    Context.Service.Identifier<typeof Inventory> | Database | RepositoryStore
+  >,
 ) =>
   pipe(
     Effect.fn("Reservations.withInventory")(function* () {

@@ -6,16 +6,9 @@ This example separates the note a client sees from the representation SQLite sto
 
 [`domain.ts`](domain.ts) defines the canonical `NoteSchema`: an application-supplied `id` and ordinary text. [`storage.ts`](storage.ts) defines a separate `StoredNoteSchema`. Its `StoredTextSchema` converts canonical text to and from storage text by reading the `StoragePrefix` service.
 
-[`resources.ts`](resources.ts) builds the physical `notes` table from the storage schema and deliberately selects `operations: []`. [`contracts.ts`](contracts.ts) declares five named canonical `{ input, output, error }` contracts; `Application.make` derives their RPCs and group, and `CommandService` derives the `Notes` service signatures. The SQL-backed handlers in [`sqlite.ts`](sqlite.ts) remain authored. They expose canonical notes to clients while executing storage queries with `StoredNoteSchema`.
+[`resources.ts`](resources.ts) supplies the canonical schema and storage codec to `Resource.make` with `operations: Resource.crud`. It derives the physical table, generated create/get/list/update/remove procedures, repository, and handlers. No command contracts, service wrapper, or SQL implementation is authored. The generated wire schemas use canonical notes; the table and repository use `StoredNoteSchema`.
 
-This keeps the prefix out of the transport boundary: the CLI sends and receives ordinary text, not `stored:` values. It also means the codec requirement is explicit in the storage layer rather than becoming a global RPC convention. [`server.ts`](server.ts) creates the actual service scope with:
-
-```ts
-const prefix = Layer.succeed(StoragePrefix, { value: "stored:" })
-const services = Layer.provide(NotesSqlite, prefix)
-```
-
-`NotesSqlite` captures that service and provides it to every stored create, get, list, update, and remove query. The exported `createKeepsCodecRequirement` check in [`sqlite.ts`](sqlite.ts) documents that the query itself retains the `StoragePrefix` requirement.
+This keeps the prefix out of the transport boundary: the CLI sends and receives ordinary text, not `stored:` values. [`main.ts`](main.ts) supplies `StoragePrefix` as an application service, so the generated handlers retain the codec requirement without a resource-specific service layer. Missing rows and persistence or schema failures use the generic generated `ResourceNotFound` and `RepositoryError` contracts; `remove` returns `void`.
 
 ## Run it
 
@@ -52,29 +45,26 @@ PORT=3001 SERVICE_CODEC_DB=notes.sqlite bun run service-codec:server
 SERVICE_CODEC_URL=http://127.0.0.1:3001/rpc/v1 bun run service-codec notes.list
 ```
 
-Startup applies frozen migrations and keeps existing data. It does not reset the database, and the SQLite runtime rejects an untracked database instead of adopting it. The current prefix is hard-coded to `stored:` in the server. `StoredTextSchema` removes a prefix-length slice when it decodes; it does not validate that stored text begins with that prefix. Do not alter rows manually or change the installed prefix without migrating existing values, or decoded text can be corrupted.
+Startup applies frozen migrations and keeps existing data. It does not reset the database, and the SQLite runtime rejects an untracked database instead of adopting it. The current prefix is hard-coded to `stored:` in `main.ts`. `StoredTextSchema` removes a prefix-length slice when it decodes; it does not validate that stored text begins with that prefix. Do not alter rows manually or change the installed prefix without migrating existing values, or decoded text can be corrupted.
 
-`get`, `update`, and `remove` return `NoteNotFound` when the id is absent. Storage/query failures become `NotesPersistenceFailure` with the operation name. `remove` returns `void`, and the list query defines neither ordering nor pagination.
+Generated missing-row and persistence failures use `ResourceNotFound` and `RepositoryError`; `remove` returns `void`. The generated list is the ordinary unpaginated CRUD list because this resource declares no list policy.
 
-Schema commands run locally without a server:
+Schema commands run locally without a server. After changing a resource schema, generate against the runtime registry at [`migrations/manifest.json`](migrations/manifest.json):
 
 ```bash
-bun run service-codec schema snapshot --out current-schema.json
-bun run service-codec schema plan --id 002_change \
-  --from examples/service-codec/migrations/001_initial.json \
-  --out 002_change.json
+bun run service-codec schema generate add-field
+bun run service-codec inspect notes.create
 ```
 
-Review a planned artifact before adding it to [`migrations.ts`](migrations.ts). Do not regenerate artifacts that may already be applied.
+`generate` writes and atomically registers only a valid next artifact; a blocked plan leaves the manifest untouched. `inspect` exposes canonical and storage schemas, including the physical stored schema. Do not regenerate artifacts that may already be applied.
 
 ## Code map
 
-- [`domain.ts`](domain.ts): canonical note values, identifier input, and public errors.
+- [`domain.ts`](domain.ts): canonical note values and identifier.
 - [`storage.ts`](storage.ts): `StoragePrefix`, the service-dependent text codec, and physical stored-note schema.
-- [`resources.ts`](resources.ts): physical table declaration and deliberate opt-out from generated resource RPCs.
-- [`contracts.ts`](contracts.ts) and [`service.ts`](service.ts): canonical command declarations and the derived service boundary.
-- [`sqlite.ts`](sqlite.ts): `Query.make` storage operations, canonical/storage conversion, and error translation.
-- [`migrations.ts`](migrations.ts) and [`migrations/001_initial.json`](migrations/001_initial.json): decoded frozen schema history.
-- [`application.ts`](application.ts), [`server.ts`](server.ts), and [`cli.ts`](cli.ts): application registration, actual prefix scope, server, and CLI.
+- [`resources.ts`](resources.ts): generated canonical/storage CRUD declaration.
+- [`application.ts`](application.ts): application registration.
+- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): decoded runtime registry and history.
+- [`main.ts`](main.ts): the sole runner and the installed prefix service.
 
 See the [examples overview](../README.md), [generated todo CRUD](../resource-crud/), and [authored book CRUD](../basic-crud/).

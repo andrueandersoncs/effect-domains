@@ -1,6 +1,6 @@
 # Persisted reference counter
 
-This example shows a single, shared counter whose in-memory value is backed by SQLite. It is a deliberate cache-coherence example: a process owns one `PersistedRef`, serializes its updates, and makes the boundary between its cache and the database visible.
+This example shows a single, shared counter whose in-memory value is bound to one SQLite resource identity. It is a deliberate cache-coherence example: a process owns one `PersistedRef`, serializes its updates, and makes the boundary between its cache and the database visible.
 
 For common runtime and schema-command conventions, see the [examples overview](../README.md). Compare the fully generated operations in [resource-crud](../resource-crud/) with this example's explicit commands.
 
@@ -41,23 +41,24 @@ The server is loopback-only and unauthenticated, using Effect's JSON RPC protoco
 
 ## What is generated and what is authored
 
-The `counters` resource deliberately publishes **no generated operations**. [`contracts.ts`](contracts.ts) declares `counters.get`, `counters.increment`, `counters.set`, and `counters.refresh` as named `{ input, output, error }` schemas. Get, increment, and refresh share one contract shape but retain distinct authored implementations. `Application.make` derives the RPCs and group, and `CommandService` derives the service signatures. The frozen `001_initial` artifact supplies the `counters` table, but it is not an API generator.
+The `counters` resource deliberately publishes **no generated operations**. [`contracts.ts`](contracts.ts) declares `counters.get`, `counters.increment`, `counters.set`, and `counters.refresh` as named `{ input, output, error }` schemas and turns them into the injectable `CounterCommands` descriptor. [`sqlite.ts`](sqlite.ts) installs the explicit handler record with `CounterCommands.layer(...)`. `Application.make` combines that descriptor's RPC group with the resource group. The frozen `001_initial` artifact supplies the `counters` table, but it is not an API generator.
 
-On startup, the application prepares the migration history, creates the singleton `visits` row with value `0` only if it is absent, and loads that row into one process-local `PersistedRef`. A `PersistedRef` update is synchronized: `increment` calculates from the cached value, writes the resulting row through to SQLite, and updates the cache only from the committed result.
+On startup, `PersistedRef.fromResource(CounterResource, { key: VisitsCounterId, ifMissing: { value: 0 } })` binds the ref to the `visits` identity. Within the resource transaction it loads that row or creates it once if absent; `ifMissing` supplies only non-key fields and the bound key is injected. The initial committed row becomes one process-local cache. A synchronized `increment` calculates from that cache, commits through the bound resource row, and updates the cache only from the committed result. A commit cannot change the bound identity.
 
 ## Boundaries and failure modes
 
-- `set` intentionally bypasses the reference to demonstrate that a database write does not invalidate a cache. Use `refresh` after it when the caller needs the cached value to agree with storage.
-- The serialization scope is one server process, not the database. Another process or direct SQLite writer can change `visits` without updating this process's cache; a later stale cached increment can overwrite that external value. This example has no cross-process synchronization or conflict detection.
-- Restarting reloads the stored `visits` value rather than resetting it. Startup applies frozen migrations but does not reset data, and an untracked database is rejected rather than adopted.
-- `increment`, `set`, and `refresh` map failed persistence or a missing `visits` row to `CounterUnavailable`; the initial load has the same typed failure. A later `get` reads only the already-loaded cache.
+- `set` intentionally bypasses the reference to demonstrate that a database write does not invalidate a cache. Use the explicit `refresh` when the caller needs the cached value to agree with storage.
+- `refresh` reloads the bound `visits` row; it never recreates a row deleted after initialization. A missing row or a failed `increment`, `set`, or `refresh` is reported as `CounterUnavailable`.
+- The serialization scope is one server process, not the database. Another process or direct SQLite writer can change `visits` without updating this process's cache; a later stale cached increment can overwrite that external value. This example has no distributed coherence, cross-process synchronization, or conflict detection.
+- Restarting binds and loads the stored `visits` row rather than resetting it. Startup applies frozen migrations but does not reset data, and an untracked database is rejected rather than adopted.
 
 ## Code map
 
 - [`domain.ts`](domain.ts): the `visits` identifier and counter shape.
 - [`resources.ts`](resources.ts): the resource declaration with no generated operations.
-- [`contracts.ts`](contracts.ts) and [`counter.ts`](counter.ts): command declarations and their derived service/error contract.
-- [`sqlite.ts`](sqlite.ts): startup seed, authored queries, direct `set`, and the cached reference.
-- [`migrations.ts`](migrations.ts) and [the frozen artifact](migrations/001_initial.json): database history.
-- [`application.ts`](application.ts), [`server.ts`](server.ts), and [`cli.ts`](cli.ts): registration, runtime configuration, and CLI entry point.
+- [`contracts.ts`](contracts.ts): command contracts and the `CounterCommands` descriptor.
+- [`sqlite.ts`](sqlite.ts): the command layer, direct `set`, and the resource-bound cached reference.
+- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry and history.
+- [`application.ts`](application.ts): resource and command-descriptor registration.
+- [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.
 - [`../../src/persisted-ref.ts`](../../src/persisted-ref.ts): the reusable synchronized write-through reference.

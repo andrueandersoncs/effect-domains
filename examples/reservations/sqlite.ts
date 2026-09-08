@@ -3,14 +3,13 @@ import {
   DateTime,
   Effect,
   Equivalence,
-  Layer,
   Option,
   pipe,
 } from "effect"
-import { RepositoryStore } from "effect-domains/repository-store"
 import { Database } from "effect-domains/sqlite-bun"
 import {
   InsufficientStock,
+  InventoryUnavailable,
   type Reservation,
   ReservationIdSchema,
   type ReservationInput,
@@ -20,7 +19,7 @@ import {
   transitionReservation,
   UnknownSku,
 } from "./domain.ts"
-import { Inventory, InventoryUnavailable } from "./inventory.ts"
+import { Inventory } from "./contracts.ts"
 import { ReservationResource, StockResource } from "./resources.ts"
 
 const persistenceFailure = Effect.fn("Inventory.persistenceFailure")(function* (
@@ -46,7 +45,6 @@ export const seedStock = Effect.fn("InventorySqlite.seedStock")(function* (
 
 const inventorySqliteEffect = Effect.gen(function* () {
   const database = yield* Database
-  const repositories = yield* RepositoryStore
 
   const reserve = Effect.fn("Inventory.reserve")(function* (
     input: ReserveStockInput,
@@ -95,7 +93,6 @@ const inventorySqliteEffect = Effect.gen(function* () {
     return yield* pipe(
       transaction,
       Effect.catchTags(persistenceErrors),
-      Effect.provideService(RepositoryStore, repositories),
     )
   })
 
@@ -140,15 +137,14 @@ const inventorySqliteEffect = Effect.gen(function* () {
       return yield* pipe(
         transaction,
         Effect.catchTags(persistenceErrors),
-        Effect.provideService(RepositoryStore, repositories),
       )
     })
 
-  return Inventory.of({
+  return {
     reserve,
     confirm: transition("confirm"),
     release: transition("release"),
-  })
+  }
 })
 
-export const InventorySqlite = Layer.effect(Inventory, inventorySqliteEffect)
+export const InventorySqlite = Inventory.layer(inventorySqliteEffect)

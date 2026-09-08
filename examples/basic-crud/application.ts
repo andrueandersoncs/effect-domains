@@ -1,12 +1,9 @@
 import { Application } from "effect-domains/application"
-import { BookCommands } from "./contracts.ts"
-import { BooksService } from "./books.ts"
+import { BooksService } from "./contracts.ts"
 import { BookResource } from "./resources.ts"
 
 export const BasicCrudApplication = Application.make({
   name: "basic-crud",
   resources: [BookResource],
-  commands: BookCommands,
+  commands: [BooksService],
 })
-
-export const BasicCrudHandlers = BasicCrudApplication.toLayer(BooksService)

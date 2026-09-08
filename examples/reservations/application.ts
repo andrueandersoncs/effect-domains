@@ -1,12 +1,9 @@
 import { Application } from "effect-domains/application"
-import { ReservationCommands } from "./contracts.ts"
-import { Inventory } from "./inventory.ts"
+import { Inventory } from "./contracts.ts"
 import { ReservationResource, StockResource } from "./resources.ts"
 
 export const ReservationApplication = Application.make({
   name: "reservations",
   resources: [StockResource, ReservationResource],
-  commands: ReservationCommands,
+  commands: [Inventory],
 })
-
-export const ReservationHandlers = ReservationApplication.toLayer(Inventory)

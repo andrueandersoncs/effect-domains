@@ -51,4 +51,4 @@ const seedVersionOneDocument = Effect.gen(function* () {
   yield* pipe(seed, Effect.provide(runtime))
 })
 
-BunRuntime.runMain(seedVersionOneDocument as Effect.Effect<void, any>)
+BunRuntime.runMain(seedVersionOneDocument)

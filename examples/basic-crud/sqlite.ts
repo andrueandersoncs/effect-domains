@@ -1,7 +1,7 @@
-import { Array, Effect, Layer, Option, pipe, Schema } from "effect"
+import { Array, Effect, Option, pipe, Schema } from "effect"
 import { Query } from "effect-domains/query"
 import { Database } from "effect-domains/sqlite-bun"
-import { BooksService } from "./books.ts"
+import { BooksService } from "./contracts.ts"
 import {
   type Book,
   type BookIdentifierInput,
@@ -158,70 +158,35 @@ const requireBook = Effect.fn("Books.require")(function* (
   return book.value
 })
 
-const booksSqliteEffect = Effect.gen(function* () {
-  const database = yield* Database
-  const provideDatabase = Effect.provideService(Database, database)
-
-  const create = Effect.fn("Books.create")(function* (input: Book) {
-    return yield* pipe(
-      CreateBook.execute(input),
-      provideDatabase,
-      Effect.mapError(persistenceFailure),
-    )
-  })
-
-  const get = Effect.fn("Books.get")(function* (input: BookIdentifierInput) {
-
-    const found = yield* pipe(
-      FindBook.execute(input),
-      provideDatabase,
-      Effect.mapError(persistenceFailure),
-    )
-
-    return yield* requireBook(input.id, found)
-  })
-
-  const list = Effect.fn("Books.list")(function* (input: ListBooksInput) {
-    return yield* pipe(
-      ListBooks.execute(input),
-      provideDatabase,
-      Effect.mapError(persistenceFailure),
-    )
-  })
-
-  const update = Effect.fn("Books.update")(function* (
-    input: typeof BookResource.table.rowSchema.Type,
-  ) {
-
-    const found = yield* pipe(
-      UpdateBook.execute(input),
-      provideDatabase,
-      Effect.mapError(persistenceFailure),
-    )
-
-    return yield* requireBook(input.id, found)
-  })
-
-  const remove = Effect.fn("Books.remove")(function* (
-    input: BookIdentifierInput,
-  ) {
-
-    const found = yield* pipe(
-      RemoveBook.execute(input),
-      provideDatabase,
-      Effect.mapError(persistenceFailure),
-    )
-
-    return yield* requireBook(input.id, found)
-  })
-
-  return BooksService.of({
-    "books.create": create,
-    "books.get": get,
-    "books.list": list,
-    "books.update": update,
-    "books.remove": remove,
-  })
+const create = Effect.fn("Books.create")(function* (input: Book) {
+  return yield* pipe(CreateBook.execute(input), Effect.mapError(persistenceFailure))
 })
 
-export const BooksSqlite = Layer.effect(BooksService, booksSqliteEffect)
+const get = Effect.fn("Books.get")(function* (input: BookIdentifierInput) {
+  const found = yield* pipe(FindBook.execute(input), Effect.mapError(persistenceFailure))
+  return yield* requireBook(input.id, found)
+})
+
+const list = Effect.fn("Books.list")(function* (input: ListBooksInput) {
+  return yield* pipe(ListBooks.execute(input), Effect.mapError(persistenceFailure))
+})
+
+const update = Effect.fn("Books.update")(function* (
+  input: typeof BookResource.table.rowSchema.Type,
+) {
+  const found = yield* pipe(UpdateBook.execute(input), Effect.mapError(persistenceFailure))
+  return yield* requireBook(input.id, found)
+})
+
+const remove = Effect.fn("Books.remove")(function* (input: BookIdentifierInput) {
+  const found = yield* pipe(RemoveBook.execute(input), Effect.mapError(persistenceFailure))
+  return yield* requireBook(input.id, found)
+})
+
+export const BooksSqlite = BooksService.layer({
+  "books.create": create,
+  "books.get": get,
+  "books.list": list,
+  "books.update": update,
+  "books.remove": remove,
+})

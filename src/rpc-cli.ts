@@ -4,11 +4,11 @@ import {
   Equivalence,
   Function,
   HashSet,
+  Layer,
   Match,
   Option,
   Predicate,
   Record,
-  Result,
   Schema,
   SchemaAST,
   Stream,
@@ -185,6 +185,34 @@ const nativeFlagFor: (ast: SchemaAST.AST) => Option.Option<NativeFlag> = (ast) =
     Match.orElse(Option.none<NativeFlag>),
   )
 
+const payloadFields = (
+  ast: SchemaAST.AST,
+  prefix: ReadonlyArray<string> = [],
+): ReadonlyArray<Readonly<{ property: SchemaAST.PropertySignature; path: ReadonlyArray<string> }>> => {
+  if (!SchemaAST.isObjects(ast) || ast.indexSignatures.length !== 0) return []
+  return ast.propertySignatures.flatMap((property) => {
+    const path = typeof property.name === "string" ? [...prefix, property.name] : prefix
+    return SchemaAST.isObjects(property.type)
+      ? payloadFields(property.type, path)
+      : [{ property, path }]
+  })
+}
+
+const setPayloadField = (
+  payload: Record<string, unknown>,
+  path: ReadonlyArray<string>,
+  value: unknown,
+) => {
+  let target = payload
+  for (const [index, field] of path.entries()) {
+    if (index === path.length - 1) {
+      target[field] = value
+    } else {
+      target = (target[field] ??= Object.create(null)) as Record<string, unknown>
+    }
+  }
+}
+
 const descriptionFor = (property: SchemaAST.PropertySignature) => {
   const contextAnnotations = Option.fromNullishOr(property.type.context?.annotations)
   const annotations = Option.getOrElse(contextAnnotations, () => property.type.annotations)
@@ -220,11 +248,17 @@ const makeNativeFlag = (
   return Flag.optional(describedFlag)
 }
 
-const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
+const makeRpcCli = <
+  Rpcs extends Rpc.AnyWithProps,
+  Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
+  ProtocolError = never,
+  ProtocolRequirements = never,
+>(
   options: Readonly<{
     name: string
-    group: RpcGroup.RpcGroup<any>
-    subcommands: ReadonlyArray<Command.Command<string, {}, {}, E, R>>
+    group: RpcGroup.RpcGroup<Rpcs>
+    protocol: Layer.Layer<RpcClient.Protocol, ProtocolError, ProtocolRequirements>
+    subcommands: Subcommands
   }>,
 ) =>
   pipe(
@@ -268,16 +302,12 @@ const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
                   )),
               )
 
-            const hasNativeFields = SchemaAST.isObjects(encodedPayloadSchema.ast)
-              && Equivalence.strictEqual<number>()(encodedPayloadSchema.ast.indexSignatures.length, 0)
-
-            const properties = hasNativeFields
-              ? encodedPayloadSchema.ast.propertySignatures
-              : []
+            const properties = payloadFields(encodedPayloadSchema.ast)
+            const decodedProperties = payloadFields(Schema.toType(payloadSchema).ast)
 
             const compiledFields = yield* Effect.forEach(
               properties,
-              Effect.fn("RpcCli.compileField")(function* (property) {
+              Effect.fn("RpcCli.compileField")(function* ({ property, path }) {
                 if (!Predicate.isString(property.name)) {
                   return yield* RpcCliDefinitionError.make({
                     procedure: procedure._tag,
@@ -285,12 +315,21 @@ const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
                   })
                 }
 
-                const native = nativeFlagFor(property.type)
+                const native = Option.orElse(nativeFlagFor(property.type), () => {
+                  const decoded = decodedProperties.find((field) =>
+                    field.path.length === path.length && field.path.every((part, index) => part === path[index]),
+                  )?.property.type
+                  // JSON number codecs also encode non-finite values as strings.
+                  // Native numeric flags cover finite values; JSON retains the full codec.
+                  return decoded !== undefined && SchemaAST.isNumber(decoded)
+                    ? nativeFlagFor(decoded)
+                    : Option.none()
+                })
                 if (Option.isNone(native)) {
                   return Option.none()
                 }
 
-                const flagName = toFlagName(property.name)
+                const flagName = path.map(toFlagName).join("-")
                 if (HashSet.has(ReservedFlagNames, flagName)) {
                   return yield* RpcCliDefinitionError.make({
                     procedure: procedure._tag,
@@ -301,7 +340,7 @@ const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
                 const description = descriptionFor(property)
                 const flag = makeNativeFlag(flagName, native.value, description)
                 return Option.some({
-                  field: property.name,
+                  path,
                   configKey: flagName,
                   flag,
                 })
@@ -339,74 +378,73 @@ const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
 
             const config: Record<string, Flag.Flag<Option.Option<unknown>>> = Record.fromEntries(configEntries)
 
+            const execute = Effect.fn("RpcCli.execute")(
+              function* (arguments_: Record<string, Option.Option<unknown>>) {
+                const stdio = yield* Stdio.Stdio
+
+                const readArgument = (key: string) =>
+                  pipe(Record.get(arguments_, key), Option.flatten)
+
+                const inputJson = readArgument("inputJson")
+
+                const hasNativeInput = Array.some(
+                  nativeFields,
+                  flow(Struct.get("configKey"), readArgument, Option.isSome),
+                )
+
+                const mixedInput = Option.isSome(inputJson) && hasNativeInput
+                if (mixedInput) {
+                  return yield* CliError.UserError.make({
+                    cause: arguments_,
+                    userMessage: "--input-json cannot be combined with native field flags",
+                  })
+                }
+
+                const nativeInput: Record<string, unknown> = Object.create(null)
+                for (const { path, configKey } of nativeFields) {
+                  const argument = readArgument(configKey)
+                  if (Option.isSome(argument)) {
+                    setPayloadField(nativeInput, path, argument.value)
+                  }
+                }
+
+                const input = Option.match(inputJson, {
+                  onSome: Function.identity,
+                  onNone: Function.constant(nativeInput),
+                })
+
+                const payload = yield* Option.match(inputJson, {
+                  onSome: () => Schema.decodeUnknownEffect(inputJsonSchema)(input),
+                  onNone: () => Schema.decodeUnknownEffect(payloadSchema)(input),
+                })
+
+                const client = yield* RpcClient.make(options.group, {
+                  flatten: true,
+                })
+
+                // The cast is confined here because validation and the tag come from the same closed RPC group.
+                const success = yield* (
+                  client as (
+                    tag: string,
+                    payload: unknown,
+                  ) => Effect.Effect<unknown, unknown, unknown>
+                )(procedure._tag, payload)
+
+                const encoded =
+                  yield* Schema.encodeUnknownEffect(outputSchema)(success)
+
+                const output = Stream.make(`${encoded}\n`)
+                const stdout = stdio.stdout()
+                yield* Stream.run(output, stdout)
+              },
+              Effect.scoped,
+              Effect.catch(reportFailure),
+            )
+
             return Command.make(
               procedure._tag,
               config,
-              Effect.fn("RpcCli.execute")(
-                function* (arguments_) {
-                  const stdio = yield* Stdio.Stdio
-
-                  const readArgument = (key: string) =>
-                    pipe(Record.get(arguments_, key), Option.flatten)
-
-                  const inputJson = readArgument("inputJson")
-
-                  const hasNativeInput = Array.some(
-                    nativeFields,
-                    flow(Struct.get("configKey"), readArgument, Option.isSome),
-                  )
-
-                  const mixedInput = Option.isSome(inputJson) && hasNativeInput
-                  if (mixedInput) {
-                    return yield* CliError.UserError.make({
-                      cause: arguments_,
-                      userMessage: "--input-json cannot be combined with native field flags",
-                    })
-                  }
-
-                  const nativeInputEntries = Array.filterMap(
-                    nativeFields,
-                    ({ field, configKey }) => pipe(
-                      readArgument(configKey),
-                      Option.map((value) => [field, value] as const),
-                      Result.fromOption(Function.constVoid),
-                    ),
-                  )
-
-                  const nativeInput = Record.fromEntries(nativeInputEntries)
-
-                  const input = Option.match(inputJson, {
-                    onSome: Function.identity,
-                    onNone: Function.constant(nativeInput),
-                  })
-
-                  const payload = yield* Option.match(inputJson, {
-                    onSome: () => Schema.decodeUnknownEffect(inputJsonSchema)(input),
-                    onNone: () => Schema.decodeUnknownEffect(payloadSchema)(input),
-                  })
-
-                  const client = yield* RpcClient.make(options.group, {
-                    flatten: true,
-                  })
-
-                  // The cast is confined here because validation and the tag come from the same closed RPC group.
-                  const success = yield* (
-                    client as (
-                      tag: string,
-                      payload: unknown,
-                    ) => Effect.Effect<unknown, unknown, unknown>
-                  )(procedure._tag, payload)
-
-                  const encoded =
-                    yield* Schema.encodeUnknownEffect(outputSchema)(success)
-
-                  const output = Stream.make(`${encoded}\n`)
-                  const stdout = stdio.stdout()
-                  yield* Stream.run(output, stdout)
-                },
-                Effect.scoped,
-                Effect.catch(reportFailure),
-              ),
+              (arguments_) => pipe(execute(arguments_), Effect.provide(options.protocol)),
             )
           }),
         )
@@ -435,13 +473,13 @@ const makeRpcCli = <Rpcs extends Rpc.AnyWithProps, E = never, R = never>(
     string,
     {},
     {},
-    CliError.UserError | E,
-    | RpcClient.Protocol
+    CliError.UserError | Command.Error<Subcommands[number]> | ProtocolError,
     | Rpc.MiddlewareClient<Rpcs>
     | Rpc.ServicesClient<Rpcs>
     | Rpc.ServicesServer<Rpcs>
     | Stdio.Stdio
-    | R
+    | Command.Services<Subcommands[number]>
+    | ProtocolRequirements
   >
 
 export const RpcCli = {

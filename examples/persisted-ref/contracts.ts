@@ -1,7 +1,6 @@
 import { Schema } from "effect"
-import type { CommandContract, CommandContracts } from "effect-domains/application"
-import { CounterUnavailable } from "./counter.ts"
-import { CounterSchema } from "./domain.ts"
+import { Commands, type CommandContract } from "effect-domains/commands"
+import { CounterSchema, CounterUnavailable } from "./domain.ts"
 
 const SetCounterPayloadSchema = Schema.Struct({ value: Schema.Number })
 
@@ -15,7 +14,7 @@ const counterOperation = {
   error: CounterUnavailable,
 } satisfies CommandContract
 
-export const CounterCommands = {
+export const CounterCommands = Commands.make("examples/persisted-ref/Counter", {
   "counters.get": counterOperation,
   "counters.increment": counterOperation,
   "counters.set": {
@@ -24,4 +23,4 @@ export const CounterCommands = {
     error: CounterUnavailable,
   },
   "counters.refresh": counterOperation,
-} satisfies CommandContracts
+})
