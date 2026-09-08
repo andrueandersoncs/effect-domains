@@ -10,7 +10,7 @@ export type CommandService<Group extends RpcGroup.Any> = {
       ? (input: Procedure["payloadSchema"]["Type"]) => Effect.Effect<
           Procedure["successSchema"]["Type"],
           Procedure["errorSchema"]["Type"],
-          unknown
+          never
         >
       : never
 }

@@ -1,4 +1,4 @@
-import { Resource } from "../../src/resource.ts"
+import { Resource } from "effect-domains/resource"
 import { ReservationSchema, StockSchema } from "./domain.ts"
 
 export const StockResource = Resource.make({

@@ -1,22 +1,26 @@
 # Examples
 
-The reservation application uses canonical resources, explicit business commands, and framework-generated persistence and interfaces. The smaller examples exercise the lower-level table/query escape hatch.
+The reservation application uses canonical resources, explicit business commands, and framework-generated persistence and interfaces. The focused examples cover generated repositories, migration review, and the lower-level table/query escape hatch.
 
-## Temporary persistence examples
+## Focused examples
 
 Run from the repository root:
 
 ```bash
+bun run examples/resource-crud.ts
+bun run examples/migration-lifecycle.ts
 bun run examples/basic-crud.ts
 bun run examples/service-codec.ts
 bun run examples/persisted-ref.ts
 ```
 
+- [`resource-crud.ts`](resource-crud.ts) derives a typed repository and exercises generated create, get, update, list, find, and remove behavior against temporary SQLite.
+- [`migration-lifecycle.ts`](migration-lifecycle.ts) shows an ambiguous schema change being blocked, supplies explicit rename and backfill intent, applies the reviewed migration, and preserves existing data.
 - [`basic-crud.ts`](basic-crud.ts) derives a stored `Book` row with a UUIDv7 key and authors queries against temporary SQLite.
 - [`service-codec.ts`](service-codec.ts) keeps a schema codec's Effect service in the query's execution requirements.
 - [`persisted-ref.ts`](persisted-ref.ts) combines queries into a write-through reference, serializes concurrent updates, and explicitly refreshes an external change.
 
-Each supplies the concrete database at runtime and removes its temporary directory afterward.
+Each focused example is self-contained: declarations come first, followed by the runnable Effect. Temporary databases use `FileSystem.makeTempDirectoryScoped` with `BunFileSystem.layer`; closing the scope removes the directory. Framework imports use the public `effect-domains/*` entry points.
 
 ## Reservation application
 

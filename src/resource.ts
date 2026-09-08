@@ -1,7 +1,7 @@
-import { Array, Effect, flow, Layer, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Effect, flow, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RepositoryError, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
-import { Table } from "./table.ts"
+import { Table, type TableDefinition } from "./table.ts"
 
 const EmptyPayloadSchema = Schema.Struct({})
 
@@ -11,18 +11,42 @@ const ResourceOperationSchema = Schema.Literals(["get", "list", "create", "updat
 type ResourceOperation = Schema.Schema.Type<typeof ResourceOperationSchema>
 const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound])
 
-const makeRepository = <T extends Table>(table: T) => {
-  const encodeKey = Schema.encodeEffect(table.identifierStorageSchema)
-  const encodeInput = Schema.encodeEffect(table.insertSchema)
-  const encodeRow = Schema.encodeEffect(table.storageSchema)
-  const decodeRow = Schema.decodeUnknownEffect(table.storageSchema)
-  const storageRowsSchema = Schema.Array(table.storageSchema)
-  const decodeRows = Schema.decodeUnknownEffect(storageRowsSchema)
-
+const makeRepository = <
+  Name extends string,
+  S extends Schema.Struct<Schema.Struct.Fields>,
+  Key extends string,
+  Row extends Schema.Struct<Schema.Struct.Fields>,
+  Identifier extends Schema.Constraint,
+>(table: TableDefinition<Name, S, Key, Row, Identifier>) => {
   const repositoryFailure = (cause: Schema.SchemaError) =>
     RepositoryError.make({ resource: table.name, cause })
 
-  const invalid = flow(repositoryFailure, Effect.fail)
+  const encodeKey = flow(
+    Schema.encodeEffect(table.identifierStorageSchema),
+    Effect.mapError(repositoryFailure),
+  )
+
+  const encodeInput = flow(
+    Schema.encodeEffect(table.insertSchema),
+    Effect.mapError(repositoryFailure),
+  )
+
+  const encodeRow = flow(
+    Schema.encodeEffect(table.storageSchema),
+    Effect.mapError(repositoryFailure),
+  )
+
+  const decodeRow = flow(
+    Schema.decodeUnknownEffect(table.storageSchema),
+    Effect.mapError(repositoryFailure),
+  )
+
+  const storageRowsSchema = Schema.Array(table.storageSchema)
+
+  const decodeRows = flow(
+    Schema.decodeUnknownEffect(storageRowsSchema),
+    Effect.mapError(repositoryFailure),
+  )
 
   const missing = (key: unknown) => {
     const stringKey = String(key)
@@ -31,20 +55,19 @@ const makeRepository = <T extends Table>(table: T) => {
   }
 
   const find = Effect.fn("Repository.find")(
-    function* (key: T["identifierSchema"]["Type"]) {
+    function* (key: Identifier["Type"]) {
       const encoded = yield* encodeKey(key)
       const store = yield* RepositoryStore
       const stored = yield* store.find(table, encoded)
-      if (Option.isNone(stored)) return Option.none<T["rowSchema"]["Type"]>()
+      if (Option.isNone(stored)) return Option.none<Row["Type"]>()
       const row = yield* decodeRow(stored.value)
 
       return Option.some(row)
     },
-    Effect.catchTag("SchemaError", invalid),
   )
 
   const get = Effect.fn("Repository.get")(function* (
-    key: T["identifierSchema"]["Type"],
+    key: Identifier["Type"],
   ) {
     const found = yield* find(key)
     if (Option.isNone(found)) return yield* missing(key)
@@ -59,22 +82,20 @@ const makeRepository = <T extends Table>(table: T) => {
 
       return yield* decodeRows(stored)
     },
-    Effect.catchTag("SchemaError", invalid),
   )
 
   const create = Effect.fn("Repository.create")(
-    function* (value: T["schema"]["Type"]) {
+    function* (value: S["Type"]) {
       const encoded = yield* encodeInput(value)
       const store = yield* RepositoryStore
       const stored = yield* store.insert(table, encoded)
 
       return yield* decodeRow(stored)
     },
-    Effect.catchTag("SchemaError", invalid),
   )
 
   const update = Effect.fn("Repository.update")(
-    function* (value: T["rowSchema"]["Type"]) {
+    function* (value: Row["Type"]) {
       const encoded = yield* encodeRow(value)
       const store = yield* RepositoryStore
       const stored = yield* store.update(table, encoded)
@@ -82,17 +103,15 @@ const makeRepository = <T extends Table>(table: T) => {
 
       return yield* decodeRow(stored.value)
     },
-    Effect.catchTag("SchemaError", invalid),
   )
 
   const remove = Effect.fn("Repository.remove")(
-    function* (key: T["identifierSchema"]["Type"]) {
+    function* (key: Identifier["Type"]) {
       const encoded = yield* encodeKey(key)
       const store = yield* RepositoryStore
       const removed = yield* store.remove(table, encoded)
       if (!removed) return yield* missing(key)
     },
-    Effect.catchTag("SchemaError", invalid),
   )
 
   const repository = { find, get, list, create, update, remove }

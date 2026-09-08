@@ -1,5 +1,5 @@
 import { Context, Schema } from "effect"
-import type { CommandService } from "../../src/application.ts"
+import type { CommandService } from "effect-domains/application"
 import type { ReservationCommands } from "./contracts.ts"
 
 export class InventoryUnavailable extends Schema.TaggedError<InventoryUnavailable>()(

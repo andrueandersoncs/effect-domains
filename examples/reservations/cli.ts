@@ -1,6 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { ApplicationBun } from "../../src/application-bun.ts"
-import { SqliteMigrations } from "../../src/sqlite-migrations.ts"
+import { ApplicationBun } from "effect-domains/application-bun"
+import { SqliteMigrations } from "effect-domains/sqlite-migrations"
 import { ReservationApplication } from "./application.ts"
 
 const schemaCommand = SqliteMigrations.command({

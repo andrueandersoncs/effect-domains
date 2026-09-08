@@ -64,7 +64,6 @@ export interface ReservationInput extends Schema.Schema.Type<
   typeof ReservationInputSchema
 > {}
 
-
 export class UnknownSku extends Schema.TaggedError<UnknownSku>()("UnknownSku", {
   sku: SkuSchema,
 }) {}

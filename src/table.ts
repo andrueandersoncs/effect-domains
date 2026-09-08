@@ -847,7 +847,7 @@ export class Table extends Schema.Class<Table>("Table")({
   }
 }
 
-interface TableDefinition<
+export interface TableDefinition<
   Name extends string,
   S extends Schema.Struct<Schema.Struct.Fields>,
   K extends string,

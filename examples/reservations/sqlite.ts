@@ -1,6 +1,14 @@
-import { Array, DateTime, Effect, Equivalence, Layer, Option, pipe } from "effect"
-import { RepositoryStore } from "../../src/repository-store.ts"
-import { Database } from "../../src/sqlite-bun.ts"
+import {
+  Array,
+  DateTime,
+  Effect,
+  Equivalence,
+  Layer,
+  Option,
+  pipe,
+} from "effect"
+import { RepositoryStore } from "effect-domains/repository-store"
+import { Database } from "effect-domains/sqlite-bun"
 import {
   InsufficientStock,
   type Reservation,
@@ -91,10 +99,10 @@ const inventorySqliteEffect = Effect.gen(function* () {
     )
   })
 
-    const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
-      reservation: Reservation,
-    ) {
-      const replenished = yield* database`
+  const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
+    reservation: Reservation,
+  ) {
+    const replenished = yield* database`
         UPDATE ${database(StockResource.table.name)}
         SET ${database("available")} = ${database("available")} + ${reservation.quantity}
         WHERE ${database("sku")} = ${reservation.sku}
@@ -102,11 +110,11 @@ const inventorySqliteEffect = Effect.gen(function* () {
         RETURNING 1
       `
 
-      if (Array.isReadonlyArrayEmpty(replenished)) {
-        yield* Effect.logError("Reservation release could not restore stock")
-        return yield* InventoryUnavailable.make({})
-      }
-    })
+    if (Array.isReadonlyArrayEmpty(replenished)) {
+      yield* Effect.logError("Reservation release could not restore stock")
+      return yield* InventoryUnavailable.make({})
+    }
+  })
 
   const transition = (action: "confirm" | "release") =>
     Effect.fn("Inventory.transition")(function* (input: ReservationInput) {
@@ -136,11 +144,11 @@ const inventorySqliteEffect = Effect.gen(function* () {
       )
     })
 
-    return Inventory.of({
-      reserve,
-      confirm: transition("confirm"),
-      release: transition("release"),
-    })
+  return Inventory.of({
+    reserve,
+    confirm: transition("confirm"),
+    release: transition("release"),
+  })
 })
 
 export const InventorySqlite = Layer.effect(Inventory, inventorySqliteEffect)
