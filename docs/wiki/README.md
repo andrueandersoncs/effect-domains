@@ -8,7 +8,7 @@ Effect Domains is a schema-first, convention-over-configuration application fram
 
 - [Thesis](thesis.md) — the central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — the accepted persistence interface and current implementation evidence.
-- [Validation Strategy](validation-strategy.md) — required vertical slices, reservation application evidence, and criteria for judging the hypothesis.
+- [Validation Strategy](validation-strategy.md) — required vertical slices, reservation and persistent-application evidence, and criteria for judging the hypothesis.
 - [Research Agenda](research-agenda.md) — the implemented framework contract, findings, and unresolved questions.
 
 ## Wiki Operations and Sources
@@ -29,6 +29,8 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 `Resource.make` derives a table, typed repository, selected Effect RPC operations, and handlers from a canonical schema. `Application.make` combines resources and authored commands; `ApplicationBun` composes the HTTP server and generated CLI. `Table.make` and `Query.make` remain available for direct table derivation and custom queries. `PersistedRef` composes query-backed, process-local write-through state. ([Persistence reference](tables-and-queries.md))
 
 The [reservation slice](validation-strategy.md#reservation-slice) uses canonical models directly, with generated storage and read interfaces and explicit stock accounting, transitions, and transactions. Frozen migration artifacts convert historical timestamp seconds to the canonical ISO representation. Live verification demonstrated one scalar schema edit propagating through SQLite, resource contracts, HTTP, and native CLI flags without adapter changes. Another business domain and another database remain unproven.
+
+Five [supporting applications](validation-strategy.md#persistent-example-applications) now expose authored book queries, generated todo CRUD, service-dependent note codecs, a persisted counter, and versioned documents through persistent SQLite, HTTP RPC, and generated CLIs. Live verification covered CRUD, restart persistence, counter concurrency/refresh, and historical rename/backfill. These examples broaden integration evidence without establishing another materially different business-policy slice.
 
 ## Development
 

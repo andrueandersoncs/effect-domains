@@ -53,6 +53,22 @@ The implemented proof covers the [framework direction](research-agenda.md#framew
 5. Reservation regression scenarios preserve no-oversell, rollback, and terminal-state guarantees. Live verification also attempted an unpublished reservation update over RPC and confirmed rejection without changing the reservation.
 6. Existing databases use reviewed artifacts. Migration regressions cover explicit rename/backfill intent, literal-aware drift checks, column-order differences after additions, and rollback of failed transformations. Historical reservation replay uses frozen files independent of the current model. ([Migration regressions](../../test/SqliteMigrations.test.ts))
 
+## Persistent Example Applications
+
+The five focused demonstrations now run as persistent applications alongside reservations. Each has a registered application, HTTP server, generated CLI, local schema commands, and frozen SQLite migration history. The [application guide](../../examples/README.md#choose-an-application) documents commands and configuration. These are supporting integration examples, not five additional business-policy vertical slices.
+
+Live CLI verification exercised:
+
+- **Authored book queries:** create, get, list, full-row update, removal, missing-record failures, and row preservation across a server restart. The query implementation remains explicit SQL rather than generated repository behavior. ([Implementation](../../examples/basic-crud/sqlite.ts))
+- **Generated todo CRUD:** all five published resource operations, explicit false booleans, invalid-title rejection, and persistence across restart. The application has no authored business service. ([Resource](../../examples/resource-crud/resources.ts); [Runtime](../../examples/resource-crud/server.ts))
+- **Service-dependent note codecs:** CRUD and restart preserved canonical text over RPC while SQLite stored the `stored:` prefix. The runtime supplies the storage codec's service; public contracts use the separate canonical note schema. Duplicate creation and missing-record operations returned typed failures. ([Storage codec](../../examples/service-codec/storage.ts); [Contracts](../../examples/service-codec/contracts.ts); [Implementation](../../examples/service-codec/sqlite.ts))
+- **Persisted counter:** ten concurrent CLI increments produced values 1–10. A direct stored write to 100 left the shared reference at 10; explicit refresh and subsequent server restart both loaded 100. The seed creates `visits` only when absent. ([Implementation](../../examples/persisted-ref/sqlite.ts))
+- **Versioned documents:** running the historical seed twice produced one row. Starting the current server preserved that row's identifier and title value as `heading`, added nullable `summary`, and backfilled `priority: 0`. A later edit survived restart; replaying the legacy seed against the upgraded database was rejected without changing the row. An unresolved CLI plan exited nonzero; explicit rename/backfill intent reproduced the frozen reviewed artifact. A fresh database also applied both migrations without historical seeding. ([Legacy seed](../../examples/migration-lifecycle/seed-v1.ts); [History](../../examples/migration-lifecycle/migrations.ts); [Reviewed artifact](../../examples/migration-lifecycle/migrations/002_document_metadata.json))
+
+The supporting runtime scenarios used disposable verification databases, not the applications' default persistent files. All five application help and snapshot commands ran locally; typechecking, example-scoped lint, and the 28 repository tests passed. The reservation reserve/release path was also exercised through the shared runtime after the application-composition typing changes.
+
+The examples do not add authentication, multi-process cache coherence, or another database adapter. In particular, a stale persisted-counter write can overwrite an external change; explicit refresh is not a concurrency-control policy.
+
 ## Remaining Gap
 
 The example is unauthenticated and loopback-only. Evidence does not establish multi-process coordination, idempotent reservation creation, cancellation recovery, production deployment readiness, another database, or a materially different business domain. The next architectural evidence should test those conventions in another slice rather than expand abstractions around reservations. See the [Research Agenda](research-agenda.md).
