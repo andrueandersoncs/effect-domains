@@ -1,11 +1,8 @@
 import {
   Array,
   Effect,
-  Equivalence,
-  Function,
   HashSet,
   Layer,
-  Match,
   Option,
   Predicate,
   Record,
@@ -13,7 +10,6 @@ import {
   SchemaAST,
   Stream,
   Struct,
-  flow,
   pipe,
 } from "effect"
 import * as Stdio from "effect/Stdio"
@@ -29,30 +25,12 @@ class RpcCliDefinitionError extends Schema.TaggedError<RpcCliDefinitionError>()(
   }
 }
 
-const StringArraySchema = Schema.Array(Schema.String)
-const NumberArraySchema = Schema.Array(Schema.Number)
-
-const StringNativeFlagSchema = Schema.TaggedStruct("string", {})
-const NumberNativeFlagSchema = Schema.TaggedStruct("number", { integer: Schema.Boolean })
-const BooleanNativeFlagSchema = Schema.TaggedStruct("boolean", {})
-
-const StringEnumNativeFlagSchema = Schema.TaggedStruct("stringEnum", {
-  values: StringArraySchema,
-})
-
-const NumberEnumNativeFlagSchema = Schema.TaggedStruct("numberEnum", {
-  values: NumberArraySchema,
-})
-
-const NativeFlagSchema = Schema.Union([
-  StringNativeFlagSchema,
-  NumberNativeFlagSchema,
-  BooleanNativeFlagSchema,
-  StringEnumNativeFlagSchema,
-  NumberEnumNativeFlagSchema,
-])
-
-type NativeFlag = Schema.Schema.Type<typeof NativeFlagSchema>
+type NativeFlag =
+  | { readonly _tag: "string" }
+  | { readonly _tag: "number"; readonly integer: boolean }
+  | { readonly _tag: "boolean" }
+  | { readonly _tag: "stringEnum"; readonly values: ReadonlyArray<string> }
+  | { readonly _tag: "numberEnum"; readonly values: ReadonlyArray<number> }
 
 const ReservedFlagNames = HashSet.fromIterable([
   "input-json",
@@ -71,119 +49,107 @@ const causeMessage = (cause: unknown) =>
     ? `${cause.name}: ${cause.message}`
     : String(cause)
 
-const toOption = (filterGroup: SchemaAST.FilterGroup<unknown>) => Option.some(filterGroup.checks)
-
-const checkIncludesRepresentation = (identifier: string) => (check: SchemaAST.Check<unknown>): boolean => {
-  const representationId = Option.fromNullishOr(check.annotations?.representation?.id)
-
-  const hasRepresentation = Option.containsWith(Equivalence.strictEqual<string>())(
-    representationId,
-    identifier,
-  )
-
-  const nestedChecks = flow(toOption, representationOccursIn(identifier))
-
-  return hasRepresentation || pipe(
-    Match.value(check),
-    Match.when({ _tag: "FilterGroup" }, nestedChecks),
-    Match.orElse(Function.constFalse),
-  )
+const representationOccursIn = (
+  identifier: string,
+  checks: SchemaAST.Checks | null | undefined,
+): boolean => {
+  if (checks === null || checks === undefined) return false
+  for (const check of checks) {
+    if (check.annotations?.representation?.id === identifier) return true
+    if (check._tag === "FilterGroup" && representationOccursIn(identifier, check.checks)) return true
+  }
+  return false
 }
 
-const representationOccursIn = (identifier: string) => (checks: Option.Option<SchemaAST.Checks>) =>
-  Option.exists(checks, Array.some(checkIncludesRepresentation(identifier)))
+const nativeFlagForEnum = (enums: ReadonlyArray<readonly [string, unknown]>): NativeFlag | undefined => {
+  let stringValues: Array<string> | undefined
+  let numberValues: Array<number> | undefined
 
-const stringNativeFlag = () => StringNativeFlagSchema.make({ _tag: "string" })
-const numberNativeFlag = (integer: boolean) => NumberNativeFlagSchema.make({ _tag: "number", integer })
-const booleanNativeFlag = () => BooleanNativeFlagSchema.make({ _tag: "boolean" })
-
-const stringEnumNativeFlag = (values: ReadonlyArray<string>) =>
-  StringEnumNativeFlagSchema.make({ _tag: "stringEnum", values })
-
-const numberEnumNativeFlag = (values: ReadonlyArray<number>) =>
-  NumberEnumNativeFlagSchema.make({ _tag: "numberEnum", values })
-
-const stringLiteralNativeFlag = (value: string) =>
-  pipe(stringEnumNativeFlag([value]), Option.some)
-
-const numberLiteralNativeFlag = (value: number) =>
-  pipe(numberEnumNativeFlag([value]), Option.some)
-
-const nativeBooleanFlag = booleanNativeFlag()
-const booleanNativeFlagOption = Option.some(nativeBooleanFlag)
-const booleanLiteralNativeFlag = Function.constant(booleanNativeFlagOption)
-
-const stringEnumNativeFlagFor = (
-  flags: ReadonlyArray<Schema.Schema.Type<typeof StringEnumNativeFlagSchema>>,
-) => pipe(
-  flags,
-  Array.flatMap(Struct.get("values")),
-  stringEnumNativeFlag,
-  Option.some,
-)
-
-const numberEnumNativeFlagFor = (
-  flags: ReadonlyArray<Schema.Schema.Type<typeof NumberEnumNativeFlagSchema>>,
-) => pipe(
-  flags,
-  Array.flatMap(Struct.get("values")),
-  numberEnumNativeFlag,
-  Option.some,
-)
-
-const combineNativeFlags = (native: ReadonlyArray<NativeFlag>) => {
-  if (Array.every(native, Schema.is(StringEnumNativeFlagSchema))) {
-    return stringEnumNativeFlagFor(native)
+  for (const [, value] of enums) {
+    if (typeof value === "string") {
+      if (numberValues !== undefined) return undefined
+      if (stringValues === undefined) stringValues = []
+      stringValues.push(value)
+      continue
+    }
+    if (typeof value === "number") {
+      if (stringValues !== undefined) return undefined
+      if (numberValues === undefined) numberValues = []
+      numberValues.push(value)
+      continue
+    }
+    return undefined
   }
-  if (Array.every(native, Schema.is(NumberEnumNativeFlagSchema))) {
-    return numberEnumNativeFlagFor(native)
-  }
-  return Array.every(native, Schema.is(BooleanNativeFlagSchema))
-    ? booleanNativeFlagOption
-    : Option.none<NativeFlag>()
+
+  return numberValues === undefined
+    ? { _tag: "stringEnum", values: stringValues ?? [] }
+    : { _tag: "numberEnum", values: numberValues }
 }
 
-const nativeFlagFor: (ast: SchemaAST.AST) => Option.Option<NativeFlag> = (ast) =>
-  pipe(
-    Match.value(ast),
-    Match.tags({
-      String: () => pipe(stringNativeFlag(), Option.some),
-      Number: ({ checks }) => {
-        const checkOptions = Option.fromNullishOr(checks)
-        const isInteger = representationOccursIn("effect/schema/isInt")(checkOptions)
-        const nativeFlag = numberNativeFlag(isInteger)
-        return Option.some(nativeFlag)
-      },
-      Boolean: () => pipe(booleanNativeFlag(), Option.some),
-      Enum: ({ enums }) => {
-        const values = Array.map(enums, ([, value]) => value)
-        const stringValues = Array.filter(values, Predicate.isString)
-        if (Equivalence.strictEqual<number>()(stringValues.length, values.length)) {
-          const nativeFlag = stringEnumNativeFlag(stringValues)
-          return Option.some(nativeFlag)
-        }
-        const numberValues = Array.filter(values, Predicate.isNumber)
-        if (Equivalence.strictEqual<number>()(numberValues.length, values.length)) {
-          const nativeFlag = numberEnumNativeFlag(numberValues)
-          return Option.some(nativeFlag)
-        }
-        return Option.none()
-      },
-      Literal: ({ literal }) => pipe(
-        Match.value(literal),
-        Match.when(Match.string, stringLiteralNativeFlag),
-        Match.when(Match.number, numberLiteralNativeFlag),
-        Match.when(Match.boolean, booleanLiteralNativeFlag),
-        Match.orElse(Option.none<NativeFlag>),
-      ),
-      Union: ({ types }) => {
-        const flags = Array.map(types, nativeFlagFor)
-        const allFlags = Option.all(flags)
-        return Option.flatMap(allFlags, combineNativeFlags)
-      },
-    }),
-    Match.orElse(Option.none<NativeFlag>),
-  )
+const combineNativeFlags = (flags: ReadonlyArray<NativeFlag>): NativeFlag | undefined => {
+  const first = flags[0]
+  if (first === undefined) return { _tag: "stringEnum", values: [] }
+
+  if (first._tag === "stringEnum") {
+    const values = [...first.values]
+    for (let index = 1; index < flags.length; index++) {
+      const flag = flags[index]!
+      if (flag._tag !== "stringEnum") return undefined
+      values.push(...flag.values)
+    }
+    return { _tag: "stringEnum", values }
+  }
+
+  if (first._tag === "numberEnum") {
+    const values = [...first.values]
+    for (let index = 1; index < flags.length; index++) {
+      const flag = flags[index]!
+      if (flag._tag !== "numberEnum") return undefined
+      values.push(...flag.values)
+    }
+    return { _tag: "numberEnum", values }
+  }
+
+  for (let index = 1; index < flags.length; index++) {
+    if (flags[index]!._tag !== "boolean") return undefined
+  }
+  return first._tag === "boolean" ? first : undefined
+}
+
+const nativeFlagFor = (ast: SchemaAST.AST): NativeFlag | undefined => {
+  switch (ast._tag) {
+    case "String":
+      return { _tag: "string" }
+    case "Number":
+      return {
+        _tag: "number",
+        integer: representationOccursIn("effect/schema/isInt", ast.checks),
+      }
+    case "Boolean":
+      return { _tag: "boolean" }
+    case "Enum":
+      return nativeFlagForEnum(ast.enums)
+    case "Literal":
+      return typeof ast.literal === "string"
+        ? { _tag: "stringEnum", values: [ast.literal] }
+        : typeof ast.literal === "number"
+        ? { _tag: "numberEnum", values: [ast.literal] }
+        : typeof ast.literal === "boolean"
+        ? { _tag: "boolean" }
+        : undefined
+    case "Union": {
+      const flags: Array<NativeFlag> = []
+      for (const type of ast.types) {
+        const flag = nativeFlagFor(type)
+        if (flag === undefined) return undefined
+        flags.push(flag)
+      }
+      return combineNativeFlags(flags)
+    }
+    default:
+      return undefined
+  }
+}
 
 const payloadFields = (
   ast: SchemaAST.AST,
@@ -213,39 +179,36 @@ const setPayloadField = (
   }
 }
 
-const descriptionFor = (property: SchemaAST.PropertySignature) => {
-  const contextAnnotations = Option.fromNullishOr(property.type.context?.annotations)
-  const annotations = Option.getOrElse(contextAnnotations, () => property.type.annotations)
-  const description = Option.fromNullishOr(annotations?.description)
-  return Option.filter(description, Predicate.isString)
+const descriptionFor = (property: SchemaAST.PropertySignature): string | undefined => {
+  const annotations = property.type.context?.annotations ?? property.type.annotations
+  const description = annotations?.description
+  return Predicate.isString(description) ? description : undefined
 }
 
 const makeNativeFlag = (
   name: string,
   native: NativeFlag,
-  description: Option.Option<string>,
+  description: string | undefined,
 ) => {
-  const flag: Flag.Flag<string | number | boolean> = pipe(
-    Match.value(native),
-    Match.tagsExhaustive({
-      string: () => Flag.string(name),
-      number: ({ integer }) => integer ? Flag.integer(name) : Flag.float(name),
-      boolean: () => Flag.boolean(name),
-      stringEnum: ({ values }) => Flag.choice(name, values),
-      numberEnum: ({ values }) => {
-        const valueEntry = (value: number) => [String(value), value] as const
-        const valuesWithEntries = Array.map(values, valueEntry)
-        return Flag.choiceWithValue(name, valuesWithEntries)
-      },
-    }),
-  )
-
-  const describedFlag = Option.match(description, {
-    onNone: Function.constant(flag),
-    onSome: (text) => Flag.withDescription(flag, text),
-  })
-
-  return Flag.optional(describedFlag)
+  let flag: Flag.Flag<string | number | boolean>
+  switch (native._tag) {
+    case "string":
+      flag = Flag.string(name)
+      break
+    case "number":
+      flag = native.integer ? Flag.integer(name) : Flag.float(name)
+      break
+    case "boolean":
+      flag = Flag.boolean(name)
+      break
+    case "stringEnum":
+      flag = Flag.choice(name, native.values)
+      break
+    case "numberEnum":
+      flag = Flag.choiceWithValue(name, native.values.map((value) => [String(value), value] as const))
+      break
+  }
+  return Flag.optional(description === undefined ? flag : Flag.withDescription(flag, description))
 }
 
 const makeRpcCli = <
@@ -294,16 +257,18 @@ const makeRpcCli = <
             const reportFailure = (cause: unknown) =>
               pipe(
                 Schema.encodeUnknownEffect(errorSchema)(cause),
-                Effect.catch(flow(Function.constant(cause), causeMessage, Effect.succeed)),
+                Effect.catch(() => Effect.succeed(causeMessage(cause))),
                 Effect.flatMap((userMessage) =>
-                  pipe(
-                    CliError.UserError.make({ cause, userMessage }),
-                    Effect.fail,
-                  )),
+                  Effect.fail(CliError.UserError.make({ cause, userMessage }))),
               )
 
             const properties = payloadFields(encodedPayloadSchema.ast)
-            const decodedProperties = payloadFields(Schema.toType(payloadSchema).ast)
+            const decodedProperties = new Map(
+              payloadFields(Schema.toType(payloadSchema).ast).map(({ property, path }) => [
+                JSON.stringify(path),
+                property.type,
+              ]),
+            )
 
             const compiledFields = yield* Effect.forEach(
               properties,
@@ -315,19 +280,14 @@ const makeRpcCli = <
                   })
                 }
 
-                const native = Option.orElse(nativeFlagFor(property.type), () => {
-                  const decoded = decodedProperties.find((field) =>
-                    field.path.length === path.length && field.path.every((part, index) => part === path[index]),
-                  )?.property.type
-                  // JSON number codecs also encode non-finite values as strings.
-                  // Native numeric flags cover finite values; JSON retains the full codec.
-                  return decoded !== undefined && SchemaAST.isNumber(decoded)
+                const decoded = decodedProperties.get(JSON.stringify(path))
+                // JSON number codecs also encode non-finite values as strings.
+                // Native numeric flags cover finite values; JSON retains the full codec.
+                const native = nativeFlagFor(property.type) ??
+                  (decoded !== undefined && SchemaAST.isNumber(decoded)
                     ? nativeFlagFor(decoded)
-                    : Option.none()
-                })
-                if (Option.isNone(native)) {
-                  return Option.none()
-                }
+                    : undefined)
+                if (native === undefined) return Option.none()
 
                 const flagName = path.map(toFlagName).join("-")
                 if (HashSet.has(ReservedFlagNames, flagName)) {
@@ -337,12 +297,10 @@ const makeRpcCli = <
                   })
                 }
 
-                const description = descriptionFor(property)
-                const flag = makeNativeFlag(flagName, native.value, description)
                 return Option.some({
                   path,
                   configKey: flagName,
-                  flag,
+                  flag: makeNativeFlag(flagName, native, descriptionFor(property)),
                 })
               }),
             )
@@ -367,13 +325,13 @@ const makeRpcCli = <
               ({ configKey, flag }) => [configKey, flag] as const,
             )
 
-            const inputJsonFlag = Flag.string("input-json")
-            const describedInputJsonFlag = Flag.withDescription(inputJsonFlag, "Canonical JSON payload")
-            const optionalInputJsonFlag = Flag.optional(describedInputJsonFlag)
+            const inputJsonFlag = Flag.optional(
+              Flag.withDescription(Flag.string("input-json"), "Canonical JSON payload"),
+            )
 
             const configEntries = Array.append(
               nativeConfigEntries,
-              ["inputJson", optionalInputJsonFlag] as const,
+              ["inputJson", inputJsonFlag] as const,
             )
 
             const config: Record<string, Flag.Flag<Option.Option<unknown>>> = Record.fromEntries(configEntries)
@@ -387,13 +345,10 @@ const makeRpcCli = <
 
                 const inputJson = readArgument("inputJson")
 
-                const hasNativeInput = Array.some(
-                  nativeFields,
-                  flow(Struct.get("configKey"), readArgument, Option.isSome),
-                )
+                const hasNativeInput = nativeFields.some(({ configKey }) =>
+                  Option.isSome(readArgument(configKey)))
 
-                const mixedInput = Option.isSome(inputJson) && hasNativeInput
-                if (mixedInput) {
+                if (Option.isSome(inputJson) && hasNativeInput) {
                   return yield* CliError.UserError.make({
                     cause: arguments_,
                     userMessage: "--input-json cannot be combined with native field flags",
@@ -408,15 +363,10 @@ const makeRpcCli = <
                   }
                 }
 
-                const input = Option.match(inputJson, {
-                  onSome: Function.identity,
-                  onNone: Function.constant(nativeInput),
-                })
-
-                const payload = yield* Option.match(inputJson, {
-                  onSome: () => Schema.decodeUnknownEffect(inputJsonSchema)(input),
-                  onNone: () => Schema.decodeUnknownEffect(payloadSchema)(input),
-                })
+                const input = Option.isSome(inputJson) ? inputJson.value : nativeInput
+                const payload = yield* (Option.isSome(inputJson)
+                  ? Schema.decodeUnknownEffect(inputJsonSchema)(input)
+                  : Schema.decodeUnknownEffect(payloadSchema)(input))
 
                 const client = yield* RpcClient.make(options.group, {
                   flatten: true,

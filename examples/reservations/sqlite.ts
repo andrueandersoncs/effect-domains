@@ -6,7 +6,7 @@ import {
   Option,
   pipe,
 } from "effect"
-import { Database } from "effect-domains/sqlite-bun"
+import { SqlClient } from "effect/unstable/sql"
 import {
   InsufficientStock,
   InventoryUnavailable,
@@ -44,7 +44,7 @@ export const seedStock = Effect.fn("InventorySqlite.seedStock")(function* (
 })
 
 const inventorySqliteEffect = Effect.gen(function* () {
-  const database = yield* Database
+  const database = yield* SqlClient.SqlClient
 
   const reserve = Effect.fn("Inventory.reserve")(function* (
     input: ReserveStockInput,

@@ -167,11 +167,14 @@ describe("Table", () => {
       const NestedValueSchema = Schema.Struct({ value: Schema.String })
       interface NestedValue extends Schema.Schema.Type<typeof NestedValueSchema> {}
       const NestedSchema = Schema.Struct({ nested: NestedValueSchema })
+      const CyclicValue: Schema.Codec<never> = Schema.suspend(() => CyclicValue)
+      const CyclicSchema = Schema.Struct({ value: CyclicValue })
       interface Nested extends Schema.Schema.Type<typeof NestedSchema> {}
       expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow(TableDefinitionError)
       expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow(TableDefinitionError)
       expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow(TableDefinitionError)
       expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow(TableDefinitionError)
+      expect(() => Table.make({ name: "cyclic", schema: CyclicSchema })).toThrow(TableDefinitionError)
 
     }))
 })

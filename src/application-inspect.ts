@@ -1,5 +1,6 @@
 import { Option, Schema } from "effect"
 import { Table } from "./table.ts"
+import type { Resource } from "./resource.ts"
 
 type InspectableProcedure = Readonly<{
   _tag: string
@@ -8,31 +9,7 @@ type InspectableProcedure = Readonly<{
   errorSchema: Schema.Constraint
 }>
 
-type InspectableTable = Table & Readonly<{
-  insertSchema: Schema.Constraint
-  storageSchema: Schema.Constraint
-}>
-
-type CreatePolicy = Readonly<{
-  defaults?: Readonly<Record<string, unknown>>
-  generated?: Readonly<Record<string, "uuidV7" | "now">>
-}>
-
-type ListPolicy = Readonly<{
-  filter?: ReadonlyArray<string>
-  order: ReadonlyArray<Readonly<{ field: string; direction?: "asc" | "desc" }>>
-  limit?: number
-}>
-
-type InspectableResource = Readonly<{
-  name: string
-  schema: Schema.Constraint
-  storage: Schema.Constraint
-  operations: ReadonlyArray<string>
-  create: CreatePolicy | undefined
-  list: ListPolicy | undefined
-  table: InspectableTable
-}>
+type InspectableResource = Pick<Resource, "name" | "schema" | "storage" | "operations" | "create" | "list" | "table">
 
 type InspectableApplication = Readonly<{
   name: string
@@ -47,7 +24,7 @@ type InspectableApplication = Readonly<{
 const schemaDocument = (schema: Schema.Constraint) =>
   Schema.toJsonSchemaDocument(Schema.toCodecJson(schema))
 
-const physicalTable = (table: InspectableTable) => ({
+const physicalTable = (table: Table) => ({
   name: table.name,
   identifier: table.identifier,
   fields: table.fields.map((field) => ({
@@ -63,12 +40,10 @@ const resource = (definition: InspectableResource) => ({
   name: definition.name,
   operations: definition.operations,
   schema: schemaDocument(definition.schema),
-  creation: definition.create === undefined
-    ? { defaults: {}, generated: {} }
-    : {
-      defaults: definition.create.defaults ?? {},
-      generated: definition.create.generated ?? {},
-    },
+  creation: {
+    defaults: definition.create?.defaults ?? {},
+    generated: definition.create?.generated ?? {},
+  },
   list: definition.list ?? null,
   storage: {
     schema: schemaDocument(definition.storage),

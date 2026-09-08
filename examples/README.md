@@ -6,7 +6,7 @@ Each example is a complete, loopback-only application with a persistent SQLite d
 
 | Application | Purpose | Database setting |
 | --- | --- | --- |
-| [basic-crud](basic-crud/README.md) | Book CRUD through authored `Query` implementations | `BASIC_CRUD_DB` |
+| [basic-crud](basic-crud/README.md) | Book CRUD through authored SQL and Effect `SqlSchema` | `BASIC_CRUD_DB` |
 | [resource-crud](resource-crud/README.md) | Todo CRUD generated from a resource, including page/list and patch policies | `RESOURCE_CRUD_DB` |
 | [service-codec](service-codec/README.md) | Generated note CRUD with a runtime-service-dependent storage codec | `SERVICE_CODEC_DB` |
 | [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
@@ -26,7 +26,7 @@ bun run resource-crud:server
 bun run resource-crud --help
 ```
 
-Each database defaults to `<application>.sqlite` in the working directory. Startup applies the frozen migration chain; it does not reset existing data. An untracked database is rejected rather than silently adopted.
+Each database defaults to `<application>.sqlite` in the working directory. Startup requires and applies frozen migration history, including for a fresh database; it does not reset existing data. An untracked database is rejected rather than silently adopted.
 
 All servers default to `http://127.0.0.1:3000`, and all CLIs default to `http://127.0.0.1:3000/rpc/v1`. To run applications concurrently, assign distinct ports and matching client URLs:
 
@@ -63,7 +63,7 @@ bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Ship docs"
 bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 ```
 
-The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Known-operation validation and business failures exit nonzero and report to stderr; successful results are JSON on stdout. `inspect [operation]` writes the resource schemas, storage/physical fields, creation and list policies, local and remote commands, and selected operation contracts. Runtime service requirements and authored transaction boundaries are intentionally reported as opaque metadata.
+The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, storage/physical fields, creation and list policies, local and remote commands, and selected operation contracts. Runtime requirements and authored transaction boundaries remain opaque metadata.
 
 ## Review schema changes
 
@@ -101,6 +101,6 @@ The planner emits blocked changes with their reasons instead of guessing drops, 
 
 - [`ApplicationBun`](../src/application-bun.ts): shared HTTP server and CLI runtime.
 - [`Resource`](../src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
-- [`Query`](../src/query.ts): authored query boundary with request encoding and result decoding.
+- [Authored SQL](basic-crud/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
 - [`SqliteMigrations`](../src/sqlite-migrations.ts): frozen snapshots, migration planning, and execution.

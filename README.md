@@ -29,41 +29,25 @@ export const Library = Application.make({
 
 This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.serve` prepares the database and serves the application's native Effect RPC group. `ApplicationBun.cli` derives commands, scalar flags, validation, and help from that group. The [generated CRUD application](examples/resource-crud/application.ts) shows resource-only registration; the [reservation application](examples/reservations/application.ts) adds explicit business commands. Both have server and CLI entrypoints.
+`ApplicationBun.run(application, { database: { manifest }, services?, initialize? })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. The [generated CRUD application](examples/resource-crud/application.ts) registers resources; the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
-Adding a supported scalar field to `BookSchema` changes fresh-table creation, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Existing databases require a reviewed migration artifact; startup does not silently alter them.
+Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
 ## Resource and command boundaries
 
 `Resource.make` supplies:
 
 - `table`: the derived table definition and row codecs;
-- `repository`: `find`, `get`, `list`, `create`, `update`, and `remove` Effects;
+- `repository`: `find`, `get`, `list`, `page`, `create`, `update`, `patch`, and `remove` Effects;
 - `group` and `handlers`: only the operations selected in `operations`.
 
-`find` returns an `Option`; `get`, `update`, and `remove` report `ResourceNotFound` for missing records. Persistence and codec failures use `RepositoryError`. Creation uses the source schema; update uses the complete persisted row, including its identifier.
+`find` returns an `Option`; missing records use `ResourceNotFound`, and persistence/codec failures use `RepositoryError`. Creation applies declared defaults and runtime-generated fields. Update validates the complete row; patch preserves its identifier and validates the merged row transactionally. A declared list policy supplies bounded cursor pages.
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-Declare custom commands once as a named record of `{ input, output, error }` schemas satisfying `CommandContracts` from `effect-domains/application`. Pass that record to `Application.make({ name, resources, commands })`; omit `commands` for resource-only applications.
+`Commands.make(name, contracts)` derives an injectable service and RPC group from named `{ input, output, error }` schemas. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications need no command service.
 
-`Application.make` derives the RPC definitions, JSON codecs, and group membership from those declarations. `CommandService<typeof commands>` derives domain-facing handler signatures from the same decoded schemas. `application.toLayer` combines their implementations with generated resource handlers; the derived group supplies HTTP dispatch and CLI generation.
-
-Identical operation shapes can share a contract without sharing business behavior. For example, the [reservation contracts](examples/reservations/contracts.ts) declare `confirm` and `release` using one `transitionContract`:
-
-```ts
-export const ReservationCommands = {
-  reserve: {
-    input: ReserveStockInputSchema,
-    output: ReservationSchema,
-    error: reserveErrorsSchema,
-  },
-  confirm: transitionContract,
-  release: transitionContract,
-} satisfies CommandContracts
-```
-
-Names, schemas, and business policy remain explicit. Applications no longer author `Rpc.make` wrappers or maintain a second group-membership list. `application.commands` contains the declarations; `application.group` is their derived RPC representation combined with resource operations.
+Contracts may share shapes without sharing business behavior: the [reservation contracts](examples/reservations/contracts.ts) reuse a transition contract for `confirm` and `release`. Names, schemas, and policy remain explicit; RPC wrappers and group membership are derived once.
 
 ## Storage conventions
 
@@ -71,15 +55,15 @@ Names, schemas, and business policy remain explicit. Applications no longer auth
 
 The SQLite interpreter derives primary keys, nullability, scalar type checks, supported numeric bounds, enum membership, and string-length checks. Arbitrary predicates remain runtime schema validation; they are not advertised as SQL constraints. Nested records, optional columns, and opaque values without a supported scalar encoding are rejected.
 
-Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical schema stays unchanged. Mark one intrinsic identity field with `identifier` from `effect-domains/domain` to use it instead. Explicit identifiers must be supplied by the application. An unannotated source field named `id` is rejected.
+Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical schema stays unchanged. Mark one intrinsic identity field with `identifier` from `effect-domains/domain` to use it instead. Explicit identifiers are caller-supplied unless declared in resource creation policy. An unannotated source field named `id` is rejected.
 
-`SqliteBunRuntime.sqlClient` provides the database, table, repository, and schema stores over one SQL client. Authored transactions therefore include generated repository operations.
+`SqliteBunRuntime.sqlClient` provides Effect's native `SqlClient`, `RepositoryStore`, `SchemaStore`, and runtime values over one connection. Authored transactions include generated repository operations. `Table` is a typed descriptor, not an executable store; migrations own schema creation.
 
 ## Migrations
 
 `SqliteMigrations.snapshot` captures a physical schema. `SqliteMigrations.plan` compares frozen snapshots and emits a reviewable JSON artifact. Its native CLI can generate snapshots and plans from an application without a running server.
 
-Fresh tables and nullable additions are mechanical. Renames, required-field backfills, and storage transformations require explicit intent. Historical artifacts contain frozen metadata, not imports of the latest domain schema. The runtime checks history and schema drift, refuses untracked tables, and applies rebuilds transactionally.
+Fresh tables and nullable additions are mechanical. Renames, required-field backfills, and storage transformations require explicit intent. Historical artifacts contain frozen metadata, not imports of the latest domain schema. One migration ledger records applied history; the runtime checks artifact contents and actual schema drift, refuses untracked objects, and applies rebuilds transactionally.
 
 See the [migration workflow](examples/README.md#review-schema-changes) for commands and supported boundaries.
 
@@ -104,7 +88,7 @@ All six [example applications](examples/README.md) have persistent SQLite databa
 
 ## Escape hatches and documentation
 
-`Query.make({ table, Request, Result, implementation })` remains the schema-checked seam for custom queries. `PersistedRef.make({ commit, load })` composes persistence operations into a synchronized, write-through value. Neither replaces explicit authorization, transaction, concurrency, or recovery policy.
+Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper or database-service alias. `PersistedRef.make({ commit, load })` composes persistence into a synchronized, write-through value; `fromResource` binds it to one resource key. These helpers do not replace explicit authorization, transaction, concurrency, or recovery policy.
 
 - [Runnable examples](examples/README.md)
 - [Project wiki](docs/wiki/README.md)

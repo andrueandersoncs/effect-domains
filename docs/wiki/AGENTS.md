@@ -52,7 +52,7 @@ Follow these source-backed project rules unless newer human-curated evidence cha
 - Define tables with `Table.make({ name, schema })`; this named construction record preserves the explicit table name from the newer direction while superseding the interim positional and curried forms and the earlier catalog-key-as-capability interface.
 - Use encoded field names directly as database column names.
 - Derive fresh table creation from the table definition and encoded schema; keep existing-table migrations explicit.
-- Define one operation per `Query.make({ table, Request, Result, implementation })`; use request/result schemas and an authored Effect implementation whose requirements carry the runtime database.
+- Use Effect `SqlSchema` and native `SqlClient` for authored SQL; use explicit Schema encode/decode Effects when semantics differ. The user-approved 2026-09-08 simplification supersedes the earlier `Query.make` wrapper.
 - Treat business policies, authorization, transactions, migrations, compatibility, and operational behavior as authored concerns.
 - Validate the hypothesis through materially different vertical slices before generalizing a framework.
 - Prefer deep modules and straightforward escape hatches over annotation-heavy thin wrappers.

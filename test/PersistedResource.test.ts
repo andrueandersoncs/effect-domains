@@ -4,6 +4,7 @@ import { identifier } from "../src/domain.ts"
 import { PersistedRef } from "../src/persisted-ref.ts"
 import { Resource } from "../src/resource.ts"
 import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { prepareTables } from "./prepare-tables.ts"
 
 const Counters = Resource.make({
   name: "reference_counters",
@@ -13,7 +14,7 @@ const Counters = Resource.make({
 
 it.effect("a resource reference cannot redirect writes or recreate a deleted row on refresh", () =>
   Effect.gen(function* () {
-    yield* Counters.table.write()
+    yield* prepareTables([Counters.table])
     const ref = yield* PersistedRef.fromResource(Counters, {
       key: "visits",
       ifMissing: { value: 0 },

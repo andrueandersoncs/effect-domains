@@ -10,7 +10,6 @@
     "./domain": "./src/domain.ts",
     "./migrations": "./src/migrations.ts",
     "./persisted-ref": "./src/persisted-ref.ts",
-    "./query": "./src/query.ts",
     "./resource": "./src/resource.ts",
     "./repository-store": "./src/repository-store.ts",
     "./rpc-cli": "./src/rpc-cli.ts",

@@ -5,9 +5,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect, FileSystem, Function, pipe, Result, Schema } from "effect"
 import { Command } from "effect/unstable/cli"
+import { Table } from "../src/table.ts"
+import { renderCreateTable } from "../src/sqlite-ddl.ts"
+import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "../src/migrations.ts"
 import { Resource } from "../src/resource.ts"
-import { Database, SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
 import {
   makeMigrationStore,
   SqliteBackfill,
@@ -31,7 +34,7 @@ interface Title extends Schema.Schema.Type<typeof TitleSchema> {}
 const nullableAdditionsAndRenamesAction = Effect.fn(
   "SqliteMigrations.nullableAdditionsAndRenames",
 )(function* () {
-  const database = yield* Database
+  const database = yield* SqlClient.SqlClient
 
   const before = Resource.make({
     name: "documents",
@@ -129,8 +132,7 @@ it.effect(
 
 const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(
   function* () {
-    const database = yield* Database
-    const store = yield* SchemaStore
+    const database = yield* SqlClient.SqlClient
     const OriginalLabelSchema = Schema.Literal("two  spaces")
     const OriginalSchema = Schema.Struct({ label: OriginalLabelSchema })
     interface Original extends Schema.Schema.Type<typeof OriginalSchema> {}
@@ -151,14 +153,17 @@ const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(
       operations: [],
     })
 
-
     const source = SqliteMigrations.snapshot([original.table])
+    const initial = SqliteMigrations.plan({ id: "001_drift", from: empty, to: source })
+    const store = makeMigrationStore(database, [initial])
     yield* store.prepare(source.tables)
     yield* database`DROP TABLE labels`
-    yield* changed.table.write()
+    yield* pipe(
+      database`${database.literal(renderCreateTable(Table.snapshot(changed.table)))}`,
+      Effect.asVoid,
+    )
     const record = yield* changed.repository.create({ label: "two spaces" })
-    const prepare = store.prepare(source.tables)
-    const outcome = yield* Effect.result(prepare)
+    const outcome = yield* Effect.result(store.prepare(source.tables))
     const loadedRecord = yield* changed.repository.get(record.id)
 
     expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
@@ -175,10 +180,40 @@ it.effect(
   driftDetectionTest,
 )
 
+const missingInitialHistoryAction = Effect.fn(
+  "SqliteMigrations.missingInitialHistory",
+)(function* () {
+  const database = yield* SqlClient.SqlClient
+  const resource = Resource.make({
+    name: "requires_initial_history",
+    schema: TitleSchema,
+    operations: [],
+  })
+  const target = SqliteMigrations.snapshot([resource.table])
+  const outcome = yield* Effect.result(makeMigrationStore(database, []).prepare(target.tables))
+  const tables = yield* database`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'requires_initial_history'
+  `
+
+  expect(outcome).toMatchObject({
+    _tag: "Failure",
+    failure: {
+      _tag: "MigrationError",
+    },
+  })
+  expect(tables).toEqual([])
+})()
+
+it.effect(
+  "nonempty schemas reject missing initial migration history instead of initializing tables",
+  () => pipe(missingInitialHistoryAction, Effect.provide(sqliteClient)),
+)
+
 const failedTransformsRollBackAction = Effect.fn(
   "SqliteMigrations.failedTransformsRollBack",
 )(function* () {
-  const database = yield* Database
+  const database = yield* SqlClient.SqlClient
 
   const before = Resource.make({
     name: "jobs",

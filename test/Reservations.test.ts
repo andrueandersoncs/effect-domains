@@ -17,7 +17,8 @@ import { InventoryMigrations } from "../examples/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
 import { InventorySqlite, seedStock } from "../examples/reservations/sqlite.ts"
 import { RepositoryStore } from "../src/repository-store.ts"
-import { Database, SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqlClient } from "effect/unstable/sql"
 import { makeMigrationStore } from "../src/sqlite-migrations.ts"
 
 const sku = SkuSchema.make("book")
@@ -35,7 +36,7 @@ const withInventory = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    Context.Service.Identifier<typeof Inventory> | Database | RepositoryStore
+    Context.Service.Identifier<typeof Inventory> | SqlClient.SqlClient | RepositoryStore
   >,
 ) =>
   pipe(
@@ -166,7 +167,7 @@ it.effect(
 const failedInsertRollsBackStockAction = Effect.fn(
   "Reservations.failedInsertRollsBackStock",
 )(function* () {
-  const database = yield* Database
+  const database = yield* SqlClient.SqlClient
   const inventory = yield* Inventory
   yield* database`CREATE TRIGGER reject_reservation BEFORE INSERT ON reservations
     BEGIN SELECT RAISE(ABORT, 'reservation storage unavailable'); END`
@@ -199,7 +200,7 @@ it.effect(
 const historicalSecondsMigrationAction = Effect.fn(
   "Reservations.migratesHistoricalSeconds",
 )(function* () {
-  const database = yield* Database
+  const database = yield* SqlClient.SqlClient
   const initialOption = Array.get(InventoryMigrations, 0)
   const initial = Option.getOrThrow(initialOption)
   const initialStore = makeMigrationStore(database, [initial])

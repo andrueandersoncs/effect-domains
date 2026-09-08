@@ -1,29 +1,22 @@
 import {
   Array,
-  Context,
   Effect,
   Equivalence,
   Function,
+  HashSet,
   Match,
   Option,
   Predicate,
   Record,
   Schema,
   SchemaAST,
-  Struct,
   pipe,
 } from "effect"
 import { DomainIdentifier } from "./domain.ts"
-import {
-  evaluate,
-  type SchemaASTF,
-  type SchemaASTFAlgebra,
-} from "./schema-ast.ts"
 
 const UuidV7Check = Schema.isUUID(7)
 export const DefaultTableIdentifierSchema = Schema.String.check(UuidV7Check)
 
-const CreateTableOperationSchema = Schema.Literal("createTable")
 const TableScalarSchema = Schema.Literals(["string", "integer", "number"])
 const TableCheckValueSchema = Schema.Union([Schema.String, Schema.Number])
 const TableCheckValuesSchema = Schema.Array(TableCheckValueSchema)
@@ -125,35 +118,26 @@ const failTableDefinition = (table: string, reason: string) =>
 
 const unsupportedTableScalar = (table: string, field: string) =>
   failTableDefinition(table, `field ${field} must encode to a supported scalar`)
-
-const scalarEquals = Equivalence.strictEqual<TableField["scalar"]>()
-const integerScalarEquals = (scalar: TableField["scalar"]) => scalarEquals(scalar, "integer")
-const numberScalarEquals = (scalar: TableField["scalar"]) => scalarEquals(scalar, "number")
-
 const commonTableScalar = (
   table: string,
   field: string,
   scalars: ReadonlyArray<TableField["scalar"]>,
 ) => {
-  const firstScalar = Array.get(scalars, 0)
-  if (Option.isNone(firstScalar)) {
-    return unsupportedTableScalar(table, field)
+  const first = scalars[0]
+  if (first === undefined) return unsupportedTableScalar(table, field)
+
+  let same = true
+  let numeric = true
+  for (const scalar of scalars) {
+    same &&= scalar === first
+    numeric &&= scalar === "integer" || scalar === "number"
   }
 
-  const scalarEqualsFirst = (scalar: TableField["scalar"]) => scalarEquals(firstScalar.value, scalar)
-  const integerScalars = Array.filter(scalars, integerScalarEquals)
-  const numberScalars = Array.filter(scalars, numberScalarEquals)
-  const numericCount = integerScalars.length + numberScalars.length
-  const allNumeric = Equivalence.strictEqual<number>()(numericCount, scalars.length)
-  if (Array.every(scalars, scalarEqualsFirst)) {
-    return Effect.succeed(firstScalar.value)
-  }
-
-  return allNumeric
+  if (same) return Effect.succeed(first)
+  return numeric
     ? Effect.succeed("number" as const)
     : unsupportedTableScalar(table, field)
 }
-
 const stringFromUnknown = (value: unknown) => {
   const some = Option.some(value)
   return Option.filter(some, Predicate.isString)
@@ -231,12 +215,6 @@ const NoTableChecks: ReadonlyArray<TableCheck> = []
 const noTableChecks = Function.constant(NoTableChecks)
 const noneLiteralValues = Option.none<ReadonlyArray<string | number>>()
 const noLiteralValues = Function.constant(noneLiteralValues)
-const makeGreaterThan = (value: number) => GreaterThan.make({ value })
-const makeGreaterThanOrEqualTo = (value: number) => GreaterThanOrEqualTo.make({ value })
-const makeLessThan = (value: number) => LessThan.make({ value })
-const makeLessThanOrEqualTo = (value: number) => LessThanOrEqualTo.make({ value })
-const makeMinLength = (value: number) => MinLength.make({ value })
-const makeMaxLength = (value: number) => MaxLength.make({ value })
 const trueFlag = (flag: unknown) => Equivalence.strictEqual<unknown>()(flag, true)
 const enumValue = ([, value]: SchemaAST.Enum["enums"][number]) => value
 
@@ -253,59 +231,39 @@ const classifyEnumEntry = (
 
 const nonNullAst = (member: SchemaAST.AST) => !SchemaAST.isNull(member)
 
-const evaluateTableScalar = Effect.fn("Table.evaluateScalar")(function* (
+const evaluateTableScalar = (
   table: string,
   field: string,
   ast: SchemaAST.AST,
-) {
+  suspends: HashSet.HashSet<SchemaAST.Suspend> = HashSet.empty(),
+): Effect.Effect<TableField["scalar"], TableDefinitionError> => {
   const unsupported = () => unsupportedTableScalar(table, field)
 
-  const algebra: SchemaASTFAlgebra<
-    Effect.Effect<TableField["scalar"], TableDefinitionError>
-  > = pipe(
-    Match.type<SchemaASTF<Effect.Effect<TableField["scalar"], TableDefinitionError>>>(),
-    Match.tagsExhaustive({
-      Declaration: (declaration) => {
-        const id = representationId(declaration.ast)
-        const isUtc = Option.exists(id, dateTimeUtcId)
-        return isUtc ? stringScalar : unsupported()
-      },
-      Null: unsupported,
-      Undefined: unsupported,
-      Void: unsupported,
-      Never: unsupported,
-      Unknown: unsupported,
-      Any: unsupported,
-      String: Function.constant(stringScalar),
-      Number: (number) => {
-        const integer = integerAst(number.ast)
-        return integer ? integerScalar : numberScalar
-      },
-      Boolean: Function.constant(integerScalar),
-      BigInt: unsupported,
-      Symbol: unsupported,
-      Literal: (literal) => literalTableScalar(table, field, literal.ast.literal),
-      UniqueSymbol: unsupported,
-      ObjectKeyword: unsupported,
-      Enum: (enumeration) => {
-        const scalars = Array.map(enumeration.ast.enums, classifyEnumEntry)
-        return commonTableScalar(table, field, scalars)
-      },
-      TemplateLiteral: Function.constant(stringScalar),
-      Arrays: unsupported,
-      Objects: unsupported,
-      Union: (union) => {
-        const unionScalars = (values: ReadonlyArray<TableField["scalar"]>) =>
-          commonTableScalar(table, field, values)
+  if (SchemaAST.isSuspend(ast)) {
+    return HashSet.has(suspends, ast)
+      ? unsupported()
+      : evaluateTableScalar(table, field, ast.thunk(), HashSet.add(suspends, ast))
+  }
 
-        return pipe(Effect.all(union.types), Effect.flatMap(unionScalars))
-      },
-      Suspend: (suspend) => suspend.thunk(),
-    }),
-  )
+  if (SchemaAST.isDeclaration(ast)) {
+    return Option.exists(representationId(ast), dateTimeUtcId) ? stringScalar : unsupported()
+  }
+  if (SchemaAST.isString(ast) || SchemaAST.isTemplateLiteral(ast)) return stringScalar
+  if (SchemaAST.isNumber(ast)) return integerAst(ast) ? integerScalar : numberScalar
+  if (SchemaAST.isBoolean(ast)) return integerScalar
+  if (SchemaAST.isLiteral(ast)) return literalTableScalar(table, field, ast.literal)
+  if (SchemaAST.isEnum(ast)) {
+    return commonTableScalar(table, field, Array.map(ast.enums, classifyEnumEntry))
+  }
+  if (SchemaAST.isUnion(ast)) {
+    return pipe(
+      Effect.all(Array.map(ast.types, (member) => evaluateTableScalar(table, field, member, suspends))),
+      Effect.flatMap((scalars) => commonTableScalar(table, field, scalars)),
+    )
+  }
 
-  return yield* evaluate(ast, algebra, unsupported)
-})
+  return unsupported()
+}
 
 const flattenGroupChecks = (
   group: SchemaAST.FilterGroup<unknown>,
@@ -348,97 +306,58 @@ const flagAt = (payload: unknown, key: string) => {
   return Option.exists(value, trueFlag)
 }
 
-const tableChecksFromNumber = (
-  value: Option.Option<number>,
-  makeCheck: (amount: number) => TableCheck,
-) =>
-  Option.match(value, {
-    onNone: noTableChecks,
-    onSome: (amount) => [makeCheck(amount)],
-  })
-
-const greaterThanChecks = (exclusiveMinimum: Option.Option<number>) =>
-  tableChecksFromNumber(exclusiveMinimum, makeGreaterThan)
-
-const minimumChecks = (minimum: Option.Option<number>) =>
-  tableChecksFromNumber(minimum, makeGreaterThanOrEqualTo)
-
-const lessThanChecks = (exclusiveMaximum: Option.Option<number>) =>
-  tableChecksFromNumber(exclusiveMaximum, makeLessThan)
-
-const maximumChecks = (maximum: Option.Option<number>) =>
-  tableChecksFromNumber(maximum, makeLessThanOrEqualTo)
-
-const minLengthChecks = (minLength: Option.Option<number>) =>
-  tableChecksFromNumber(minLength, makeMinLength)
-
-const maxLengthChecks = (maxLength: Option.Option<number>) =>
-  tableChecksFromNumber(maxLength, makeMaxLength)
-
-const betweenBound = (
-  exclusive: boolean,
-  value: number,
-  exclusiveCheck: (value: number) => TableCheck,
-  inclusiveCheck: (value: number) => TableCheck,
-) => exclusive ? exclusiveCheck(value) : inclusiveCheck(value)
-
-const betweenBounds = (payload: unknown, low: number) => (high: number) => {
-  const exclusiveMinimum = flagAt(payload, "exclusiveMinimum")
-  const exclusiveMaximum = flagAt(payload, "exclusiveMaximum")
-  return [
-    betweenBound(exclusiveMinimum, low, makeGreaterThan, makeGreaterThanOrEqualTo),
-    betweenBound(exclusiveMaximum, high, makeLessThan, makeLessThanOrEqualTo),
-  ]
-}
-
-const betweenMaximum = (payload: unknown, maximum: Option.Option<number>) => (low: number) =>
-  Option.match(maximum, {
-    onNone: noTableChecks,
-    onSome: betweenBounds(payload, low),
-  })
-
-const betweenChecks = (
-  payload: unknown,
-  minimum: Option.Option<number>,
-  maximum: Option.Option<number>,
-) =>
-  Option.match(minimum, {
-    onNone: noTableChecks,
-    onSome: betweenMaximum(payload, maximum),
-  })
-
 const tableChecksFromUnknown = (representation: unknown) => {
-  if (!Predicate.isObject(representation)) {
-    return NoTableChecks
-  }
+  if (!Predicate.isObject(representation)) return NoTableChecks
 
-  const idDescriptor = Object.getOwnPropertyDescriptor(representation, "id")
-  const idValue = Option.fromNullishOr(idDescriptor?.value)
-  const id = Option.filter(idValue, Predicate.isString)
-  if (Option.isNone(id)) {
-    return NoTableChecks
-  }
+  const id = Object.getOwnPropertyDescriptor(representation, "id")?.value
+  if (!Predicate.isString(id)) return NoTableChecks
 
-  const payloadDescriptor = Object.getOwnPropertyDescriptor(representation, "payload")
-  const payload = payloadDescriptor?.value
+  const payload = Object.getOwnPropertyDescriptor(representation, "payload")?.value
   const minimum = numberAt(payload, "minimum")
   const maximum = numberAt(payload, "maximum")
   const exclusiveMinimum = numberAt(payload, "exclusiveMinimum")
   const exclusiveMaximum = numberAt(payload, "exclusiveMaximum")
   const minLength = numberAt(payload, "minLength")
   const maxLength = numberAt(payload, "maxLength")
+  const single = (
+    value: Option.Option<number>,
+    make: (value: number) => TableCheck,
+  ): ReadonlyArray<TableCheck> => Option.match(value, {
+    onNone: Function.constant(NoTableChecks),
+    onSome: (value) => [make(value)],
+  })
 
-  return pipe(
-    Match.value(id.value),
-    Match.when("effect/schema/isGreaterThan", () => greaterThanChecks(exclusiveMinimum)),
-    Match.when("effect/schema/isGreaterThanOrEqualTo", () => minimumChecks(minimum)),
-    Match.when("effect/schema/isLessThan", () => lessThanChecks(exclusiveMaximum)),
-    Match.when("effect/schema/isLessThanOrEqualTo", () => maximumChecks(maximum)),
-    Match.when("effect/schema/isBetween", () => betweenChecks(payload, minimum, maximum)),
-    Match.when("effect/schema/isMinLength", () => minLengthChecks(minLength)),
-    Match.when("effect/schema/isMaxLength", () => maxLengthChecks(maxLength)),
-    Match.orElse(noTableChecks),
-  )
+  switch (id) {
+    case "effect/schema/isGreaterThan":
+      return single(exclusiveMinimum, (value) => GreaterThan.make({ value }))
+    case "effect/schema/isGreaterThanOrEqualTo":
+      return single(minimum, (value) => GreaterThanOrEqualTo.make({ value }))
+    case "effect/schema/isLessThan":
+      return single(exclusiveMaximum, (value) => LessThan.make({ value }))
+    case "effect/schema/isLessThanOrEqualTo":
+      return single(maximum, (value) => LessThanOrEqualTo.make({ value }))
+    case "effect/schema/isMinLength":
+      return single(minLength, (value) => MinLength.make({ value }))
+    case "effect/schema/isMaxLength":
+      return single(maxLength, (value) => MaxLength.make({ value }))
+    case "effect/schema/isBetween":
+      return Option.match(minimum, {
+        onNone: Function.constant(NoTableChecks),
+        onSome: (low) => Option.match(maximum, {
+          onNone: Function.constant(NoTableChecks),
+          onSome: (high) => [
+            flagAt(payload, "exclusiveMinimum")
+              ? GreaterThan.make({ value: low })
+              : GreaterThanOrEqualTo.make({ value: low }),
+            flagAt(payload, "exclusiveMaximum")
+              ? LessThan.make({ value: high })
+              : LessThanOrEqualTo.make({ value: high }),
+          ],
+        }),
+      })
+    default:
+      return NoTableChecks
+  }
 }
 
 const checksForFilter = (filter: SchemaAST.Filter<unknown>) => {
@@ -483,32 +402,23 @@ const literalValuesFromAst = (ast: SchemaAST.AST) =>
     Match.orElse(noLiteralValues),
   )
 
-class NullableAst extends Schema.Class<NullableAst>("NullableAst")({
-  ast: Schema.Any,
-  nullable: Schema.Boolean,
-}) {}
+type NullableAst = Readonly<{
+  ast: SchemaAST.AST
+  nullable: boolean
+}>
 
-const nullableAst = (ast: SchemaAST.AST) => {
-  if (!SchemaAST.isUnion(ast)) {
-    return NullableAst.make({ ast, nullable: false })
-  }
+const nullableAst = (ast: SchemaAST.AST): NullableAst => {
+  if (!SchemaAST.isUnion(ast)) return { ast, nullable: false }
 
   const nonNull = Array.filter(ast.types, nonNullAst)
-  const hasNull = !Equivalence.strictEqual<number>()(nonNull.length, ast.types.length)
-  const hasNonNull = Array.isArrayNonEmpty(nonNull)
-  const canBeNullable = hasNull && hasNonNull
-  if (!canBeNullable) {
-    return NullableAst.make({ ast, nullable: false })
+  if (nonNull.length === ast.types.length || !Array.isArrayNonEmpty(nonNull)) {
+    return { ast, nullable: false }
   }
 
-  const onlyMember = Equivalence.strictEqual<number>()(nonNull.length, 1)
-  const first = Array.get(nonNull, 0)
-
-  const scalarAst = onlyMember && Option.isSome(first)
-    ? first.value
-    : new SchemaAST.Union(nonNull, ast.mode)
-
-  return NullableAst.make({ ast: scalarAst, nullable: true })
+  return {
+    ast: nonNull.length === 1 ? nonNull[0]! : new SchemaAST.Union(nonNull, ast.mode),
+    nullable: true,
+  }
 }
 
 const physicalScalar = Effect.fn("Table.physicalScalar")(function* (
@@ -581,49 +491,27 @@ const storageSchemaFor = <S extends Schema.Constraint>(
   return unsupportedTableScalar(table, field)
 }
 
-const compileStorageSchema = Effect.fn("Table.compileStorageSchema")(function* <
-  S extends Schema.Struct<Schema.Struct.Fields>,
->(table: string, schema: S) {
-  const fieldEntries = Record.toEntries(schema.fields)
+type CompiledField = Readonly<{
+  name: string
+  storageSchema: Schema.Constraint
+  field: TableField
+}>
 
-  const compiledFields = yield* Effect.forEach(
-    fieldEntries,
-    ([name, fieldSchema]) => {
-      const compiled = storageSchemaFor(table, name, fieldSchema)
-      return Effect.map(compiled, (storage) => [name, storage] as const)
-    },
+const compileStorageSchema = (
+  schema: Schema.Struct<Schema.Struct.Fields>,
+  fields: ReadonlyArray<CompiledField>,
+) => {
+  const storageFields = Record.fromEntries(
+    Array.map(fields, ({ name, storageSchema }) => [name, storageSchema] as const),
   )
-
-  const storageFields = Record.fromEntries(compiledFields)
-  const CompiledStorageSchema = Schema.Struct(storageFields)
-  interface CompiledStorage extends Schema.Schema.Type<typeof CompiledStorageSchema> {}
-  const encodedType = SchemaAST.toType(schema.ast)
-  const rootChecks = Option.fromNullishOr(encodedType.checks)
+  const storageSchema = Schema.Struct(storageFields)
+  const rootChecks = Option.fromNullishOr(SchemaAST.toType(schema.ast).checks)
 
   return Option.match(rootChecks, {
-    onNone: Function.constant(CompiledStorageSchema as Schema.Constraint),
-    onSome: (checks) => CompiledStorageSchema.check(...checks) as Schema.Constraint,
+    onNone: Function.constant(storageSchema as Schema.Constraint),
+    onSome: (checks) => storageSchema.check(...checks) as Schema.Constraint,
   })
-})
-
-export class TableError extends Schema.TaggedError<TableError>()(
-  "TableError",
-  {
-    operation: CreateTableOperationSchema,
-    table: Schema.String,
-    cause: Schema.Unknown,
-  },
-) {
-  override get message() {
-    return `Table creation failed for ${this.table}`
-  }
 }
-
-export class TableStore extends Context.Service<TableStore, {
-  readonly write: (
-    table: Table,
-  ) => Effect.Effect<void, TableError>
-}>()("@effect-domains/TableStore") {}
 
 type IdentifierName<S extends Schema.Struct<Schema.Struct.Fields>> = {
   [K in Extract<keyof S["fields"], string>]: S["fields"][K] extends import("effect").Brand.Brand<
@@ -661,7 +549,6 @@ const compileTable = Effect.fn("Table.compile")(function* <
     if (!Predicate.isString(property.name)) {
       return yield* failTableDefinition(name, "field names must be strings")
     }
-
     if (SchemaAST.isOptional(property.type)) {
       return yield* failTableDefinition(name, `field ${property.name} must be required`)
     }
@@ -671,21 +558,25 @@ const compileTable = Effect.fn("Table.compile")(function* <
     const storageSchema = yield* storageSchemaFor(name, property.name, fieldSchema)
     const encodedStorageSchema = Schema.toEncoded(storageSchema)
     const storage = yield* physicalScalar(name, property.name, encodedStorageSchema.ast)
-    const checks = tableChecks(encodedStorageSchema.ast)
 
-    return TableField.make({
+    return {
       name: property.name,
-      scalar: storage.scalar,
-      nullable: storage.nullable,
-      generation: NoGeneration,
-      checks,
-    })
+      storageSchema,
+      field: TableField.make({
+        name: property.name,
+        scalar: storage.scalar,
+        nullable: storage.nullable,
+        generation: NoGeneration,
+        checks: tableChecks(encodedStorageSchema.ast),
+      }),
+    } satisfies CompiledField
   })
 
-  const fields = yield* Effect.forEach(
+  const compiledFields = yield* Effect.forEach(
     encodedSchema.ast.propertySignatures,
     compileField,
   )
+  const fields = Array.map(compiledFields, (compiled) => compiled.field)
 
   const identifierAnnotation = (fieldSchema: Schema.Constraint) => {
     const annotations = Schema.resolveAnnotations(fieldSchema)
@@ -693,48 +584,39 @@ const compileTable = Effect.fn("Table.compile")(function* <
     const marked = Option.map(resolved, (resolvedAnnotations) => resolvedAnnotations[DomainIdentifier])
     return Option.exists(marked, trueFlag)
   }
-
-  const fieldHasIdentifier = (field: TableField) => {
-    const source = Option.fromNullishOr(schema.fields[field.name] as Schema.Constraint | undefined)
+  const fieldHasIdentifier = (compiled: CompiledField) => {
+    const source = Option.fromNullishOr(
+      schema.fields[compiled.name] as Schema.Constraint | undefined,
+    )
     return Option.exists(source, identifierAnnotation)
   }
 
-  const identifierFields = Array.filter(fields, fieldHasIdentifier)
-  const multipleIdentifiers = identifierFields.length > 1
-  if (multipleIdentifiers) {
+  const identifierFields = Array.filter(compiledFields, fieldHasIdentifier)
+  if (identifierFields.length > 1) {
     return yield* failTableDefinition(name, "schema must contain at most one Domain.identifier field")
   }
 
-  const identifierFieldOption = Array.get(identifierFields, 0)
-  if (Option.isSome(identifierFieldOption)) {
-    const identifierSource = Option.fromNullishOr(
-      schema.fields[identifierFieldOption.value.name as Extract<keyof S["fields"], string>],
-    )
-
-    const identifierSchema = Option.getOrThrow(identifierSource)
-    const storageSchema = yield* compileStorageSchema(name, schema)
-
-    const identifierStorageSchema = yield* storageSchemaFor(
-      name,
-      identifierFieldOption.value.name,
-      identifierSchema,
-    )
+  const identifierField = identifierFields[0]
+  if (identifierField !== undefined) {
+    const identifierSchema = Option.getOrThrow(Option.fromNullishOr(
+      schema.fields[identifierField.name as Extract<keyof S["fields"], string>],
+    ))
+    const storageSchema = compileStorageSchema(schema, compiledFields)
 
     return {
       name,
       schema,
       rowSchema: schema,
-      identifier: identifierFieldOption.value.name,
+      identifier: identifierField.name,
       identifierSchema,
       fields,
       insertSchema: storageSchema,
       storageSchema,
-      identifierStorageSchema,
+      identifierStorageSchema: identifierField.storageSchema,
     }
   }
 
-  const namedId = (field: TableField) => Equivalence.strictEqual<string>()(field.name, "id")
-  const idIsReserved = Array.some(fields, namedId)
+  const idIsReserved = Array.some(fields, (field) => field.name === "id")
   if (idIsReserved) {
     return yield* failTableDefinition(
       name,
@@ -743,10 +625,15 @@ const compileTable = Effect.fn("Table.compile")(function* <
   }
 
   const rowSchema = pipe(schema, Schema.fieldsAssign(DefaultIdentifierFields))
-  const insertSchema = yield* compileStorageSchema(name, schema)
-  const storageSchema = yield* compileStorageSchema(name, rowSchema)
   const identifierStorageSchema = yield* storageSchemaFor(name, "id", rowSchema.fields.id)
-  const persistedFields = Array.prepend(fields, DefaultIdentifierField)
+  const storageSchema = compileStorageSchema(
+    rowSchema,
+    Array.prepend(compiledFields, {
+      name: "id",
+      storageSchema: identifierStorageSchema,
+      field: DefaultIdentifierField,
+    }),
+  )
 
   return {
     name,
@@ -754,97 +641,23 @@ const compileTable = Effect.fn("Table.compile")(function* <
     rowSchema,
     identifier: "id" as const,
     identifierSchema: rowSchema.fields.id,
-    fields: persistedFields,
-    insertSchema,
+    fields: Array.prepend(fields, DefaultIdentifierField),
+    insertSchema: compileStorageSchema(schema, compiledFields),
     storageSchema,
     identifierStorageSchema,
   }
 })
 
-export class Table extends Schema.Class<Table>("Table")({
-  name: Schema.String,
-  schema: Schema.Any,
-  rowSchema: Schema.Any,
-  insertSchema: Schema.Any,
-  storageSchema: Schema.Any,
-  identifier: Schema.String,
-  identifierSchema: Schema.Any,
-  identifierStorageSchema: Schema.Any,
-  fields: TableFieldsSchema,
-}) {
-  static override make<
-    const Name extends string,
-    const S extends Schema.Struct<Schema.Struct.Fields>,
-  >(
-    options: Readonly<{
-      name: Name
-      schema: S
-    }>,
-  ): TableDefinition<
-    Name,
-    S,
-    [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
-    RowSchema<S>,
-    IdentifierSchema<S>
-  > {
-    const compiledEffect = compileTable(options.name, options.schema)
-    const compiled = Effect.runSync(compiledEffect)
-
-    const base = super.make({
-      name: compiled.name,
-      schema: compiled.schema,
-      rowSchema: compiled.rowSchema,
-      insertSchema: compiled.insertSchema,
-      storageSchema: compiled.storageSchema,
-      identifier: compiled.identifier,
-      identifierSchema: compiled.identifierSchema,
-      identifierStorageSchema: compiled.identifierStorageSchema,
-      fields: compiled.fields,
-    })
-
-    const table = Struct.assign(base, {
-      write: Effect.fn("Table.write")(function* () {
-        const store = yield* TableStore
-        return yield* store.write(table)
-      }),
-    }) as TableDefinition<
-      Name,
-      S,
-      [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
-      RowSchema<S>,
-      IdentifierSchema<S>
-    >
-
-    return table
-  }
-
-  static snapshot(table: Table) {
-    const frozenChecks = Array.map(table.fields, (field) => {
-      const checks = Array.map(field.checks, (check) => {
-        const isOneOf = Schema.is(OneOf)(check)
-
-        const frozen = isOneOf
-          ? OneOf.make({ values: [...check.values] })
-          : check
-
-        return frozen
-      })
-
-      return TableField.make({
-        name: field.name,
-        scalar: field.scalar,
-        nullable: field.nullable,
-        generation: field.generation,
-        checks,
-      })
-    })
-
-    return TableSnapshot.make({
-      name: table.name,
-      identifier: table.identifier,
-      fields: frozenChecks,
-    })
-  }
+export interface Table {
+  readonly name: string
+  readonly schema: Schema.Struct<Schema.Struct.Fields>
+  readonly rowSchema: Schema.Struct<Schema.Struct.Fields>
+  readonly insertSchema: Schema.Codec<unknown, unknown, unknown, unknown>
+  readonly storageSchema: Schema.Codec<unknown, unknown, unknown, unknown>
+  readonly identifier: string
+  readonly identifierSchema: Schema.Constraint
+  readonly identifierStorageSchema: Schema.Codec<unknown, unknown, unknown, unknown>
+  readonly fields: ReadonlyArray<TableField>
 }
 
 export interface TableDefinition<
@@ -853,7 +666,7 @@ export interface TableDefinition<
   K extends string,
   Row extends Schema.Struct<Schema.Struct.Fields>,
   Identifier extends Schema.Constraint,
-> extends Schema.Schema.Type<typeof Table> {
+> extends Table {
   readonly name: Name
   readonly schema: S
   readonly rowSchema: Row
@@ -877,5 +690,50 @@ export interface TableDefinition<
     Identifier["DecodingServices"],
     Identifier["EncodingServices"]
   >
-  readonly write: () => Effect.Effect<void, TableError, TableStore>
 }
+
+const make = <
+  const Name extends string,
+  const S extends Schema.Struct<Schema.Struct.Fields>,
+>(
+  options: Readonly<{
+    name: Name
+    schema: S
+  }>,
+): TableDefinition<
+  Name,
+  S,
+  [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
+  RowSchema<S>,
+  IdentifierSchema<S>
+> => Effect.runSync(compileTable(options.name, options.schema)) as unknown as TableDefinition<
+  Name,
+  S,
+  [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>,
+  RowSchema<S>,
+  IdentifierSchema<S>
+>
+
+const snapshot = (table: Table) => {
+  const fields = Array.map(table.fields, (field) => {
+    const checks = Array.map(field.checks, (check) =>
+      Schema.is(OneOf)(check) ? OneOf.make({ values: [...check.values] }) : check
+    )
+
+    return TableField.make({
+      name: field.name,
+      scalar: field.scalar,
+      nullable: field.nullable,
+      generation: field.generation,
+      checks,
+    })
+  })
+
+  return TableSnapshot.make({
+    name: table.name,
+    identifier: table.identifier,
+    fields,
+  })
+}
+
+export const Table = { make, snapshot }

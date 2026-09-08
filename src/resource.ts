@@ -1,4 +1,4 @@
-import { Array, Effect, flow, Layer, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Effect, flow, Layer, Option, Predicate, Record, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import {
   RepositoryError,
@@ -8,13 +8,12 @@ import {
 } from "./repository-store.ts"
 import { Table, type TableDefinition } from "./table.ts"
 import { Value } from "./value.ts"
+import type { AnyCommandBundle } from "./commands.ts"
 import { DomainIdentifier } from "./domain.ts"
 
 const EmptyPayloadSchema = Schema.Struct({})
 const CursorSchema = Schema.String
 const PageLimitSchema = Schema.Int.check(Schema.isGreaterThan(0))
-
-interface EmptyPayload extends Schema.Schema.Type<typeof EmptyPayloadSchema> {}
 
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch"
 type GeneratedValue = "uuidV7" | "now"
@@ -174,11 +173,13 @@ const makeRepository = <
   canonicalRowSchema: Schema.Schema<Row["Type"]>,
   creation: Creation | undefined,
   listPolicy: List | undefined,
+  generated: Readonly<Record<string, GeneratedValue>>,
 ) => {
   const repositoryFailure = (cause: Schema.SchemaError) =>
     RepositoryError.make({ resource: table.name, cause })
+  const isCanonical = Schema.is(canonicalRowSchema)
   const validateCanonical = (value: unknown) =>
-    Schema.is(canonicalRowSchema)(value)
+    isCanonical(value)
       ? Effect.succeed(value)
       : Effect.fail(invalidInput(table.name, "value does not satisfy the canonical schema"))
 
@@ -208,13 +209,6 @@ const makeRepository = <
   const missing = (key: unknown) =>
     ResourceNotFound.make({ resource: table.name, key: String(key) })
 
-  const generated: Record<string, GeneratedValue> = {}
-  for (const [field, value] of Object.entries(creation?.generated ?? {})) {
-    if (value !== undefined) generated[field] = value
-  }
-  if (!own(table.schema.fields, table.identifier) && !own(generated, table.identifier)) {
-    generated[table.identifier] = "uuidV7"
-  }
 
   const defaults = creation?.defaults ?? {}
   const generatedEntries = Object.entries(generated)
@@ -237,8 +231,7 @@ const makeRepository = <
       }
     }
 
-    const canonical = yield* validateCanonical(complete)
-    const encoded = yield* encodeRow(canonical)
+    const encoded = yield* encodeRow(complete)
     const store = yield* RepositoryStore
     const stored = yield* store.insert(table, encoded)
     return yield* decodeRow(stored)
@@ -338,8 +331,7 @@ const makeRepository = <
       if (Option.isNone(stored)) return yield* missing(key)
       const current = yield* decodeRow(stored.value)
       const candidate = { ...current, ...changes, [table.identifier]: current[table.identifier] }
-      const canonical = yield* validateCanonical(candidate)
-      const encoded = yield* encodeRow(canonical)
+      const encoded = yield* encodeRow(candidate)
       const updated = yield* store.update(table, encoded)
       if (Option.isNone(updated)) return yield* missing(key)
       return yield* decodeRow(updated.value)
@@ -356,21 +348,20 @@ const makeRepository = <
   return { find, get, list, page, create, update, patch, remove }
 }
 
-export class Resource extends Schema.Class<Resource>("Resource")({
-  name: Schema.String,
-  schema: Schema.Any,
-  storage: Schema.Any,
-  table: Schema.Any,
-  operations: Schema.Array(Schema.Literals(["get", "list", "create", "update", "remove", "patch"])),
-  create: Schema.Any,
-  list: Schema.Any,
-  repository: Schema.Any,
-  group: Schema.Any,
-  handlers: Schema.Any,
-}) {
-  static readonly crud = ["get", "list", "create", "update", "remove"] as const
+export interface Resource extends AnyCommandBundle {
+  readonly name: string
+  readonly schema: Schema.Struct<Schema.Struct.Fields>
+  readonly storage: Schema.Struct<Schema.Struct.Fields>
+  readonly table: Table
+  readonly operations: ReadonlyArray<ResourceOperation>
+  readonly create: CreationPolicy<Schema.Struct<Schema.Struct.Fields>> | undefined
+  readonly list: ListPolicy<Schema.Struct<Schema.Struct.Fields>> | undefined
+}
 
-  static override make<
+export const Resource = {
+  crud: ["get", "list", "create", "update", "remove"] as const,
+
+  make<
     const Name extends string,
     const S extends Schema.Struct<Schema.Struct.Fields>,
     const Storage extends Schema.Struct<Schema.Struct.Fields> = S,
@@ -415,10 +406,11 @@ export class Resource extends Schema.Class<Resource>("Resource")({
         [table.identifier]: table.identifierSchema,
       })) as CanonicalTable["rowSchema"]
     const implicitIdentifier = !own(canonicalFields, table.identifier)
-    const generated = {
-      ...(options.create?.generated ?? {}),
-      ...(implicitIdentifier ? { [table.identifier]: "uuidV7" as const } : {}),
+    const generated: Record<string, GeneratedValue> = {}
+    for (const [field, value] of Object.entries(options.create?.generated ?? {})) {
+      if (value !== undefined) generated[field] = value
     }
+    if (implicitIdentifier) generated[table.identifier] = "uuidV7"
     if (options.list !== undefined) {
       const fields = new Set(table.fields.map((field) => field.name))
       for (const field of options.list.filter ?? []) {
@@ -452,6 +444,7 @@ export class Resource extends Schema.Class<Resource>("Resource")({
       canonicalRowSchema as Schema.Schema<typeof table.rowSchema.Type>,
       options.create,
       options.list,
+      generated,
     )
 
     const createFields = Record.fromEntries([
@@ -535,7 +528,8 @@ export class Resource extends Schema.Class<Resource>("Resource")({
         request.patch,
       )
     }
-    const procedureFor = (operation: Operations[number]) => ({ get: getProcedure, list: listProcedure, create: createProcedure, update: updateProcedure, patch: patchProcedure, remove: removeProcedure })[operation]
+    const procedures = { get: getProcedure, list: listProcedure, create: createProcedure, update: updateProcedure, patch: patchProcedure, remove: removeProcedure }
+    const procedureFor = (operation: Operations[number]) => procedures[operation]
     const handlerByOperation = { get: getHandler, list: listHandler, create: repository.create, update: repository.update, patch: patchHandler, remove: removeHandler }
     const handlerFor = <Operation extends Operations[number]>(operation: Operation) => handlerByOperation[operation]
     const tagFor = (operation: Operations[number]) => `${options.name}.${operation}`
@@ -555,7 +549,7 @@ export class Resource extends Schema.Class<Resource>("Resource")({
       Effect.Services<ReturnType<typeof handlerByOperation[Operations[number]]>>
     >
 
-    return super.make({
+    return {
       name: options.name,
       schema: options.schema,
       storage,
@@ -566,17 +560,6 @@ export class Resource extends Schema.Class<Resource>("Resource")({
       repository,
       group,
       handlers,
-    }) as Struct.Assign<Resource, {
-      name: Name
-      schema: S
-      storage: Storage
-      table: typeof table
-      operations: Operations
-      repository: typeof repository
-      group: typeof group
-      create: Creation | undefined
-      list: List | undefined
-      handlers: typeof handlers
-    }>
+    }
   }
 }

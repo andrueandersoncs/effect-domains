@@ -17,12 +17,13 @@ import {
 } from "effect"
 import { identifier } from "../src/domain.ts"
 import { PersistedRef } from "../src/persisted-ref.ts"
-import { Query } from "../src/query.ts"
-import { Database, SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
 import { Table } from "../src/table.ts"
+import { SqlClient, SqlSchema } from "effect/unstable/sql"
+import { prepareTables } from "./prepare-tables.ts"
 import { adapterContract } from "./adapter-contract/effects.ts"
 
-describe("Bun SQLite tables and queries", () => {
+describe("Bun SQLite tables and authored operations", () => {
   class CodecPrefix extends Context.Service<CodecPrefix, {
     readonly prefix: string
   }>()("test/CodecPrefix") {}
@@ -65,9 +66,6 @@ describe("Bun SQLite tables and queries", () => {
     secret: StoredStringSchema,
     score: Schema.Number,
   })
-
-  interface User extends Schema.Schema.Type<typeof UserSchema> {}
-
   const incrementUserScore = (user: typeof UserSchema.Type) =>
     UserSchema.make({
       ...user,
@@ -75,83 +73,67 @@ describe("Bun SQLite tables and queries", () => {
     })
 
   const Users = Table.make({ name: "users", schema: UserSchema })
-  const OptionalUserSchema = Schema.OptionFromNullOr(UserSchema)
 
-  const CreateUser = Query.make({
-    table: Users,
+  const CreateUser = SqlSchema.findOne({
     Request: UserSchema,
     Result: UserSchema,
-    implementation: Effect.fn("CreateUser.implementation")(function* (user) {
-      const db = yield* Database
+    execute: Effect.fn("CreateUser.implementation")(function* (user) {
+      const db = yield* SqlClient.SqlClient
       const insert = db.insert(user)
 
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Readonly<Record<string, unknown>>>`
         INSERT INTO ${db(Users.name)} ${insert}
         RETURNING *
       `
-
-      const firstRow = pipe(rows, Array.get(0), Option.getOrUndefined)
-
-      return firstRow
     }),
   })
 
-  const FindUser = Query.make({
-    table: Users,
+  const FindUser = SqlSchema.findOneOption({
     Request: UserIdSchema,
-    Result: OptionalUserSchema,
-    implementation: Effect.fn("FindUser.implementation")(function* (id) {
-      const db = yield* Database
+    Result: UserSchema,
+    execute: Effect.fn("FindUser.implementation")(function* (id) {
+      const db = yield* SqlClient.SqlClient
 
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Readonly<Record<string, unknown>>>`
         SELECT * FROM ${db(Users.name)}
         WHERE ${db(Users.identifier)} = ${id}
         LIMIT 1
       `
-
-      const firstRow = pipe(rows, Array.get(0), Option.getOrNull)
-
-      return firstRow
     }),
   })
 
-  const UpdateUser = Query.make({
-    table: Users,
+  const UpdateUser = SqlSchema.findOneOption({
     Request: UserSchema,
-    Result: OptionalUserSchema,
-    implementation: Effect.fn("UpdateUser.implementation")(function* (user) {
-      const db = yield* Database
+    Result: UserSchema,
+    execute: Effect.fn("UpdateUser.implementation")(function* (user) {
+      const db = yield* SqlClient.SqlClient
       const identifier = user[Users.identifier]
       const changes = db.update(user, [Users.identifier])
 
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Readonly<Record<string, unknown>>>`
         UPDATE ${db(Users.name)}
         SET ${changes}
         WHERE ${db(Users.identifier)} = ${identifier}
         RETURNING *
       `
-
-      const firstRow = pipe(rows, Array.get(0), Option.getOrNull)
-
-      return firstRow
     }),
   })
 
-  const DeleteUser = Query.make({
-    table: Users,
-    Request: UserIdSchema,
-    Result: Schema.Boolean,
-    implementation: Effect.fn("DeleteUser.implementation")(function* (id) {
-      const db = yield* Database
+  const encodeUserId = Schema.encodeEffect(UserIdSchema)
 
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
-        DELETE FROM ${db(Users.name)}
-        WHERE ${db(Users.identifier)} = ${id}
-        RETURNING ${db(Users.identifier)}
-      `
+  const DeleteUser = Effect.fn("DeleteUser.implementation")(function* (
+    id: typeof UserIdSchema.Type,
+  ) {
+    const db = yield* SqlClient.SqlClient
+    const encodedId = yield* encodeUserId(id)
 
-      return rows.length > 0
-    }),
+    const rows = yield* db<Readonly<Record<string, unknown>>>`
+      DELETE FROM ${db(Users.name)}
+      WHERE ${db(Users.identifier)} = ${encodedId}
+      RETURNING ${db(Users.identifier)}
+    `
+
+    return rows.length > 0
   })
 
   const numberEquivalence = Equivalence.strictEqual<number>()
@@ -163,23 +145,18 @@ describe("Bun SQLite tables and queries", () => {
     name: Schema.String,
     rating: SqliteFiniteSchema,
   })
-
-  interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
   const Articles = Table.make({ name: "articles", schema: ArticleSchema })
 
-  const CreateArticle = Query.make({
-    table: Articles,
+  const CreateArticle = SqlSchema.findOne({
     Request: ArticleSchema,
     Result: Articles.rowSchema,
-    implementation: Effect.fn("CreateArticle.implementation")(function* (article) {
-      const db = yield* Database
+    execute: Effect.fn("CreateArticle.implementation")(function* (article) {
+      const db = yield* SqlClient.SqlClient
 
-      const rows = yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Readonly<Record<string, unknown>>>`
         INSERT INTO ${db(Articles.name)} ${db.insert(article)}
         RETURNING *
       `
-
-      return pipe(rows, Array.get(0), Option.getOrUndefined)
     }),
   })
 
@@ -220,8 +197,8 @@ describe("Bun SQLite tables and queries", () => {
     ) {
       return yield* pipe(
         Effect.gen(function* () {
-          yield* Articles.write()
-          return yield* CreateArticle.execute(article)
+          yield* prepareTables([Articles])
+          return yield* CreateArticle(article)
         }),
         Effect.provide(adapter),
       )
@@ -230,7 +207,7 @@ describe("Bun SQLite tables and queries", () => {
   const runCrudContract = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
     pipe(
       Effect.gen(function* () {
-        yield* Users.write()
+        yield* prepareTables([Users])
 
         const id = UserIdSchema.make("user-1")
         const missingId = UserIdSchema.make("missing")
@@ -260,10 +237,10 @@ describe("Bun SQLite tables and queries", () => {
           replacement,
           missingReplacement,
           missingKey: missingId,
-          create: CreateUser,
-          read: FindUser,
-          update: UpdateUser,
-          delete: DeleteUser,
+          create: { execute: CreateUser },
+          read: { execute: FindUser },
+          update: { execute: UpdateUser },
+          delete: { execute: DeleteUser },
         })
       }),
       Effect.provide(adapter),
@@ -273,7 +250,7 @@ describe("Bun SQLite tables and queries", () => {
   const runPersistedRefContract = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
     pipe(
       Effect.gen(function* () {
-        yield* Users.write()
+        yield* prepareTables([Users])
 
         const id = UserIdSchema.make("persisted-ref-user")
 
@@ -284,10 +261,10 @@ describe("Bun SQLite tables and queries", () => {
           score: 0,
         })
 
-        yield* CreateUser.execute(original)
+        yield* CreateUser(original)
 
         const loadUser = Effect.fn("PersistedRefTest.loadUser")(function* () {
-          const found = yield* FindUser.execute(id)
+          const found = yield* FindUser(id)
 
           if (Option.isNone(found)) {
             return yield* Effect.fail({
@@ -303,8 +280,7 @@ describe("Bun SQLite tables and queries", () => {
           _previous: typeof UserSchema.Type,
           next: typeof UserSchema.Type,
         ) {
-          const updated = yield* UpdateUser.execute(next)
-
+          const updated = yield* UpdateUser(next)
           if (Option.isNone(updated)) {
             return yield* Effect.fail({
               _tag: "PersistedUserNotFound" as const,
@@ -323,7 +299,7 @@ describe("Bun SQLite tables and queries", () => {
         yield* Effect.all(updates, { concurrency: "unbounded" })
 
         const cached = yield* userRef.get
-        const stored = yield* FindUser.execute(id)
+        const stored = yield* FindUser(id)
         const storedUser = Option.getOrThrow(stored)
 
         expect(cached.score).toBe(10)
@@ -333,25 +309,6 @@ describe("Bun SQLite tables and queries", () => {
       Effect.provide(PrefixLive),
     )
 
-  const FirstUsers = Table.make({ name: "first_users", schema: UserSchema })
-  const SecondUsers = Table.make({ name: "second_users", schema: UserSchema })
-
-  const createMultipleTables = Effect.fn("SqliteBun.createMultipleTables")(function* (
-    adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>,
-  ) {
-    const createFirstTable = FirstUsers.write()
-    const createSecondTable = SecondUsers.write()
-    const createTables = Effect.all([createFirstTable, createSecondTable])
-
-    return yield* pipe(createTables, Effect.provide(adapter))
-  })
-
-  const expectTablesCreated = (created: ReadonlyArray<void>) => {
-    const expectation = expect(created)
-    expectation.toEqual([undefined, undefined])
-
-    return created
-  }
 
   const verifiesGeneratedArticle = Effect.fn(
     "SqliteBun.verifiesGeneratedArticle",
@@ -364,28 +321,14 @@ describe("Bun SQLite tables and queries", () => {
     expect(created.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     )
-    expect(Articles.identifier).toBe("id")
-    expect(Articles.identifierSchema).toBe(Articles.rowSchema.fields.id)
-
-    const firstField = pipe(Articles.fields, Array.get(0), Option.getOrThrow)
-    const generation = Option.getOrThrow(firstField.generation)
-
-    expect(generation).toBe("uuidv7")
   })
 
-  const verifiesMultipleTables = Effect.fn("SqliteBun.verifiesMultipleTables")(
-    function* () {
-      const created = yield* withTemporaryDatabase(createMultipleTables)
-
-      expectTablesCreated(created)
-    },
-  )
 
 
-  it.effect("creates a derived table and runs authored CRUD queries", () =>
+  it.effect("creates a derived table and runs authored CRUD operations", () =>
     withTemporaryDatabase(runCrudContract))
 
-  it.effect("backs a shared persisted reference with authored queries", () =>
+  it.effect("backs a shared persisted reference with authored operations", () =>
     withTemporaryDatabase(runPersistedRefContract))
 
   it.effect.prop(
@@ -395,41 +338,21 @@ describe("Bun SQLite tables and queries", () => {
     { fastCheck: { numRuns: 10 } },
   )
 
-  it.effect("uses an explicit domain identifier instead of the UUIDv7 default", () =>
-    Effect.sync(() => {
-      expect(Users.identifier).toBe("id")
-      expect(Users.identifierSchema).toBe(UserIdSchema)
-      expect(Users.rowSchema).toBe(UserSchema)
 
-      const firstField = pipe(Users.fields, Array.get(0), Option.getOrThrow)
-      const hasGeneration = Option.isSome(firstField.generation)
-
-      expect(hasGeneration).toBe(false)
-    }))
-
-  it.effect("keeps database and codec services as execution requirements", () =>
-    Effect.sync(() => {
-      const queryRequiresDatabase = true satisfies (
-        Context.Service.Identifier<typeof Database> extends Effect.Services<
-          ReturnType<typeof CreateUser.execute>
+  {
+      const requiresDatabase = true satisfies (
+        SqlClient.SqlClient extends Effect.Services<
+          ReturnType<typeof CreateUser>
         > ? true : false
       )
 
-      const queryRequiresCodec = true satisfies (
+      const requiresCodec = true satisfies (
         Context.Service.Identifier<typeof CodecPrefix> extends Effect.Services<
-          ReturnType<typeof CreateUser.execute>
+          ReturnType<typeof CreateUser>
         > ? true : false
       )
 
-      expect(queryRequiresDatabase).toBe(true)
-      expect(queryRequiresCodec).toBe(true)
-      expect(CreateUser.table).toBe(Users)
-      expect(FindUser.Request).toBe(UserIdSchema)
-      expect(FindUser.Result).toBe(OptionalUserSchema)
-    }))
-
-  it.effect(
-    "supports multiple table definitions through one runtime layer",
-    verifiesMultipleTables,
-  )
+      void requiresDatabase
+      void requiresCodec
+  }
 })

@@ -30,9 +30,21 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
-### 2026-09-08: Current verification
+### 2026-09-08: Simplification verification
 
-The following was exercised against the current descriptor, resource, manifest, and single-runner APIs:
+The user-approved cutover requires initial migration history, removes the framework Query wrapper in favor of Effect primitives, and preserves generated native CLI flags. Source size fell from 5,428 to 4,128 lines; the generic AST algebra, direct table-write service, database alias, opaque descriptor schema classes, and migration bootstrap/adoption state were removed. ([Table](../../src/table.ts); [Runtime](../../src/sqlite-bun.ts); [Migrations](../../src/sqlite-migrations.ts); [Authored SQL](../../examples/basic-crud/sqlite.ts))
+
+- All six applications started as real Bun HTTP servers against isolated SQLite files. Generated CLIs exercised authored book create/get/update/remove and missing-row errors; todo defaults, two cursor pages, nested patch flags, mixed-input rejection, and invalid-patch preservation; canonical note create/update; counter increment, cached reads, direct writes and refresh; and reservation hold/release stock accounting. Physical note storage contained `stored:revised` while RPC returned `revised`. ([Example guide](../../examples/README.md))
+- The historical document seed upgraded to `heading`, retained its identifier, and gained `summary: null` and `priority: 0`. Restart retained the same row; the database contained two ledger entries and no separate schema-state table. Local `inspect todos.patch` emitted the selected operation. ([Document seed](../../examples/migration-lifecycle/seed-v1.ts); [Inspection](../../src/application-inspect.ts))
+- A disposable command-only application exercised native string enums, numeric literals, boolean literals, finite positive/negative numeric flags, and present/absent optional nested fields. Invalid native enum values failed through Effect CLI's parser, which prints usage on stdout and the error on stderr; schema/business failures exercised above kept stdout empty. ([CLI interpreter](../../src/rpc-cli.ts))
+- `bun run check` passed. All 24 tests in nine files passed, including migration rollback/registration/drift, missing initial history, cyclic scalar rejection, reservation transitions, and codec-service requirements. Obsolete Query/algebra tests and tests of wrapper metadata or void return plumbing were removed rather than repinned. ([Tests](../../test/))
+- `bun run lint` did not pass. Its diagnostics include nested-call, declaration-spacing, optional-property, collection-style, and direct-control-flow restrictions; no rules were disabled. Passing tests and type checking do not imply lint compliance.
+
+This verifies only the listed scenarios, not another database adapter or business domain.
+
+### Earlier 2026-09-08 verification (pre-simplification)
+
+The following was exercised against the preceding descriptor, resource, manifest, and single-runner APIs:
 
 - All six applications ran through their actual CLI/server surfaces. Todo creation defaulted `completed` to `false`; patching nested resource input succeeded; generated identifier override was rejected; filtered listing selected completed rows; separate cursor traversal covered four rows, including equal titles, without duplicate identifiers; and restart retained data. A deterministic runtime `Value` service supplied an explicit generated identifier and timestamp, while caller overrides were rejected. ([Todo resource](../../examples/resource-crud/resources.ts); [Todo entrypoint](../../examples/resource-crud/main.ts); [Value](../../src/value.ts); [resource regressions](../../test/ResourceCrud.test.ts))
 - The notes application returned canonical plain text over RPC while SQLite stored its `stored:` form. The persisted counter accepted eight simultaneous increments, retained process-local cache after a direct write, then loaded the direct value through refresh and restart. This exercises local synchronization only. ([Note storage](../../examples/service-codec/storage.ts); [Counter implementation](../../examples/persisted-ref/sqlite.ts); [persisted-resource regression](../../test/PersistedResource.test.ts))

@@ -2,7 +2,9 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 import { identifier } from "../src/domain.ts"
 import { Resource } from "../src/resource.ts"
-import { Database, SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { SqlClient } from "effect/unstable/sql"
+import { prepareTables } from "./prepare-tables.ts"
 import { NotesResource } from "../examples/service-codec/resources.ts"
 import { StoragePrefix } from "../examples/service-codec/storage.ts"
 import { NoteIdSchema } from "../examples/service-codec/domain.ts"
@@ -29,14 +31,13 @@ const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
 it.effect("generated CRUD keeps storage codecs off the canonical wire and applies defaults without accepting generated overrides", () =>
   Effect.gen(function* () {
-    yield* NotesResource.table.write()
-    yield* GeneratedTodos.table.write()
+    yield* prepareTables([NotesResource.table, GeneratedTodos.table])
 
     const note = yield* NotesResource.repository.create({
       id: NoteIdSchema.make("note-1"),
       text: "visible",
     })
-    const database = yield* Database
+    const database = yield* SqlClient.SqlClient
     const rows = yield* database<Readonly<{ readonly text: string }>>`
       SELECT text FROM ${database(NotesResource.table.name)} WHERE id = ${note.id}
     `
@@ -57,9 +58,9 @@ it.effect("generated CRUD keeps storage codecs off the canonical wire and applie
 
 it.effect("declared list cursors preserve page boundaries and patch keeps keys immutable and rows valid", () =>
   Effect.gen(function* () {
-    yield* PagedTodos.table.write()
+    yield* prepareTables([PagedTodos.table])
     yield* PagedTodos.repository.create({ id: "1", title: "alpha", completed: false })
-    yield* PagedTodos.repository.create({ id: "2", title: "beta", completed: false })
+    yield* PagedTodos.repository.create({ id: "2", title: "alpha", completed: false })
 
     const first = yield* PagedTodos.repository.page({ filter: { completed: false }, limit: 1 })
     expect(first.items.map((todo) => todo.id)).toEqual(["1"])

@@ -1,6 +1,6 @@
 # Basic CRUD: authored book queries
 
-This example shows where to take control of ordinary CRUD. It exposes book create, get, list, update, and remove RPCs, but implements their persistence with authored `Query.make` queries and SQL rather than the generated repository. Use it when the default resource behavior is close but not the contract you want.
+This example shows where to take control of ordinary CRUD. It exposes book create, get, list, update, and remove RPCs, but implements persistence with authored SQL and Effect `SqlSchema` rather than the generated repository.
 
 ## What is generated and what is authored
 
@@ -10,7 +10,7 @@ The five standard operations could instead be derived by selecting `Resource.cru
 
 - [`contracts.ts`](contracts.ts) declares all five `books.*` `{ input, output, error }` contracts and passes them to `Commands.make`. That descriptor supplies the injectable command service, derived RPC group, and handler layer.
 - [`sqlite.ts`](sqlite.ts) uses `BooksService.layer(...)` to install the authored handler record. It captures its fallback dependencies when the layer is built, while invocation context can still supply dependencies for a handler.
-- [`sqlite.ts`](sqlite.ts) implements each operation through `Query.make` and SQL `INSERT`, `SELECT`, `UPDATE`, or `DELETE` with `RETURNING`.
+- [`sqlite.ts`](sqlite.ts) uses Effect `SqlSchema.findOne`, `findOneOption`, and `findAll` around SQL `INSERT`, `SELECT`, `UPDATE`, and `DELETE`. These combinators encode requests and decode results without a framework query descriptor.
 - Missing books become the authored `BookNotFound` error, and database/query failures become `BookPersistenceError`.
 - `books.remove` returns the removed book. The generated resource operation returns `void` and uses the generated resource error union instead.
 
@@ -72,7 +72,7 @@ bun run basic-crud inspect books.create
 - [`domain.ts`](domain.ts): canonical book values, UUIDv7 identifier input, and authored errors.
 - [`resources.ts`](resources.ts): table definition and the deliberate opt-out from generated operations.
 - [`contracts.ts`](contracts.ts): transport-independent contracts and the `BooksService` command descriptor.
-- [`sqlite.ts`](sqlite.ts): `BooksService.layer`, authored `Query.make` implementations, SQL, and error translation.
+- [`sqlite.ts`](sqlite.ts): `BooksService.layer`, authored SQL, `SqlSchema` codecs, and error translation.
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry and history.
 - [`application.ts`](application.ts): resource and command-descriptor registration.
 - [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.

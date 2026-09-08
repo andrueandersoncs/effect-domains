@@ -28,7 +28,7 @@ Strong candidates for derivation are:
 
 The benefit sought is less duplicate declaration and less drift between mechanically equivalent representations. ([Project thesis](raw/project-thesis.md))
 
-A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; an authored query or command still carries semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Query](../../src/query.ts))
+A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; authored SQL or commands still carry semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Authored SQL](../../examples/basic-crud/sqlite.ts))
 
 ## Architectural Shape
 

@@ -55,11 +55,7 @@ type RunErrors<App extends RuntimeApplication, Services extends RuntimeLayer | u
   | Layer.Error<App["handlers"]> | Effect.Error<App["prepare"]>
   | Layer.Error<NonNullable<Services>> | Effect.Error<NonNullable<Initialize>>
 
-type InspectionApplication = Readonly<{
-  name: string
-  resources: Application["resources"]
-  group: RpcGroup.RpcGroup<any>
-}>
+type InspectionApplication = Pick<RuntimeApplication, "name" | "resources" | "group">
 
 const databaseEnvironmentVariable = (application: Readonly<{ name: string }>) =>
   `${application.name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_DB`
