@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import type { CommandContract, CommandContracts } from "effect-domains/application"
 import {
   InsufficientStock,
   InvalidReservationState,
@@ -17,32 +17,24 @@ const reserveErrorsSchema = Schema.Union([
   InventoryUnavailable,
 ])
 
-const reserveCommand = Rpc.make("reserve", {
-  payload: ReserveStockInputSchema,
-  success: ReservationSchema,
-  error: reserveErrorsSchema,
-})
-
 const transitionErrorsSchema = Schema.Union([
   ReservationNotFound,
   InvalidReservationState,
   InventoryUnavailable,
 ])
 
-const confirmCommand = Rpc.make("confirm", {
-  payload: ReservationInputSchema,
-  success: ReservationSchema,
+const transitionContract = {
+  input: ReservationInputSchema,
+  output: ReservationSchema,
   error: transitionErrorsSchema,
-})
+} satisfies CommandContract
 
-const releaseCommand = Rpc.make("release", {
-  payload: ReservationInputSchema,
-  success: ReservationSchema,
-  error: transitionErrorsSchema,
-})
-
-export const ReservationCommands = RpcGroup.make(
-  reserveCommand,
-  confirmCommand,
-  releaseCommand,
-)
+export const ReservationCommands = {
+  reserve: {
+    input: ReserveStockInputSchema,
+    output: ReservationSchema,
+    error: reserveErrorsSchema,
+  },
+  confirm: transitionContract,
+  release: transitionContract,
+} satisfies CommandContracts

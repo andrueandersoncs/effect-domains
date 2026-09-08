@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import type { CommandContracts } from "effect-domains/application"
 import {
   BookIdentifierInputSchema,
   BookNotFound,
@@ -16,40 +16,30 @@ const requiredBookErrorsSchema = Schema.Union([
 
 const StoredBooksSchema = Schema.Array(BookResource.table.rowSchema)
 
-const createBook = Rpc.make("books.create", {
-  payload: BookSchema,
-  success: BookResource.table.rowSchema,
-  error: BookPersistenceError,
-})
-
-const getBook = Rpc.make("books.get", {
-  payload: BookIdentifierInputSchema,
-  success: BookResource.table.rowSchema,
-  error: requiredBookErrorsSchema,
-})
-
-const listBooks = Rpc.make("books.list", {
-  payload: ListBooksInputSchema,
-  success: StoredBooksSchema,
-  error: BookPersistenceError,
-})
-
-const updateBook = Rpc.make("books.update", {
-  payload: BookResource.table.rowSchema,
-  success: BookResource.table.rowSchema,
-  error: requiredBookErrorsSchema,
-})
-
-const removeBook = Rpc.make("books.remove", {
-  payload: BookIdentifierInputSchema,
-  success: BookResource.table.rowSchema,
-  error: requiredBookErrorsSchema,
-})
-
-export const BookCommands = RpcGroup.make(
-  createBook,
-  getBook,
-  listBooks,
-  updateBook,
-  removeBook,
-)
+export const BookCommands = {
+  "books.create": {
+    input: BookSchema,
+    output: BookResource.table.rowSchema,
+    error: BookPersistenceError,
+  },
+  "books.get": {
+    input: BookIdentifierInputSchema,
+    output: BookResource.table.rowSchema,
+    error: requiredBookErrorsSchema,
+  },
+  "books.list": {
+    input: ListBooksInputSchema,
+    output: StoredBooksSchema,
+    error: BookPersistenceError,
+  },
+  "books.update": {
+    input: BookResource.table.rowSchema,
+    output: BookResource.table.rowSchema,
+    error: requiredBookErrorsSchema,
+  },
+  "books.remove": {
+    input: BookIdentifierInputSchema,
+    output: BookResource.table.rowSchema,
+    error: requiredBookErrorsSchema,
+  },
+} satisfies CommandContracts

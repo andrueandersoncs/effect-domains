@@ -6,7 +6,6 @@ Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatc
 
 ```ts
 import { Schema } from "effect"
-import { RpcGroup } from "effect/unstable/rpc"
 import { Application } from "effect-domains/application"
 import { Resource } from "effect-domains/resource"
 
@@ -25,7 +24,6 @@ const Books = Resource.make({
 export const Library = Application.make({
   name: "library",
   resources: [Books],
-  commands: RpcGroup.make(),
 })
 ```
 
@@ -47,7 +45,25 @@ Adding a supported scalar field to `BookSchema` changes fresh-table creation, re
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-Declare custom commands with Effect's `Rpc` and `RpcGroup`, then pass the group as `Application.make({ name, resources, commands })`. `CommandService<typeof commands>` derives their domain-facing service signatures. `application.toLayer` combines their implementations with generated resource handlers. There is no competing operation DSL.
+Declare custom commands once as a named record of `{ input, output, error }` schemas satisfying `CommandContracts` from `effect-domains/application`. Pass that record to `Application.make({ name, resources, commands })`; omit `commands` for resource-only applications.
+
+`Application.make` derives the RPC definitions, JSON codecs, and group membership from those declarations. `CommandService<typeof commands>` derives domain-facing handler signatures from the same decoded schemas. `application.toLayer` combines their implementations with generated resource handlers; the derived group supplies HTTP dispatch and CLI generation.
+
+Identical operation shapes can share a contract without sharing business behavior. For example, the [reservation contracts](examples/reservations/contracts.ts) declare `confirm` and `release` using one `transitionContract`:
+
+```ts
+export const ReservationCommands = {
+  reserve: {
+    input: ReserveStockInputSchema,
+    output: ReservationSchema,
+    error: reserveErrorsSchema,
+  },
+  confirm: transitionContract,
+  release: transitionContract,
+} satisfies CommandContracts
+```
+
+Names, schemas, and business policy remain explicit. Applications no longer author `Rpc.make` wrappers or maintain a second group-membership list. `application.commands` contains the declarations; `application.group` is their derived RPC representation combined with resource operations.
 
 ## Storage conventions
 

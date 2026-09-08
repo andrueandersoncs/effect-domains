@@ -1,19 +1,47 @@
-import { Array, Effect, HashSet, Layer, Schema, Struct, pipe } from "effect"
-import { Rpc, RpcGroup, RpcMiddleware, RpcSchema } from "effect/unstable/rpc"
+import { Array, Effect, HashSet, Layer, Record, Schema, type Scope, Struct, pipe } from "effect"
+import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import { SchemaStore } from "./migrations.ts"
 import type { Resource } from "./resource.ts"
 import { Table } from "./table.ts"
 
-export type CommandService<Group extends RpcGroup.Any> = {
-  readonly [Procedure in RpcGroup.Rpcs<Group> as Procedure["_tag"]]:
-    Procedure extends Rpc.AnyWithProps
-      ? (input: Procedure["payloadSchema"]["Type"]) => Effect.Effect<
-          Procedure["successSchema"]["Type"],
-          Procedure["errorSchema"]["Type"],
-          never
-        >
-      : never
+export type CommandContract = Readonly<{
+  input: Schema.Top
+  output: Schema.Top
+  error: Schema.Top
+}>
+
+export type CommandContracts = Readonly<Record<string, CommandContract>>
+
+export type CommandService<Contracts extends CommandContracts> = {
+  readonly [Name in keyof Contracts]: (
+    input: Contracts[Name]["input"]["Type"],
+  ) => Effect.Effect<
+    Contracts[Name]["output"]["Type"],
+    Contracts[Name]["error"]["Type"],
+    never
+  >
 }
+
+type CommandRpc<Name extends string, Contract extends CommandContract> = Rpc.Rpc<
+  Name,
+  Schema.toCodecJson<Contract["input"]>,
+  Schema.toCodecJson<Contract["output"]>,
+  Schema.toCodecJson<Contract["error"]>
+>
+
+type CommandRpcs<Contracts extends CommandContracts> = {
+  readonly [Name in keyof Contracts & string]: CommandRpc<Name, Contracts[Name]>
+}[keyof Contracts & string]
+
+type ResourceRpcs<Resources extends ReadonlyArray<Resource>> =
+  Resources[number] extends { readonly group: infer Group }
+    ? RpcGroup.Rpcs<Group>
+    : never
+
+type ApplicationGroup<
+  Resources extends ReadonlyArray<Resource>,
+  Commands extends CommandContracts,
+> = RpcGroup.RpcGroup<CommandRpcs<Commands> | ResourceRpcs<Resources>>
 
 class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitionError>()(
   "ApplicationDefinitionError",
@@ -22,31 +50,6 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   override get message() {
     return this.reason
   }
-}
-
-const toJsonCodecRpc = <
-  Tag extends string,
-  Payload extends Schema.Top,
-  Success extends Schema.Top,
-  Error extends Schema.Top,
-  Middleware extends RpcMiddleware.AnyService,
-  Requires,
->(procedure: Rpc.Rpc<Tag, Payload, Success, Error, Middleware, Requires>) => {
-  const payloadSchema = Schema.toCodecJson(procedure.payloadSchema)
-  const successSchema = Schema.toCodecJson(procedure.successSchema)
-  const errorSchema = Schema.toCodecJson(procedure.errorSchema)
-  const withPayload = procedure.setPayload(payloadSchema)
-  const withSuccess = withPayload.setSuccess(successSchema)
-  return withSuccess.setError(errorSchema)
-}
-
-const toJsonCodecGroup = <Commands extends Rpc.Rpc<any, any, any, any, any, any>>(group: RpcGroup.RpcGroup<Commands>) => {
-  const requests = group.requests.values()
-  const procedures = Array.fromIterable(requests)
-  const codecProcedures = Array.map(procedures, toJsonCodecRpc)
-
-  const codecGroup = RpcGroup.make(...codecProcedures)
-  return codecGroup.annotateMerge(group.annotations)
 }
 
 const proceduresFromRequests = (
@@ -91,23 +94,33 @@ export class Application extends Schema.Class<Application>("Application")({
 }) {
   static override make<
     const Resources extends ReadonlyArray<Resource>,
-    Commands extends Rpc.Rpc<any, any, any, any, any, any>,
+    const Commands extends CommandContracts = {},
   >(
-    options: Readonly<{
+    options: Readonly<{ name: string; resources: Resources }> | Readonly<{
       name: string
       resources: Resources
-      commands: RpcGroup.RpcGroup<Commands>
+      commands: Commands
     }>,
   ) {
+    const commands = "commands" in options ? options.commands : ({} as Commands)
+    const commandEntries = Record.toEntries(commands)
+
+    const commandProcedures = Array.map(commandEntries, ([name, command]) => {
+      const payloadSchema = Schema.toCodecJson(command.input)
+      const successSchema = Schema.toCodecJson(command.output)
+      const errorSchema = Schema.toCodecJson(command.error)
+      return Rpc.make(name, { payload: payloadSchema, success: successSchema, error: errorSchema })
+    }) as Array<CommandRpcs<Commands>>
+
+    const commandGroup = RpcGroup.make(...commandProcedures)
     const resourceGroups = Array.map(options.resources, Struct.get("group"))
 
     const groups: ReadonlyArray<Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">> = Array.prepend(
       resourceGroups,
-      options.commands,
+      commandGroup,
     )
 
     const validation = Effect.gen(function* () {
-
       const resources = yield* Effect.reduce(
         options.resources,
         HashSet.empty<string>,
@@ -135,7 +148,11 @@ export class Application extends Schema.Class<Application>("Application")({
 
     Effect.runSync(validation)
 
-    const group = toJsonCodecGroup(options.commands).merge(...resourceGroups)
+    const group = commandGroup.merge(...resourceGroups) as ApplicationGroup<
+      Resources,
+      Commands
+    >
+
     const tables = Array.map(options.resources, Struct.get("table")) as Array<Resources[number]["table"]>
     const snapshots = Array.map(tables, Table.snapshot)
     const layers = Array.map(options.resources, Struct.get("handlers")) as Array<Resources[number]["handlers"]>
@@ -153,15 +170,27 @@ export class Application extends Schema.Class<Application>("Application")({
       yield* store.prepare(snapshots)
     })
 
-    const toLayer = (implementation: any) => {
-      const implementationLayer = options.commands.toLayer(implementation)
+    const toLayer = <
+      Implementation extends CommandService<Commands>,
+      EX = never,
+      RX = never,
+    >(
+      implementation: Implementation | Effect.Effect<Implementation, EX, RX>,
+    ) => {
+      // Only service construction needs RX because domain handlers capture their dependencies.
+      const implementationLayer = commandGroup.toLayer(
+        implementation as
+          | RpcGroup.HandlersFrom<CommandRpcs<Commands>>
+          | Effect.Effect<RpcGroup.HandlersFrom<CommandRpcs<Commands>>, EX, RX>,
+      ) as Layer.Layer<Rpc.ToHandler<CommandRpcs<Commands>>, EX, Exclude<RX, Scope.Scope>>
+
       return Layer.provideMerge(implementationLayer, handlers)
     }
 
     return super.make({
       name: options.name,
       resources: options.resources,
-      commands: options.commands,
+      commands,
       group,
       tables,
       handlers,
@@ -170,8 +199,8 @@ export class Application extends Schema.Class<Application>("Application")({
     }) as Struct.Assign<Application, {
       name: string
       resources: Resources
-      commands: RpcGroup.RpcGroup<Commands>
-      group: ReturnType<typeof toJsonCodecGroup>
+      commands: Commands
+      group: ApplicationGroup<Resources, Commands>
       tables: Array<Resources[number]["table"]>
       handlers: typeof handlers
       prepare: typeof prepare

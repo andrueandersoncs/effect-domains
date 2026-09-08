@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import type { CommandContracts } from "effect-domains/application"
 import {
   EmptyInputSchema,
   NoteIdInputSchema,
@@ -11,40 +11,30 @@ import {
 const noteErrorSchema = Schema.Union([NoteNotFound, NotesPersistenceFailure])
 const NotesSchema = Schema.Array(NoteSchema)
 
-const createNote = Rpc.make("notes.create", {
-  payload: NoteSchema,
-  success: NoteSchema,
-  error: NotesPersistenceFailure,
-})
-
-const getNote = Rpc.make("notes.get", {
-  payload: NoteIdInputSchema,
-  success: NoteSchema,
-  error: noteErrorSchema,
-})
-
-const listNotes = Rpc.make("notes.list", {
-  payload: EmptyInputSchema,
-  success: NotesSchema,
-  error: NotesPersistenceFailure,
-})
-
-const updateNote = Rpc.make("notes.update", {
-  payload: NoteSchema,
-  success: NoteSchema,
-  error: noteErrorSchema,
-})
-
-const removeNote = Rpc.make("notes.remove", {
-  payload: NoteIdInputSchema,
-  success: Schema.Void,
-  error: noteErrorSchema,
-})
-
-export const NotesCommands = RpcGroup.make(
-  createNote,
-  getNote,
-  listNotes,
-  updateNote,
-  removeNote,
-)
+export const NotesCommands = {
+  "notes.create": {
+    input: NoteSchema,
+    output: NoteSchema,
+    error: NotesPersistenceFailure,
+  },
+  "notes.get": {
+    input: NoteIdInputSchema,
+    output: NoteSchema,
+    error: noteErrorSchema,
+  },
+  "notes.list": {
+    input: EmptyInputSchema,
+    output: NotesSchema,
+    error: NotesPersistenceFailure,
+  },
+  "notes.update": {
+    input: NoteSchema,
+    output: NoteSchema,
+    error: noteErrorSchema,
+  },
+  "notes.remove": {
+    input: NoteIdInputSchema,
+    output: Schema.Void,
+    error: noteErrorSchema,
+  },
+} satisfies CommandContracts
