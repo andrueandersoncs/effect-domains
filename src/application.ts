@@ -40,14 +40,10 @@ const toJsonCodecRpc = <
   return withSuccess.setError(errorSchema)
 }
 
-const toJsonCodecGroup = (group: RpcGroup.RpcGroup<any>) => {
+const toJsonCodecGroup = <Commands extends Rpc.Rpc<any, any, any, any, any, any>>(group: RpcGroup.RpcGroup<Commands>) => {
   const requests = group.requests.values()
   const procedures = Array.fromIterable(requests)
-
-  const codecProcedures = Array.map(
-    procedures,
-    toJsonCodecRpc as (procedure: (typeof procedures)[number]) => ReturnType<typeof toJsonCodecRpc>,
-  )
+  const codecProcedures = Array.map(procedures, toJsonCodecRpc)
 
   const codecGroup = RpcGroup.make(...codecProcedures)
   return codecGroup.annotateMerge(group.annotations)
@@ -95,12 +91,12 @@ export class Application extends Schema.Class<Application>("Application")({
 }) {
   static override make<
     const Resources extends ReadonlyArray<Resource>,
-    Commands extends Rpc.Any,
+    Commands extends Rpc.Rpc<any, any, any, any, any, any>,
   >(
     options: Readonly<{
       name: string
       resources: Resources
-      commands: RpcGroup.RpcGroup<any>
+      commands: RpcGroup.RpcGroup<Commands>
     }>,
   ) {
     const resourceGroups = Array.map(options.resources, Struct.get("group"))

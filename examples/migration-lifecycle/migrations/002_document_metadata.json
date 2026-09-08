@@ -1,0 +1,191 @@
+{
+  "from": {
+    "tables": [
+      {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "title",
+            "nullable": false,
+            "scalar": "string"
+          }
+        ],
+        "identifier": "id",
+        "name": "documents"
+      }
+    ],
+    "version": 1
+  },
+  "id": "002_document_metadata",
+  "steps": [
+    {
+      "_tag": "SqliteRebuildTable",
+      "copies": [
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "id",
+          "source": "id"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "heading",
+          "source": "title"
+        },
+        {
+          "_tag": "SqliteColumnValue",
+          "column": "priority",
+          "value": 0
+        }
+      ],
+      "table": {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "heading",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "summary",
+            "nullable": true,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "priority",
+            "nullable": false,
+            "scalar": "integer"
+          }
+        ],
+        "identifier": "id",
+        "name": "documents"
+      }
+    }
+  ],
+  "to": {
+    "tables": [
+      {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "heading",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "summary",
+            "nullable": true,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "priority",
+            "nullable": false,
+            "scalar": "integer"
+          }
+        ],
+        "identifier": "id",
+        "name": "documents"
+      }
+    ],
+    "version": 1
+  }
+}

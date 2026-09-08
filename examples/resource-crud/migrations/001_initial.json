@@ -1,0 +1,123 @@
+{
+  "from": {
+    "tables": [],
+    "version": 1
+  },
+  "id": "001_initial",
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "title",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "completed",
+            "nullable": false,
+            "scalar": "integer"
+          }
+        ],
+        "identifier": "id",
+        "name": "todos"
+      }
+    }
+  ],
+  "to": {
+    "tables": [
+      {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "MinLength",
+                "value": 1
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "title",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "completed",
+            "nullable": false,
+            "scalar": "integer"
+          }
+        ],
+        "identifier": "id",
+        "name": "todos"
+      }
+    ],
+    "version": 1
+  }
+}

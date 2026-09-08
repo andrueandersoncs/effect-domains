@@ -6,7 +6,7 @@ import { RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstabl
 import type { MigrationError, SchemaStore } from "./migrations.ts"
 import { RpcCli } from "./rpc-cli.ts"
 
-const serveApplication = Effect.fn("ApplicationBun.serve")(function* (options: Readonly<{
+const serveApplication = Effect.fn("ApplicationBun.serve")(function* <Services>(options: Readonly<{
   application: Readonly<{
     name: string
     group: RpcGroup.RpcGroup<any>
@@ -14,7 +14,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* (options: R
   }>
   handlers: Layer.Layer<any, any, any>
   runtime: Layer.Layer<any, any, any>
-  services: Layer.Layer<any, any, any>
+  services: Layer.Layer<Services, any, any>
   initialize: Effect.Effect<unknown, any, any>
 }>) {
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))

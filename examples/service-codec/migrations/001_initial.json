@@ -1,0 +1,73 @@
+{
+  "from": {
+    "tables": [],
+    "version": 1
+  },
+  "id": "001_initial",
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "text",
+            "nullable": false,
+            "scalar": "string"
+          }
+        ],
+        "identifier": "id",
+        "name": "notes"
+      }
+    }
+  ],
+  "to": {
+    "tables": [
+      {
+        "fields": [
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "id",
+            "nullable": false,
+            "scalar": "string"
+          },
+          {
+            "_tag": "TableField",
+            "checks": [],
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "name": "text",
+            "nullable": false,
+            "scalar": "string"
+          }
+        ],
+        "identifier": "id",
+        "name": "notes"
+      }
+    ],
+    "version": 1
+  }
+}

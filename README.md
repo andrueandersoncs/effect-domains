@@ -6,6 +6,7 @@ Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatc
 
 ```ts
 import { Schema } from "effect"
+import { RpcGroup } from "effect/unstable/rpc"
 import { Application } from "effect-domains/application"
 import { Resource } from "effect-domains/resource"
 
@@ -24,12 +25,13 @@ const Books = Resource.make({
 export const Library = Application.make({
   name: "library",
   resources: [Books],
+  commands: RpcGroup.make(),
 })
 ```
 
 This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.serve` prepares the database and serves the application's native Effect RPC group. `ApplicationBun.cli` derives commands, scalar flags, validation, and help from that group. The [reservation server](examples/reservations/server.ts) and [CLI](examples/reservations/cli.ts) show the runtime entrypoints.
+`ApplicationBun.serve` prepares the database and serves the application's native Effect RPC group. `ApplicationBun.cli` derives commands, scalar flags, validation, and help from that group. The [generated CRUD application](examples/resource-crud/application.ts) shows resource-only registration; the [reservation application](examples/reservations/application.ts) adds explicit business commands. Both have server and CLI entrypoints.
 
 Adding a supported scalar field to `BookSchema` changes fresh-table creation, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Existing databases require a reviewed migration artifact; startup does not silently alter them.
 
@@ -81,6 +83,8 @@ bun run reservations reservations.get --help
 ```
 
 The example is loopback-only and unauthenticated. Its [guide](examples/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
+
+All six [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. Examples cover generated CRUD, authored queries, service-dependent storage codecs, a process-local persisted counter, explicit schema evolution, and reservation policy.
 
 ## Escape hatches and documentation
 

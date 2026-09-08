@@ -618,7 +618,7 @@ const verifyDatabase = Effect.fn("SqliteMigrations.verifyDatabase")(function* (
     const expectedSql = normalizedSql(expectedCreateStatement)
     const matchesExpectedSql = Equivalence.strictEqual<string>()(actualSql, expectedSql)
     if (matchesExpectedSql) {
-      return
+      return yield* Effect.void
     }
 
     // SQLite appends added columns because named records are declaration-order independent.

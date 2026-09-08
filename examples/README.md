@@ -1,26 +1,154 @@
 # Examples
 
-The reservation application uses canonical resources, explicit business commands, and framework-generated persistence and interfaces. The focused examples cover generated repositories, migration review, and the lower-level table/query escape hatch.
+Each example is a complete, loopback-only application with a persistent SQLite database, frozen migration history, an HTTP RPC server, a generated CLI, and local schema commands. They demonstrate different framework boundaries rather than six copies of the same CRUD implementation.
 
-## Focused examples
+## Choose an application
 
-Run from the repository root:
+| Application | Purpose | Database setting |
+| --- | --- | --- |
+| [basic-crud](basic-crud/) | Book CRUD through authored `Query` implementations | `BASIC_CRUD_DB` |
+| [resource-crud](resource-crud/) | Todo CRUD generated entirely from a resource | `RESOURCE_CRUD_DB` |
+| [service-codec](service-codec/) | Notes with a runtime-service-dependent storage codec | `SERVICE_CODEC_DB` |
+| [persisted-ref](persisted-ref/) | A shared, query-backed counter with explicit cache refresh | `PERSISTED_REF_DB` |
+| [migration-lifecycle](migration-lifecycle/) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
+| [reservations](reservations/) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
+
+Run commands from the repository root. Start one server, then use its CLI in another terminal:
 
 ```bash
-bun run examples/resource-crud.ts
-bun run examples/migration-lifecycle.ts
-bun run examples/basic-crud.ts
-bun run examples/service-codec.ts
-bun run examples/persisted-ref.ts
+bun run resource-crud:server
+bun run resource-crud --help
 ```
 
-- [`resource-crud.ts`](resource-crud.ts) derives a typed repository and exercises generated create, get, update, list, find, and remove behavior against temporary SQLite.
-- [`migration-lifecycle.ts`](migration-lifecycle.ts) shows an ambiguous schema change being blocked, supplies explicit rename and backfill intent, applies the reviewed migration, and preserves existing data.
-- [`basic-crud.ts`](basic-crud.ts) derives a stored `Book` row with a UUIDv7 key and authors queries against temporary SQLite.
-- [`service-codec.ts`](service-codec.ts) keeps a schema codec's Effect service in the query's execution requirements.
-- [`persisted-ref.ts`](persisted-ref.ts) combines queries into a write-through reference, serializes concurrent updates, and explicitly refreshes an external change.
+Each database defaults to `<application>.sqlite` in the working directory. Startup applies the frozen migration chain; it does not reset existing data. An untracked database is rejected rather than silently adopted.
 
-Each focused example is self-contained: declarations come first, followed by the runnable Effect. Temporary databases use `FileSystem.makeTempDirectoryScoped` with `BunFileSystem.layer`; closing the scope removes the directory. Framework imports use the public `effect-domains/*` entry points.
+All servers default to `http://127.0.0.1:3000`, and all CLIs default to `http://127.0.0.1:3000/rpc/v1`. To run applications concurrently, assign distinct ports and matching client URLs:
+
+```bash
+PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
+BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
+```
+
+Client settings follow the database naming convention: `BASIC_CRUD_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. There is no authentication. These are runnable examples, not production deployment templates.
+
+### Shared structure
+
+- `domain.ts`: canonical values and errors.
+- `resources.ts`: storage registration and selected generated operations.
+- `application.ts`: resources and explicit command registration.
+- `migrations.ts` and `migrations/*.json`: decoded, frozen schema history.
+- `server.ts`: persistent database and runtime service composition.
+- `cli.ts`: generated RPC client and local migration commands.
+
+Authored-query applications also define command contracts, service interfaces, and SQLite implementations. Resource-only applications use generated handlers directly; they do not need empty service wrappers. Framework imports use the public `effect-domains/*` entry points.
+
+## Authored book queries
+
+Start `bun run basic-crud:server`, then:
+
+```bash
+bun run basic-crud books.create --input-json '{"title":"A Field Guide","pageCount":120}'
+bun run basic-crud books.list
+```
+
+Set `BOOK_ID` to the created row's UUIDv7 `id`:
+
+```bash
+bun run basic-crud books.get --id "$BOOK_ID"
+bun run basic-crud books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Revised Field Guide\",\"pageCount\":144}"
+bun run basic-crud books.remove --id "$BOOK_ID"
+```
+
+These operations use authored SQL through `Query.make`, not the generated repository. Missing records report typed errors. Book page counts and counter values retain the original `Schema.Number` contract; its JSON codec is not a single native numeric flag, so use canonical `--input-json` for those payloads.
+
+## Generated todo CRUD
+
+Start `bun run resource-crud:server`, then:
+
+```bash
+bun run resource-crud todos.create --title "Ship applications" --completed false
+bun run resource-crud todos.list
+```
+
+Set `TODO_ID` to the returned identifier:
+
+```bash
+bun run resource-crud todos.get --id "$TODO_ID"
+bun run resource-crud todos.update --id "$TODO_ID" --title "Ship applications" --completed true
+bun run resource-crud todos.remove --id "$TODO_ID"
+```
+
+`Resource.make` generates all five operations. Updates supply the complete stored row. The canonical todo schema has no identifier; persistence adds the UUIDv7 key.
+
+## Service-dependent note codecs
+
+Start `bun run service-codec:server`, then:
+
+```bash
+bun run service-codec notes.create --id note-1 --text "Visible domain text"
+bun run service-codec notes.get --id note-1
+bun run service-codec notes.update --id note-1 --text "Revised domain text"
+bun run service-codec notes.list
+bun run service-codec notes.remove --id note-1
+```
+
+The CLI accepts and returns ordinary text. The stored representation adds `stored:` through a schema codec that requires the server's `StoragePrefix` service. Public contracts use the canonical note schema, so storage-service requirements do not leak into the client. The storage codec remains explicit rather than becoming a transport convention.
+
+## Query-backed persisted counter
+
+Start `bun run persisted-ref:server`, then:
+
+```bash
+bun run persisted-ref counters.get
+bun run persisted-ref counters.increment
+bun run persisted-ref counters.set --input-json '{"value":100}'
+bun run persisted-ref counters.get
+bun run persisted-ref counters.refresh
+```
+
+The application seeds a single `visits` counter at zero only when absent. One process-local `PersistedRef` serializes concurrent increments and writes them through to SQLite. `counters.set` deliberately bypasses the reference and changes the stored value: `get` remains stale until `refresh`. Restarting loads the persisted value, rather than reseeding it.
+
+This is a single-server cache demonstration. It does not provide cross-process synchronization; a stale cached update can overwrite an external write.
+
+## Versioned documents
+
+To exercise the historical migration, choose a fresh database and seed version-one data before starting the current server:
+
+```bash
+bun run migration-lifecycle:seed-v1
+bun run migration-lifecycle:server
+```
+
+In another terminal:
+
+```bash
+bun run migration-lifecycle documents.list
+bun run migration-lifecycle documents.create --input-json '{"heading":"New document","summary":null,"priority":1}'
+```
+
+The historical document retains its identifier and title value, now stored as `heading`; migration adds `summary: null` and backfills `priority: 0`. The legacy seed command uses only the frozen version-one artifact and refuses an already-upgraded database. Starting the current server directly on a fresh database also works; historical seeding is optional.
+
+Set `DOCUMENT_ID` to a returned identifier:
+
+```bash
+bun run migration-lifecycle documents.get --id "$DOCUMENT_ID"
+bun run migration-lifecycle documents.update --input-json "{\"id\":\"$DOCUMENT_ID\",\"heading\":\"Reviewed document\",\"summary\":null,\"priority\":2}"
+bun run migration-lifecycle documents.remove --id "$DOCUMENT_ID"
+```
+
+Compare an unresolved plan with explicit migration intent, without a running server:
+
+```bash
+bun run migration-lifecycle schema plan --id 002_document_metadata \
+  --from examples/migration-lifecycle/migrations/001_initial.json \
+  --out unresolved.json
+bun run migration-lifecycle schema plan --id 002_document_metadata \
+  --from examples/migration-lifecycle/migrations/001_initial.json \
+  --rename documents:title:heading --backfill documents:priority:0 \
+  --out reviewed.json
+```
+
+The first command writes a plan containing blocked changes and exits nonzero; the second resolves the rename and required-field backfill. The server uses the checked-in reviewed artifact, not either scratch output. Previously applied migration artifacts must remain unchanged.
 
 ## Reservation application
 

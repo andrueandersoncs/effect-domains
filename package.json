@@ -21,7 +21,18 @@
     "lint": "better-typescript",
     "test": "bun --bun vitest run",
     "reservations:server": "bun run examples/reservations/server.ts",
-    "reservations": "bun run examples/reservations/cli.ts"
+    "reservations": "bun run examples/reservations/cli.ts",
+    "basic-crud:server": "bun run examples/basic-crud/server.ts",
+    "basic-crud": "bun run examples/basic-crud/cli.ts",
+    "resource-crud:server": "bun run examples/resource-crud/server.ts",
+    "resource-crud": "bun run examples/resource-crud/cli.ts",
+    "service-codec:server": "bun run examples/service-codec/server.ts",
+    "service-codec": "bun run examples/service-codec/cli.ts",
+    "persisted-ref:server": "bun run examples/persisted-ref/server.ts",
+    "persisted-ref": "bun run examples/persisted-ref/cli.ts",
+    "migration-lifecycle:server": "bun run examples/migration-lifecycle/server.ts",
+    "migration-lifecycle": "bun run examples/migration-lifecycle/cli.ts",
+    "migration-lifecycle:seed-v1": "bun run examples/migration-lifecycle/seed-v1.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.112",
