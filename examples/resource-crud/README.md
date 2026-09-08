@@ -74,4 +74,4 @@ bun run resource-crud inspect todos.patch
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime migration registry and history.
 - [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.
 
-See the [examples overview](../README.md), [authored book CRUD](../basic-crud/), and [service-dependent storage codec](../service-codec/).
+See the [examples overview](../README.md), [authored book CRUD](../README.md#authored-sql), and [service-dependent storage codec](../service-codec/).

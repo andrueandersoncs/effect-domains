@@ -2,7 +2,7 @@
 
 This example explains how a frozen SQLite migration history carries data from a legacy document shape to a current generated CRUD application. It keeps historical intent separate from the current model: version one stored `title`; version two renames it to `heading`, adds nullable `summary`, and backfills required `priority` with `0`.
 
-For common runtime and schema-command conventions, see the [examples overview](../README.md). Compare the current generated CRUD here with the authored queries in [basic-crud](../basic-crud/) and the migration transform in [reservations](../reservations/).
+For common runtime and schema-command conventions, see the [examples overview](../README.md). Compare the generated CRUD here with [authored book queries](../README.md#authored-sql) and the migration transform in [reservations](../reservations/).
 
 ## Run the historical upgrade
 

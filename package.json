@@ -26,6 +26,8 @@
     "reservations": "bun run examples/reservations/main.ts",
     "basic-crud:server": "bun run examples/basic-crud/main.ts serve",
     "basic-crud": "bun run examples/basic-crud/main.ts",
+    "authored-sql:server": "bun run examples/authored-sql/main.ts serve",
+    "authored-sql": "bun run examples/authored-sql/main.ts",
     "resource-crud:server": "bun run examples/resource-crud/main.ts serve",
     "resource-crud": "bun run examples/resource-crud/main.ts",
     "service-codec:server": "bun run examples/service-codec/main.ts serve",

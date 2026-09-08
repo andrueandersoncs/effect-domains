@@ -8,6 +8,16 @@ class Greeting extends Context.Service<Greeting, { readonly value: string }>()("
 const greetRpc = Rpc.make("greet", { success: Schema.String })
 const greeterRpcs = RpcGroup.make(greetRpc)
 
+class TimeUnavailable extends Schema.TaggedError<TimeUnavailable>()("TimeUnavailable", {
+  at: Schema.Date,
+}) {}
+
+const timeRpc = Commands.rpc("time", {
+  payload: Schema.Date,
+  success: Schema.Date,
+  error: TimeUnavailable,
+})
+
 const Greeter = Commands.make({
   name: "test/Commands/Greeter",
   group: greeterRpcs,
@@ -39,4 +49,22 @@ it.effect("captures command handler services and lets invocation context overrid
 
   const scopedProgram = Effect.scoped(program)
   return scopedProgram
+})
+
+it("derives JSON codecs for transformed RPC schemas", () => {
+  const at = new Date("2026-01-02T03:04:05.000Z")
+  const failure = TimeUnavailable.make({ at })
+  const encodedPayload = Schema.encodeSync(timeRpc.payloadSchema)(at)
+  const decodedSuccess = Schema.decodeSync(timeRpc.successSchema)("2026-01-02T03:04:05.000Z")
+  const encodedFailure = Schema.encodeSync(timeRpc.errorSchema)(failure)
+  const decodedFailure = Schema.decodeSync(timeRpc.errorSchema)(encodedFailure)
+
+  expect(encodedPayload).toBe("2026-01-02T03:04:05.000Z")
+  expect(decodedSuccess).toEqual(at)
+
+  expect(encodedFailure).toEqual({
+    _tag: "TimeUnavailable",
+    at: "2026-01-02T03:04:05.000Z",
+  })
+  expect(decodedFailure).toEqual(failure)
 })

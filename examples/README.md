@@ -1,19 +1,20 @@
 # Examples
 
-Each example is a complete, loopback-only application with a persistent SQLite database, a manifest registry of frozen migration artifacts, an HTTP RPC server, a generated CLI, and local schema commands. They demonstrate different framework boundaries rather than six copies of the same CRUD implementation.
+Each example is a complete, loopback-only application with a persistent SQLite database, a manifest registry of frozen migration artifacts, an HTTP RPC server, a generated CLI, and local schema commands. They demonstrate different framework boundaries rather than seven copies of the same CRUD implementation.
 
 ## Choose an application
 
 | Application | Purpose | Database setting |
 | --- | --- | --- |
-| [basic-crud](basic-crud/README.md) | Book CRUD through authored SQL and Effect `SqlSchema` | `BASIC_CRUD_DB` |
+| [basic-crud](basic-crud/README.md) | Minimal book CRUD generated from one resource declaration | `BASIC_CRUD_DB` |
+| [authored-sql](#authored-sql) | Custom book contracts and authored SQL with Effect `SqlSchema` | `AUTHORED_SQL_DB` |
 | [resource-crud](resource-crud/README.md) | Todo CRUD generated from a resource, including page/list and patch policies | `RESOURCE_CRUD_DB` |
 | [service-codec](service-codec/README.md) | Generated note CRUD with a runtime-service-dependent storage codec | `SERVICE_CODEC_DB` |
 | [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
 | [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
 
-Each local README explains what is generated, what is deliberately authored, how to run the application, and its important limitations. Start with [resource-crud](resource-crud/README.md) for generated CRUD; [basic-crud](basic-crud/README.md) demonstrates the authored-query escape hatch.
+The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); [resource-crud](resource-crud/README.md) adds defaults, pagination, and patch policy. [Authored SQL](#authored-sql) demonstrates the escape hatch.
 
 ## Shared runtime
 
@@ -35,19 +36,51 @@ PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
 BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
 ```
 
-Client settings follow the database naming convention: `BASIC_CRUD_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. There is no authentication. These are runnable examples, not production deployment templates.
+Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. There is no authentication. These are runnable examples, not production deployment templates.
 
 ### Shared structure
 
 - `domain.ts`: canonical values and errors.
 - `resources.ts`: storage registration and selected generated operations.
-- `contracts.ts`: native RPC definitions and groups where the application has authored commands.
+- `contracts.ts`: authored native RPCs using `Commands.rpc` for automatic JSON codecs, grouped with `RpcGroup.make`; absent for generated-only applications.
 - `application.ts`: resources and explicit command-descriptor registration.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, and generated remote commands.
 
-`Application.make({ name, resources, commands: [descriptor] })` combines resource and command-descriptor groups; absent groups use empty arrays. `main.ts` resolves the manifest to an absolute path and calls `ApplicationBun.run(app, { database: { manifest, filename: Option.none() }, services, initialize })`; callers that already own decoded history may instead pass `database: { migrations, filename: Option.none() }`. Use `Layer.empty` for no authored services and `Effect.void` for no initialization. The same runner supplies the loopback server, generated RPC client, local `schema` commands, and `inspect`; `*:server` package scripts are aliases for `main.ts serve`. Authored-command applications pass native RPC groups to `Commands.make({ name, group })` and install implementations through the resulting descriptor. Resource-only applications use generated handlers directly. Framework imports use the public `effect-domains/*` entry points.
+`Application.make({ name, resources, commands: [descriptor] })` combines resource and command-descriptor groups; absent groups use empty arrays. `main.ts` resolves the manifest to an absolute path and calls `ApplicationBun.run(app, { database: { manifest, filename: Option.none() }, services, initialize })`; callers owning decoded history may instead pass `database: { migrations, filename: Option.none() }`. Use `Layer.empty` for no authored services and `Effect.void` for no initialization. The same runner supplies the loopback server, generated RPC client, local schema commands, and inspection; `*:server` scripts alias `main.ts serve`. Authored applications pass native RPC groups to `Commands.make({ name, group })` and install implementations with `descriptor.layer(handlers)`.
+
+## Authored SQL
+
+[`authored-sql`](authored-sql/) preserves the custom book behavior separately from minimal generated CRUD. It reuses the canonical [`BookSchema`](basic-crud/domain.ts), while its [`Resource.make`](authored-sql/resources.ts) uses `operations: []`: table derivation stays automatic, but no generated RPC handlers are published.
+
+[`contracts.ts`](authored-sql/contracts.ts) declares explicit payload/success/error schemas with `Commands.rpc`, which derives JSON codecs and returns native Effect RPCs. [`sqlite.ts`](authored-sql/sqlite.ts) installs `BooksService.layer` handlers using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query behavior and error translation remain authored.
+
+Unlike generated CRUD, missing rows report `BookNotFound`, database/query failures report `BookPersistenceError`, and `books.remove` returns the deleted row. List returns an array with no ordering or pagination guarantees.
+
+Start the server:
+
+```bash
+bun run authored-sql:server
+```
+
+In another terminal:
+
+```bash
+bun run authored-sql books.create --title "A Field Guide" --page-count 120
+bun run authored-sql books.list
+```
+
+Copy the returned UUIDv7 into `BOOK_ID`:
+
+```bash
+bun run authored-sql books.get --id "$BOOK_ID"
+bun run authored-sql books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Revised Field Guide\",\"pageCount\":144}"
+bun run authored-sql books.remove --id "$BOOK_ID"
+bun run authored-sql inspect books.create
+```
+
+`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration manifest](authored-sql/migrations/manifest.json) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Review later changes with `bun run authored-sql schema generate <name>`.
 
 ## Reservation application
 
@@ -101,6 +134,6 @@ The planner emits blocked changes with their reasons instead of guessing drops, 
 
 - [`ApplicationBun`](../src/application-bun.ts): shared HTTP server and CLI runtime.
 - [`Resource`](../src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
-- [Authored SQL](basic-crud/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
+- [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
 - [`SqliteMigrations`](../src/sqlite-migrations.ts): frozen snapshots, migration planning, and execution.

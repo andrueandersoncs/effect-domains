@@ -18,7 +18,7 @@ const BookSchema = Schema.Struct({
 const Books = Resource.make({
   name: "books",
   schema: BookSchema,
-  operations: ["create", "get", "list", "update", "remove"],
+  operations: Resource.crud,
 })
 
 export const Library = Application.make({
@@ -30,7 +30,7 @@ export const Library = Application.make({
 
 This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.run(application, { database: { manifest, filename }, services, initialize })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. Use `Option.none()` for the environment/default filename, `Layer.empty` when no authored services are needed, and `Effect.void` when no initialization is needed. The [generated CRUD application](examples/resource-crud/application.ts) registers resources; the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+`ApplicationBun.run(application, { database: { manifest, filename }, services, initialize })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. Use `Option.none()` for the environment/default filename, `Layer.empty` when no authored services are needed, and `Effect.void` when no initialization is needed. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -46,9 +46,21 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. Declare operations with `Rpc.make(tag, { payload, success, error })`; apply `Schema.toCodecJson` explicitly where JSON wire codecs are needed. Install authored implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares the resource tables through the migration store.
+`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. For authored JSON operations, `Commands.rpc(tag, { payload, success, error })` accepts explicit schemas and derives their JSON codecs, returning a native Effect RPC. Use `Rpc.make` directly for native options or custom wire codecs. Install implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares tables through the migration store.
 
 RPCs may share schemas without sharing business behavior: the [reservation RPCs](examples/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
+
+For example, an authored operation keeps its meaningful contract without wire-schema variables:
+
+```ts
+const createBook = Commands.rpc("books.create", {
+  payload: BookSchema,
+  success: BookResource.table.rowSchema,
+  error: BookPersistenceError,
+})
+```
+
+Routine CRUD needs none of these declarations: select `Resource.crud` instead. The [authored SQL example](examples/README.md#authored-sql) deliberately keeps custom SQL, errors, and a remove operation returning the deleted row.
 
 ## Storage conventions
 
@@ -87,7 +99,7 @@ bun run reservations reservations.get --help
 
 The example is loopback-only and unauthenticated. Its [guide](examples/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
-All six [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. Examples cover generated CRUD, authored queries, service-dependent storage codecs, a process-local persisted counter, explicit schema evolution, and reservation policy.
+All seven [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. Examples cover minimal generated CRUD, configured list/patch policy, authored queries, service-dependent storage codecs, a process-local persisted counter, explicit schema evolution, and reservation policy.
 
 ## Escape hatches and documentation
 

@@ -1,14 +1,13 @@
 import { Effect, Option, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
+import { type Book, BookSchema } from "../basic-crud/domain.ts"
 import { BooksService } from "./contracts.ts"
 import {
-  type Book,
   type BookIdentifierInput,
   type ListBooksInput,
   BookIdentifierInputSchema,
   BookNotFound,
   BookPersistenceError,
-  BookSchema,
   ListBooksInputSchema,
 } from "./domain.ts"
 import { BookResource } from "./resources.ts"

@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { RpcGroup } from "effect/unstable/rpc"
 import { Commands } from "effect-domains/commands"
 import { CounterSchema, CounterUnavailable } from "./domain.ts"
 
@@ -11,20 +11,19 @@ export interface SetCounterPayload extends Schema.Schema.Type<
 
 const counterOperation = {
   payload: Schema.Struct({}),
-  success: Schema.toCodecJson(CounterSchema),
-  error: Schema.toCodecJson(CounterUnavailable),
+  success: CounterSchema,
+  error: CounterUnavailable,
 }
 
-const get = Rpc.make("counters.get", counterOperation)
-const increment = Rpc.make("counters.increment", counterOperation)
-const setPayloadSchema = Schema.toCodecJson(SetCounterPayloadSchema)
+const get = Commands.rpc("counters.get", counterOperation)
+const increment = Commands.rpc("counters.increment", counterOperation)
 
-const set = Rpc.make("counters.set", {
+const set = Commands.rpc("counters.set", {
   ...counterOperation,
-  payload: setPayloadSchema,
+  payload: SetCounterPayloadSchema,
 })
 
-const refresh = Rpc.make("counters.refresh", counterOperation)
+const refresh = Commands.rpc("counters.refresh", counterOperation)
 const counterRpcs = RpcGroup.make(get, increment, set, refresh)
 
 export const CounterCommands = Commands.make({

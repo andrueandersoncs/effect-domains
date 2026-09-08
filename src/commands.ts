@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, Record, type Scope, pipe } from "effect"
-import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
+import { Context, Effect, Layer, Record, Schema, type Scope, pipe } from "effect"
+import { Rpc, type RpcGroup } from "effect/unstable/rpc"
 
 type CommandHandlers<Rpcs extends Rpc.Any, R = never> = {
   readonly [Current in Rpcs as Current["_tag"]]: (
@@ -27,6 +27,21 @@ const withCapturedContext = <Rpcs extends Rpc.Any>(
   }
 
   return Record.map(handlers, capture) as CommandHandlers<Rpcs>
+}
+
+const rpc = <
+  const Tag extends string,
+  Payload extends Schema.Constraint,
+  Success extends Schema.Constraint,
+  Error extends Schema.Constraint,
+>(
+  tag: Tag,
+  options: Readonly<{ payload: Payload; success: Success; error: Error }>,
+) => {
+  const payloadSchema = Schema.toCodecJson(options.payload)
+  const successSchema = Schema.toCodecJson(options.success)
+  const errorSchema = Schema.toCodecJson(options.error)
+  return Rpc.make(tag, { payload: payloadSchema, success: successSchema, error: errorSchema })
 }
 
 const make = <const Name extends string, Rpcs extends Rpc.Any>(
@@ -72,4 +87,4 @@ const make = <const Name extends string, Rpcs extends Rpc.Any>(
   return CommandService
 }
 
-export const Commands = { make }
+export const Commands = { make, rpc }

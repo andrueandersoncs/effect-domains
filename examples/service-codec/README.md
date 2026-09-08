@@ -67,4 +67,4 @@ bun run service-codec inspect notes.create
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): decoded runtime registry and history.
 - [`main.ts`](main.ts): the sole runner and the installed prefix service.
 
-See the [examples overview](../README.md), [generated todo CRUD](../resource-crud/), and [authored book CRUD](../basic-crud/).
+See the [examples overview](../README.md), [generated todo CRUD](../resource-crud/), and [authored book CRUD](../README.md#authored-sql).

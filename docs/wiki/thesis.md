@@ -8,7 +8,7 @@ Effect Schema is an inspectable runtime value as well as a source of TypeScript 
 
 ## Core Interface Principles
 
-Project implementations use Effect and narrow runtime interfaces rather than fixed infrastructure. Native Effect RPCs define operation contracts through payload/success/error schemas; `Commands.make({ name, group })` adds an injectable unary handler service to their existing RPC group. `Application.make` composes command descriptors with resources. `ApplicationBun.run` supplies the one Bun CLI/HTTP entrypoint, keeping transport selection separate from RPC declarations and canonical domain models. These are implementations of the direction, not evidence that the direction generalizes beyond the exercised slice. ([Commands](../../src/commands.ts); [Book RPCs](../../examples/basic-crud/contracts.ts); [Application](../../src/application.ts); [Bun runtime](../../src/application-bun.ts); [Effect direction](raw/effect-and-declarative-interface-direction.md))
+Project implementations use Effect and narrow runtime interfaces rather than fixed infrastructure. Native Effect RPCs define operation contracts through payload/success/error schemas; `Commands.rpc` derives their JSON codecs, and `Commands.make({ name, group })` adds an injectable unary handler service to the existing RPC group. `Application.make` composes command descriptors with resources. `ApplicationBun.run` supplies the Bun CLI/HTTP entrypoint, keeping transport selection separate from RPC declarations and canonical domain models. These implement the direction, not evidence that it generalizes beyond the exercised slice. ([Commands](../../src/commands.ts); [Book RPCs](../../examples/authored-sql/contracts.ts); [Application](../../src/application.ts); [Bun runtime](../../src/application-bun.ts))
 
 The project does not preserve backward compatibility. Refactors make a clean cutover and remove superseded records, services, shims, and parallel APIs. ([Refactoring and compatibility direction](raw/refactoring-and-compatibility-direction.md))
 
@@ -28,7 +28,7 @@ Strong candidates for derivation are:
 
 The benefit sought is less duplicate declaration and less drift between mechanically equivalent representations. ([Project thesis](raw/project-thesis.md))
 
-A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; authored SQL or commands still carry semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Authored SQL](../../examples/basic-crud/sqlite.ts))
+A schema does not determine business decisions, transitions, authorization, transaction boundaries, indexes, aggregate ownership, historical migration intent, compatibility policy, retries, or idempotency. These concerns require explicit design. Resource defaults, runtime generation, selected list policy, and patch validation are framework semantics defined once; authored SQL or commands still carry semantic policy. ([Project thesis](raw/project-thesis.md); [Resource](../../src/resource.ts); [Authored SQL](../../examples/authored-sql/sqlite.ts))
 
 ## Architectural Shape
 
