@@ -461,34 +461,27 @@ const snapshotOperand = (operand: Operand) =>
     }),
   )
 
-const snapshotPolicy: (policy: PolicySyntax) => PolicySyntax = (policy) =>
+const snapshotPolicyLayer = (layer: PolicyF<PolicySyntax>) =>
   pipe(
-    Match.value(policy),
+    Match.value(layer),
     Match.tagsExhaustive({
-      Constant: ({ value }) =>
-        pipe(Policy.Schema.make({ _tag: "Constant", value }), freezePolicy),
-      Equal: ({ left, right }) => {
-        const snapshotLeft = snapshotOperand(left)
-        const snapshotRight = snapshotOperand(right)
-        return pipe(Policy.Schema.make({ _tag: "Equal", left: snapshotLeft, right: snapshotRight }), freezePolicy)
-      },
-      Includes: ({ collection, value }) => {
-        const snapshotCollection = snapshotOperand(collection)
-        const snapshotValue = snapshotOperand(value)
-        return pipe(Policy.Schema.make({ _tag: "Includes", collection: snapshotCollection, value: snapshotValue }), freezePolicy)
-      },
-      All: ({ children }) => {
-        const snapshots = Array.map(children, snapshotPolicy)
-        const snapshotChildren = Object.freeze(snapshots)
-        return pipe(Policy.Schema.make({ _tag: "All", children: snapshotChildren }), freezePolicy)
-      },
-      Any: ({ children }) => {
-        const snapshots = Array.map(children, snapshotPolicy)
-        const snapshotChildren = Object.freeze(snapshots)
-        return pipe(Policy.Schema.make({ _tag: "Any", children: snapshotChildren }), freezePolicy)
-      },
+      Constant: ({ value }) => pipe(Policy.Schema.make({ _tag: "Constant", value }), freezePolicy),
+      Equal: ({ left, right }) =>
+        pipe(
+          Policy.Schema.make({ _tag: "Equal", left: snapshotOperand(left), right: snapshotOperand(right) }),
+          freezePolicy,
+        ),
+      Includes: ({ collection, value }) =>
+        pipe(
+          Policy.Schema.make({ _tag: "Includes", collection: snapshotOperand(collection), value: snapshotOperand(value) }),
+          freezePolicy,
+        ),
+      All: ({ children }) => pipe(Policy.Schema.make({ _tag: "All", children: Object.freeze(children) }), freezePolicy),
+      Any: ({ children }) => pipe(Policy.Schema.make({ _tag: "Any", children: Object.freeze(children) }), freezePolicy),
     }),
   )
+
+const snapshotPolicy = Policy.fold(snapshotPolicyLayer)
 
 const constructPolicy = <Resource extends AnyStruct, Subject extends AnyStruct>(
   resource: Resource,

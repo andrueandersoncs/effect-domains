@@ -279,11 +279,16 @@ export const Resource = {
     const authorize = (
       action: AuthorizationAction,
       subject: Readonly<Record<string, unknown>>,
-      values: AuthorizationValues,
-    ) => pipe(
-      authorization.check(action, subject, values),
-      Effect.catchTag("PolicyEvaluationError", () => RepositoryError.make({ resource: table.name, cause: "Authorization evaluation failed" })),
-    )
+      row: AuthorizationValues["row"],
+      next: AuthorizationValues["next"] = absentAuthorizationValue,
+    ) => {
+      const values = AuthorizationValues.make({ row, next })
+
+      return pipe(
+        authorization.check(action, subject, values),
+        Effect.catchTag("PolicyEvaluationError", () => RepositoryError.make({ resource: table.name, cause: "Authorization evaluation failed" })),
+      )
+    }
 
     const repositoryFailure = (cause: Schema.SchemaError) => RepositoryError.make({ resource: table.name, cause })
     const isCanonical = Schema.is(canonicalRowSchema)
@@ -334,23 +339,11 @@ export const Resource = {
 
       const transaction = Effect.gen(function* () {
         const next = Option.some(complete)
-
-        const candidate = AuthorizationValues.make({
-          row: absentAuthorizationValue,
-          next,
-        })
-
-        yield* authorize("create", subject, candidate)
+        yield* authorize("create", subject, absentAuthorizationValue, next)
         const stored = yield* store.insert(table, encoded)
         const result = yield* decodeRow(stored)
         const row = Option.some(result)
-
-        const returned = AuthorizationValues.make({
-          row,
-          next: absentAuthorizationValue,
-        })
-
-        yield* authorize("read", subject, returned)
+        yield* authorize("read", subject, row)
         return result
       })
 
@@ -501,26 +494,14 @@ export const Resource = {
         if (Option.isNone(stored)) return yield* missing(key)
         const current = yield* decodeRow(stored.value)
         const [candidate, encoded] = yield* prepareCandidate(current)
-        const currentRow = Option.some(current)
-        const candidateNext = Option.some(candidate)
-
-        const changed = AuthorizationValues.make({
-          row: currentRow,
-          next: candidateNext,
-        })
-
-        yield* authorize(action, subject, changed)
+        const row = Option.some(current)
+        const next = Option.some(candidate)
+        yield* authorize(action, subject, row, next)
         const updated = yield* store.update(table, encoded, permission)
         if (Option.isNone(updated)) return yield* missing(key)
         const result = yield* decodeRow(updated.value)
-        const resultRow = Option.some(result)
-
-        const readable = AuthorizationValues.make({
-          row: resultRow,
-          next: absentAuthorizationValue,
-        })
-
-        yield* authorize("read", subject, readable)
+        const returned = Option.some(result)
+        yield* authorize("read", subject, returned)
         return result
       })
 
@@ -560,14 +541,8 @@ export const Resource = {
         const stored = yield* store.find(table, encoded, permission)
         if (Option.isNone(stored)) return yield* missing(key)
         const current = yield* decodeRow(stored.value)
-        const currentRow = Option.some(current)
-
-        const target = AuthorizationValues.make({
-          row: currentRow,
-          next: absentAuthorizationValue,
-        })
-
-        yield* authorize("remove", subject, target)
+        const row = Option.some(current)
+        yield* authorize("remove", subject, row)
         const removed = yield* store.remove(table, encoded, permission)
         if (!removed) return yield* missing(key)
       })

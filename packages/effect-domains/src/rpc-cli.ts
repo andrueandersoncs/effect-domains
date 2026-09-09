@@ -221,22 +221,11 @@ const makeNativeFlag = (name: string, native: NativeFlag, description: Option.Op
   return Flag.optional(describedFlag)
 }
 
-const nativeFlagForPayloadField = (encoded: SchemaAST.AST, decoded: Option.Option<SchemaAST.AST>) => {
-  const encodedFlag = nativeFlagFor(encoded)
-
-  const decodedFlag = pipe(
-    decoded,
-    Option.filter(SchemaAST.isNumber),
-    Option.map((number) => {
-      const checks = Option.fromNullishOr(number.checks)
-      const integer = representationOccursIn("effect/schema/isInt", checks)
-      return NativeFlag.Number({ integer })
-    }),
+const nativeFlagForPayloadField = (encoded: SchemaAST.AST, decoded: Option.Option<SchemaAST.AST>) =>
+  pipe(
+    nativeFlagFor(encoded),
+    Option.orElse(() => pipe(decoded, Option.filter(SchemaAST.isNumber), Option.flatMap(nativeFlagFor))),
   )
-
-  const useDecodedFlag = Function.constant(decodedFlag)
-  return Option.orElse(encodedFlag, useDecodedFlag)
-}
 
 const makeInputJsonFlag = () => {
   const flag = Flag.string("input-json")
@@ -379,10 +368,11 @@ const makeRpcCli = <
         const stdout = stdio.stdout()
         yield* Stream.run(output, stdout)
       }, Effect.scoped, Effect.catch(Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
-        const encodeError = Schema.encodeUnknownEffect(errorSchema)
-        const encodedError = encodeError(cause)
-        const recoverCauseMessage = () => pipe(causeMessage(cause), Effect.succeed)
-        const userMessage = yield* Effect.catch(encodedError, recoverCauseMessage)
+        const userMessage = yield* pipe(
+          Schema.encodeUnknownEffect(errorSchema)(cause),
+          Effect.catch(() => pipe(causeMessage(cause), Effect.succeed)),
+        )
+
         return yield* CliError.UserError.make({ cause, userMessage })
       })))
 

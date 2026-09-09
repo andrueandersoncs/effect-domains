@@ -41,11 +41,8 @@ const scalarKind = (value: Scalar): ScalarKind =>
   )
 
 const scalarExpression = (sql: SqlClient.SqlClient) => (value: Scalar): ScalarExpression => {
-  const kind = scalarKind(value)
-  const boolean = pipe(kind, Match.value, Match.when("boolean", Function.constant(true)), Match.orElse(Function.constant(false)))
-  const storedValue = boolean ? Number(value) : value
-  const fragment = sql`${storedValue}`
-  return ScalarExpression.make({ fragment, kind })
+  const fragment = sql`${Predicate.isBoolean(value) ? Number(value) : value}`
+  return ScalarExpression.make({ fragment, kind: scalarKind(value) })
 }
 
 const rowExpression = (sql: SqlClient.SqlClient) => (field: string): ScalarExpression => {
@@ -194,8 +191,7 @@ const bindMembership = ({
     return sql.or(comparisons)
   })
 
-const bindChild = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) => (child: Binder) =>
-  child(sql, environment)
+type Junction = Extract<PolicyF<Binder>, { readonly _tag: "All" | "Any" }>
 
 const allFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) =>
   Array.isReadonlyArrayNonEmpty(fragments) ? sql.and(fragments) : trueExpression(sql)
@@ -203,23 +199,19 @@ const allFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Sta
 const anyFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) =>
   Array.isReadonlyArrayNonEmpty(fragments) ? sql.or(fragments) : falseExpression(sql)
 
-const allBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "All" }>): Binder =>
+const junctionBinding =
+  (combine: (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) => Statement.Fragment) =>
+  ({ children }: Junction): Binder =>
   (sql, environment) =>
     pipe(
       children,
-      Array.map(bindChild(sql, environment)),
+      Array.map((child) => child(sql, environment)),
       Effect.all,
-      Effect.map(allFragments(sql)),
+      Effect.map(combine(sql)),
     )
 
-const anyBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "Any" }>): Binder =>
-  (sql, environment) =>
-    pipe(
-      children,
-      Array.map(bindChild(sql, environment)),
-      Effect.all,
-      Effect.map(anyFragments(sql)),
-    )
+const allBinding = junctionBinding(allFragments)
+const anyBinding = junctionBinding(anyFragments)
 
 const compileLayer = (layer: PolicyF<Binder>) =>
   pipe(

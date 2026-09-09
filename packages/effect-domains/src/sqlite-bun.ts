@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Array, Context, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
-import { SqlClient, SqlError, type Statement } from "effect/unstable/sql"
+import { SqlClient, SqlError } from "effect/unstable/sql"
 
 import {
   RepositoryError,
@@ -32,49 +32,29 @@ const absentPolicyValue = Option.none<Readonly<Record<string, unknown>>>()
 const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
   unknownEquals(value, null) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
-const leadingEqualitySql = (
-  sql: SqlClient.SqlClient,
-  values: ReadonlyArray<unknown>,
-) => (entry: RepositoryListOrder, position: number) => {
-  const valueOption = Array.get(values, position)
-  const value = Option.getOrUndefined(valueOption)
-  return sql`${sql(entry.field)} = ${value}`
-}
-
-const cursorTerm = (
-  sql: SqlClient.SqlClient,
-  order: ReadonlyArray<RepositoryListOrder>,
-  values: ReadonlyArray<unknown>,
-) => (entry: RepositoryListOrder, index: number) => {
-  const preceding = Array.take(order, index)
-  const equalPreceding = Array.map(preceding, leadingEqualitySql(sql, values))
-  const valueOption = Array.get(values, index)
-  const value = Option.getOrUndefined(valueOption)
-  const ascending = repositoryOrderDirectionEquals(entry.direction, "asc")
-
-  const boundary = ascending
-    ? sql`${sql(entry.field)} > ${value}`
-    : sql`${sql(entry.field)} < ${value}`
-
-  return sql.and([...equalPreceding, boundary])
-}
-
 const cursorCondition = (
   sql: SqlClient.SqlClient,
   order: ReadonlyArray<RepositoryListOrder>,
 ) => (cursor: RepositoryListCursor) => {
   const values = Array.append(cursor.values, cursor.identifier)
-  const terms = Array.map(order, cursorTerm(sql, order, values))
-  return sql.or(terms)
-}
+  const valueAt = (position: number) => pipe(Array.get(values, position), Option.getOrUndefined)
 
-const appendCursorCondition = (
-  sql: SqlClient.SqlClient,
-  order: ReadonlyArray<RepositoryListOrder>,
-  predicates: ReadonlyArray<Statement.Fragment>,
-) => (cursor: RepositoryListCursor) => {
-  const predicate = cursorCondition(sql, order)(cursor)
-  return Array.append(predicates, predicate)
+  const terms = Array.map(order, (entry, index) => {
+    const preceding = Array.take(order, index)
+
+    const equalPreceding = Array.map(preceding, (field, position) => {
+      const value = valueAt(position)
+      return sql`${sql(field.field)} = ${value}`
+    })
+
+    const ascending = repositoryOrderDirectionEquals(entry.direction, "asc")
+    const operator = sql.literal(ascending ? ">" : "<")
+    const value = valueAt(index)
+    const boundary = sql`${sql(entry.field)} ${operator} ${value}`
+    return sql.and([...equalPreceding, boundary])
+  })
+
+  return sql.or(terms)
 }
 
 const orderingFragment = (sql: SqlClient.SqlClient) => (entry: RepositoryListOrder) => {
@@ -151,7 +131,10 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
 
       const predicatesWithCursor = Option.match(query.cursor, {
         onNone: Function.constant(predicates),
-        onSome: appendCursorCondition(sqlClient, order, predicates),
+        onSome: (cursor) => {
+          const predicate = cursorCondition(sqlClient, order)(cursor)
+          return Array.append(predicates, predicate)
+        },
       })
 
       const ordering = Array.map(order, orderingFragment(sqlClient))

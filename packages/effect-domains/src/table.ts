@@ -185,11 +185,8 @@ const unsupportedTableScalar = (table: string, field: string) =>
 
 const tableScalarEquals = Equivalence.strictEqual<TableField["scalar"]>()
 
-const isNumericTableScalar = (scalar: TableField["scalar"]) => {
-  const integer = tableScalarEquals(scalar, "integer")
-  const number = tableScalarEquals(scalar, "number")
-  return integer || number
-}
+const isNumericTableScalar = (scalar: TableField["scalar"]) =>
+  tableScalarEquals(scalar, "integer") || tableScalarEquals(scalar, "number")
 
 const frozenFields = (fields: ReadonlyArray<string>) => Object.freeze([...fields])
 
@@ -452,8 +449,6 @@ const evaluateTableScalar = (
   suspends: HashSet.HashSet<SchemaAST.Suspend> = HashSet.empty(),
 ): Effect.Effect<TableField["scalar"], TableDefinitionError> => {
   if (!SchemaAST.isSuspend(ast)) {
-    const unsupported = unsupportedTableScalar(table, field)
-
     return pipe(
       Match.value(ast),
       Match.when(SchemaAST.isDeclaration, declarationTableScalar(table, field)),
@@ -464,7 +459,7 @@ const evaluateTableScalar = (
       Match.when(SchemaAST.isLiteral, literalTableScalarFor(table, field)),
       Match.when(SchemaAST.isEnum, enumTableScalar(table, field)),
       Match.when(SchemaAST.isUnion, unionTableScalar(table, field, suspends)),
-      Match.orElse(Function.constant(unsupported)),
+      Match.orElse(() => unsupportedTableScalar(table, field)),
     )
   }
 
@@ -673,16 +668,27 @@ const orderableAst = (ast: SchemaAST.AST): boolean => {
   )
 }
 
+const scalarRepresentation = (
+  table: string,
+  field: string,
+  ast: SchemaAST.AST,
+) =>
+  pipe(
+    scalarAst(ast),
+    Option.match({
+      onNone: () => unsupportedTableScalar(table, field),
+      onSome: Effect.succeed,
+    }),
+  )
+
 const physicalScalar = Effect.fn("Table.physicalScalar")(function* (
   table: string,
   field: string,
   ast: SchemaAST.AST,
 ) {
-  const representation = scalarAst(ast)
-  if (Option.isNone(representation)) return yield* unsupportedTableScalar(table, field)
-  const [physicalAst, nullable] = representation.value
+  const [physicalAst, nullable] = yield* scalarRepresentation(table, field, ast)
   const scalar = yield* evaluateTableScalar(table, field, physicalAst)
-  return { scalar, nullable }
+  return { ast: physicalAst, scalar, nullable }
 })
 
 const appendOneOf = (checks: ReadonlyArray<TableCheck>) => (values: ReadonlyArray<string | number>) => {
@@ -690,76 +696,61 @@ const appendOneOf = (checks: ReadonlyArray<TableCheck>) => (values: ReadonlyArra
   return Array.append(checks, oneOf)
 }
 
-const tableChecks = (ast: SchemaAST.AST) =>
-  pipe(
-    scalarAst(ast),
+const tableChecks = (ast: SchemaAST.AST, physicalAst: SchemaAST.AST) => {
+  const direct = tableChecksFromAst(ast)
+  const fromNullable = equals(physicalAst, ast) ? NoTableChecks : tableChecksFromAst(physicalAst)
+  const checks = Array.appendAll(direct, fromNullable)
+
+  return pipe(
+    literalValuesFromAst(physicalAst),
     Option.match({
-      onNone: noTableChecks,
-      onSome: ([physicalAst]) => {
-        const direct = tableChecksFromAst(ast)
-        const sameAst = equals(physicalAst, ast)
-        const fromNullable = sameAst ? NoTableChecks : tableChecksFromAst(physicalAst)
-        const checks = Array.appendAll(direct, fromNullable)
-        const oneOf = literalValuesFromAst(physicalAst)
-
-        return Option.match(oneOf, {
-          onNone: Function.constant(checks),
-          onSome: appendOneOf(checks),
-        })
-      },
+      onNone: Function.constant(checks),
+      onSome: appendOneOf(checks),
     }),
   )
+}
 
-const automaticStorageAst = (ast: SchemaAST.AST) =>
-  pipe(
-    scalarAst(ast),
-    Option.exists(([physicalAst]) => {
-      const id = representationId(physicalAst)
-      const utc = Option.exists(id, dateTimeUtcId)
-      return SchemaAST.isBoolean(physicalAst) || utc
-    }),
-  )
-
-const storageSchemaFor = <S extends Schema.Constraint>(
+const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
   table: string,
   field: string,
-  schema: S,
-) => {
+  schema: Schema.Constraint,
+) {
   const encodedSchema = Schema.toEncoded(schema)
+  const [sourceAst, nullable] = yield* scalarRepresentation(table, field, encodedSchema.ast)
+  const sourceRepresentation = representationId(sourceAst)
+  const automaticUtc = Option.exists(sourceRepresentation, dateTimeUtcId)
+  const automaticBoolean = SchemaAST.isBoolean(sourceAst)
+  const automatic = automaticBoolean || automaticUtc
 
-  if (!automaticStorageAst(encodedSchema.ast)) {
-    return pipe(
-      physicalScalar(table, field, encodedSchema.ast),
-      Effect.as(schema),
-    )
+  if (!automatic) {
+    const scalar = yield* evaluateTableScalar(table, field, sourceAst)
+
+    return {
+      storageSchema: schema,
+      encodedStorageSchema: encodedSchema,
+      storage: { ast: sourceAst, scalar, nullable },
+    }
   }
 
-  const encodedType = SchemaAST.toType(schema.ast)
-  const normalizedType = scalarAst(encodedType)
+  const typeAst = SchemaAST.toType(schema.ast)
+  const normalizedType = scalarAst(typeAst)
+  if (Option.isNone(normalizedType)) return yield* unsupportedTableScalar(table, field)
+  const [physicalAst, physicalNullable] = normalizedType.value
+  const physicalRepresentation = representationId(physicalAst)
+  const utc = Option.exists(physicalRepresentation, dateTimeUtcId)
+  const booleanAst = SchemaAST.isBoolean(physicalAst)
+  const automaticStorage = utc || booleanAst
 
-  return Option.match(normalizedType, {
-    onNone: () => unsupportedTableScalar(table, field),
-    onSome: ([physicalAst, nullable]) => {
-      const id = representationId(physicalAst)
-      const utc = Option.exists(id, dateTimeUtcId)
-      const booleanAst = SchemaAST.isBoolean(physicalAst)
-      const utcSchema = nullable ? NullableDateTimeUtcFromStringSchema : Schema.DateTimeUtcFromString
-      const booleanSchema = nullable ? NullableBooleanFromBitSchema : Schema.BooleanFromBit
+  if (!automaticStorage) return yield* unsupportedTableScalar(table, field)
 
-      if (utc) {
-        const decodedSchema = Schema.decodeTo(schema)(utcSchema)
-        return Effect.succeed(decodedSchema)
-      }
-
-      if (booleanAst) {
-        const decodedSchema = Schema.decodeTo(schema)(booleanSchema)
-        return Effect.succeed(decodedSchema)
-      }
-
-      return unsupportedTableScalar(table, field)
-    },
-  })
-}
+  const utcSchema = physicalNullable ? NullableDateTimeUtcFromStringSchema : Schema.DateTimeUtcFromString
+  const booleanSchema = physicalNullable ? NullableBooleanFromBitSchema : Schema.BooleanFromBit
+  const physicalSchema = utc ? utcSchema : booleanSchema
+  const storageSchema = Schema.decodeTo(schema)(physicalSchema)
+  const encodedStorageSchema = Schema.toEncoded(storageSchema)
+  const stored = yield* physicalScalar(table, field, encodedStorageSchema.ast)
+  return { storageSchema, encodedStorageSchema, storage: stored }
+})
 
 type CompiledField = Readonly<{
   name: string
@@ -852,20 +843,18 @@ const compileTable = Effect.fn("Table.compile")(function* <
 
     const sourceField = Option.fromNullishOr(schema.fields[property.name])
     const fieldSchema = Option.getOrThrow(sourceField)
-    const storageSchema = yield* storageSchemaFor(name, property.name, fieldSchema)
-    const encodedStorageSchema = Schema.toEncoded(storageSchema)
-    const storage = yield* physicalScalar(name, property.name, encodedStorageSchema.ast)
+    const storage = yield* storageFieldFor(name, property.name, fieldSchema)
 
     return {
       name: property.name,
-      storageSchema,
+      storageSchema: storage.storageSchema,
       orderable: orderableAst(fieldSchema.ast),
       field: TableField.make({
         name: property.name,
-        scalar: storage.scalar,
-        nullable: storage.nullable,
+        scalar: storage.storage.scalar,
+        nullable: storage.storage.nullable,
         generation: NoGeneration,
-        checks: tableChecks(encodedStorageSchema.ast),
+        checks: tableChecks(storage.encodedStorageSchema.ast, storage.storage.ast),
       }),
     } satisfies CompiledField
   })
@@ -936,7 +925,7 @@ const compileTable = Effect.fn("Table.compile")(function* <
   }
 
   const rowSchema = withImplicitIdentifier(schema)
-  const identifierStorageSchema = yield* storageSchemaFor(name, "id", rowSchema.fields.id)
+  const { storageSchema: identifierStorageSchema } = yield* storageFieldFor(name, "id", rowSchema.fields.id)
 
   const storageEntriesWithIdentifier = Array.prepend(compiledFields, {
     name: "id",

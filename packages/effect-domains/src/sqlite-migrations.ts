@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, FileSystem, flow, Function, HashMap, HashSet, Match, Option, Order, pipe, Predicate, Record, Result, Schema, Stdio, Stream, Struct } from "effect"
+import { Array, Data, Effect, Equivalence, FileSystem, flow, Function, HashMap, HashSet, Match, Option, Order, pipe, Predicate, Record, Result, Schema, Stdio, Stream, Struct } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import { SqlClient, Statement } from "effect/unstable/sql"
 import { MigrationError, SchemaStore } from "./migrations.ts"
@@ -231,6 +231,8 @@ const sortJson = (value: unknown): unknown => {
 
 const canonical = flow(JSON.stringify, JSON.parse, sortJson)
 const canonicalText = flow(canonical, JSON.stringify)
+const prettyJson = (value: unknown) => JSON.stringify(value, null, 2)
+const jsonText = flow(canonical, prettyJson, (value) => `${value}\n`)
 const snapshotEquals = Schema.toEquivalence(SqliteSchemaSnapshot)
 
 const fieldMetadataEquals = pipe(
@@ -813,106 +815,75 @@ const verifyDatabase = Effect.fn("SqliteMigrations.verifyDatabase")(function* (
   yield* verifyForeignKeys(sql)
 })
 
+const rebuildTable = Effect.fn("SqliteMigrations.rebuildTable")(function* (
+  sql: SqlClient.SqlClient,
+  rebuild: SqliteRebuildTable,
+) {
+  const temporary = `__effect_schema_${rebuild.table.name}`
+  const temporaryTable = TableSnapshot.make({ ...rebuild.table, name: temporary })
+  const columns = pipe(rebuild.copies, Array.map(flow(Struct.get("column"), quoteIdentifier)), Array.join(", "))
+  const sourceSql = (source: SqliteColumnSource) => pipe(source.source, quoteIdentifier, sql.literal)
+
+  const valueSql = (value: SqliteColumnValue) => {
+    const parameter = Statement.parameter(value.value)
+    return Statement.fragment([parameter])
+  }
+
+  const expressionSql = (expression: SqliteColumnExpression) =>
+    sql.literal(expression.expression)
+
+  const sqlFragment = (copy: SqliteColumnSource | SqliteColumnValue | SqliteColumnExpression) =>
+    pipe(
+      Match.value(copy),
+      Match.tagsExhaustive({
+        SqliteColumnSource: sourceSql,
+        SqliteColumnValue: valueSql,
+        SqliteColumnExpression: expressionSql,
+      }),
+    )
+
+  const expressions = pipe(rebuild.copies, Array.map(sqlFragment), sql.join(", ", false))
+  const quotedTemporary = quoteIdentifier(temporary)
+  const quotedSource = quoteIdentifier(rebuild.table.name)
+  const create = renderCreateTable(temporaryTable)
+  yield* applyStatement(sql, create)
+
+  yield* pipe(
+    sql`INSERT INTO ${sql.literal(quotedTemporary)} (${sql.literal(columns)}) SELECT ${expressions} FROM ${sql.literal(quotedSource)}`,
+    Effect.asVoid,
+    Effect.mapError((cause) => migrationFailure("SQLite schema operation failed", cause)),
+  )
+
+  yield* applyStatement(sql, `DROP TABLE ${quotedSource}`)
+  yield* applyStatement(sql, `ALTER TABLE ${quotedTemporary} RENAME TO ${quotedSource}`)
+})
+
 const runStep = Effect.fn("SqliteMigrations.runStep")(function* (
   sql: SqlClient.SqlClient,
   step: SqliteMigrationStep,
 ) {
-  const rebuildTable = Effect.fn("SqliteMigrations.rebuildTable")(function* (
-    rebuild: SqliteRebuildTable,
-  ) {
-    const temporary = `__effect_schema_${rebuild.table.name}`
-    const temporaryTable = TableSnapshot.make({ ...rebuild.table, name: temporary })
-    const copiedColumns = Array.map(rebuild.copies, Struct.get("column"))
-    const quotedColumns = Array.map(copiedColumns, quoteIdentifier)
-    const columns = Array.join(quotedColumns, ", ")
-
-    const sourceSql: (source: SqliteColumnSource) => ReturnType<typeof sql.literal> =
-      flow(Struct.get("source"), quoteIdentifier, sql.literal)
-
-    const sqlFragment = (
-      copy: SqliteColumnSource | SqliteColumnValue | SqliteColumnExpression,
-    ) =>
-      pipe(
-        Match.value(copy),
-        Match.tagsExhaustive({
-          SqliteColumnSource: sourceSql,
-          SqliteColumnValue: (value) => {
-            const parameter = Statement.parameter(value.value)
-            return Statement.fragment([parameter])
-          },
-          SqliteColumnExpression: (value) => sql.literal(value.expression),
-        }),
-      )
-
-    const expressionFragments = Array.map(rebuild.copies, sqlFragment)
-    const expressions = sql.join(", ", false)(expressionFragments)
-    const columnsFragment = sql.literal(columns)
-    const quotedTemporary = quoteIdentifier(temporary)
-    const temporaryFragment = sql.literal(quotedTemporary)
-    const quotedSource = quoteIdentifier(rebuild.table.name)
-    const sourceFragment = sql.literal(quotedSource)
-    const createTemporaryTable = renderCreateTable(temporaryTable)
-
-    yield* applyStatement(sql, createTemporaryTable)
-
-    const copyQuery = sql`INSERT INTO ${temporaryFragment} (${columnsFragment}) SELECT ${expressions} FROM ${sourceFragment}`
-    const copiedRows = Effect.asVoid(copyQuery)
-    const copyFailure = (cause: unknown) => migrationFailure("SQLite schema operation failed", cause)
-
-    yield* Effect.mapError(copiedRows, copyFailure)
-    yield* applyStatement(sql, `DROP TABLE ${quotedSource}`)
-    yield* applyStatement(sql, `ALTER TABLE ${quotedTemporary} RENAME TO ${quotedSource}`)
-  })
-
-  const createTable = (create: SqliteCreateTable) => {
-    const statement = renderCreateTable(create.table)
-
-    return applyStatement(sql, statement)
+  if (Predicate.isTagged(step, "SqliteRebuildTable")) {
+    return yield* rebuildTable(sql, step)
   }
 
-  const addColumn = (addition: SqliteAddColumn) => {
-    const table = quoteIdentifier(addition.table)
-    const column = renderColumn(addition.column, false)
-    const statement = `ALTER TABLE ${table} ADD COLUMN ${column}`
-
-    return applyStatement(sql, statement)
+  if (Predicate.isTagged(step, "SqliteBlockedChange")) {
+    return yield* migrationFailure(step.reason)
   }
 
-  const renameColumn = (rename: SqliteRenameColumn) => {
-    const table = quoteIdentifier(rename.table)
-    const from = quoteIdentifier(rename.from)
-    const to = quoteIdentifier(rename.to)
-    const statement = `ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`
-
-    return applyStatement(sql, statement)
-  }
-
-  const createIndex = (create: SqliteCreateIndex) => {
-    const statement = renderIndex(create.table)(create)
-    return applyStatement(sql, statement)
-  }
-
-  const dropIndex = (drop: SqliteDropIndex) => {
-    const name = quoteIdentifier(drop.name)
-    const statement = `DROP INDEX ${name}`
-
-    return applyStatement(sql, statement)
-  }
-
-  const failBlockedChange = (change: SqliteBlockedChange) => migrationFailure(change.reason)
-
-  return yield* pipe(
+  const statement = pipe(
     Match.value(step),
     Match.tagsExhaustive({
-      SqliteCreateTable: createTable,
-      SqliteAddColumn: addColumn,
-      SqliteRenameColumn: renameColumn,
-      SqliteRebuildTable: rebuildTable,
-      SqliteCreateIndex: createIndex,
-      SqliteDropIndex: dropIndex,
-      SqliteBlockedChange: failBlockedChange,
+      SqliteCreateTable: (create) => renderCreateTable(create.table),
+      SqliteAddColumn: (addition) =>
+        `ALTER TABLE ${quoteIdentifier(addition.table)} ADD COLUMN ${renderColumn(addition.column, false)}`,
+      SqliteRenameColumn: (rename) =>
+        `ALTER TABLE ${quoteIdentifier(rename.table)} RENAME COLUMN ${quoteIdentifier(rename.from)} TO ${quoteIdentifier(rename.to)}`,
+      SqliteCreateIndex: (create) => renderIndex(create.table)(create),
+      SqliteDropIndex: (drop) => `DROP INDEX ${quoteIdentifier(drop.name)}`,
     }),
   )
+
+  return yield* applyStatement(sql, statement)
 })
 
 const applyMigration = (
@@ -1127,64 +1098,50 @@ const parseSqliteRename = (input: string) => {
 
 const MigrationValueSourceSchema = Schema.fromJsonString(MigrationValueSchema)
 
-const parseSqliteBackfill = (input: string) => {
+const parseColumnIntent = (input: string) => {
   const first = input.indexOf(":")
   const second = input.indexOf(":", first + 1)
-  const missingTable = first <= 0
-  const missingColumn = second <= first + 1
-  const invalidParts = missingTable || missingColumn
+  const invalid = first <= 0 || second <= first + 1
+  if (invalid) return Option.none<readonly [string, string, string]>()
+  const parts = [input.slice(0, first), input.slice(first + 1, second), input.slice(second + 1)] as const
+  return Option.some(parts)
+}
 
-  if (invalidParts) {
-    const error = invalidIntent("--backfill", input, "table:column:JSON-value")
-    return Effect.fail(error)
+const parseSqliteBackfill = (input: string) => {
+  const parts = parseColumnIntent(input)
+
+  if (Option.isNone(parts)) {
+    return pipe(invalidIntent("--backfill", input, "table:column:JSON-value"), Effect.fail)
   }
 
-  const table = input.slice(0, first)
-  const column = input.slice(first + 1, second)
-  const valueSource = input.slice(second + 1)
-  const createBackfill = (value: string | number | null) => SqliteBackfill.make({ table, column, value })
-  const makeBackfill = flow(createBackfill, freeze)
+  const [table, column, valueSource] = parts.value
 
   return pipe(
     Schema.decodeUnknownEffect(MigrationValueSourceSchema)(valueSource),
     Effect.mapError(() => invalidIntent("--backfill", input, "table:column:JSON-value")),
-    Effect.map(makeBackfill),
+    Effect.map((value) => pipe(SqliteBackfill.make({ table, column, value }), freeze)),
   )
 }
 
 const parseSqliteTransform = (input: string) => {
-  const first = input.indexOf(":")
-  const second = input.indexOf(":", first + 1)
-  const missingTable = first <= 0
-  const missingColumn = second <= first + 1
-  const invalidParts = missingTable || missingColumn
+  const parts = pipe(
+    parseColumnIntent(input),
+    Option.filter(([, , expression]) => sqlExpressionIsValid(expression)),
+  )
 
-  if (invalidParts) {
-    const error = invalidIntent("--transform", input, "table:column:SQL-expression")
-    return Effect.fail(error)
+  if (Option.isNone(parts)) {
+    return pipe(invalidIntent("--transform", input, "table:column:SQL-expression"), Effect.fail)
   }
 
-  const table = input.slice(0, first)
-  const column = input.slice(first + 1, second)
-  const expression = input.slice(second + 1)
-  const parsedTransform = SqliteTransform.make({ table, column, expression })
-  const transform = freeze(parsedTransform)
-  const expressionIsValid = sqlExpressionIsValid(transform.expression)
-
-  if (expressionIsValid) {
-    return Effect.succeed(transform)
-  }
-
-  const error = invalidIntent("--transform", input, "table:column:SQL-expression")
-  return Effect.fail(error)
+  const [table, column, expression] = parts.value
+  return pipe(SqliteTransform.make({ table, column, expression }), freeze, Effect.succeed)
 }
 
 const writeJson = Effect.fn("SqliteMigrations.writeJson")(function* (
   value: unknown,
   out: Option.Option<string>,
 ) {
-  const canonicalValue = canonical(value)
-  const output = `${JSON.stringify(canonicalValue, null, 2)}\n`
+  const output = jsonText(value)
 
   if (Option.isSome(out)) {
     const fileSystem = yield* FileSystem.FileSystem
@@ -1192,61 +1149,39 @@ const writeJson = Effect.fn("SqliteMigrations.writeJson")(function* (
   }
 
   const stdio = yield* Stdio.Stdio
-  const stream = Stream.make(output)
   const stdout = stdio.stdout()
-  return yield* Stream.run(stream, stdout)
+  return yield* pipe(Stream.make(output), Stream.run(stdout))
 })
 
-class ColumnFieldSource extends Schema.TaggedClass<ColumnFieldSource>()(
-  "Column",
-  { field: TableField },
-) {}
 
-class TransformFieldSource extends Schema.TaggedClass<TransformFieldSource>()(
-  "Transform",
-  { intent: SqliteTransform },
-) {}
+type FieldSource = Data.TaggedEnum<{
+  Column: { readonly field: TableField }
+  Transform: { readonly intent: SqliteTransform }
+  Backfill: { readonly intent: SqliteBackfill }
+  Nullable: {}
+  Blocked: {}
+}>
 
-class BackfillFieldSource extends Schema.TaggedClass<BackfillFieldSource>()(
-  "Backfill",
-  { intent: SqliteBackfill },
-) {}
+const FieldSource = Data.taggedEnum<FieldSource>()
+type ColumnFieldSource = Extract<FieldSource, { readonly _tag: "Column" }>
+type TransformFieldSource = Extract<FieldSource, { readonly _tag: "Transform" }>
+type BackfillFieldSource = Extract<FieldSource, { readonly _tag: "Backfill" }>
 
-class NullableFieldSource extends Schema.TaggedClass<NullableFieldSource>()("Nullable", {}) {}
-class BlockedFieldSource extends Schema.TaggedClass<BlockedFieldSource>()("Blocked", {}) {}
+class FieldPlan extends Data.Class<{
+  readonly target: TableField
+  readonly sourceField: Option.Option<TableField>
+  readonly valueSource: FieldSource
+  readonly errors: ReadonlyArray<string>
+  readonly usedRename: Option.Option<SqliteRename>
+}> {}
 
-const FieldSourceSchema = Schema.Union([
-  ColumnFieldSource,
-  TransformFieldSource,
-  BackfillFieldSource,
-  NullableFieldSource,
-  BlockedFieldSource,
-])
-
-const FieldPlanSourceFieldSchema = Schema.Option(TableField)
-const FieldPlanErrorsSchema = Schema.Array(Schema.String)
-const FieldPlanUsedRenameSchema = Schema.Option(SqliteRename)
-const TablePlanStepsSchema = Schema.Array(SqliteMigrationStepSchema)
-const TablePlanErrorsSchema = Schema.Array(Schema.String)
-const TablePlanUsedRenamesSchema = Schema.Array(SqliteRename)
-const TablePlanUsedBackfillsSchema = Schema.Array(SqliteBackfill)
-const TablePlanUsedTransformsSchema = Schema.Array(SqliteTransform)
-
-class FieldPlan extends Schema.Class<FieldPlan>("FieldPlan")({
-  target: TableField,
-  sourceField: FieldPlanSourceFieldSchema,
-  valueSource: FieldSourceSchema,
-  errors: FieldPlanErrorsSchema,
-  usedRename: FieldPlanUsedRenameSchema,
-}) {}
-
-class TablePlan extends Schema.Class<TablePlan>("TablePlan")({
-  steps: TablePlanStepsSchema,
-  errors: TablePlanErrorsSchema,
-  usedRenames: TablePlanUsedRenamesSchema,
-  usedBackfills: TablePlanUsedBackfillsSchema,
-  usedTransforms: TablePlanUsedTransformsSchema,
-}) {}
+class TablePlan extends Data.Class<{
+  readonly steps: ReadonlyArray<SqliteMigrationStep>
+  readonly errors: ReadonlyArray<string>
+  readonly usedRenames: ReadonlyArray<SqliteRename>
+  readonly usedBackfills: ReadonlyArray<SqliteBackfill>
+  readonly usedTransforms: ReadonlyArray<SqliteTransform>
+}> {}
 
 const interactingRenamesRequireRebuild = (renames: ReadonlyArray<SqliteRename>) => {
   const isEffectiveRename = (rename: SqliteRename) =>
@@ -1286,9 +1221,10 @@ const planSqliteMigration = (input: SqliteMigrationPlanningConfig) => {
 
     const createTablePlan = (): TablePlan => {
       const creation = SqliteCreateTable.make({ table: target })
+      const steps = [freeze(creation)]
 
-      return TablePlan.make({
-        steps: [freeze(creation)],
+      return new TablePlan({
+        steps,
         errors: [],
         usedRenames: [],
         usedBackfills: [],
@@ -1332,18 +1268,18 @@ const planSqliteMigration = (input: SqliteMigrationPlanningConfig) => {
         const backfillErrors = requiresBackfill ? [`field ${target.name}.${targetField.name} requires an explicit backfill or transform`] : []
         const renameErrors = invalidRename ? [`rename source ${target.name}.${sourceName} does not exist`] : []
         const errors = [...renameErrors, ...metadataErrors, ...backfillErrors]
-        const nullableSource = NullableFieldSource.make({})
+        const nullableSource = FieldSource.Nullable()
         const useNullable = Function.constant(nullableSource)
-        const useBackfill = (intent: SqliteBackfill) => BackfillFieldSource.make({ intent })
-        const useSource = (field: TableField) => ColumnFieldSource.make({ field })
-        const useTransform = (intent: SqliteTransform) => TransformFieldSource.make({ intent })
+        const useBackfill = (intent: SqliteBackfill) => FieldSource.Backfill({ intent })
+        const useSource = (field: TableField) => FieldSource.Column({ field })
+        const useTransform = (intent: SqliteTransform) => FieldSource.Transform({ intent })
         const resolveSource = () => Option.match(resolvedBackfill, { onNone: useNullable, onSome: useBackfill })
         const resolveTransform = () => Option.match(sourceField, { onNone: resolveSource, onSome: useSource })
         const resolveValueSource = () => Option.match(validTransform, { onNone: resolveTransform, onSome: useTransform })
         const hasErrors = !Equivalence.strictEqual<number>()(errors.length, 0)
-        const valueSource = hasErrors ? BlockedFieldSource.make({}) : resolveValueSource()
+        const valueSource = hasErrors ? FieldSource.Blocked() : resolveValueSource()
         const usedRename = invalidRename ? Option.none<SqliteRename>() : rename
-        return FieldPlan.make({ target: targetField, sourceField, valueSource, errors, usedRename })
+        return new FieldPlan({ target: targetField, sourceField, valueSource, errors, usedRename })
       }
 
       const fieldPlans = Array.map(target.fields, planField)
@@ -1478,7 +1414,7 @@ const planSqliteMigration = (input: SqliteMigrationPlanningConfig) => {
       const fieldPlanErrors = Array.flatMap(fieldPlans, Struct.get("errors"))
       const errors = [...identifierErrors, ...fieldPlanErrors, ...retainedErrors]
 
-      return TablePlan.make({
+      return new TablePlan({
         steps,
         errors,
         usedRenames,
@@ -1637,6 +1573,7 @@ const planSqliteMigration = (input: SqliteMigrationPlanningConfig) => {
     return matchingSource ? [] : [freeze(target)]
   }
 
+
   const drops = Array.flatMap(sourceIndexes, dropForSourceIndex)
   const creates = Array.flatMap(targetIndexes, createForTargetIndex)
   const blockedSteps = Array.map(errors, blocked)
@@ -1705,6 +1642,7 @@ const sqliteMigrationsCommand = (
     const messageLines = Array.prepend(reasons, "Migration plan contains unresolved changes")
     return Array.join(messageLines, "\n")
   }
+
 
   const planCommand = Effect.fn("SqliteMigrations.planCommand")(function* (
     { from, id, rename, backfill, transform, out },
