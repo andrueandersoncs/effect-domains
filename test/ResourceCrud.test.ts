@@ -1,4 +1,4 @@
-import { Authorization } from "../src/authorization.ts"
+import { Authorization, AuthorizationSubject } from "../src/authorization.ts"
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
 import { identifier } from "../src/domain.ts"
@@ -9,6 +9,7 @@ import { prepareTables } from "./prepare-tables.ts"
 import { NotesResource } from "../examples/service-codec/resources.ts"
 import { StoragePrefix } from "../examples/service-codec/storage.ts"
 import { NoteIdSchema } from "../examples/service-codec/domain.ts"
+import { ExampleSubjectSchema } from "../examples/authentication.ts"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
@@ -24,6 +25,7 @@ interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
 const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, list: { filter: ["completed"], order: [{ field: "title" }], limit: 1 }, operations: [] })
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const todoIdentifier = Struct.get<PagedTodo, "id">("id")
+const noteAuthor = ExampleSubjectSchema.make({ userId: "codec-author", tenantId: "codec-test", roles: ["editor"] })
 
 const generatedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([NotesResource.table, GeneratedTodos.table])
@@ -33,7 +35,7 @@ const generatedCrudProgram = Effect.gen(function* () {
     text: "visible",
   })
 
-  const note = yield* NotesResource.repository.create(noteInput)
+  const note = yield* pipe(NotesResource.repository.create(noteInput), Effect.provideService(AuthorizationSubject, noteAuthor))
   const database = yield* SqlClient.SqlClient
 
   const rows = yield* database<Readonly<{ readonly text: string }>>`

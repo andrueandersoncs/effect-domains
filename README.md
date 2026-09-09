@@ -137,7 +137,7 @@ bun run reservations reservations.get --help
 
 The example is loopback-only and unauthenticated. Its [guide](examples/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
-All seven [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. Examples cover minimal generated CRUD, configured list/patch policy, authored queries, service-dependent storage codecs, a process-local persisted counter, explicit schema evolution, and reservation policy.
+All seven [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](examples/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](examples/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](examples/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, a process-local persisted counter, explicit schema evolution, and reservation policy.
 
 ## Escape hatches and documentation
 

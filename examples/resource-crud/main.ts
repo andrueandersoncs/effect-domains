@@ -1,6 +1,7 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
+import { ExampleAuthentication } from "../authentication.ts"
 import { ResourceCrudApplication } from "./application.ts"
 
 const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
@@ -9,7 +10,7 @@ const filename = Option.none()
 
 const program = ApplicationBun.run(ResourceCrudApplication, {
   database: { manifest, filename },
-  services: Layer.empty,
+  services: ExampleAuthentication,
   initialize: Effect.void,
 })
 

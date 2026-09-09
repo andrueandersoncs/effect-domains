@@ -8,13 +8,13 @@ Each example is a complete, loopback-only application with a persistent SQLite d
 | --- | --- | --- |
 | [basic-crud](basic-crud/README.md) | Minimal book CRUD generated from one resource declaration | `BASIC_CRUD_DB` |
 | [authored-sql](#authored-sql) | Custom book contracts and authored SQL with Effect `SqlSchema` | `AUTHORED_SQL_DB` |
-| [resource-crud](resource-crud/README.md) | Todo CRUD generated from a resource, including page/list and patch policies | `RESOURCE_CRUD_DB` |
-| [service-codec](service-codec/README.md) | Generated note CRUD with a runtime-service-dependent storage codec | `SERVICE_CODEC_DB` |
+| [resource-crud](resource-crud/README.md) | Tenant/owner todo policies, completion locks, pagination, and patch | `RESOURCE_CRUD_DB` |
+| [service-codec](service-codec/README.md) | Reader/editor/admin note permissions alongside a service-dependent storage codec | `SERVICE_CODEC_DB` |
 | [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
 | [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
 
-The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); [resource-crud](resource-crud/README.md) adds defaults, pagination, and patch policy. [Authored SQL](#authored-sql) demonstrates the escape hatch.
+The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); compare [tenant/owner todo rules](resource-crud/resources.ts) with [role-based note rules](service-codec/resources.ts) to see custom authorization. [Authored SQL](#authored-sql) demonstrates the privileged escape hatch.
 
 ## Shared runtime
 
@@ -36,7 +36,34 @@ PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
 BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
 ```
 
-Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. There is no authentication. These are runnable examples, not production deployment templates.
+Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. Todo and note RPCs require the demo credentials below; the other five examples remain explicitly public. These are runnable loopback examples, not production deployment templates.
+
+### Demo authentication
+
+[`authentication.ts`](authentication.ts) supplies one small `Authenticator` layer to the todo and note applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
+
+| Token | User | Tenant | Roles |
+| --- | --- | --- | --- |
+| `alice-demo` | `alice` | `acme` | `editor` |
+| `bob-demo` | `bob` | `acme` | `reader` |
+| `admin-demo` | `admin` | `acme` | `admin` |
+| `outsider-demo` | `alice` | `other` | `editor` |
+
+These are deliberately public credentials. Anyone who knows a token can impersonate that demo identity; there is no login, expiry, revocation, or production identity provider. Keep these servers on loopback and replace the authenticator for a real application.
+
+Set the token on the **client**, not the server:
+
+```bash
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.create \
+  --tenant-id acme --owner-id alice --title "Ship authorization examples"
+SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --id example-note --text "Shared notes"
+```
+
+Todo policies combine tenant scope, ownership, current completion state, immutable ownership, and admin-only removal. `outsider-demo` deliberately has Alice's user ID in another tenant, demonstrating that ownership alone does not grant access. Existing todos migrate to tenant `acme`, owner `alice`; this is explicit demo backfill intent, not an inferred ownership rule.
+
+Notes instead form one global shared collection: readers can read, editors can create/update, and admins can also remove. Tenant claims do not partition this collection. The storage codec remains independent of authorization. Follow each guide for successful and denied operations.
+
+Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. Generated repositories enforce it before SQL pagination and transactionally around mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
 
 ### Shared structure
 
@@ -91,8 +118,8 @@ The [reservation guide](reservations/README.md) covers the business-policy slice
 Scalar payload fields become kebab-case flags. Nested payload fields use their path, so `filter.completed` is `--filter-completed` and `patch.title` is `--patch-title`. Explicit false booleans are accepted as `--enabled false`; finite numeric fields have native flags, and use `--amount=-1` for negative numeric arguments. `--input-json` accepts the canonical JSON payload, including shapes that cannot be represented by native flags. It cannot be mixed with field flags.
 
 ```bash
-bun run resource-crud todos.list --filter-completed false --limit 10
-bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Ship docs"
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list --filter-completed false --limit 10
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Ship docs"
 bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 ```
 
@@ -134,6 +161,8 @@ The planner emits blocked changes with their reasons instead of guessing drops, 
 
 - [`ApplicationBun`](../src/application-bun.ts): shared HTTP server and CLI runtime.
 - [`Resource`](../src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
+- [`Authorization`](../src/authorization.ts): typed resource policy declarations and evaluator.
+- [`Authenticator`](../src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](authentication.ts).
 - [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
 - [`SqliteMigrations`](../src/sqlite-migrations.ts): frozen snapshots, migration planning, and execution.
