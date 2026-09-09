@@ -1,5 +1,5 @@
 import { Array, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
-import { Table, TableField, TableCheckSchema } from "./table.ts"
+import { Table, TableField, TableCheckSchema, TableRelations } from "./table.ts"
 import type { Resource } from "./resource.ts"
 import { Policy, type Operand } from "./policy.ts"
 import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
@@ -28,11 +28,13 @@ class PhysicalField extends Schema.Class<PhysicalField>("PhysicalField")({
 }) {}
 
 const PhysicalFieldsSchema = Schema.Array(PhysicalField)
+const PhysicalRelationsSchema = Schema.optionalKey(TableRelations)
 
 class PhysicalTable extends Schema.Class<PhysicalTable>("PhysicalTable")({
   name: Schema.String,
   identifier: Schema.String,
   fields: PhysicalFieldsSchema,
+  relations: PhysicalRelationsSchema,
 }) {}
 
 const SubjectBindingsSchema = Schema.Record(Schema.String, Schema.String)
@@ -106,8 +108,10 @@ const physicalField = (field: TableField) =>
 
 const physicalTable = (table: Table) => {
   const fields = Array.map(table.fields, physicalField)
+  const relations = Option.fromNullishOr(table.relations)
+  const declared = Record.getSomes({ relations })
 
-  return PhysicalTable.make({ name: table.name, identifier: table.identifier, fields })
+  return PhysicalTable.make({ name: table.name, identifier: table.identifier, fields, ...declared })
 }
 
 const renderPolicies = (rules: Readonly<Partial<Record<string, Policy>>>) => pipe(rules, Record.map(Option.fromNullishOr), Record.getSomes, Record.map(Policy.render))

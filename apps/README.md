@@ -13,6 +13,7 @@ Each application is a runnable Bun workspace package. The private repository roo
 | [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
 | [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
+| [orders-invoices](#orders-and-invoices) | Tenant-scoped relational billing, authenticated transactions, and optimistic versions | `ORDERS_INVOICES_DB` |
 | [durable-workflows](#durable-workflows) | Approval/export workflow with durable timing and queue-backed file creation | `DURABLE_WORKFLOWS_DB`, `DURABLE_WORKFLOWS_EXECUTION_DB` |
 | [durable-reminders](#durable-reminders) | Persisted per-recipient scheduling, receipt projection, and cron retention | `DURABLE_REMINDERS_DB`, `DURABLE_REMINDERS_EXECUTION_DB` |
 | [mcp-server](#mcp-client-walkthrough) | Generated book tools consumed by an official MCP SDK client | `MCP_SERVER_DB` |
@@ -48,7 +49,7 @@ Client settings follow the database naming convention: `<APPLICATION_NAME>_URL` 
 
 ### Demo authentication
 
-[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo, note, and durable-reminder applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
+[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo, note, orders/invoices, and durable-reminder applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
 
 | Token | User | Tenant | Roles |
 | --- | --- | --- | --- |
@@ -146,6 +147,45 @@ bun run authored-sql inspect books.create
 ## Reservation application
 
 The [reservation guide](reservations/README.md) covers the business-policy slice: generated read operations alongside explicit transactional reserve, confirm, and release commands. It includes the stock walkthrough, transition errors, restart behavior, and historical timestamp migration. The [validation record](../docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
+
+## Orders and invoices
+
+[`orders-invoices`](orders-invoices/) exercises a second business-policy domain across orders, order lines, and invoices. [Resource configuration](orders-invoices/resources.ts) declares tenant-local unique numbers, composite tenant/order foreign keys, one invoice per order, and tenant/status indexes. Canonical [schemas](orders-invoices/domain.ts) remain free of storage and authorization declarations. Generated `get`/`list` operations are read-only and tenant-scoped; [authored commands](orders-invoices/sqlite.ts) own every mutation, transaction, role check, and expected-version guard.
+
+Start the server:
+
+```bash
+bun run orders-invoices:server
+```
+
+In another terminal:
+
+```bash
+export ORDERS_INVOICES_TOKEN=alice-demo
+bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'
+```
+
+Copy its returned `id` into `ORDER_ID`. A new order is draft at version 1:
+
+```bash
+bun run orders-invoices billing.addLine --input-json "{\"orderId\":\"$ORDER_ID\",\"expectedVersion\":1,\"lineNumber\":1,\"description\":\"Consulting\",\"quantity\":2,\"unitAmountMinor\":1250}"
+bun run orders-invoices billing.issueInvoice --input-json "{\"orderId\":\"$ORDER_ID\",\"expectedVersion\":2,\"number\":\"INV-1\"}"
+```
+
+The line advances the order to version 2 and total 2500. Issuing the invoice atomically marks the order invoiced at version 3 and creates an issued invoice at version 1. Copy the invoice's returned `id` into `INVOICE_ID`:
+
+```bash
+bun run orders-invoices billing.payInvoice --input-json "{\"invoiceId\":\"$INVOICE_ID\",\"expectedVersion\":1}"
+bun run orders-invoices billing.getOrder --input-json "{\"orderId\":\"$ORDER_ID\"}"
+ORDERS_INVOICES_TOKEN=bob-demo bun run orders-invoices orders.get --id "$ORDER_ID"
+bun run orders-invoices inspect
+```
+
+The paid invoice has version 2. Repeating a mutation with its old version returns `VersionConflict`; re-paying the current paid version returns `InvalidInvoiceTransition`. Readers can query but cannot mutate. Another tenant can reuse `SO-1` or `INV-1` but cannot access or attach a line to this order. Foreign keys also enforce the tenant boundary for privileged SQL.
+
+Amounts are checked safe-integer minor units. Empty orders cannot be invoiced; duplicate numbers, duplicate line numbers, arithmetic overflow, invalid transitions, and stale writes have declared errors. Payment records a local transition, not a payment-provider call. Taxes, currencies, credit notes, production identity, and request-idempotent retries are not implemented; fetch the current summary and make an explicit decision after a conflict.
+
+`ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial manifest](orders-invoices/migrations/manifest.json), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
 
 ## Durable workflows
 
@@ -332,7 +372,7 @@ A transform runs in the `SELECT` over the physical **from** table, before rename
 
 Rename chains and cycles also copy original source columns through a transactional rebuild. The todo, document, and reservation manifests append `003_schema_string_checks` to remove previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas; historical artifacts are not rewritten.
 
-The planner emits blocked changes with their reasons instead of guessing drops, renames, or required values. The runtime checks manifest history and actual table definitions, applies rebuilds transactionally, and refuses untracked tables, indexes, and triggers. Relationships, indexes, destructive drops, and arbitrary custom table objects are outside the current migration model.
+The planner emits blocked changes with their reasons instead of guessing drops, renames, or required values. The runtime checks manifest history and actual table definitions, applies rebuilds transactionally, and refuses untracked tables, indexes, and triggers. Declared unique/foreign-key changes rebuild tables; declared secondary indexes have explicit create/drop steps. Existing data must satisfy the target constraints or the migration rolls back. Destructive table/column drops, arbitrary custom objects, cascade policy, and inferred joins remain outside the current model. ([Relational contract](../docs/wiki/tables-and-queries.md#relational-storage-declarations))
 
 ## Framework code map
 

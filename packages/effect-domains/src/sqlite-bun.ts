@@ -1,5 +1,5 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
+import { Array, Context, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
 import { SqlClient, SqlError, type Statement } from "effect/unstable/sql"
 
 import {
@@ -242,6 +242,15 @@ const migrationStore = (
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
 ) => (sql: SqlClient.SqlClient) => makeMigrationStore(sql, options.migrations)
 
+const enableForeignKeys = (context: Context.Context<SqlClient.SqlClient>) => {
+  const sql = Context.get(context, SqlClient.SqlClient)
+
+  return pipe(
+    sql`PRAGMA foreign_keys = ON`,
+    Effect.asVoid,
+  )
+}
+
 const sqlClient = (
   filename: string,
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
@@ -251,7 +260,11 @@ const sqlClient = (
   const repositoryLayer = Layer.effect(RepositoryStore, repositoryStore)
   const schemaStoreLayer = Layer.effect(SchemaStore, migrationStoreEffect)
   const stores = Layer.mergeAll(repositoryLayer, schemaStoreLayer, values)
-  const database = SqliteClient.layer({ filename })
+
+  const database = pipe(
+    SqliteClient.layer({ filename }),
+    Layer.tap(enableForeignKeys),
+  )
 
   return Layer.provideMerge(stores, database)
 }

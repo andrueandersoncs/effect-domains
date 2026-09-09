@@ -18,6 +18,8 @@
     "check": "bun run --workspaces check && tsc --noEmit",
     "lint": "bun run --workspaces lint && better-typescript",
     "test": "bun --bun vitest run",
+    "orders-invoices": "bun run apps/orders-invoices/main.ts",
+    "orders-invoices:server": "bun run apps/orders-invoices/main.ts serve",
     "mcp-server": "bun run apps/mcp-server/main.ts",
     "mcp-server:server": "bun run apps/mcp-server/main.ts serve",
     "mcp-server:client": "bun run apps/mcp-server/client.ts",

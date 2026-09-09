@@ -50,6 +50,9 @@ const make = <
       return HashSet.add(names, table.name)
     }))
 
+    const snapshots = Array.map(tables, Table.snapshot)
+    yield* Table.validateRelations(snapshots)
+
     const proceduresForGroup = (group: AnyCommandBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
     const procedures = Array.flatMap(groups, proceduresForGroup)
 

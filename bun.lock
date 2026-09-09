@@ -73,6 +73,14 @@
         "effect-domains": "workspace:*",
       },
     },
+    "apps/orders-invoices": {
+      "name": "@effect-domains/example-orders-invoices",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
     "apps/persisted-ref": {
       "name": "@effect-domains/example-persisted-ref",
       "dependencies": {
@@ -154,6 +162,8 @@
     "@effect-domains/example-mcp-server": ["@effect-domains/example-mcp-server@workspace:apps/mcp-server"],
 
     "@effect-domains/example-migration-lifecycle": ["@effect-domains/example-migration-lifecycle@workspace:apps/migration-lifecycle"],
+
+    "@effect-domains/example-orders-invoices": ["@effect-domains/example-orders-invoices@workspace:apps/orders-invoices"],
 
     "@effect-domains/example-persisted-ref": ["@effect-domains/example-persisted-ref@workspace:apps/persisted-ref"],
 

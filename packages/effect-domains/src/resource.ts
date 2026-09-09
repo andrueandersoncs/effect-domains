@@ -1,13 +1,12 @@
 import { Array, Effect, Equivalence, flow, Function, Layer, Option, Order, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RepositoryAccess, RepositoryError, RepositoryListCursor, RepositoryListOrder, RepositoryListQuery, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
-import { Table, type TableField, withImplicitIdentifier } from "./table.ts"
+import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
 import { Value } from "./value.ts"
 import type { AnyCommandBundle } from "./commands.ts"
 import { DomainIdentifier } from "./domain.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
-
 const EmptyPayloadSchema = Schema.Struct({})
 interface EmptyPayload extends Schema.Schema.Type<typeof EmptyPayloadSchema> {}
 const PositiveLimitCheck = Schema.isGreaterThan(0)
@@ -141,6 +140,7 @@ export const Resource = {
     const List extends ListPolicy<S> = never,
   >(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
     storage: Storage
+    relations: TableRelationsInput<TableFieldName<Storage>>
     create: Creation
     list: List
   }>> & CompatibleStorage<S, Storage>) {
@@ -149,7 +149,13 @@ export const Resource = {
     type CanonicalKey = CanonicalTable["identifier"]
     type CanonicalId = CanonicalTable["identifierSchema"]["Type"]
     const storageSchema = options.storage ?? options.schema
-    const table = Table.make({ name: options.name, schema: storageSchema })
+
+    const table = Table.make<Name, S | Storage>({
+      name: options.name,
+      schema: storageSchema,
+      relations: options.relations as TableRelationsInput<TableFieldName<S | Storage>>,
+    })
+
     const creation = Option.fromNullishOr(options.create)
     const listPolicy = Option.fromNullishOr(options.list)
     const defaults: Readonly<Record<string, unknown>> = options.create?.defaults ?? Record.empty()

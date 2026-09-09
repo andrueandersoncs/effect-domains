@@ -1,5 +1,5 @@
 import { Array, Equivalence, Match, Option, Predicate, Schema, pipe } from "effect"
-import type { TableCheck, TableField, TableSnapshot } from "./table.ts"
+import type { TableCheck, TableField, TableForeignKey, TableIndex, TableSnapshot, TableUnique } from "./table.ts"
 
 const quoteIdentifier = (identifier: string) =>
   `"${identifier.replaceAll('"', '""')}"`
@@ -93,6 +93,15 @@ export const renderColumn = (
   return `${quoteIdentifier(field.name)} ${columnType(field.scalar)}${primaryKeyConstraint}${nullability}${generated} ${Array.join(checks, " ")}`
 }
 
+const renderFields = (fields: ReadonlyArray<string>) =>
+  pipe(fields, Array.map(quoteIdentifier), Array.join(", "))
+
+const renderUnique = (constraint: TableUnique) =>
+  `CONSTRAINT ${quoteIdentifier(constraint.name)} UNIQUE (${renderFields(constraint.fields)})`
+
+const renderForeignKey = (constraint: TableForeignKey) =>
+  `CONSTRAINT ${quoteIdentifier(constraint.name)} FOREIGN KEY (${renderFields(constraint.fields)}) REFERENCES ${quoteIdentifier(constraint.references.table)} (${renderFields(constraint.references.fields)})`
+
 export const renderCreateTable = (table: TableSnapshot) => {
   const identifierEquals = Equivalence.strictEqual<string>()
 
@@ -102,6 +111,15 @@ export const renderCreateTable = (table: TableSnapshot) => {
   }
 
   const columns = Array.map(table.fields, renderTableColumn)
+  const unique = Array.map(table.relations?.unique ?? [], renderUnique)
+  const foreignKeys = Array.map(table.relations?.foreignKeys ?? [], renderForeignKey)
+  const definitions = [...columns, ...unique, ...foreignKeys]
 
-  return `CREATE TABLE ${quoteIdentifier(table.name)} (${Array.join(columns, ", ")})`
+  return `CREATE TABLE ${quoteIdentifier(table.name)} (${Array.join(definitions, ", ")})`
 }
+
+const renderIndex = (table: string) => (index: TableIndex) =>
+  `CREATE INDEX ${quoteIdentifier(index.name)} ON ${quoteIdentifier(table)} (${renderFields(index.fields)})`
+
+export const renderCreateIndexes = (table: TableSnapshot): readonly string[] =>
+  Array.map(table.relations?.indexes ?? [], renderIndex(table.name))
