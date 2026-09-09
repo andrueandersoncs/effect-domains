@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
 import {
   Array,
   Context,
@@ -15,6 +16,7 @@ import {
   SchemaGetter,
   Struct,
 } from "effect"
+
 import { identifier } from "effect-domains/domain"
 import { PersistedRef } from "effect-domains/persisted-ref"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -286,6 +288,7 @@ describe("Bun SQLite tables and authored operations", () => {
           next: typeof UserSchema.Type,
         ) {
           const updated = yield* UpdateUser(next)
+
           if (Option.isNone(updated)) {
             return yield* Effect.fail({
               _tag: "PersistedUserNotFound" as const,
@@ -323,6 +326,7 @@ describe("Bun SQLite tables and authored operations", () => {
 
     expect(created.name).toBe(article.name)
     expect(created.rating).toBe(article.rating)
+
     expect(created.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     )

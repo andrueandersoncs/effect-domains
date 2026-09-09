@@ -1,17 +1,15 @@
-import { Array, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
+import { Array, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
 import { Table, TableField, TableCheckSchema } from "./table.ts"
 import type { Resource } from "./resource.ts"
 import { Policy, type Operand } from "./policy.ts"
 import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
-
-type InspectableProcedure = UnaryRpcProcedure
 
 type InspectableApplication = Readonly<{
   name: string
   resources: ReadonlyArray<Resource>
   group: Readonly<{
     requests: Readonly<{
-      values: () => Iterable<InspectableProcedure>
+      values: () => Iterable<UnaryRpcProcedure>
     }>
   }>
 }>
@@ -39,6 +37,7 @@ class PhysicalTable extends Schema.Class<PhysicalTable>("PhysicalTable")({
 
 const SubjectBindingsSchema = Schema.Record(Schema.String, Schema.String)
 const CreationSchema = Schema.Struct({ defaults: Schema.Unknown, generated: Schema.Unknown, fromSubject: SubjectBindingsSchema })
+interface Creation extends Schema.Schema.Type<typeof CreationSchema> {}
 
 const StorageSchema = Schema.Struct({
   schema: Schema.Unknown,
@@ -47,6 +46,8 @@ const StorageSchema = Schema.Struct({
   row: Schema.Unknown,
   stored: Schema.Unknown,
 })
+
+interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
 
 const OperationNamesSchema = Schema.Array(Schema.String)
 
@@ -80,8 +81,11 @@ class OperationInspection extends Schema.Class<OperationInspection>("OperationIn
 const OperationsSchema = Schema.Array(OperationInspection)
 const ResourcesSchema = Schema.Array(ResourceInspection)
 const CommandsSchema = Schema.Struct({ local: OperationNamesSchema, remote: OperationNamesSchema })
+interface Commands extends Schema.Schema.Type<typeof CommandsSchema> {}
 const OpaqueRuntimeSchema = Schema.Struct({ opaque: Schema.String })
+interface OpaqueRuntime extends Schema.Schema.Type<typeof OpaqueRuntimeSchema> {}
 const RuntimeSchema = Schema.Struct({ services: OpaqueRuntimeSchema, transactions: OpaqueRuntimeSchema })
+interface Runtime extends Schema.Schema.Type<typeof RuntimeSchema> {}
 
 class ApplicationInspection extends Schema.Class<ApplicationInspection>("ApplicationInspection")({
   application: Schema.String,
@@ -131,11 +135,11 @@ const resource = (definition: Resource) => {
   const fromSubject = Option.match(definition.create, {
     onNone: Record.empty,
     onSome: (creation) => {
-      const bindings = creation.fromSubject ?? Record.empty()
-      const subjectBindings = bindings as Readonly<Record<string, Extract<Operand, { readonly _tag: "SubjectField" }>>>
+      const subjectBindings = (creation.fromSubject ?? Record.empty()) as Readonly<Record<string, Extract<Operand, { readonly _tag: "SubjectField" }>>>
       return Record.map(subjectBindings, (binding) => `subject.${binding.field}`)
     },
   })
+
   const creation = CreationSchema.make({ defaults, generated, fromSubject })
   const authorization = inspectAuthorization(definition.authorization)
 
@@ -150,26 +154,32 @@ const resource = (definition: Resource) => {
   })
 }
 
-const operation = (procedure: InspectableProcedure) => {
-  const contract = Option.getOrElse(
-    compileUnaryRpc(procedure),
-    () => {
-      throw new Error(`Application inspection supports only unary RPC procedures: ${procedure._tag}`)
-    },
+class InspectionError extends Schema.TaggedError<InspectionError>()("ApplicationInspectionError", {
+  reason: Schema.String,
+}) {}
+
+const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: UnaryRpcProcedure) {
+  const compiled = compileUnaryRpc(procedure)
+
+  const contract = yield* Effect.fromOption(
+    compiled,
+    () => InspectionError.make({ reason: `Application inspection supports only unary RPC procedures: ${procedure._tag}` }),
   )
-  return OperationInspection.make({
-    name: contract.tag,
-    input: schemaDocument(contract.payload),
-    output: schemaDocument(contract.success),
-    error: schemaDocument(contract.error),
-  })
-}
+
+  const input = schemaDocument(contract.payload)
+  const output = schemaDocument(contract.success)
+  const error = schemaDocument(contract.error)
+  return OperationInspection.make({ name: contract.tag, input, output, error })
+})
+
+const operation = flow(inspectOperation, Effect.runSync)
+const sameName = Equivalence.strictEqual<string>()
 
 const describe = <App extends InspectableApplication>(application: App, selected: Option.Option<string> = Option.none()) => {
   const operations = pipe(application.group.requests.values(), Array.fromIterable, Array.map(operation))
 
   const matching = (name: string) => {
-    const named = (entry: OperationInspection) => (entry.name === name)
+    const named = (entry: OperationInspection) => sameName(entry.name, name)
     return Array.filter(operations, named)
   }
 

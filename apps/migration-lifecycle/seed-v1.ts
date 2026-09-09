@@ -1,4 +1,5 @@
 import { BunRuntime } from "@effect/platform-bun"
+
 import {
   Array,
   Config,
@@ -8,6 +9,7 @@ import {
   Struct,
   pipe,
 } from "effect"
+
 import { SchemaStore } from "effect-domains/migrations"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { LegacyDocumentsResource } from "./legacy.ts"

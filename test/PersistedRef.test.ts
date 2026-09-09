@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+
 import {
   Array,
   Effect,
@@ -7,6 +8,7 @@ import {
   Ref,
   Schema,
 } from "effect"
+
 import { PersistedRef } from "effect-domains/persisted-ref"
 
 describe("PersistedRef", () => {

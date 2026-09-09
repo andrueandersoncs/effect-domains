@@ -2,12 +2,14 @@ import { Schema } from "effect"
 import { RpcGroup } from "effect/unstable/rpc"
 import { Commands } from "effect-domains/commands"
 import { BookSchema } from "@effect-domains/example-support/book"
+
 import {
   BookIdentifierInputSchema,
   BookNotFound,
   BookPersistenceError,
   ListBooksInputSchema,
 } from "./domain.ts"
+
 import { BookResource } from "./resources.ts"
 
 const requiredBookErrorsSchema = Schema.Union([

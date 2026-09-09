@@ -1,4 +1,4 @@
-import { Option, Schema } from "effect"
+import { Array, Option, Schema, Struct } from "effect"
 import { RpcSchema } from "effect/unstable/rpc"
 
 export interface UnaryRpcProcedure {
@@ -9,7 +9,7 @@ export interface UnaryRpcProcedure {
   readonly middlewares: Iterable<Readonly<{ readonly error: Schema.Constraint }>>
 }
 
-export interface UnaryRpcContract {
+interface UnaryRpcContract {
   readonly tag: string
   readonly payload: Schema.Constraint
   readonly success: Schema.Constraint
@@ -19,12 +19,11 @@ export interface UnaryRpcContract {
 export const compileUnaryRpc = <Procedure extends UnaryRpcProcedure>(procedure: Procedure): Option.Option<UnaryRpcContract> => {
   if (RpcSchema.isStreamSchema(procedure.successSchema)) return Option.none()
 
-  const errors: [Schema.Constraint, ...Array<Schema.Constraint>] = [procedure.errorSchema]
-  for (const middleware of procedure.middlewares) errors.push(middleware.error)
-  return Option.some({
-    tag: procedure._tag,
-    payload: Schema.toCodecJson(procedure.payloadSchema),
-    success: Schema.toCodecJson(procedure.successSchema),
-    error: Schema.toCodecJson(Schema.Union(errors)),
-  })
+  const middlewares = Array.fromIterable(procedure.middlewares)
+  const middlewareErrors = Array.map(middlewares, Struct.get("error"))
+  const errors = [procedure.errorSchema, ...middlewareErrors] as const
+  const payloadSchema = Schema.toCodecJson(procedure.payloadSchema)
+  const successSchema = Schema.toCodecJson(procedure.successSchema)
+  const errorSchema = Schema.toCodecJson(Schema.Union(errors))
+  return Option.some({ tag: procedure._tag, payload: payloadSchema, success: successSchema, error: errorSchema })
 }

@@ -10,9 +10,14 @@ import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { Commands } from "effect-domains/commands"
 import { RpcMcp } from "effect-domains/rpc-mcp"
 
-type Handler = (request: Request) => Promise<Response>
 
-const send = Effect.fn("RpcMcp.testSend")(function* (handler: Handler, headers: globalThis.Headers, message: Schema.JsonObject) {
+const send = Effect.fn("RpcMcp.testSend")(function* (
+  handler: ReturnType<
+    typeof HttpRouter.toWebHandler<never, never, HttpRouter.HttpRouter, never>
+  >["handler"],
+  headers: globalThis.Headers,
+  message: Schema.JsonObject,
+) {
   const body = JSON.stringify(message)
   const request = new Request("http://localhost/mcp", { method: "POST", headers, body })
   return yield* Effect.promise(() => handler(request))
@@ -23,7 +28,11 @@ const decode = Effect.fn("RpcMcp.testDecode")(function* <S extends Schema.Constr
   return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text)
 })
 
-const openSession = Effect.fn("RpcMcp.testOpenSession")(function* (handler: Handler) {
+const openSession = Effect.fn("RpcMcp.testOpenSession")(function* (
+  handler: ReturnType<
+    typeof HttpRouter.toWebHandler<never, never, HttpRouter.HttpRouter, never>
+  >["handler"],
+) {
   const headers = new globalThis.Headers({ "content-type": "application/json", accept: "application/json, text/event-stream" })
 
   const response = yield* send(handler, headers, {
@@ -44,7 +53,15 @@ interface CallResponse extends Schema.Schema.Type<typeof CallResponseSchema> {}
 const ListResponseSchema = Schema.Struct({ result: Schema.Struct({ tools: Schema.Array(McpSchema.Tool) }) })
 interface ListResponse extends Schema.Schema.Type<typeof ListResponseSchema> {}
 
-const call = Effect.fn("RpcMcp.testCall")(function* (handler: Handler, headers: globalThis.Headers, id: number, name: string, input: Schema.Json) {
+const call = Effect.fn("RpcMcp.testCall")(function* (
+  handler: ReturnType<
+    typeof HttpRouter.toWebHandler<never, never, HttpRouter.HttpRouter, never>
+  >["handler"],
+  headers: globalThis.Headers,
+  id: number,
+  name: string,
+  input: Schema.Json,
+) {
   const response = yield* send(handler, headers, { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: { input } } })
   return yield* decode(response, CallResponseSchema)
 })

@@ -25,9 +25,11 @@ const Greeter = Commands.make({
   group: greeterRpcs,
 })
 
+const clockRpcs = RpcGroup.make(timeRpc)
+
 const Clock = Commands.make({
   name: "test/Commands/Clock",
-  group: RpcGroup.make(timeRpc),
+  group: clockRpcs,
 })
 
 const greet = Effect.fn("Greeter.greet")(function* () {
@@ -58,29 +60,43 @@ it.effect("captures command handler services and lets invocation context overrid
   return scopedProgram
 })
 
-it.effect("maps tagged invocation failures after handler finalizers", () =>
-  Effect.scoped(Effect.gen(function* () {
-    const released = yield* Ref.make(false)
-    const at = new Date("2026-01-02T03:04:05.000Z")
-    const handlers = yield* Layer.build(Clock.layer({
-      time: () =>
-        Effect.scoped(Effect.gen(function* () {
-          yield* Effect.addFinalizer(() => Ref.set(released, true))
-          return yield* HandlerFailed.make({})
-        })),
-    }, {
-      catchTags: {
-        HandlerFailed: () =>
-          Effect.gen(function* () {
-            expect(yield* Ref.get(released)).toBe(true)
-            return yield* TimeUnavailable.make({ at })
-          }),
-      },
-    }))
-    const clock = Context.get(handlers, Clock)
+const failingTime = (released: Ref.Ref<boolean>) =>
+  Effect.fn("Commands.failingTime")(function* () {
+    yield* Effect.addFinalizer(() => Ref.set(released, true))
+    return yield* HandlerFailed.make({})
+  }, Effect.scoped)
 
-    expect(yield* Effect.flip(clock.time(at))).toEqual(TimeUnavailable.make({ at }))
-  })),
+const mapHandlerFailure = Effect.fn("Commands.mapHandlerFailure")(function* (
+  released: Ref.Ref<boolean>,
+  at: Date,
+) {
+  const wasReleased = yield* Ref.get(released)
+  expect(wasReleased).toBe(true)
+  return yield* TimeUnavailable.make({ at })
+})
+
+const failureMapperFor = (released: Ref.Ref<boolean>, at: Date) =>
+  Effect.fn("Commands.mapFailure")(function* () {
+    return yield* mapHandlerFailure(released, at)
+  })
+
+const verifyFinalizerMapping = Effect.fn("Commands.verifyFinalizerMapping")(function* () {
+  const released = yield* Ref.make(false)
+  const at = new Date("2026-01-02T03:04:05.000Z")
+  const time = failingTime(released)
+  const failureMapper = failureMapperFor(released, at)
+  const catchTags = { HandlerFailed: failureMapper }
+  const clockLayer = Clock.layer({ time }, catchTags)
+  const handlers = yield* Layer.build(clockLayer)
+  const clock = Context.get(handlers, Clock)
+  const invocation = clock.time(at)
+  const rejected = yield* Effect.flip(invocation)
+  const expected = TimeUnavailable.make({ at })
+  expect(rejected).toEqual(expected)
+})
+
+it.effect("maps tagged invocation failures after handler finalizers", () =>
+  pipe(verifyFinalizerMapping(), Effect.scoped),
 )
 
 it("derives JSON codecs for transformed RPC schemas", () => {
@@ -98,5 +114,6 @@ it("derives JSON codecs for transformed RPC schemas", () => {
     _tag: "TimeUnavailable",
     at: "2026-01-02T03:04:05.000Z",
   })
+
   expect(decodedFailure).toEqual(failure)
 })

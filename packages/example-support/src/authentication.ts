@@ -1,6 +1,6 @@
 import { Effect, Layer, Option, Record, Schema, pipe } from "effect"
 import { Unauthenticated } from "effect-domains/authorization"
-import { Authenticator } from "effect-domains/authorization-rpc"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { Headers } from "effect/unstable/http"
 
 export const ExampleSubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String, roles: Schema.Array(Schema.String) })
@@ -26,5 +26,5 @@ const authenticate = Effect.fn("ExampleAuthentication.authenticate")(function* (
   return yield* Effect.fromOption(subject, () => Unauthenticated.make({}))
 })
 
-const authenticator = Authenticator.of({ authenticate })
-export const ExampleAuthentication = Layer.succeed(Authenticator, authenticator)
+const authenticator = AuthorizationRpc.Authenticator.of({ authenticate })
+export const ExampleAuthentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)

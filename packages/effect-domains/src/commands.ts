@@ -1,10 +1,10 @@
-import { Context, Effect, Layer, Record, Schema, type Scope, pipe } from "effect"
+import { Array, Context, Effect, Layer, Option, Record, Schema, type Scope, pipe } from "effect"
 import { Rpc, type RpcGroup } from "effect/unstable/rpc"
 
 type CommandHandlerDefinitions<Rpcs extends Rpc.Any> = {
   readonly [Current in Rpcs as Current["_tag"]]: (
     input: Rpc.Payload<Current>,
-  ) => Effect.Effect<any, any, any>
+  ) => Effect.Effect<unknown, unknown, unknown>
 }
 
 type CommandHandlers<Rpcs extends Rpc.Any, R = never> = {
@@ -13,26 +13,27 @@ type CommandHandlers<Rpcs extends Rpc.Any, R = never> = {
   ) => Effect.Effect<Rpc.Success<Current>, Rpc.Error<Current>, R>
 }
 
-type HandlerEffect<Handler> = Handler extends (...args: ReadonlyArray<any>) => infer Result
-  ? Result extends Effect.Effect<any, any, any>
+type HandlerEffect<Handler> = Handler extends (...args: ReadonlyArray<never>) => infer Result
+  ? Result extends Effect.Effect<unknown, unknown, unknown>
     ? Result
     : never
   : never
 
 type HandlerEffects<Handlers> = HandlerEffect<Handlers[keyof Handlers]>
-type TaggedErrors<Effect_> = Extract<Effect.Error<Effect_>, { readonly _tag: string }>
-type ErrorTags<Effect_> = TaggedErrors<Effect_>["_tag"]
+
+type ErrorTags<Effect_, Errors = Effect.Error<Effect_>> =
+  Errors extends { readonly _tag: infer Tag extends string } ? Tag : never
 
 type CatchTagHandlers<Handlers> = Partial<{
   readonly [Tag in ErrorTags<HandlerEffects<Handlers>>]: (
-    error: Extract<TaggedErrors<HandlerEffects<Handlers>>, { readonly _tag: Tag }>,
-  ) => Effect.Effect<any, any, any>
+    error: Extract<Effect.Error<HandlerEffects<Handlers>>, { readonly _tag: Tag }>,
+  ) => Effect.Effect<unknown, unknown, unknown>
 }>
 
 type RequiredCatchTagKeys<CatchTags> = {
   readonly [Key in keyof CatchTags]-?: {} extends Pick<CatchTags, Key>
     ? never
-    : CatchTags[Key] extends (...args: ReadonlyArray<any>) => Effect.Effect<any, any, any>
+    : CatchTags[Key] extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
       ? Key
       : never
 }[keyof CatchTags]
@@ -55,7 +56,7 @@ type InvocationError<Effect_, CatchTags> =
 type CatchTagServices<CatchTags> = Effect.Services<HandlerEffect<CatchTags[keyof CatchTags]>>
 
 type HandlerIsValid<Current extends Rpc.Any, Handler, CatchTags> =
-  Handler extends Effect.Effect<any, any, any>
+  Handler extends Effect.Effect<unknown, unknown, unknown>
     ? [InvocationSuccess<Handler, CatchTags>] extends [Rpc.Success<Current>]
       ? [InvocationError<Handler, CatchTags>] extends [Rpc.Error<Current>]
         ? true
@@ -79,10 +80,6 @@ type ValidHandlers<Rpcs extends Rpc.Any, Handlers, CatchTags> =
 type ValidCatchTags<Handlers, CatchTags> =
   Exclude<keyof CatchTags, ErrorTags<HandlerEffects<Handlers>>> extends never ? unknown : never
 
-type LayerOptions<Handlers, CatchTags> = Readonly<Partial<{
-  readonly catchTags: CatchTags
-}>> & ValidCatchTags<Handlers, CatchTags>
-
 export interface AnyCommandBundle {
   readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.AnyWithProps>, "requests">
   readonly handlers: Layer.Layer<never, any, any>
@@ -95,15 +92,21 @@ const withCapturedContext = <
 >(
   captured: Context.Context<any>,
   handlers: Handlers,
-  catchTags?: CatchTags,
-) => Record.map(handlers, (handler: (input: never) => Effect.Effect<any, any, any>) =>
-  (input: never) => Effect.contextWith((current: Context.Context<never>) => {
-    const invocation = catchTags === undefined
-      ? handler(input)
-      : pipe(handler(input), Effect.catchTags(catchTags))
-    return Effect.provide(invocation, Context.merge(captured, current))
-  }),
-) as CommandHandlers<Rpcs>
+  catchTags: Option.Option<CatchTags>,
+) => {
+  const capture = (handler: (input: never) => Effect.Effect<unknown, unknown, unknown>) =>
+    (input: never) => Effect.contextWith((current: Context.Context<never>) => {
+      const invocation = Option.match(catchTags, {
+        onNone: () => handler(input),
+        onSome: (tags) => pipe(handler(input), Effect.catchTags(tags)),
+      })
+
+      const context = Context.merge(captured, current)
+      return Effect.provide(invocation, context)
+    })
+
+  return Record.map(handlers, capture) as CommandHandlers<Rpcs>
+}
 
 const rpc = <
   const Tag extends string,
@@ -149,7 +152,7 @@ const make = <const Name extends string, Rpcs extends Rpc.Any>(
       value: (
         Handlers & ValidHandlers<Rpcs, Handlers, CatchTags>
       ) | Effect.Effect<Handlers & ValidHandlers<Rpcs, Handlers, CatchTags>, E, R>,
-      options?: LayerOptions<Handlers, CatchTags>,
+      ...catchTagsArgument: [] | [catchTags: CatchTags & ValidCatchTags<Handlers, CatchTags>]
     ) {
       const construction = Effect.gen(function* () {
         const captured = yield* Effect.context<
@@ -157,7 +160,13 @@ const make = <const Name extends string, Rpcs extends Rpc.Any>(
         >()
 
         const handlers = yield* (Effect.isEffect(value) ? value : Effect.succeed(value))
-        return withCapturedContext<Rpcs, Handlers, CatchTags>(captured, handlers, options?.catchTags)
+        const capturedCatchTags = Array.head(catchTagsArgument)
+
+        return withCapturedContext<Rpcs, Handlers, CatchTags>(
+          captured,
+          handlers,
+          capturedCatchTags,
+        )
       })
 
       return Layer.effect(CommandService)(construction) as Layer.Layer<

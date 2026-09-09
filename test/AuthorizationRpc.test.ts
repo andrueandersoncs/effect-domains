@@ -4,7 +4,7 @@ import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
 import { Authorization, AuthorizationSubject, Unauthenticated } from "effect-domains/authorization"
-import { Authenticator, AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -19,6 +19,7 @@ const owned = p.eq(p.row.ownerId, p.subject.userId)
 const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unrestrictedScope = p.all()
 const policy = p.policy({ scope: unrestrictedScope, allow: { read: owned, create: candidateOwned } })
+
 const Notes = Resource.make({
   name: "private_notes",
   schema: PrivateNoteSchema,
@@ -26,6 +27,7 @@ const Notes = Resource.make({
   create: { fromSubject: { ownerId: p.subject.userId } },
   operations: ["get", "create"],
 })
+
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)
 interface Sessions extends Schema.Schema.Type<typeof SessionsSchema> {}
 const sessions = SessionsSchema.make({ "Bearer alice-session": { userId: "alice" }, "Bearer bob-session": { userId: "bob" } })
@@ -36,7 +38,7 @@ const authenticate = Effect.fn("AuthorizationRpc.testAuthenticate")(function* (h
   return yield* Effect.fromOption(subject, () => Unauthenticated.make({}))
 })
 
-const authenticator = Authenticator.of({ authenticate })
+const authenticator = AuthorizationRpc.Authenticator.of({ authenticate })
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const aliceHeaders = { authorization: "Bearer alice-session" }
 const bobHeaders = { authorization: "Bearer bob-session" }
@@ -47,11 +49,14 @@ it.effect("RPC authentication overrides captured identity and isolates concurren
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO private_notes (id, ownerId, text) VALUES ('alice-note', 'alice', 'alice secret'), ('bob-note', 'bob', 'bob secret')`
     const client = yield* RpcTest.makeClient(Notes.group)
+
     const forgedPayload = yield* pipe(
       Schema.decodeUnknownEffect(Schema.toCodecJson(Notes.createInputSchema))({ id: "forged-note", ownerId: "bob", text: "forged" }),
       Effect.result,
     )
-    expect(Result.isFailure(forgedPayload)).toBe(true)
+
+    const rejectedPayload = Result.isFailure(forgedPayload)
+    expect(rejectedPayload).toBe(true)
 
     const aliceCreated = client["private_notes.create"]({ id: "alice-created", text: "alice authored" }, { headers: aliceHeaders })
     const bobCreated = client["private_notes.create"]({ id: "bob-created", text: "bob authored" }, { headers: bobHeaders })
@@ -72,7 +77,7 @@ it.effect("RPC authentication overrides captured identity and isolates concurren
   }),
   Effect.provide(Notes.handlers),
   Effect.provide(AuthorizationRpc.layer),
-  Effect.provideService(Authenticator, authenticator),
+  Effect.provideService(AuthorizationRpc.Authenticator, authenticator),
   Effect.provideService(AuthorizationSubject, { userId: "captured-identity" }),
   Effect.provide(sqlite),
 ))

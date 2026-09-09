@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest"
 import { Array, Context, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
 import { ReservationApplication } from "../apps/reservations/application.ts"
 import { Inventory } from "../apps/reservations/contracts.ts"
+
 import {
   InsufficientStock,
   InvalidReservationState,
@@ -13,6 +14,7 @@ import {
   SkuSchema,
   StockSchema,
 } from "../apps/reservations/domain.ts"
+
 import { InventoryMigrations } from "../apps/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../apps/reservations/resources.ts"
 import { InventorySqlite, seedStock } from "../apps/reservations/sqlite.ts"
@@ -170,8 +172,10 @@ const failedInsertRollsBackStockAction = Effect.fn(
 )(function* () {
   const database = yield* SqlClient.SqlClient
   const inventory = yield* Inventory
+
   yield* database`CREATE TRIGGER reject_reservation BEFORE INSERT ON reservations
     BEGIN SELECT RAISE(ABORT, 'reservation storage unavailable'); END`
+
   const reservationEffect = inventory.reserve(request)
   const outcome = yield* Effect.result(reservationEffect)
   const inventoryUnavailable = InventoryUnavailable.make({})
@@ -210,8 +214,10 @@ const historicalSecondsMigrationAction = Effect.fn(
   const id = ReservationIdSchema.make("01941f29-7c00-7000-8000-000000000001")
   const seconds = 1735689600
   yield* database`INSERT INTO stock (sku, available) VALUES (${sku}, 0)`
+
   yield* database`INSERT INTO reservations (id, sku, quantity, status, created_at_seconds)
     VALUES (${id}, ${sku}, 1, 'held', ${seconds})`
+
   yield* Application.prepare(ReservationApplication)
   yield* Application.prepare(ReservationApplication)
   const historicalStock = StockSchema.make({ sku, available: 99 })
@@ -240,6 +246,7 @@ const historicalSecondsMigrationAction = Effect.fn(
     releaseHistoricalReservationAction,
     Effect.provide(InventorySqlite),
   )
+
   const stockAfterRelease = yield* StockResource.repository.get(sku)
 
   expect(stockAfterRelease).toEqual({ sku, available: 1 })

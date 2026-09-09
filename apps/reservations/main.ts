@@ -1,3 +1,5 @@
+import { BunRuntime } from "@effect/platform-bun"
+import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
@@ -11,9 +13,9 @@ const InitialStock = StockSchema.make({
 const manifest = new URL("./migrations/manifest.json", import.meta.url)
 const initialize = seedStock(InitialStock)
 
-ApplicationBun.runMain(ReservationApplication, {
+pipe(ApplicationBun.run(ReservationApplication, {
   database: { manifest },
   services: InventorySqlite,
   initialize,
   admin: true,
-})
+}), BunRuntime.runMain)

@@ -46,10 +46,10 @@ it.effect(
   }, Effect.provide(BunServices.layer)),
 )
 
-it.effect("native nested flags preserve prototype-named fields without mutating prototypes", () =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const source = `
+const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields")(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
+  const source = `
       import { BunServices } from "@effect/platform-bun"
       import { Console, Effect, Layer, Schema } from "effect"
       import { Command } from "effect/unstable/cli"
@@ -79,19 +79,33 @@ it.effect("native nested flags preserve prototype-named fields without mutating 
         }))
       }).pipe(Effect.provide(BunServices.layer)))
     `
-    const child = yield* spawner.spawn(ChildProcess.make(process.execPath, ["--eval", source], {
-      cwd: new URL("..", import.meta.url).pathname,
-    }))
-    const result = yield* Effect.all({
-      stdout: pipe(child.stdout, Stream.decodeText(), Stream.mkString),
-      stderr: pipe(child.stderr, Stream.decodeText(), Stream.mkString),
-      exitCode: child.exitCode,
-    }, { concurrency: "unbounded" })
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe("")
-    expect(JSON.parse(result.stdout)).toEqual({
-      observed: { own: true, value: "sentinel" },
-      polluted: false,
-    })
-  }).pipe(Effect.provide(BunServices.layer)),
+
+  const rootUrl = new URL("..", import.meta.url)
+
+  const command = ChildProcess.make(process.execPath, ["--eval", source], {
+    cwd: rootUrl.pathname,
+  })
+
+  const child = yield* spawner.spawn(command)
+  const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
+  const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
+
+  const result = yield* Effect.all(
+    { stdout, stderr, exitCode: child.exitCode },
+    { concurrency: "unbounded" },
+  )
+
+  expect(result.exitCode).toBe(0)
+  expect(result.stderr).toBe("")
+  const output = JSON.parse(result.stdout)
+
+  expect(output).toEqual({
+    observed: { own: true, value: "sentinel" },
+    polluted: false,
+  })
+}, Effect.provide(BunServices.layer))
+
+it.effect(
+  "native nested flags preserve prototype-named fields without mutating prototypes",
+  preservesPrototypeNamedFields,
 )

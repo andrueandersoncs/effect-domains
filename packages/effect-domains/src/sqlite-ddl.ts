@@ -1,4 +1,4 @@
-import { Array, Match, Option, Predicate, Schema, pipe } from "effect"
+import { Array, Equivalence, Match, Option, Predicate, Schema, pipe } from "effect"
 import type { TableCheck, TableField, TableSnapshot } from "./table.ts"
 
 const quoteIdentifier = (identifier: string) =>
@@ -94,10 +94,14 @@ export const renderColumn = (
 }
 
 export const renderCreateTable = (table: TableSnapshot) => {
-  const columns = Array.map(
-    table.fields,
-    (field) => renderColumn(field, (field.name === table.identifier)),
-  )
+  const identifierEquals = Equivalence.strictEqual<string>()
+
+  const renderTableColumn = (field: TableField) => {
+    const primaryKey = identifierEquals(field.name, table.identifier)
+    return renderColumn(field, primaryKey)
+  }
+
+  const columns = Array.map(table.fields, renderTableColumn)
 
   return `CREATE TABLE ${quoteIdentifier(table.name)} (${Array.join(columns, ", ")})`
 }

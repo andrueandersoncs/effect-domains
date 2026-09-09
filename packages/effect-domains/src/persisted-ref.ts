@@ -7,7 +7,6 @@ type Persistence<A, CE, CR, LE, LR> = Readonly<{
   load: Effect.Effect<A, LE, LR>
 }>
 
-
 const makeLoaded = Effect.fn("PersistedRef.makeLoaded")(
   function* <A, CommitError, CommitRequirements, LoadError, LoadRequirements>(
     initial: A,
@@ -15,7 +14,6 @@ const makeLoaded = Effect.fn("PersistedRef.makeLoaded")(
   ) {
     const backing = yield* SynchronizedRef.make(initial)
     const get = SynchronizedRef.get(backing)
-
     const refresh = SynchronizedRef.updateAndGetEffect(backing, () => options.load)
 
     const set = (value: A) => pipe(
@@ -23,18 +21,30 @@ const makeLoaded = Effect.fn("PersistedRef.makeLoaded")(
       Effect.uninterruptible,
     )
 
-    const update = (updateValue: (current: A) => A) => pipe(
-      SynchronizedRef.updateAndGetEffect(backing, (previous) => options.commit(previous, updateValue(previous))),
-      Effect.uninterruptible,
-    )
+    const update = (updateValue: (current: A) => A) => {
+      const commitUpdated = (previous: A) => {
+        const next = updateValue(previous)
+        return options.commit(previous, next)
+      }
 
-    const modify = <B>(modifyValue: (current: A) => readonly [result: B, next: A]) => pipe(
-      SynchronizedRef.modifyEffect(backing, (previous) => {
+      return pipe(
+        SynchronizedRef.updateAndGetEffect(backing, commitUpdated),
+        Effect.uninterruptible,
+      )
+    }
+
+    const modify = <B>(modifyValue: (current: A) => readonly [result: B, next: A]) => {
+      const persistModified = (previous: A) => {
         const [result, next] = modifyValue(previous)
-        return Effect.map(options.commit(previous, next), (persisted) => [result, persisted] as const)
-      }),
-      Effect.uninterruptible,
-    )
+        const persisted = options.commit(previous, next)
+        return Effect.map(persisted, (value) => [result, value] as const)
+      }
+
+      return pipe(
+        SynchronizedRef.modifyEffect(backing, persistModified),
+        Effect.uninterruptible,
+      )
+    }
 
     return { get, refresh, set, update, modify }
   },
@@ -47,7 +57,7 @@ const make = Effect.fn("PersistedRef.make")(
   },
 )
 
-export class PersistedRefKeyError extends Schema.TaggedError<PersistedRefKeyError>()(
+class PersistedRefKeyError extends Schema.TaggedError<PersistedRefKeyError>()(
   "PersistedRefKeyError",
   { resource: Schema.String },
 ) {}

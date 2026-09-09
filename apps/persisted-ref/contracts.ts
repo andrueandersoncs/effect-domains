@@ -17,10 +17,12 @@ const counterOperation = {
 
 const getCounter = Commands.rpc("counters.get", counterOperation)
 const incrementCounter = Commands.rpc("counters.increment", counterOperation)
+
 const setCounter = Commands.rpc("counters.set", {
   ...counterOperation,
   payload: SetCounterPayloadSchema,
 })
+
 const refreshCounter = Commands.rpc("counters.refresh", counterOperation)
 
 const counterRpcs = RpcGroup.make(

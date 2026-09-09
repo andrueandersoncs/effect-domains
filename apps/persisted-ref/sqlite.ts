@@ -1,12 +1,14 @@
 import { Effect, Function, Number, Struct } from "effect"
 import { PersistedRef } from "effect-domains/persisted-ref"
 import { CounterCommands, type SetCounterPayload } from "./contracts.ts"
+
 import {
   type Counter as CounterValue,
   CounterSchema,
   CounterUnavailable,
   VisitsCounterId,
 } from "./domain.ts"
+
 import { CounterResource } from "./resources.ts"
 
 const unavailable = Effect.fn("Counter.unavailable")(function* () {
@@ -48,7 +50,5 @@ const counterHandlers = Effect.gen(function* () {
   }
 })
 
-export const CounterSqlite = CounterCommands.layer(counterHandlers, {
-  catchTags: persistenceErrors,
-})
+export const CounterSqlite = CounterCommands.layer(counterHandlers, persistenceErrors)
 

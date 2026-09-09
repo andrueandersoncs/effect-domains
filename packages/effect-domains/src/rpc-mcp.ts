@@ -1,10 +1,9 @@
-import { Effect, Layer, Option, Schema, pipe } from "effect"
+import { Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
-
 
 class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
   "RpcMcpDefinitionError",
@@ -16,7 +15,6 @@ const internalFailure = pipe(McpSchema.CallToolResult.make({
   content: [{ type: "text", text: "Tool execution failed due to an internal server error." }],
 }), Effect.succeed)
 
-
 const successResult = (encoded: Schema.JsonObject) => McpSchema.CallToolResult.make({
   isError: false,
   structuredContent: encoded,
@@ -24,8 +22,8 @@ const successResult = (encoded: Schema.JsonObject) => McpSchema.CallToolResult.m
 })
 
 const errorResult = (text: string) => McpSchema.CallToolResult.make({ isError: true, content: [{ type: "text", text }] })
-const failInternally = () => internalFailure
-const emptyHeaders = () => Headers.empty
+const failInternally = Function.constant(internalFailure)
+const emptyHeaders = Function.constant(Headers.empty)
 
 const toolSchema = (schema: Schema.Constraint) => pipe(
   Effect.try(() => Tool.getJsonSchemaFromSchema(schema)),
@@ -39,16 +37,21 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
+    const compiled = compileUnaryRpc(procedure)
+
     const contract = yield* Effect.fromOption(
-      compileUnaryRpc(procedure),
+      compiled,
       () => RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" }),
     )
+
     if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract.tag)) {
       return yield* RpcMcpDefinitionError.make({ procedure: contract.tag, reason: "MCP tool names must contain 1–128 letters, digits, underscores, dots, or hyphens" })
     }
 
     const InputSchema = Schema.Struct({ input: contract.payload })
+    interface Input extends Schema.Schema.Type<typeof InputSchema> {}
     const OutputSchema = Schema.Struct({ result: contract.success })
+    interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
     const ErrorSchema = Schema.fromJsonString(contract.error)
     const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: contract.tag, reason: String(cause) })
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
@@ -56,13 +59,15 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
     const tool = McpSchema.Tool.make({ name: contract.tag, inputSchema, outputSchema })
 
     const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown) {
-      const payload = yield* pipe(
-        Schema.decodeUnknownEffect(InputSchema)(arguments_),
+      const decodeInput = Schema.decodeUnknownEffect(InputSchema)
+
+      const payload: Input = yield* pipe(
+        decodeInput(arguments_),
         Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${contract.tag}` })),
       )
 
       const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
-      const headers = Option.match(request, { onNone: emptyHeaders, onSome: (value) => value.headers })
+      const headers = Option.match(request, { onNone: emptyHeaders, onSome: Struct.get("headers") })
 
       const failureResponse = (cause: unknown) => pipe(
         Schema.encodeUnknownEffect(ErrorSchema)(cause),
@@ -70,12 +75,15 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
         Effect.catch(failInternally),
       )
 
+      const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
+
       return yield* pipe(
         client(contract.tag, payload.input, { headers }),
         Effect.matchEffect({
           onFailure: failureResponse,
           onSuccess: (result) => pipe(
-            Schema.encodeUnknownEffect(OutputSchema)({ result }),
+            OutputSchema.make({ result }),
+            encodeOutput,
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
             Effect.map(successResult),
             Effect.catch(failInternally),

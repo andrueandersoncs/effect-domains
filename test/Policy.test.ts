@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Result, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { OperandSchema, Policy, type Operand } from "effect-domains/policy"
+import { OperandSchema, Policy, PolicyEnvironment, type Operand } from "effect-domains/policy"
 import { PolicySql } from "effect-domains/policy-sql"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
@@ -15,7 +15,8 @@ const rowId = Struct.get<Readonly<Record<string, unknown>>, "id">("id")
 const rowIds = Array.map(rowId)
 const hostile = "x' OR 1=1 --"
 const subject = { allowed: [null, "one", hostile], minimum: 1, role: "reader" }
-const environment = { subject }
+const absent = Option.none()
+const environment = PolicyEnvironment.make({ subject, row: absent, next: absent })
 const label = rowField("label")
 const amount = rowField("amount")
 const minimum = subjectField("minimum")
@@ -57,7 +58,12 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
       const raw: unknown = JSON.parse(json)
       const policy = yield* Schema.decodeUnknownEffect(Policy.Schema)(raw)
       const evaluate = Policy.evaluate(policy)
-      const visible = (row: Readonly<Record<string, unknown>>) => evaluate({ subject, row })
+
+      const visible = (row: Readonly<Record<string, unknown>>) => {
+        const present = Option.some(row)
+        return pipe(PolicyEnvironment.make({ subject, row: present, next: absent }), evaluate)
+      }
+
       const expected = yield* pipe(Effect.filter(rows, visible), Effect.map(rowIds))
       const predicate = yield* PolicySql.compile(policy)(sql, environment)
       const actualRows = yield* sql<Readonly<Record<string, unknown>>>`SELECT id FROM policy_rows WHERE ${predicate} ORDER BY id`
@@ -67,8 +73,10 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 
     yield* Effect.forEach(policies, verifyPolicy)
     const binder = PolicySql.compile(minimumAmount)
-    const first = yield* binder(sql, { subject: { minimum: 1 } })
-    const second = yield* binder(sql, { subject: { minimum: 3 } })
+    const firstEnvironment = PolicyEnvironment.make({ subject: { minimum: 1 }, row: absent, next: absent })
+    const secondEnvironment = PolicyEnvironment.make({ subject: { minimum: 3 }, row: absent, next: absent })
+    const first = yield* binder(sql, firstEnvironment)
+    const second = yield* binder(sql, secondEnvironment)
     const firstRows = yield* sql`SELECT id FROM policy_rows WHERE ${first} ORDER BY id`
     const secondRows = yield* sql`SELECT id FROM policy_rows WHERE ${second} ORDER BY id`
     expect(firstRows).toEqual([{ id: 2 }, { id: 4 }])

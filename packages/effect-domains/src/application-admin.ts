@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Schema, Struct, pipe } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { AdminPresentation } from "@effect-domains/admin/contract"
@@ -18,6 +18,7 @@ class AdminDefinitionError extends Schema.TaggedError<AdminDefinitionError>()("A
 }) {}
 
 const CallSchema = Schema.Struct({ operation: Schema.String, input: Schema.Json })
+interface Call extends Schema.Schema.Type<typeof CallSchema> {}
 
 const responseHeaders = {
   "cache-control": "no-store",
@@ -33,6 +34,7 @@ const internalResponse = HttpServerResponse.text('{"error":{"message":"Operation
 })
 
 const internalFailure = () => Effect.succeed(internalResponse)
+
 const jsonResponse = (status: number) => (body: unknown) => pipe(
   HttpServerResponse.json(body, { status, headers: responseHeaders }),
   Effect.catch(internalFailure),
@@ -40,6 +42,7 @@ const jsonResponse = (status: number) => (body: unknown) => pipe(
 
 const successResponse = jsonResponse(200)
 const declaredErrorResponse = jsonResponse(422)
+
 const failure = (status: number, message: string) => pipe(
   HttpServerResponse.json({ error: { message } }, { status, headers: responseHeaders }),
   Effect.catch(internalFailure),
@@ -54,29 +57,32 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
   stylesheet: string
 }> & AdminOptions) {
   const path = (options.path ?? "/admin") as `/${string}`
+
   if (!/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(path)) {
     return yield* AdminDefinitionError.make({ reason: "Admin path must contain nonempty URL path segments without a trailing slash" })
   }
+
   const router = yield* HttpRouter.HttpRouter
   const client = yield* makeClient(options.application.group as RpcGroup.RpcGroup<UnaryRpc>)
   const services = yield* Effect.context<Rpc.ServicesServer<UnaryRpc>>()
   const procedures = options.application.group.requests.values()
 
   const entries = yield* Effect.forEach(procedures, Effect.fn("ApplicationAdmin.compileOperation")(function* (procedure) {
+    const compiled = compileUnaryRpc(procedure)
+
     const contract = yield* Effect.fromOption(
-      compileUnaryRpc(procedure),
+      compiled,
       () => AdminDefinitionError.make({ reason: `Admin operations must be unary: ${procedure._tag}` }),
     )
-    const InputSchema = contract.payload
-    const OutputSchema = Schema.Struct({ result: contract.success })
-    const ErrorSchema = Schema.Struct({ error: contract.error })
-    const decode = Schema.decodeUnknownEffect(InputSchema)
-    const encodeResult = Schema.encodeUnknownEffect(OutputSchema)
-    const encodeError = Schema.encodeUnknownEffect(ErrorSchema)
+
+    const decode = Schema.decodeUnknownEffect(contract.payload)
+    const encodeResult = pipe(Schema.Struct({ result: contract.success }), Schema.encodeUnknownEffect)
+    const encodeError = pipe(Schema.Struct({ error: contract.error }), Schema.encodeUnknownEffect)
 
     const invoke = Effect.fn("ApplicationAdmin.invoke")(function* (input: unknown, request: HttpServerRequest.HttpServerRequest) {
       const decoded = yield* pipe(decode(input), Effect.result)
       if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${contract.tag}: ${decoded.failure.message}`)
+
       return yield* pipe(
         client(contract.tag, decoded.success, { headers: request.headers }),
         Effect.matchEffect({
@@ -97,7 +103,8 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
 
 
   const invocations = HashMap.fromIterable(entries)
-  const metadata = { ...ApplicationInspect.describe(options.application), presentation: options.presentation ?? {} }
+  const inspection = ApplicationInspect.describe(options.application)
+  const metadata = Struct.assign(inspection, { presentation: options.presentation ?? {} })
 
   const document = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Effect Domains Admin</title><link rel="stylesheet" href="${path}/style.css"><script type="module" src="${path}/client.js"></script></head><body><div id="app" data-base="${path}"></div><noscript>This application requires JavaScript.</noscript></body></html>`
@@ -119,19 +126,24 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
 
     const trustedOrigin = Option.exists(url, (value) => {
       const matches = Option.contains(origin, value.origin)
+
       const trusted = Option.match(allowedOrigins, {
         onNone: () => HashSet.has(loopbackHosts, value.hostname),
         onSome: (origins) => Array.contains(origins, value.origin),
       })
+
       return matches && trusted
     })
 
-    const untrusted = Option.isSome(origin) && !trustedOrigin
-    const rejectedOrigin = crossSite || untrusted
+    const untrusted = !trustedOrigin
+    const rejectedRequestOrigin = Option.isSome(origin) && untrusted
+    const rejectedOrigin = crossSite || rejectedRequestOrigin
     if (rejectedOrigin) return yield* failure(403, "Cross-origin or untrusted admin requests are not allowed")
+
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] ?? "")) {
       return yield* failure(415, "Admin calls require application/json")
     }
+
     const body = yield* pipe(request.json, Effect.flatMap(Schema.decodeUnknownEffect(CallSchema)), Effect.result)
     if (Result.isFailure(body)) return yield* failure(400, "Invalid admin call envelope")
     const invoke = HashMap.get(invocations, body.success.operation)

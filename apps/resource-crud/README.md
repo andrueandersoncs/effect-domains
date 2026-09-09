@@ -128,7 +128,7 @@ PORT=3001 RESOURCE_CRUD_DB=todos.sqlite bun run resource-crud:server
 RESOURCE_CRUD_URL=http://127.0.0.1:3001/rpc/v1 RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list
 ```
 
-The credentials are hard-coded public fixtures, not production authentication: they have no password verification, rotation, expiry, transport security, or token issuance. They exist solely to demonstrate that `Authenticator` produces trusted request-local claims for the authorization policy. Do not reuse them or this setup outside a local demo. Other examples remain explicitly public unless they declare their own authorization policy.
+The credentials are hard-coded public fixtures, not production authentication: they have no password verification, rotation, expiry, transport security, or token issuance. They demonstrate that `AuthorizationRpc.Authenticator` produces trusted request-local claims. Do not reuse them outside a local demo. Other examples remain public unless they declare authorization policy.
 
 Startup applies the checked-in, frozen migration chain and preserves existing rows; it does not reset the database. Migration `002_ownership` adds the ownership columns and backfills existing todos with `tenantId = "acme"` and `ownerId = "alice"`. An untracked database is rejected rather than silently adopted.
 

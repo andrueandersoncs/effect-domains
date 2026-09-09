@@ -5,4 +5,4 @@ export const BookSchema = Schema.Struct({
   pageCount: Schema.Number,
 })
 
-export interface Book extends Schema.Schema.Type<typeof BookSchema> {}
+interface Book extends Schema.Schema.Type<typeof BookSchema> {}

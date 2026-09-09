@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
-import { Table, TableDefinitionError } from "effect-domains/table"
+import { Table } from "effect-domains/table"
 
 describe("Table", () => {
   const isMinimumLabelLength = Schema.isMinLength(2)
@@ -108,26 +108,33 @@ describe("Table", () => {
   it.effect(
     "preserves root struct checks after compiling storage fields",
     Effect.fn("Table.preservesRootStructChecks")(function* () {
-      const invalidRow = {
+      const UncheckedOrderedRowSchema = Schema.Struct(Ordered.rowSchema.fields)
+      interface UncheckedOrderedRow extends Schema.Schema.Type<typeof UncheckedOrderedRowSchema> {}
+
+      const invalidRow = UncheckedOrderedRowSchema.make({
         id: "0192f8d1-ef4e-7dd4-a8f0-ec3d1fe71826",
         lower: 4,
         upper: 1,
-      }
+      })
+
       const invalidOrdered = OrderedFieldsSchema.make({ lower: 4, upper: 1 })
-      const failures = yield* Effect.all([
-        pipe(
-          Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered),
-          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
-        ),
-        pipe(
-          Schema.decodeUnknownEffect(Ordered.rowSchema)(invalidRow),
-          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
-        ),
-        pipe(
-          Schema.encodeUnknownEffect(Ordered.storageSchema)(invalidRow),
-          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
-        ),
-      ])
+
+      const invalidInsert = pipe(
+        Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered),
+        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+      )
+
+      const invalidPersistedRow = pipe(
+        Schema.decodeUnknownEffect(Ordered.rowSchema)(invalidRow),
+        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+      )
+
+      const invalidStorageRow = pipe(
+        Schema.encodeUnknownEffect(Ordered.storageSchema)(invalidRow),
+        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+      )
+
+      const failures = yield* Effect.all([invalidInsert, invalidPersistedRow, invalidStorageRow])
 
       expect(failures).toEqual([true, true, true])
     }),
@@ -149,6 +156,7 @@ describe("Table", () => {
           checks: [{ _tag: "OneOf", values: [0, 1] }],
         },
       })
+
       expect(quantity).toMatchObject({
         value: {
           scalar: "integer",
@@ -184,11 +192,11 @@ describe("Table", () => {
       const CyclicValueSchema: Schema.Codec<never> = Schema.suspend(() => CyclicValueSchema)
       const CyclicSchema = Schema.Struct({ value: CyclicValueSchema })
       interface Cyclic extends Schema.Schema.Type<typeof CyclicSchema> {}
-      expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow(TableDefinitionError)
-      expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow(TableDefinitionError)
-      expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow(TableDefinitionError)
-      expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow(TableDefinitionError)
-      expect(() => Table.make({ name: "cyclic", schema: CyclicSchema })).toThrow(TableDefinitionError)
+      expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow()
+      expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow()
+      expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow()
+      expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow()
+      expect(() => Table.make({ name: "cyclic", schema: CyclicSchema })).toThrow()
 
     }))
 })

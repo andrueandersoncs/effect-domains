@@ -1,3 +1,4 @@
+import { BunRuntime } from "@effect/platform-bun"
 import { Effect, Layer, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { NotesApplication } from "../apps/service-codec/application.ts"
@@ -16,15 +17,19 @@ const missing = ApplicationBun.run(NotesApplication, {
 
 const storedPrefix = Layer.succeed(StoragePrefix, { value: "stored:" })
 
-const storedTextGroup = RpcGroup.make(Rpc.make("stored-text", {
+const storedTextRpc = Rpc.make("stored-text", {
   payload: StoredTextSchema,
   success: StoredTextSchema,
   error: Schema.Never,
-}))
+})
+
+const storedTextGroup = RpcGroup.make(storedTextRpc)
+
 const storedTextApplication = Application.make({
   name: "stored-text",
   commands: [{ group: storedTextGroup, handlers: Layer.empty }],
 })
+
 const storedTextCli = ApplicationBun.run(storedTextApplication, {
   database: { migrations: [] },
   services: storedPrefix,
@@ -35,24 +40,20 @@ const complete = ApplicationBun.run(NotesApplication, {
   services: storedPrefix,
 })
 
+const manifest = new URL("../apps/service-codec/migrations/manifest.json", import.meta.url)
+
 const minimal = ApplicationBun.run(emptyApplication, {
-  database: { manifest: new URL("../apps/service-codec/migrations/manifest.json", import.meta.url) },
+  database: { manifest },
   admin: true,
 })
 
-ApplicationBun.runMain(NotesApplication, {
-  database: { migrations: [] },
-  services: storedPrefix,
-})
+BunRuntime.runMain(complete)
 
-// @ts-expect-error StoragePrefix remains a requirement for a process entrypoint.
-ApplicationBun.runMain(NotesApplication, { database: { migrations: [] } })
+// @ts-expect-error Entry points cannot run because StoragePrefix remains a requirement.
+BunRuntime.runMain(missing)
 
-// @ts-expect-error StoredTextSchema is also needed by the CLI wire codec.
-ApplicationBun.runMain(storedTextApplication, {
-  database: { migrations: [] },
-  services: storedPrefix,
-})
+// @ts-expect-error Entry points cannot run because the wire codec still requires StoragePrefix.
+BunRuntime.runMain(storedTextCli)
 
 // A missing storage service remains a caller requirement because it is not needed by the wire client.
 const preservesMissing = true satisfies Equal<Effect.Services<typeof missing>, StoragePrefix>

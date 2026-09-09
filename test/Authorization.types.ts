@@ -13,6 +13,7 @@ const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unchanged = p.unchanged("ownerId")
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
 Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: ["get"] })
+
 const BoundDocument = Resource.make({
   name: "subject_bound_authorization",
   schema: ScoredDocumentSchema,
@@ -20,6 +21,7 @@ const BoundDocument = Resource.make({
   create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
   operations: ["create"],
 })
+
 const boundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1 }
 void boundCreate
 

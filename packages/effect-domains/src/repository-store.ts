@@ -1,8 +1,12 @@
 import { Context, Effect, Option, Schema } from "effect"
-import type { Policy } from "./policy.ts"
+import { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
 
 const RepositoryListDirectionSchema = Schema.Literals(["asc", "desc"])
+const RepositoryListCursorValuesSchema = Schema.Array(Schema.Unknown)
+const RepositoryListQueryFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
+const RepositoryAccessSubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
+
 export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
   "RepositoryListOrder",
 )({
@@ -10,22 +14,31 @@ export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
   direction: RepositoryListDirectionSchema,
 }) {}
 
-export interface RepositoryListCursor {
-  readonly values: ReadonlyArray<unknown>
-  readonly identifier: unknown
-}
+export class RepositoryListCursor extends Schema.Class<RepositoryListCursor>(
+  "RepositoryListCursor",
+)({
+  values: RepositoryListCursorValuesSchema,
+  identifier: Schema.Unknown,
+}) {}
 
-export interface RepositoryListQuery {
-  readonly filter: Readonly<Record<string, unknown>>
-  readonly order: ReadonlyArray<RepositoryListOrder>
-  readonly cursor: Option.Option<RepositoryListCursor>
-  readonly limit: number
-}
+const RepositoryListQueryOrdersSchema = Schema.Array(RepositoryListOrder)
+const RepositoryListQueryCursorSchema = Schema.Option(RepositoryListCursor)
 
-export interface RepositoryAccess {
-  readonly policy: Policy
-  readonly subject: Readonly<Record<string, unknown>>
-}
+export class RepositoryListQuery extends Schema.Class<RepositoryListQuery>(
+  "RepositoryListQuery",
+)({
+  filter: RepositoryListQueryFilterSchema,
+  order: RepositoryListQueryOrdersSchema,
+  cursor: RepositoryListQueryCursorSchema,
+  limit: Schema.Number,
+}) {}
+
+export class RepositoryAccess extends Schema.Class<RepositoryAccess>(
+  "RepositoryAccess",
+)({
+  policy: Policy.Schema,
+  subject: RepositoryAccessSubjectSchema,
+}) {}
 
 interface RepositoryListPage {
   readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>

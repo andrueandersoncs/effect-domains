@@ -2,9 +2,7 @@ import { Effect, Schema, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
 
 export const SkuSchema = pipe(Schema.NonEmptyString, Schema.brand("Sku"))
-
 const isReservationId = Schema.isUUID(7)
-
 const reservationIdStringSchema = Schema.String.check(isReservationId)
 
 export const ReservationIdSchema = pipe(
@@ -15,11 +13,8 @@ export const ReservationIdSchema = pipe(
 
 const isNonNegative = Schema.isGreaterThanOrEqualTo(0)
 const isSafeInteger = Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
-
 export const StockCountSchema = Schema.Int.check(isNonNegative, isSafeInteger)
-
 const isPositive = Schema.isGreaterThan(0)
-
 export const QuantitySchema = StockCountSchema.check(isPositive)
 
 export const ReservationStatusSchema = Schema.Literals([
@@ -115,6 +110,7 @@ export const transitionReservation = Effect.fn("Reservation.transition")(
     action: typeof ReservationActionSchema.Type,
   ) {
     const transition = ReservationTransitions[action]
+
     if (reservation.status !== transition.from) {
       return yield* InvalidReservationState.make({
         id: reservation.id,
@@ -122,6 +118,7 @@ export const transitionReservation = Effect.fn("Reservation.transition")(
         actual: reservation.status,
       })
     }
+
     return ReservationSchema.make({ ...reservation, status: transition.to })
   },
 )

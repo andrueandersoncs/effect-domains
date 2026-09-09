@@ -1,7 +1,8 @@
 import { Effect, Option } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { type Book, BookSchema } from "@effect-domains/example-support/book"
+import { BookSchema } from "@effect-domains/example-support/book"
 import { BooksService } from "./contracts.ts"
+
 import {
   type BookIdentifierInput,
   type ListBooksInput,
@@ -10,6 +11,7 @@ import {
   BookPersistenceError,
   ListBooksInputSchema,
 } from "./domain.ts"
+
 import { BookResource } from "./resources.ts"
 type SqliteRow = Readonly<Record<string, unknown>>
 
@@ -118,9 +120,7 @@ export const BooksSqlite = BooksService.layer({
   "books.update": update,
   "books.remove": remove,
 }, {
-  catchTags: {
-    SqlError: persistenceFailure,
-    SchemaError: persistenceFailure,
-    NoSuchElementError: persistenceFailure,
-  },
+  SqlError: persistenceFailure,
+  SchemaError: persistenceFailure,
+  NoSuchElementError: persistenceFailure,
 })

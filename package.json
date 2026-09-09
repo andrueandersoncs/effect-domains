@@ -35,7 +35,7 @@
     "migration-lifecycle:seed-v1": "bun run apps/migration-lifecycle/seed-v1.ts"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.13",
+    "@better-typescript/better-typescript": "0.4.14",
     "@effect/vitest": "catalog:",
     "@types/bun": "latest",
     "vitest": "4.1.11",

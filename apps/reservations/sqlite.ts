@@ -6,7 +6,9 @@ import {
   Option,
   pipe,
 } from "effect"
+
 import { SqlClient } from "effect/unstable/sql"
+
 import {
   InsufficientStock,
   InventoryUnavailable,
@@ -19,6 +21,7 @@ import {
   transitionReservation,
   UnknownSku,
 } from "./domain.ts"
+
 import { Inventory } from "./contracts.ts"
 import { ReservationResource, StockResource } from "./resources.ts"
 
@@ -38,6 +41,7 @@ export const seedStock = Effect.fn("InventorySqlite.seedStock")(function* (
   stock: Stock,
 ) {
   const existing = yield* StockResource.repository.find(stock.sku)
+
   if (Option.isNone(existing)) {
     yield* StockResource.repository.create(stock)
   }
@@ -51,6 +55,7 @@ const inventorySqliteEffect = Effect.gen(function* () {
   ) {
     const reservationTransaction = Effect.gen(function* () {
       const stock = yield* StockResource.repository.find(input.sku)
+
       if (Option.isNone(stock)) {
         return yield* UnknownSku.make({ sku: input.sku })
       }
@@ -79,6 +84,7 @@ const inventorySqliteEffect = Effect.gen(function* () {
       })
 
       const createdAt = yield* DateTime.now
+
       return yield* ReservationResource.repository.create({
         id,
         sku: input.sku,
@@ -112,11 +118,13 @@ const inventorySqliteEffect = Effect.gen(function* () {
     Effect.fn("Inventory.transition")(function* (input: ReservationInput) {
       const transitionTransaction = Effect.gen(function* () {
         const reservation = yield* ReservationResource.repository.find(input.id)
+
         if (Option.isNone(reservation)) {
           return yield* ReservationNotFound.make({ id: input.id })
         }
 
         const next = yield* transitionReservation(reservation.value, action)
+
         if (Equivalence.strictEqual<typeof action>()(action, "release")) {
           yield* restoreStock(next)
         }
@@ -137,6 +145,4 @@ const inventorySqliteEffect = Effect.gen(function* () {
   }
 })
 
-export const InventorySqlite = Inventory.layer(inventorySqliteEffect, {
-  catchTags: persistenceErrors,
-})
+export const InventorySqlite = Inventory.layer(inventorySqliteEffect, persistenceErrors)

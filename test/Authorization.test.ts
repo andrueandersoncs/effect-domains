@@ -1,10 +1,10 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Option, Order, Result, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, Option, Order, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { Authorization, AuthorizationSubject, type PolicyAuthorization } from "effect-domains/authorization"
+import { Authorization, AuthorizationSubject, AuthorizationValues, type PolicyAuthorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
-import { Policy, type Operand } from "effect-domains/policy"
+import { Policy, type Policy as PolicySyntax } from "effect-domains/policy"
 import { RepositoryStore } from "effect-domains/repository-store"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
@@ -18,6 +18,18 @@ const OwnedDocumentSchema = Schema.Struct({
 })
 
 interface OwnedDocument extends Schema.Schema.Type<typeof OwnedDocumentSchema> {}
+
+const policyMarkerEquals = Equivalence.strictEqual<string>()
+
+const FabricatedPolicyShapeSchema = Schema.TaggedStruct("Policy", {
+  resource: Schema.Unknown,
+  subject: Schema.Unknown,
+  scope: Policy.Schema,
+  allow: Schema.Record(Schema.String, Policy.Schema),
+})
+
+const FabricatedPolicySchema = Schema.make<Schema.Codec<PolicyAuthorization>>(FabricatedPolicyShapeSchema.ast)
+
 const p = Authorization.for({ resource: OwnedDocumentSchema, subject: SubjectSchema })
 const unrestricted = p.all()
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
@@ -52,6 +64,7 @@ const rejectedTag = <A, E extends { readonly _tag: string }, R>(effect: Effect.E
 const seed = Effect.gen(function* () {
   yield* prepareTables([Documents.table])
   const sql = yield* SqlClient.SqlClient
+
   yield* sql`INSERT INTO authorized_documents (id, tenantId, ownerId, title) VALUES
     ('1', 'a', 'alice', 'alpha'), ('2', 'a', 'bob', 'bravo'),
     ('3', 'b', 'eve', 'charlie'), ('4', 'a', 'alice', 'delta')`
@@ -98,17 +111,21 @@ it.effect("repository visibility scopes identifiers and pagination before comput
 it.effect("create update patch and remove enforce current and candidate authorization without partial writes", () => pipe(
   Effect.gen(function* () {
     yield* seed
+
     const forged = yield* pipe(
       Documents.repository.create({ id: "5", tenantId: "a", ownerId: "bob", title: "forged" } as never),
       asAlice,
       rejectedTag,
     )
+
     expect(forged).toBe("RepositoryError")
+
     const crossTenant = yield* pipe(
       Documents.repository.create({ id: "6", tenantId: "b", title: "cross" } as never),
       asAlice,
       rejectedTag,
     )
+
     expect(crossTenant).toBe("RepositoryError")
     const original = yield* pipe(Documents.repository.get("1"), asAlice)
     const transfer = yield* pipe(Documents.repository.update({ ...original, ownerId: "bob" }), asAdmin, rejectedTag)
@@ -132,18 +149,23 @@ it.effect("create update patch and remove enforce current and candidate authoriz
     expect(ids).toEqual(["1", "2", "3", "4"])
   }), Effect.provide(sqlite),
 ))
-it("rejects unsafe create subject binding definitions", () => {
-  const make = (name: string, authorization: typeof policy | typeof Authorization.public | typeof Authorization.deny, create: unknown) =>
-    Resource.make({ name, schema: OwnedDocumentSchema, authorization, create: create as never, operations: [] })
 
-  expect(() => make("public_binding", Authorization.public, { fromSubject: { ownerId: p.subject.userId } })).toThrow()
-  expect(() => make("deny_binding", Authorization.deny, { fromSubject: { ownerId: p.subject.userId } })).toThrow()
-  expect(() => make("unknown_target_binding", policy, { fromSubject: { absent: p.subject.userId } })).toThrow()
-  expect(() => make("non_subject_binding", policy, { fromSubject: { ownerId: p.row.ownerId } })).toThrow()
-  expect(() => make("unknown_subject_binding", policy, { fromSubject: { ownerId: { _tag: "SubjectField", field: "absent" } } })).toThrow()
-  expect(() => make("incompatible_binding", policy, { fromSubject: { ownerId: p.subject.roles } })).toThrow()
-  expect(() => make("defaulted_binding", policy, { defaults: { ownerId: "owner" }, fromSubject: { ownerId: p.subject.userId } })).toThrow()
-  expect(() => make("generated_binding", policy, { generated: { ownerId: "uuidV7" }, fromSubject: { ownerId: p.subject.userId } })).toThrow()
+it("rejects unsafe create subject binding definitions", () => {
+  const make = (encodedDefinition: string) => {
+    const definition = JSON.parse(encodedDefinition)
+    const hasPolicyMarker = policyMarkerEquals(definition.authorization, "policy")
+    const authorization = hasPolicyMarker ? policy : definition.authorization
+    return Resource.make({ ...definition, authorization, schema: OwnedDocumentSchema, operations: [] })
+  }
+
+  expect(() => make('{"name":"public_binding","authorization":{"_tag":"Public"},"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
+  expect(() => make('{"name":"deny_binding","authorization":{"_tag":"Deny"},"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
+  expect(() => make('{"name":"unknown_target_binding","authorization":"policy","create":{"fromSubject":{"absent":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
+  expect(() => make('{"name":"non_subject_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"RowField","field":"ownerId"}}}}')).toThrow()
+  expect(() => make('{"name":"unknown_subject_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"absent"}}}}')).toThrow()
+  expect(() => make('{"name":"incompatible_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"roles"}}}}')).toThrow()
+  expect(() => make('{"name":"defaulted_binding","authorization":"policy","create":{"defaults":{"ownerId":"owner"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
+  expect(() => make('{"name":"generated_binding","authorization":"policy","create":{"generated":{"ownerId":"uuidV7"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
 })
 
 
@@ -207,16 +229,24 @@ it.effect("concurrent transfers cannot both authorize against the previous owner
     expect(final.ownerId).toBe(success.success.ownerId)
   }), Effect.provide(sqlite),
 ))
+
 const FeaturePermissionSchema = Schema.Struct({ id: identifier(Schema.String), enabled: Schema.NullOr(Schema.Boolean) })
 interface FeaturePermission extends Schema.Schema.Type<typeof FeaturePermissionSchema> {}
+
 const FeatureSubjectSchema = Schema.Struct({
   enabled: Schema.NullOr(Schema.Boolean),
   enabledValues: Schema.Array(Schema.NullOr(Schema.Boolean)),
 })
+
+interface FeatureSubject extends Schema.Schema.Type<typeof FeatureSubjectSchema> {}
+
 const flags = Authorization.for({ resource: FeaturePermissionSchema, subject: FeatureSubjectSchema })
 const enabled = flags.eq(flags.row.enabled, flags.subject.enabled)
 const enabledBySubject = flags.includes(flags.subject.enabledValues, flags.row.enabled)
-const featurePermission = flags.policy({ scope: flags.all(), allow: { read: flags.all(enabled, enabledBySubject) } })
+const featureScope = flags.all()
+const featureRead = flags.all(enabled, enabledBySubject)
+const featurePermission = flags.policy({ scope: featureScope, allow: { read: featureRead } })
+
 const FeaturePermissions = Resource.make({
   name: "feature_permissions",
   schema: FeaturePermissionSchema,
@@ -224,6 +254,7 @@ const FeaturePermissions = Resource.make({
   operations: ["list"],
   list: { order: [{ field: "id" }], limit: 1 },
 })
+
 const enabledSubject = FeatureSubjectSchema.make({ enabled: true, enabledValues: [true] })
 const nullSubject = FeatureSubjectSchema.make({ enabled: null, enabledValues: [null] })
 const asEnabled = Effect.provideService(AuthorizationSubject, enabledSubject)
@@ -231,9 +262,22 @@ const asNull = Effect.provideService(AuthorizationSubject, nullSubject)
 
 it.effect("native Boolean storage preserves equality, membership, subject, and null semantics before pagination", () => pipe(
   Effect.gen(function* () {
-    const permitted = { row: { id: "feature", enabled: true } }
+    const permittedRow = FeaturePermissionSchema.make({ id: "feature", enabled: true })
+
+    const permitted = AuthorizationValues.make({
+      row: Option.some(permittedRow),
+      next: Option.none(),
+    })
+
     yield* pipe(Authorization.require(featurePermission, "read", permitted), asEnabled)
-    const withheld = { row: { id: "feature", enabled: false } }
+
+    const withheldRow = FeaturePermissionSchema.make({ id: "feature", enabled: false })
+
+    const withheld = AuthorizationValues.make({
+      row: Option.some(withheldRow),
+      next: Option.none(),
+    })
+
     const denied = yield* pipe(Authorization.require(featurePermission, "read", withheld), asEnabled, rejectedTag)
     expect(denied).toBe("Forbidden")
 
@@ -246,37 +290,52 @@ it.effect("native Boolean storage preserves equality, membership, subject, and n
     expect(page).toEqual({ items: [{ id: "enabled", enabled: true }], nextCursor: null })
     const nullVisible = yield* pipe(FeaturePermissions.repository.list(), asNull)
     expect(nullVisible).toEqual([{ id: "unset", enabled: null }])
-  }), Effect.provide(sqlite),
+  }),
+  Effect.provide(sqlite),
 ))
 
 it.effect("policy construction snapshots compiled rules and rejects fabricated policy descriptors", () => pipe(
   Effect.gen(function* () {
-    const rule = {
-      _tag: "Equal",
-      left: p.row.ownerId,
-      right: p.subject.userId,
-    } as unknown as typeof owned
-    const malformed = { _tag: "Equal", left: p.row.ownerId } as unknown as typeof owned
-    expect(() => p.policy({ scope: p.all(), allow: { read: malformed } })).toThrow()
+    const malformed = JSON.parse('{"_tag":"Equal","left":{"_tag":"RowField","field":"ownerId"}}')
+    const policyScope = p.all()
+    expect(() => p.policy({ scope: policyScope, allow: { read: malformed } })).toThrow()
 
-    const compiled = p.policy({ scope: p.all(), allow: { read: rule } })
-    const mutableRule = rule as unknown as { left: Operand }
-    mutableRule.left = Policy.literal("nobody")
+    const rule = p.eq(p.row.ownerId, p.subject.userId)
+    const rules = FabricatedPolicyShapeSchema.fields.allow.make({ read: rule })
+    const compiled = p.policy({ scope: policyScope, allow: rules })
+    const compiledRow = OwnedDocumentSchema.make({ id: "owned", tenantId: "a", ownerId: "alice", title: "private" })
 
-    yield* pipe(Authorization.require(compiled, "read", { row: { id: "owned", tenantId: "a", ownerId: "alice", title: "private" } }), asAlice)
+    const compiledValues = AuthorizationValues.make({
+      row: Option.some(compiledRow),
+      next: Option.none(),
+    })
 
-    const fabricated: PolicyAuthorization = {
-      _tag: "Policy",
+    yield* pipe(Authorization.require(compiled, "read", compiledValues), asAlice)
+    const alwaysAllowed = Policy.constant(true)
+    yield* Effect.sync(() => Reflect.set(rules, "read", alwaysAllowed))
+    const stillDenied = yield* pipe(Authorization.require(compiled, "read", compiledValues), asBob, rejectedTag)
+    expect(stillDenied).toBe("Forbidden")
+    const copied = Struct.assign(compiled, { allow: { read: alwaysAllowed } })
+    const copiedDenied = yield* pipe(Authorization.require(copied, "read", compiledValues), asBob, rejectedTag)
+    expect(copiedDenied).toBe("AuthorizationDefinitionError")
+    const fabricatedRead = Policy.constant(true)
+    const fabricatedScope = Policy.constant(true)
+
+    const fabricated = FabricatedPolicySchema.make({
       resource: OwnedDocumentSchema,
       subject: SubjectSchema,
-      scope: Policy.constant(true),
-      allow: { read: Policy.constant(true) },
-    }
-    const rejected = yield* pipe(
-      Authorization.require(fabricated, "read", { row: { id: "owned", tenantId: "a", ownerId: "alice", title: "private" } }),
-      asAlice,
-      rejectedTag,
-    )
+      scope: fabricatedScope,
+      allow: { read: fabricatedRead },
+    })
+
+    const fabricatedRow = OwnedDocumentSchema.make({ id: "owned", tenantId: "a", ownerId: "alice", title: "private" })
+
+    const fabricatedValues = AuthorizationValues.make({
+      row: Option.some(fabricatedRow),
+      next: Option.none(),
+    })
+
+    const rejected = yield* pipe(Authorization.require(fabricated, "read", fabricatedValues), asAlice, rejectedTag)
     expect(rejected).toBe("AuthorizationDefinitionError")
   }),
 ))

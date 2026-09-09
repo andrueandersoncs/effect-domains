@@ -41,6 +41,7 @@ const OrderedTodos = Resource.make({
   schema: OrderedTodoSchema,
   operations: [],
 })
+
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const todoIdentifier = Struct.get<PagedTodo, "id">("id")
 const noteAuthor = ExampleSubjectSchema.make({ userId: "codec-author", tenantId: "codec-test", roles: ["editor"] })
@@ -135,25 +136,26 @@ it.effect("declared list cursors preserve page boundaries and patch keeps keys i
 const orderedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([OrderedTodos.table])
   const database = yield* SqlClient.SqlClient
-  const invalidCreate = yield* Effect.result(
-    OrderedTodos.repository.create({ lower: 4, upper: 1 }),
-  )
-  expect(Result.isFailure(invalidCreate)).toBe(true)
+  const invalidCreateEffect = OrderedTodos.repository.create({ lower: 4, upper: 1 })
+  const invalidCreate = yield* Effect.result(invalidCreateEffect)
+  const invalidCreateFailed = Result.isFailure(invalidCreate)
+  expect(invalidCreateFailed).toBe(true)
 
   const created = yield* OrderedTodos.repository.create({ lower: 1, upper: 4 })
-  const invalidUpdate = yield* Effect.result(
-    OrderedTodos.repository.update({ ...created, lower: 4, upper: 1 }),
-  )
-  const invalidPatch = yield* Effect.result(
-    OrderedTodos.repository.patch(created.id, { lower: 4 }),
-  )
+  const invalidUpdateEffect = OrderedTodos.repository.update({ ...created, lower: 4, upper: 1 })
+  const invalidUpdate = yield* Effect.result(invalidUpdateEffect)
+  const invalidPatchEffect = OrderedTodos.repository.patch(created.id, { lower: 4 })
+  const invalidPatch = yield* Effect.result(invalidPatchEffect)
+  const invalidUpdateFailed = Result.isFailure(invalidUpdate)
+  const invalidPatchFailed = Result.isFailure(invalidPatch)
 
-  expect(Result.isFailure(invalidUpdate)).toBe(true)
-  expect(Result.isFailure(invalidPatch)).toBe(true)
+  expect(invalidUpdateFailed).toBe(true)
+  expect(invalidPatchFailed).toBe(true)
 
   const rows = yield* database<Readonly<{ readonly lower: number; readonly upper: number }>>`
     SELECT lower, upper FROM ${database(OrderedTodos.table.name)}
   `
+
   expect(rows).toEqual([{ lower: 1, upper: 4 }])
 })
 

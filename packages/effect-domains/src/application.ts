@@ -1,4 +1,4 @@
-import { Array, Effect, Layer, Schema, Struct } from "effect"
+import { Array, Effect, HashSet, Layer, Schema, Struct, pipe } from "effect"
 import { RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import type { AnyCommandBundle } from "./commands.ts"
 import { SchemaStore } from "./migrations.ts"
@@ -31,36 +31,42 @@ const make = <
   const Commands extends ReadonlyArray<AnyCommandBundle> = typeof emptyCommands,
 >(options: Readonly<{
   name: string
-  resources?: Resources
-  commands?: Commands
-}>) => {
+}> & Readonly<Partial<{
+  resources: Resources
+  commands: Commands
+}>>) => {
   const resources = options.resources ?? emptyResources
   const commands = options.commands ?? emptyCommands
   const bundles = [...resources, ...commands]
   const groups = Array.map(bundles, Struct.get("group"))
-  const tables = Array.map(resources, (resource: Resource) => resource.table) as Array<Resources[number]["table"]>
-  Effect.runSync(Effect.gen(function* () {
-    const tableNames = new Set<string>()
-    for (const table of tables) {
-      if (tableNames.has(table.name)) {
+  const tables = Array.map(resources as ReadonlyArray<Resource>, Struct.get("table")) as Array<Resources[number]["table"]>
+
+  const validate = Effect.gen(function* () {
+    yield* Effect.reduce(tables, HashSet.empty<string>, Effect.fn("Application.validateTable")(function* (names, table) {
+      if (HashSet.has(names, table.name)) {
         return yield* ApplicationDefinitionError.make({ reason: `Duplicate resource table ${table.name}` })
       }
-      tableNames.add(table.name)
-    }
 
-    const operationNames = new Set<string>()
-    for (const group of groups) {
-      for (const procedure of group.requests.values()) {
-        if (operationNames.has(procedure._tag)) {
-          return yield* ApplicationDefinitionError.make({ reason: `Duplicate operation ${procedure._tag}` })
-        }
-        if (RpcSchema.isStreamSchema(procedure.successSchema)) {
-          return yield* ApplicationDefinitionError.make({ reason: `Application commands must be unary: ${procedure._tag}` })
-        }
-        operationNames.add(procedure._tag)
+      return HashSet.add(names, table.name)
+    }))
+
+    const proceduresForGroup = (group: AnyCommandBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
+    const procedures = Array.flatMap(groups, proceduresForGroup)
+
+    yield* Effect.reduce(procedures, HashSet.empty<string>, Effect.fn("Application.validateOperation")(function* (names, procedure) {
+      if (HashSet.has(names, procedure._tag)) {
+        return yield* ApplicationDefinitionError.make({ reason: `Duplicate operation ${procedure._tag}` })
       }
-    }
-  }))
+
+      if (RpcSchema.isStreamSchema(procedure.successSchema)) {
+        return yield* ApplicationDefinitionError.make({ reason: `Application commands must be unary: ${procedure._tag}` })
+      }
+
+      return HashSet.add(names, procedure._tag)
+    }))
+  })
+
+  pipe(validate, Effect.runSync)
   const group = RpcGroup.make().merge(...groups) as ApplicationGroup<Resources, Commands>
   const layers = Array.map(bundles, Struct.get("handlers")) as Array<HandlerLayer<Resources[number] | Commands[number]>>
   const handlers = Layer.mergeAll(Layer.empty, ...layers)

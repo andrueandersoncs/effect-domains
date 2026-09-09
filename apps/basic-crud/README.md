@@ -65,5 +65,5 @@ Review migrations; do not regenerate already-applied artifacts from current mode
 - [`BookSchema`](../../packages/example-support/src/book.ts): canonical book schema shared with authored SQL.
 - [`resources.ts`](resources.ts): one generated CRUD declaration.
 - [`application.ts`](application.ts): resource registration, with no authored commands.
-- [`main.ts`](main.ts): `ApplicationBun.runMain` with a URL manifest and optional runtime settings omitted.
+- [`main.ts`](main.ts): `ApplicationBun.run` executed by native `BunRuntime.runMain`, with a URL manifest.
 - [`migrations/manifest.json`](migrations/manifest.json) and [artifacts](migrations/): frozen runtime history.

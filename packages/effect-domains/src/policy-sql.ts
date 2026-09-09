@@ -1,5 +1,6 @@
-import { Array, Effect, Match, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Match, Predicate, Schema, pipe } from "effect"
 import { SqlClient, type Statement } from "effect/unstable/sql"
+
 import {
   Policy,
   PolicyEvaluationError,
@@ -18,27 +19,39 @@ type Binder = (
 
 type ScalarKind = "boolean" | "null" | "number" | "string"
 type ExpressionKind = ScalarKind | "row"
-type ScalarExpression = Readonly<{
-  readonly fragment: Statement.Fragment
-  readonly kind: ExpressionKind
-}>
 
-const scalarKind = (value: Scalar): ScalarKind => {
-  if (value === null) return "null"
-  if (typeof value === "boolean") return "boolean"
-  if (typeof value === "number") return "number"
-  return "string"
+const ScalarExpressionKindSchema = Schema.Literals(["boolean", "null", "number", "row", "string"])
+
+class ScalarExpression extends Schema.Class<ScalarExpression>("ScalarExpression")({
+  fragment: Schema.Unknown,
+  kind: ScalarExpressionKindSchema,
+}) {
+  declare readonly fragment: Statement.Fragment
 }
+
+const expressionKindEquals = Equivalence.strictEqual<ExpressionKind>()
+
+const scalarKind = (value: Scalar): ScalarKind =>
+  pipe(
+    Match.value(value),
+    Match.when(Predicate.isNull, Function.constant("null" as const)),
+    Match.when(Predicate.isBoolean, Function.constant("boolean" as const)),
+    Match.when(Predicate.isNumber, Function.constant("number" as const)),
+    Match.orElse(Function.constant("string" as const)),
+  )
 
 const scalarExpression = (sql: SqlClient.SqlClient) => (value: Scalar): ScalarExpression => {
   const kind = scalarKind(value)
-  return { fragment: sql`${kind === "boolean" ? Number(value) : value}`, kind }
+  const boolean = pipe(kind, Match.value, Match.when("boolean", Function.constant(true)), Match.orElse(Function.constant(false)))
+  const storedValue = boolean ? Number(value) : value
+  const fragment = sql`${storedValue}`
+  return ScalarExpression.make({ fragment, kind })
 }
 
-const rowExpression = (sql: SqlClient.SqlClient) => (field: string): ScalarExpression => ({
-  fragment: sql`${sql(field)}`,
-  kind: "row",
-})
+const rowExpression = (sql: SqlClient.SqlClient) => (field: string): ScalarExpression => {
+  const fragment = sql`${sql(field)}`
+  return ScalarExpression.make({ fragment, kind: "row" })
+}
 
 const numericType = (sql: SqlClient.SqlClient, expression: Statement.Fragment): Statement.Fragment =>
   sql`typeof(${expression}) IN ${sql.in(["integer", "real"])}`
@@ -47,15 +60,23 @@ const typeMatches = (
   sql: SqlClient.SqlClient,
   expression: Statement.Fragment,
   kind: "null" | "number" | "string",
-): Statement.Fragment =>
-  kind === "null"
-    ? sql`typeof(${expression}) = ${"null"}`
-    : kind === "number"
-      ? numericType(sql, expression)
-      : sql`typeof(${expression}) = ${"text"}`
+) =>
+  pipe(
+    Match.value(kind),
+    Match.when("null", () => sql`typeof(${expression}) = ${"null"}`),
+    Match.when("number", () => numericType(sql, expression)),
+    Match.orElse(() => sql`typeof(${expression}) = ${"text"}`),
+  )
 
-const storageKind = (kind: ScalarKind): "null" | "number" | "string" =>
-  kind === "boolean" ? "number" : kind
+const storageKind = (kind: ScalarKind) =>
+  pipe(
+    Match.value(kind),
+    Match.when("boolean", Function.constant("number" as const)),
+    Match.when("null", Function.constant("null" as const)),
+    Match.when("number", Function.constant("number" as const)),
+    Match.when("string", Function.constant("string" as const)),
+    Match.exhaustive,
+  )
 
 const rowEquality = (
   sql: SqlClient.SqlClient,
@@ -74,55 +95,67 @@ const rowScalarEquality = (
   row: Statement.Fragment,
   scalar: Statement.Fragment,
   kind: ScalarKind,
-): Statement.Fragment => sql`${typeMatches(sql, row, storageKind(kind))} AND ${row} IS ${scalar}`
+): Statement.Fragment => {
+  const expectedKind = storageKind(kind)
+  const matchingType = typeMatches(sql, row, expectedKind)
+  return sql`${matchingType} AND ${row} IS ${scalar}`
+}
 
 const totalEquality = (
   sql: SqlClient.SqlClient,
   left: ScalarExpression,
   right: ScalarExpression,
-): Statement.Fragment => {
-  if (left.kind === "row") {
-    return right.kind === "row"
-      ? rowEquality(sql, left.fragment, right.fragment)
-      : rowScalarEquality(sql, left.fragment, right.fragment, right.kind)
-  }
-  if (right.kind === "row") return rowScalarEquality(sql, right.fragment, left.fragment, left.kind)
-  return left.kind === right.kind ? sql`${left.fragment} IS ${right.fragment}` : falseExpression(sql)
-}
+) =>
+  pipe(
+    Match.value([left.kind, right.kind] as const),
+    Match.when(["row", "row"], () => rowEquality(sql, left.fragment, right.fragment)),
+    Match.when(["row", Match.any], () => rowScalarEquality(sql, left.fragment, right.fragment, right.kind as ScalarKind)),
+    Match.when([Match.any, "row"], () => rowScalarEquality(sql, right.fragment, left.fragment, left.kind as ScalarKind)),
+    Match.when([Match.any, Match.any], ([leftKind, rightKind]) => {
+      const matchingKind = expressionKindEquals(leftKind, rightKind)
+      return matchingKind ? sql`${left.fragment} IS ${right.fragment}` : falseExpression(sql)
+    }),
+    Match.exhaustive,
+  )
 
 const sqlEvaluationFailure = (reason: string) =>
   pipe(PolicyEvaluationError.make({ reason }), Effect.fail)
+
+const nextFieldUnavailable = sqlEvaluationFailure("next fields are unavailable to SQL predicates")
+const collectionRequired = sqlEvaluationFailure("policy collection must resolve to finite scalar values")
 
 const scalarOperand = (
   sql: SqlClient.SqlClient,
   environment: PolicyEnvironment,
   operand: Operand,
-): Effect.Effect<ScalarExpression, PolicyEvaluationError> => {
-  switch (operand._tag) {
-    case "Literal":
-    case "SubjectField":
-      return pipe(resolveScalarLiteralOrSubject(operand, environment), Effect.map(scalarExpression(sql)))
-    case "RowField":
-      return Effect.succeed(rowExpression(sql)(operand.field))
-    case "NextField":
-      return sqlEvaluationFailure("next fields are unavailable to SQL predicates")
-  }
-}
+) =>
+  pipe(
+    Match.value(operand),
+    Match.tagsExhaustive({
+      Literal: (value) => pipe(resolveScalarLiteralOrSubject(value, environment), Effect.map(scalarExpression(sql))),
+      SubjectField: (value) => pipe(resolveScalarLiteralOrSubject(value, environment), Effect.map(scalarExpression(sql))),
+      RowField: ({ field }) => {
+        const expression = rowExpression(sql)
+        const row = expression(field)
+        return Effect.succeed(row)
+      },
+      NextField: Function.constant(nextFieldUnavailable),
+    }),
+  )
 
 const collectionValues = (
   environment: PolicyEnvironment,
   operand: Operand,
-): Effect.Effect<ReadonlyArray<Scalar>, PolicyEvaluationError> => {
-  switch (operand._tag) {
-    case "Literal":
-    case "SubjectField":
-      return resolveScalarCollectionLiteralOrSubject(operand, environment)
-    case "RowField":
-      return sqlEvaluationFailure("policy collection must resolve to finite scalar values")
-    case "NextField":
-      return sqlEvaluationFailure("next fields are unavailable to SQL predicates")
-  }
-}
+) =>
+  pipe(
+    Match.value(operand),
+    Match.tagsExhaustive({
+      Literal: (value) => resolveScalarCollectionLiteralOrSubject(value, environment),
+      SubjectField: (value) => resolveScalarCollectionLiteralOrSubject(value, environment),
+      RowField: Function.constant(collectionRequired),
+      NextField: Function.constant(nextFieldUnavailable),
+    }),
+  )
 
 const constantCondition = (sql: SqlClient.SqlClient) => (value: boolean) =>
   value ? trueExpression(sql) : falseExpression(sql)
@@ -141,7 +174,6 @@ const bindEquality = ({
     return totalEquality(sql, leftValue, rightValue)
   })
 
-
 const bindMembership = ({
   collection,
   value,
@@ -149,11 +181,16 @@ const bindMembership = ({
   Effect.fn("PolicySql.includes")(function* (sql, environment) {
     const entries = yield* collectionValues(environment, collection)
     const valueExpression = yield* scalarOperand(sql, environment, value)
+    const expression = scalarExpression(sql)
 
     if (!Array.isReadonlyArrayNonEmpty(entries)) return falseExpression(sql)
 
-    const expression = scalarExpression(sql)
-    const comparisons = Array.map(entries, (entry) => totalEquality(sql, valueExpression, expression(entry)))
+    const comparison = (entry: Scalar) => {
+      const entryExpression = expression(entry)
+      return totalEquality(sql, valueExpression, entryExpression)
+    }
+
+    const comparisons = Array.map(entries, comparison)
     return sql.or(comparisons)
   })
 

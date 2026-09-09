@@ -1,16 +1,17 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, DateTime, Effect, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
+import { Array, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
 import { SqlClient, SqlError, type Statement } from "effect/unstable/sql"
+
 import {
   RepositoryError,
   type RepositoryListCursor,
   RepositoryListOrder,
   RepositoryStore,
   type RepositoryAccess,
-  type RepositoryListQuery,
 } from "./repository-store.ts"
+
 import { PolicySql } from "./policy-sql.ts"
-import type { Policy } from "./policy.ts"
+import { Policy, PolicyEnvironment } from "./policy.ts"
 import { SchemaStore } from "./migrations.ts"
 import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { Table } from "./table.ts"
@@ -24,8 +25,12 @@ class InsertReturnedNoRow extends Schema.TaggedError<InsertReturnedNoRow>()(
 const repositoryFailure = (resource: string) => (cause: unknown) =>
   RepositoryError.make({ resource, cause })
 
+const unknownEquals = Equivalence.strictEqual<unknown>()
+const repositoryOrderDirectionEquals = Equivalence.strictEqual<RepositoryListOrder["direction"]>()
+const absentPolicyValue = Option.none<Readonly<Record<string, unknown>>>()
+
 const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
-  value === null ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
+  unknownEquals(value, null) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
 const leadingEqualitySql = (
   sql: SqlClient.SqlClient,
@@ -45,7 +50,7 @@ const cursorTerm = (
   const equalPreceding = Array.map(preceding, leadingEqualitySql(sql, values))
   const valueOption = Array.get(values, index)
   const value = Option.getOrUndefined(valueOption)
-  const ascending = entry.direction === "asc"
+  const ascending = repositoryOrderDirectionEquals(entry.direction, "asc")
 
   const boundary = ascending
     ? sql`${sql(entry.field)} > ${value}`
@@ -73,36 +78,11 @@ const appendCursorCondition = (
 }
 
 const orderingFragment = (sql: SqlClient.SqlClient) => (entry: RepositoryListOrder) => {
-  const ascending = entry.direction === "asc"
+  const ascending = repositoryOrderDirectionEquals(entry.direction, "asc")
   const direction = sql.literal(ascending ? "ASC" : "DESC")
   return sql`${sql(entry.field)} ${direction}`
 }
 
-const queryStatement = (
-  sql: SqlClient.SqlClient,
-  table: Table,
-  query: RepositoryListQuery,
-  policy: Statement.Fragment,
-) => {
-  const identifierOrder = RepositoryListOrder.make({ field: table.identifier, direction: "asc" })
-  const order = Array.append(query.order, identifierOrder)
-  const filterEntries = Record.toEntries(query.filter)
-  const predicates = [policy, ...Array.map(filterEntries, whereFragment(sql))]
-
-  const predicatesWithCursor = Option.match(query.cursor, {
-    onNone: Function.constant(predicates),
-    onSome: appendCursorCondition(sql, order, predicates),
-  })
-
-  const ordering = Array.map(order, orderingFragment(sql))
-
-  return sql<Readonly<Record<string, unknown>>>`
-    SELECT * FROM ${sql(table.name)}
-    WHERE ${sql.and(predicatesWithCursor)}
-    ORDER BY ${sql.csv(ordering)}
-    LIMIT ${query.limit + 1}
-  `
-}
 
 const transactionFailure = (resource: string) => (cause: SqlError.SqlError) =>
   pipe(cause, repositoryFailure(resource), Effect.fail)
@@ -121,8 +101,18 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
   const policyBinding = Effect.fn("RepositoryStore.policyBinding")(
     function* (table: Table, access: RepositoryAccess) {
       const recover = Function.flow(repositoryFailure(table.name), Effect.fail)
-      const binder = yield* pipe(Ref.modify(policyBinders, registerPolicy(access.policy)), Effect.catchDefect(recover))
-      const environment = { subject: access.subject }
+
+      const binder = yield* pipe(
+        Ref.modify(policyBinders, registerPolicy(access.policy)),
+        Effect.catchDefect(recover),
+      )
+
+      const environment = PolicyEnvironment.make({
+        subject: access.subject,
+        row: absentPolicyValue,
+        next: absentPolicyValue,
+      })
+
       return yield* pipe(binder(sqlClient, environment), Effect.mapError(repositoryFailure(table.name)))
     },
   )
@@ -144,6 +134,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
     }),
     list: Effect.fn("RepositoryStore.list")(function* (table, access) {
       const policy = yield* policyBinding(table, access)
+
       return yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           SELECT * FROM ${sqlClient(table.name)}
@@ -154,10 +145,25 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
     }),
     query: Effect.fn("RepositoryStore.query")(function* (table, query, access) {
       const policy = yield* policyBinding(table, access)
-      const statement = queryStatement(sqlClient, table, query, policy)
+      const identifierOrder = RepositoryListOrder.make({ field: table.identifier, direction: "asc" })
+      const order = Array.append(query.order, identifierOrder)
+      const filterEntries = Record.toEntries(query.filter)
+      const predicates = [policy, ...Array.map(filterEntries, whereFragment(sqlClient))]
+
+      const predicatesWithCursor = Option.match(query.cursor, {
+        onNone: Function.constant(predicates),
+        onSome: appendCursorCondition(sqlClient, order, predicates),
+      })
+
+      const ordering = Array.map(order, orderingFragment(sqlClient))
 
       const rows = yield* pipe(
-        statement,
+        sqlClient<Readonly<Record<string, unknown>>>`
+          SELECT * FROM ${sqlClient(table.name)}
+          WHERE ${sqlClient.and(predicatesWithCursor)}
+          ORDER BY ${sqlClient.csv(ordering)}
+          LIMIT ${query.limit + 1}
+        `,
         Effect.mapError(repositoryFailure(table.name)),
       )
 
@@ -176,6 +182,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
       )
 
       const row = Array.get(rows, 0)
+
       if (Option.isNone(row)) {
         return yield* RepositoryError.make({
           resource: table.name,

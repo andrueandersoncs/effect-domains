@@ -1,6 +1,7 @@
 import { Commands } from "effect-domains/commands"
 import { Schema } from "effect"
 import { RpcGroup } from "effect/unstable/rpc"
+
 import {
   InsufficientStock,
   InvalidReservationState,
@@ -35,6 +36,7 @@ const reserveStock = Commands.rpc("reserve", {
   success: transition.success,
   error: reserveErrorsSchema,
 })
+
 const confirmReservation = Commands.rpc("confirm", transition)
 const releaseReservation = Commands.rpc("release", transition)
 

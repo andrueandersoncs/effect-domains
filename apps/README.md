@@ -45,7 +45,7 @@ Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHOR
 
 ### Demo authentication
 
-[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies one small `Authenticator` layer to the todo and note applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
+[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo and note applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
 
 | Token | User | Tenant | Roles |
 | --- | --- | --- | --- |
@@ -82,7 +82,7 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, and generated remote commands.
 
-`Application.make({ name, resources, commands })` groups optional resource and command arrays; omitted groups are empty. Each `main.ts` resolves its manifest as `new URL("./migrations/manifest.json", import.meta.url)` and calls `ApplicationBun.runMain(app, { database: { manifest }, admin: true })`, adding `services` and `initialize` only where its handlers need them. `ApplicationBun.run` returns a typed Effect when the caller owns the runtime. `database.filename`, `services`, and `initialize` are optional; callers with decoded history may instead pass `database: { migrations, filename? }`. The shared runner supplies the loopback server, generated RPC client, local schema commands, inspection, MCP, and opted-in admin; `*:server` scripts alias `main.ts serve`. When enabled, the Bun adapter loads the prebuilt assets from `apps/admin/dist`; it never bundles the browser application at runtime.
+`Application.make({ name, resources, commands })` groups optional resource/command arrays. Each `main.ts` resolves its manifest with `new URL("./migrations/manifest.json", import.meta.url)` and passes `ApplicationBun.run(app, { database: { manifest }, admin: true })` to native `BunRuntime.runMain`. Services and initialization are supplied only where needed. Database filenames are optional; callers with decoded history may instead pass `{ migrations, filename? }`. The runner supplies the loopback server, RPC client, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; admin uses prebuilt assets and never bundles at runtime.
 
 ## Generated admin
 
@@ -221,7 +221,7 @@ The planner emits blocked changes with their reasons instead of guessing drops, 
 - [`ApplicationBun`](../packages/effect-domains/src/application-bun.ts): shared HTTP server and CLI runtime.
 - [`Resource`](../packages/effect-domains/src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
 - [`Authorization`](../packages/effect-domains/src/authorization.ts): typed resource policy declarations and evaluator.
-- [`Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
+- [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
 - [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
 - [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, migration planning, and execution.

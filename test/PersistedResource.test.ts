@@ -43,6 +43,7 @@ const persistedResourceProgram = Effect.gen(function* () {
   const redirected = yield* Effect.result(redirection)
   const redirectionFailed = Result.isFailure(redirected)
   expect(redirectionFailed).toBe(true)
+
   if (redirectionFailed) {
     expect(redirected.failure._tag).toBe("PersistedRefKeyError")
   }
@@ -62,9 +63,11 @@ const persistedResourceProgram = Effect.gen(function* () {
   const refreshed = yield* Effect.result(ref.refresh)
   const refreshFailed = Result.isFailure(refreshed)
   expect(refreshFailed).toBe(true)
+
   if (refreshFailed) {
     expect(refreshed.failure._tag).toBe("ResourceNotFound")
   }
+
   const retainedVisits = yield* ref.get
   expect(retainedVisits).toEqual({ id: "visits", value: 10 })
   const missing = yield* Counters.repository.find(VisitsCounterId)
