@@ -2,7 +2,7 @@
 
 This directory is the persistent, source-grounded wiki for the Effect Domains design hypothesis and implementation workspace.
 
-Effect Domains derives routine application machinery from canonical Effect Schemas while leaving semantic storage transformations, business policy, and migration intent explicit. The maintained [framework contract](research-agenda.md#implemented-contract) records the current API; the [validation record](validation-strategy.md#verification-record) separates exercised behavior from historical and unproven claims. The implementation is a private Bun workspace: the framework is [`packages/effect-domains`](../../packages/effect-domains/), shared fixtures are [`packages/example-support`](../../packages/example-support/), ten runnable applications are [`apps`](../../apps/), and the browser admin is separately prebuilt in [`apps/admin`](../../apps/admin/).
+Effect Domains derives routine application machinery from canonical Effect Schemas while leaving semantic storage transformations, business policy, and migration intent explicit. The maintained [framework contract](research-agenda.md#implemented-contract) records the current API; the [validation record](validation-strategy.md#verification-record) separates exercised behavior from historical and unproven claims. The implementation is a private Bun workspace: the framework is [`packages/effect-domains`](../../packages/effect-domains/), shared fixtures are [`packages/example-support`](../../packages/example-support/), runnable applications are under [`apps`](../../apps/), and the browser admin is separately prebuilt in [`apps/admin`](../../apps/admin/).
 
 ## Content Map
 
@@ -25,6 +25,8 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 Files under `raw/` are immutable source material. Maintained pages synthesize them and cite implementation evidence close to claims. Current implementation links use the workspace layout; dated verification records retain their original dates and observations.
 
 ## Current Status
+
+The [feature-retirement record](validation-strategy.md#2026-09-09-persistent-reference-and-cluster-wrapper-removal) documents removal of `PersistedRef`, its counter demonstration, and the framework cluster wrapper. Caching remains application policy; the workflow application owns its native diagnostic schemas and authenticated status command. Generated CLI flags are unchanged.
 
 The [native durable-execution record](validation-strategy.md#2026-09-09-native-durable-execution) records passing final workspace typechecking, lint, and 64 tests, plus forced-restart recovery for an approval/export workflow and scheduled per-recipient delivery. Live checks include standalone workers, authenticated native proxies, protected diagnostics, a singleton projection, and explicit cron retention. These are bounded single-runner demonstrations, not cross-database atomicity or production distributed-system guarantees.
 

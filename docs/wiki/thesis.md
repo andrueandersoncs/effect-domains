@@ -44,7 +44,7 @@ Domain schemas and operation contracts
     └── Documentation interpreter
 ```
 
-This arrangement aims for deep modules with clear escape hatches rather than annotation-heavy thin wrappers. Persisted resource state is deliberately only in-process synchronization; migration generation requires explicit intent for semantic changes; transactions remain authored handler concerns. ([PersistedRef](../../packages/effect-domains/src/persisted-ref.ts); [Migrations](../../packages/effect-domains/src/sqlite-migrations.ts); [Inspection boundary](../../packages/effect-domains/src/application-inspect.ts))
+This arrangement aims for deep modules with clear escape hatches rather than annotation-heavy thin wrappers. Caching and concurrency policy remain application concerns; migration generation requires explicit intent for semantic changes; transactions remain authored handler concerns. Operational diagnostics use native Effect services in the application rather than a framework wrapper. ([Authored SQL](../../apps/authored-sql/sqlite.ts); [Migrations](../../packages/effect-domains/src/sqlite-migrations.ts); [Workflow diagnostics](../../apps/durable-workflows/workflow.ts))
 
 ## Constraints on Generalization
 
