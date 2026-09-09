@@ -94,15 +94,13 @@ const representationOccursIn = (identifier: string, checks: Option.Option<Schema
 
 const nativeFlagForEnum = (ast: SchemaAST.Enum): Option.Option<NativeFlag> => {
   const values = Array.map(ast.enums, ([, value]) => value)
-  const stringValues = Array.filter(values, Predicate.isString)
-  const numberValues = Array.filter(values, Predicate.isNumber)
-  const stringFlag = NativeFlag.StringEnum({ values: stringValues })
-  const numberFlag = NativeFlag.NumberEnum({ values: numberValues })
-  const hasOnlyStrings = Array.every(values, Predicate.isString)
-  if (hasOnlyStrings) return Option.some(stringFlag)
 
-  const hasOnlyNumbers = Array.every(values, Predicate.isNumber)
-  return hasOnlyNumbers ? Option.some(numberFlag) : noNativeFlag
+  return pipe(
+    Match.value(values),
+    Match.when(Array.every(Predicate.isString), (values) => pipe(NativeFlag.StringEnum({ values }), Option.some)),
+    Match.when(Array.every(Predicate.isNumber), (values) => pipe(NativeFlag.NumberEnum({ values }), Option.some)),
+    Match.orElse(Function.constant(noNativeFlag)),
+  )
 }
 
 const stringLiteralFlag = (literal: string) => pipe(NativeFlag.StringEnum({ values: [literal] }), Option.some)
@@ -117,28 +115,21 @@ const nativeFlagForLiteral = (ast: SchemaAST.Literal) =>
     Match.orElse(Function.constant(noNativeFlag)),
   )
 
-const combineNativeFlags = (flags: ReadonlyArray<NativeFlag>): Option.Option<NativeFlag> => {
-  const stringEnums = Array.filter(flags, NativeFlag.$is("StringEnum"))
-  const numberEnums = Array.filter(flags, NativeFlag.$is("NumberEnum"))
-  const stringValues = Array.flatMap(stringEnums, Struct.get("values"))
-  const numberValues = Array.flatMap(numberEnums, Struct.get("values"))
-  const stringFlag = NativeFlag.StringEnum({ values: stringValues })
-  const numberFlag = NativeFlag.NumberEnum({ values: numberValues })
-  const emptyFlag = NativeFlag.StringEnum({ values: [] })
-  const nonempty = Array.isReadonlyArrayNonEmpty(flags)
-  const allBooleans = Array.every(flags, NativeFlag.$is("Boolean"))
-  const allStringEnums = Array.every(flags, NativeFlag.$is("StringEnum"))
-  const allNumberEnums = Array.every(flags, NativeFlag.$is("NumberEnum"))
-
-  return pipe(
-    Match.value({ nonempty, allBooleans, allStringEnums, allNumberEnums }),
-    Match.when({ nonempty: false }, () => Option.some(emptyFlag)),
-    Match.when({ allBooleans: true }, Function.constant(nativeBooleanOption)),
-    Match.when({ allStringEnums: true }, () => Option.some(stringFlag)),
-    Match.when({ allNumberEnums: true }, () => Option.some(numberFlag)),
+const combineNativeFlags = (flags: ReadonlyArray<NativeFlag>) =>
+  pipe(
+    Match.value(flags),
+    Match.when(Array.isReadonlyArrayEmpty, () => pipe(NativeFlag.StringEnum({ values: [] }), Option.some)),
+    Match.when(Array.every(NativeFlag.$is("Boolean")), Function.constant(nativeBooleanOption)),
+    Match.when(Array.every(NativeFlag.$is("StringEnum")), (flags) => {
+      const values = Array.flatMap(flags, Struct.get("values"))
+      return pipe(NativeFlag.StringEnum({ values }), Option.some)
+    }),
+    Match.when(Array.every(NativeFlag.$is("NumberEnum")), (flags) => {
+      const values = Array.flatMap(flags, Struct.get("values"))
+      return pipe(NativeFlag.NumberEnum({ values }), Option.some)
+    }),
     Match.orElse(Function.constant(noNativeFlag)),
   )
-}
 
 const nativeFlagFor: (ast: SchemaAST.AST) => Option.Option<NativeFlag> = (ast) =>
   pipe(

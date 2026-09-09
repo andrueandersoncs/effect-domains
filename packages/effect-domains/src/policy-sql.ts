@@ -203,8 +203,8 @@ const allFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Sta
 const anyFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) =>
   Array.isReadonlyArrayNonEmpty(fragments) ? sql.or(fragments) : falseExpression(sql)
 
-const bindAll = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) =>
-  (children: ReadonlyArray<Binder>) =>
+const allBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "All" }>): Binder =>
+  (sql, environment) =>
     pipe(
       children,
       Array.map(bindChild(sql, environment)),
@@ -212,20 +212,14 @@ const bindAll = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) =>
       Effect.map(allFragments(sql)),
     )
 
-const bindAny = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) =>
-  (children: ReadonlyArray<Binder>) =>
+const anyBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "Any" }>): Binder =>
+  (sql, environment) =>
     pipe(
       children,
       Array.map(bindChild(sql, environment)),
       Effect.all,
       Effect.map(anyFragments(sql)),
     )
-
-const allBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "All" }>): Binder =>
-  (sql, environment) => bindAll(sql, environment)(children)
-
-const anyBinding = ({ children }: Extract<PolicyF<Binder>, { readonly _tag: "Any" }>): Binder =>
-  (sql, environment) => bindAny(sql, environment)(children)
 
 const compileLayer = (layer: PolicyF<Binder>) =>
   pipe(

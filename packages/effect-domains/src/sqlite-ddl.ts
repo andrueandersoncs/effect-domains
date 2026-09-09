@@ -1,7 +1,7 @@
 import { Array, Equivalence, Match, Option, Predicate, Schema, pipe } from "effect"
 import type { TableCheck, TableField, TableForeignKey, TableIndex, TableSnapshot, TableUnique } from "./table.ts"
 
-const quoteIdentifier = (identifier: string) =>
+export const quoteIdentifier = (identifier: string) =>
   `"${identifier.replaceAll('"', '""')}"`
 
 const quoteLiteral = (value: string | number) => {
@@ -118,7 +118,7 @@ export const renderCreateTable = (table: TableSnapshot) => {
   return `CREATE TABLE ${quoteIdentifier(table.name)} (${Array.join(definitions, ", ")})`
 }
 
-const renderIndex = (table: string) => (index: TableIndex) =>
+export const renderIndex = (table: string) => (index: TableIndex) =>
   `CREATE INDEX ${quoteIdentifier(index.name)} ON ${quoteIdentifier(table)} (${renderFields(index.fields)})`
 
 export const renderCreateIndexes = (table: TableSnapshot): readonly string[] =>

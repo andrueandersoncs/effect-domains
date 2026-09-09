@@ -179,7 +179,7 @@ export const Resource = {
         const storageIdentity = pipe(Record.get(storageSchema.fields, field), Option.map(identityAnnotation))
         const equal = Option.makeEquivalence(Equivalence.strictEqual<boolean>())(canonicalIdentity, storageIdentity)
         return equal ? Effect.void : definitionFailure(`storage must preserve canonical identity on ${field}`)
-      })
+      }, { discard: true })
 
       const defaultNames = Record.keys(defaults)
 
@@ -189,7 +189,7 @@ export const Resource = {
         const authored = !generated
         const valid = canonical && authored
         return valid ? Effect.void : definitionFailure(`declares an unknown or generated default field ${field}`)
-      })
+      }, { discard: true })
 
       const generatedNames = Record.keys(declaredGenerated)
       const subjectBindingNames = Record.keys(subjectBindings)
@@ -208,7 +208,7 @@ export const Resource = {
         return overlaps
           ? definitionFailure(`declares an unknown, defaulted, or generated create subject binding ${field}`)
           : Effect.void
-      })
+      }, { discard: true })
 
       yield* pipe(
         Authorization.validateSubjectBindings(options.authorization, options.schema, subjectBindings),
@@ -218,14 +218,14 @@ export const Resource = {
       const validateGeneratedField = (field: string) => Record.has(options.schema.fields, field)
         ? Effect.void : definitionFailure(`declares unknown generated field ${field}`)
 
-      yield* Effect.forEach(generatedNames, validateGeneratedField)
+      yield* Effect.forEach(generatedNames, validateGeneratedField, { discard: true })
 
       yield* Effect.forEach(filterFields, (field) => {
         const canonical = Record.has(options.schema.fields, field)
         const physical = Array.some(table.fields, fieldNamed(field))
         const valid = canonical && physical
         return valid ? Effect.void : definitionFailure(`declares unknown list filter ${field}`)
-      })
+      }, { discard: true })
 
       yield* Effect.forEach(declaredOrder, (entry) => {
         const physical = Array.findFirst(table.fields, fieldNamed(entry.field))
@@ -240,7 +240,7 @@ export const Resource = {
         const ordered = compatible && preservesOrder
         const valid = declared && ordered
         return valid ? Effect.void : definitionFailure(`declares invalid list order ${entry.field}`)
-      })
+      }, { discard: true })
     })
 
     Effect.runSync(validateDefinition)
@@ -308,10 +308,10 @@ export const Resource = {
 
     const create = Effect.fn("Repository.create")(function* (input: CreateInput<S, Creation>) {
       yield* Effect.forEach(generatedEntries, ([field]) => Record.has(input, field)
-        ? inputFailure(`create input must not provide generated field ${field}`) : Effect.void)
+        ? inputFailure(`create input must not provide generated field ${field}`) : Effect.void, { discard: true })
 
       yield* Effect.forEach(subjectBindingEntries, ([field]) => Record.has(input, field)
-        ? inputFailure(`create input must not provide subject-bound field ${field}`) : Effect.void)
+        ? inputFailure(`create input must not provide subject-bound field ${field}`) : Effect.void, { discard: true })
 
       const subject = yield* authorization.subject("create")
 
@@ -429,7 +429,7 @@ export const Resource = {
       const validateFilter = (field: string) => Array.contains(filterFields, field)
         ? Effect.void : inputFailure(`filter ${field} is not declared`)
 
-      yield* Effect.forEach(requestedNames, validateFilter)
+      yield* Effect.forEach(requestedNames, validateFilter, { discard: true })
 
       const filter = yield* encodeFilter(requestedFilter)
       const cursorInput = Option.fromNullishOr(input.cursor)

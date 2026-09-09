@@ -289,7 +289,7 @@ const validateLocalRelations = Effect.fn("Table.validateLocalRelations")(functio
 
     const targetNames = HashSet.fromIterable(constraint.references.fields)
     yield* constraintFieldsValid(table, constraint.references.fields, targetNames, constraint.name)
-  }))
+  }), { discard: true })
 
   yield* Effect.forEach(relations.value.indexes ?? [], Effect.fn("Table.validateIndexName")(function* (index) {
     const normalized = index.name.toLowerCase()
@@ -297,7 +297,7 @@ const validateLocalRelations = Effect.fn("Table.validateLocalRelations")(functio
     if (normalized.startsWith("sqlite_")) {
       return yield* failTableDefinition(table, `index constraint ${index.name} uses the reserved sqlite_ prefix`)
     }
-  }))
+  }), { discard: true })
 })
 
 const commonTableScalarFor = (
@@ -822,14 +822,15 @@ const compileStorageSchema = (
 ) => {
   const storagePairs = Array.map(storageEntries, storagePair)
   const storageFields = Record.fromEntries(storagePairs)
-  const CompiledStorageSchema = Schema.Struct(storageFields)
-  interface CompiledStorage extends Schema.Schema.Type<typeof CompiledStorageSchema> {}
-  const typeAst = SchemaAST.toType(schema.ast)
-  const rootChecks = Option.fromNullishOr(typeAst.checks)
 
-  return Option.match(rootChecks, {
-    onNone: Function.constant(CompiledStorageSchema),
-    onSome: applyRootChecks(CompiledStorageSchema),
+  return pipe(Schema.Struct(storageFields), (storageSchema) => {
+    const typeAst = SchemaAST.toType(schema.ast)
+    const rootChecks = Option.fromNullishOr(typeAst.checks)
+
+    return Option.match(rootChecks, {
+      onNone: Function.constant(storageSchema),
+      onSome: applyRootChecks(storageSchema),
+    })
   })
 }
 
@@ -1206,9 +1207,9 @@ const validateRelations = Effect.fn("Table.validateRelations")(function* (tables
         if (!compatibleForeignKeyScalars(source.value.scalar, targetField.value.scalar)) {
           return yield* failTableDefinition(table.name, `foreign key constraint ${foreignKey.name} has incompatible field types ${sourceName} and ${target.value.name}.${targetName}`)
         }
-      }))
-    }))
-  }))
+      }), { discard: true })
+    }), { discard: true })
+  }), { discard: true })
 })
 
 export const Table = { make, snapshot, validateRelations }
