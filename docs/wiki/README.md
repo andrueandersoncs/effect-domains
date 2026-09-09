@@ -26,6 +26,8 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
+The [declarative-compaction record](validation-strategy.md#2026-09-09-declarative-compiler-compaction) records another 132 source lines removed through shared compiler metadata, migration planning, and runtime-only SQL data. Public DSLs remain unchanged; workspace checks, all 57 regressions, byte-identical differential comparisons, and live CLI authorization boundaries passed.
+
 The [implementation-reduction record](validation-strategy.md#2026-09-09-behavior-preserving-implementation-reduction) records 140 net source lines removed without a public-contract change. Workspace checks and 57 regressions passed; differential smoke outputs matched the original implementation, and live authenticated CLI mutation/visibility boundaries were exercised.
 
 The [command-wrapper removal record](validation-strategy.md#2026-09-09-command-wrapper-removal) completes the earlier authored-SQL pilot: `commands.ts` and its package export are removed, and all authored applications register native RPC groups and handler layers. Live reservations and billing retain timestamp codecs, rollback, authorization, and request-local MCP identity; wrapper-only tests are retired rather than reproduced.

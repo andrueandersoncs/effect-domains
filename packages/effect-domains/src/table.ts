@@ -351,6 +351,9 @@ const integerAst = (ast: SchemaAST.AST) => {
   return Array.some(checks, integerCheck)
 }
 
+const scalarForNumber = (value: number): TableField["scalar"] =>
+  Number.isSafeInteger(value) ? "integer" : "number"
+
 const literalTableScalar = (
   table: string,
   field: string,
@@ -361,8 +364,8 @@ const literalTableScalar = (
   }
 
   if (Predicate.isNumber(literal)) {
-    const integerLiteral = Number.isSafeInteger(literal)
-    return Effect.succeed(integerLiteral ? "integer" as const : "number" as const)
+    const scalar = scalarForNumber(literal)
+    return Effect.succeed(scalar)
   }
 
   return unsupportedTableScalar(table, field)
@@ -384,14 +387,7 @@ const enumValue = ([, value]: SchemaAST.Enum["enums"][number]) => value
 
 const classifyEnumEntry = (
   [, value]: SchemaAST.Enum["enums"][number],
-): TableField["scalar"] => {
-  if (Predicate.isString(value)) {
-    return "string"
-  }
-
-  const integerEnum = Number.isSafeInteger(value)
-  return integerEnum ? "integer" : "number"
-}
+) => Predicate.isString(value) ? "string" : scalarForNumber(value)
 
 const nonNullAst = (member: SchemaAST.AST) => !SchemaAST.isNull(member)
 
@@ -507,12 +503,12 @@ const lessThan = (value: number) => LessThan.make({ value })
 const lessThanOrEqualTo = (value: number) => LessThanOrEqualTo.make({ value })
 
 const singleChecks = (
-  value: Option.Option<number>,
+  key: string,
   make: (value: number) => TableCheck,
-): ReadonlyArray<TableCheck> => Option.match(value, {
-  onNone: Function.constant(NoTableChecks),
-  onSome: (number) => [make(number)],
-})
+) => (payload: unknown): ReadonlyArray<TableCheck> => pipe(
+  numberAt(payload, key),
+  Option.match({ onNone: noTableChecks, onSome: (value) => [make(value)] }),
+)
 
 const betweenChecks = (payload: unknown) => (
   [low, high]: readonly [number, number],
@@ -524,42 +520,35 @@ const betweenChecks = (payload: unknown) => (
   return [lower, upper]
 }
 
+const intervalChecks = (payload: unknown) => {
+  const minimum = numberAt(payload, "minimum")
+  const maximum = numberAt(payload, "maximum")
+  return pipe(Option.all([minimum, maximum]), Option.match({ onNone: noTableChecks, onSome: betweenChecks(payload) }))
+}
+
+const checkCompilers: Readonly<Record<string, (payload: unknown) => ReadonlyArray<TableCheck>>> = {
+  "effect/schema/isGreaterThan": singleChecks("exclusiveMinimum", greaterThan),
+  "effect/schema/isGreaterThanOrEqualTo": singleChecks("minimum", greaterThanOrEqualTo),
+  "effect/schema/isLessThan": singleChecks("exclusiveMaximum", lessThan),
+  "effect/schema/isLessThanOrEqualTo": singleChecks("maximum", lessThanOrEqualTo),
+  "effect/schema/isBetween": intervalChecks,
+}
+
+const compileTableChecks = (representation: unknown) => (id: string) => pipe(
+  Record.get(checkCompilers, id),
+  Option.match({
+    onNone: noTableChecks,
+    onSome: (compile) => pipe(ownValue(representation, "payload"), Option.getOrUndefined, compile),
+  }),
+)
+
 const tableChecksFromUnknown = (representation: unknown) =>
   pipe(
     ownValue(representation, "id"),
     Option.filter(Predicate.isString),
     Option.match({
       onNone: noTableChecks,
-      onSome: (id) => {
-        const payloadOption = ownValue(representation, "payload")
-        const payload = Option.getOrUndefined(payloadOption)
-        const minimum = numberAt(payload, "minimum")
-        const maximum = numberAt(payload, "maximum")
-        const exclusiveMinimum = numberAt(payload, "exclusiveMinimum")
-        const exclusiveMaximum = numberAt(payload, "exclusiveMaximum")
-        const greater = singleChecks(exclusiveMinimum, greaterThan)
-        const greaterOrEqual = singleChecks(minimum, greaterThanOrEqualTo)
-        const less = singleChecks(exclusiveMaximum, lessThan)
-        const lessOrEqual = singleChecks(maximum, lessThanOrEqualTo)
-
-        const interval = pipe(
-          Option.all([minimum, maximum]),
-          Option.match({
-            onNone: noTableChecks,
-            onSome: betweenChecks(payload),
-          }),
-        )
-
-        return pipe(
-          Match.value(id),
-          Match.when("effect/schema/isGreaterThan", Function.constant(greater)),
-          Match.when("effect/schema/isGreaterThanOrEqualTo", Function.constant(greaterOrEqual)),
-          Match.when("effect/schema/isLessThan", Function.constant(less)),
-          Match.when("effect/schema/isLessThanOrEqualTo", Function.constant(lessOrEqual)),
-          Match.when("effect/schema/isBetween", Function.constant(interval)),
-          Match.orElse(noTableChecks),
-        )
-      },
+      onSome: compileTableChecks(representation),
     }),
   )
 
@@ -587,10 +576,7 @@ const literalValuesFromLiteral = (literal: SchemaAST.Literal) => {
 }
 
 const literalValuesFromEnum = (enumeration: SchemaAST.Enum) =>
-  pipe(
-    Array.map(enumeration.enums, enumValue),
-    Option.some,
-  )
+  pipe(enumeration.enums, Array.map(enumValue), Option.some)
 
 const literalValuesFromAst = (ast: SchemaAST.AST) =>
   pipe(

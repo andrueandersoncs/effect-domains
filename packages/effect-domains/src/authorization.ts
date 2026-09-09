@@ -397,14 +397,22 @@ const AuthorizationActions = ["read", "create", "update", "patch", "remove"] as 
 const scopePhases = HashSet.fromIterable<PolicyPhase>(["row", "subject"])
 const createPhases = HashSet.fromIterable<PolicyPhase>(["next", "subject"])
 const changePhases = HashSet.fromIterable<PolicyPhase>(["row", "next", "subject"])
-const actionPhases = (action: AuthorizationAction) => pipe(Match.value(action), Match.when("read", Function.constant(scopePhases)), Match.when("remove", Function.constant(scopePhases)), Match.when("create", Function.constant(createPhases)), Match.when("update", Function.constant(changePhases)), Match.when("patch", Function.constant(changePhases)), Match.exhaustive)
+
+const actionMetadata = {
+  read: { phases: scopePhases, requiresCurrent: true, requiresCandidate: false },
+  create: { phases: createPhases, requiresCurrent: false, requiresCandidate: true },
+  update: { phases: changePhases, requiresCurrent: true, requiresCandidate: true },
+  patch: { phases: changePhases, requiresCurrent: true, requiresCandidate: true },
+  remove: { phases: scopePhases, requiresCurrent: true, requiresCandidate: false },
+} satisfies Record<AuthorizationAction, Readonly<{ phases: HashSet.HashSet<PolicyPhase>; requiresCurrent: boolean; requiresCandidate: boolean }>>
+
 const policyForAction = (authorization: PolicyAuthorization, action: AuthorizationAction) => Option.fromNullishOr(authorization.allow[action])
 const actionKnown = (action: string): action is AuthorizationAction => Array.some(AuthorizationActions, (known) => stringEquals(known, action))
 const isStruct = (value: unknown): value is AnyStruct => Schema.isSchema(value) && SchemaAST.isObjects(value.ast)
 
 const ruleValidationFor = (authorization: PolicyAuthorization, resource: AnyStruct, subject: AnyStruct) => (action: AuthorizationAction) => {
   const rule = policyForAction(authorization, action)
-  const phases = actionPhases(action)
+  const phases = actionMetadata[action].phases
 
   return pipe(
     rule,
@@ -666,11 +674,7 @@ const validate = Effect.fn("Authorization.validateSqlStorage")(function* (
   yield* Effect.all(validations, { discard: true })
 })
 
-const currentActions = HashSet.fromIterable<AuthorizationAction>(["read", "remove", "update", "patch"])
-const candidateActions = HashSet.fromIterable<AuthorizationAction>(["create", "update", "patch"])
 const notVisible = Effect.succeed(false)
-const requiresCurrent = (action: AuthorizationAction) => HashSet.has(currentActions, action)
-const requiresCandidate = (action: AuthorizationAction) => HashSet.has(candidateActions, action)
 
 const make = (authorization: PolicyAuthorization): CompiledAuthorization => {
   const scope = Policy.evaluate(authorization.scope)
@@ -719,39 +723,32 @@ const make = (authorization: PolicyAuthorization): CompiledAuthorization => {
     const rule = evaluators[action]
     if (Option.isNone(rule)) return yield* forbidden()
 
-    const needsCurrent = requiresCurrent(action)
+    const metadata = actionMetadata[action]
     const currentUnavailable = Option.isNone(values.row)
-    const currentRequired = needsCurrent && currentUnavailable
-    if (currentRequired) return yield* forbidden()
-
-    const needsCandidate = requiresCandidate(action)
+    const currentRequired = metadata.requiresCurrent && currentUnavailable
     const candidateUnavailable = Option.isNone(values.next)
-    const candidateRequired = needsCandidate && candidateUnavailable
-    if (candidateRequired) return yield* forbidden()
+    const candidateRequired = metadata.requiresCandidate && candidateUnavailable
+    const requiredValuesUnavailable = currentRequired || candidateRequired
+    if (requiredValuesUnavailable) return yield* forbidden()
 
     yield* checkScope(subject, values.row, values.next)
     yield* checkScope(subject, values.next, values.next)
 
     const ruleValues = PolicyEnvironment.make({ subject, row: values.row, next: values.next })
     if (!(yield* rule.value(ruleValues))) return yield* forbidden()
-    if (!needsCandidate) return
+    if (!metadata.requiresCandidate) return
+
+    const readAndNext = Option.all({ read: evaluators.read, next: values.next })
 
     const visible = yield* pipe(
-      evaluators.read,
+      readAndNext,
       Option.match({
         onNone: Function.constant(notVisible),
-        onSome: (read) =>
-          pipe(
-            values.next,
-            Option.match({
-              onNone: Function.constant(notVisible),
-              onSome: (next) => {
-                const current = Option.some(next)
-                const readValues = PolicyEnvironment.make({ subject, row: current, next: values.next })
-                return read(readValues)
-              },
-            }),
-          ),
+        onSome: ({ read, next }) => {
+          const current = Option.some(next)
+          const readValues = PolicyEnvironment.make({ subject, row: current, next: values.next })
+          return read(readValues)
+        },
       }),
     )
 
