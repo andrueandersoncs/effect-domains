@@ -17,6 +17,7 @@
     "./resource": "./src/resource.ts",
     "./repository-store": "./src/repository-store.ts",
     "./rpc-cli": "./src/rpc-cli.ts",
+    "./rpc-mcp": "./src/rpc-mcp.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",
     "./table": "./src/table.ts",

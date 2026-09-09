@@ -21,7 +21,7 @@ The [reservation application](../../examples/reservations/README.md) has branded
 | Models and policy | Canonical schemas, reserve/confirm/release contracts, transitions, guarded stock accounting, and transactions are authored |
 | Storage | Resource tables, recognized constraints, and reversible codecs are generated |
 | Publication | Only selected resource reads are published; reservation mutations remain business commands |
-| HTTP and CLI | Application groups provide RPC dispatch, native flags, validation, help, and JSON fallback |
+| HTTP, CLI, and MCP | Application groups provide RPC dispatch, native flags, JSON fallback, and derived MCP tools |
 | History | Frozen artifacts preserve historical schema and explicit timestamp conversion |
 
 Sources: [resources](../../examples/reservations/resources.ts), [application](../../examples/reservations/application.ts), [contracts](../../examples/reservations/contracts.ts), [policy](../../examples/reservations/sqlite.ts), [migration fixture](../../examples/reservations/migrations.ts), and [runtime](../../src/application-bun.ts).
@@ -29,6 +29,18 @@ Sources: [resources](../../examples/reservations/resources.ts), [application](..
 The slice removes duplicate storage schemas, ordinary read/query plumbing, initial DDL, and per-operation HTTP/CLI binding; stock effects and transaction boundaries remain authored. It is an SQLite-only result, and native flags are not evidence that generated CLIs replace domain-specific CLI design. ([Reservation regressions](../../test/Reservations.test.ts); [CLI regressions](../../test/RpcCli.test.ts))
 
 ## Verification Record
+
+### 2026-09-09: MCP runtime derivation
+
+The `serve` command derived by `ApplicationBun.run` now mounts `/mcp` beside `/rpc/v1`; applications do not redeclare tools. Native Effect MCP handles HTTP/session negotiation, while `RpcMcp` derives tool schemas and dispatches through the existing RPC handlers and middleware. ([Adapter](../../src/rpc-mcp.ts); [Runtime](../../src/application-bun.ts); [Usage](../../examples/README.md#mcp-server))
+
+- `bun run check`, `bun run lint`, and all 36 tests across 13 files pass without suppressions or exclusions.
+- HTTP-boundary regressions exercise discovery, Date input/output and tagged-error encoding, array/void results, invalid inputs, defect redaction, and service-dependent wire codecs. A type assertion preserves missing codec services as caller requirements. ([MCP regressions](../../test/RpcMcp.test.ts))
+- Concurrent calls sharing one MCP session resolve separate Alice/Bob identities. Anonymous requests before and after authenticated calls, and a server without an authenticator, cannot inherit captured identity. These checks exercise native HTTP requests and RPC middleware rather than direct tool-handler mocks.
+- Real Bun example servers with isolated in-memory SQLite exercised initialization, discovery, book create/get/update/list/remove, and missing-row errors. Protected notes rejected anonymous access, allowed editor creation and reader retrieval, denied a reader update without changing the row, and allowed administrator removal. Canonical note text traversed the existing service-dependent storage codec. The unchanged generated RPC CLI still returned the book list.
+- Smoke servers were stopped afterward; their SQLite databases were in memory, and no temporary scripts were retained.
+
+This verifies derived HTTP tools, not stdio, inferred MCP resources/prompts, REST, production credential issuance, or external desktop-client interoperability. Tool discovery is public metadata; authorization is enforced on calls.
 
 ### 2026-09-09: Authorized examples
 

@@ -125,6 +125,34 @@ bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 
 The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, storage/physical fields, creation and list policies, local and remote commands, and selected operation contracts. Runtime requirements and authored transaction boundaries remain opaque metadata.
 
+## MCP server
+
+Every existing `serve` command also exposes Streamable HTTP MCP at `http://127.0.0.1:3000/mcp` (or the configured `PORT`). No extra application declarations or dependencies are needed:
+
+```bash
+bun run basic-crud:server
+```
+
+Configure your MCP client with that HTTP URL. It initializes an MCP session and discovers one tool per application RPC, using the unchanged operation name, such as `books.create`. `/rpc/v1` remains the separate Effect RPC endpoint used by the CLI.
+
+Tool arguments are `{ "input": <RPC JSON payload> }`; successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text. These object envelopes preserve scalar, array, and void contracts without guessing their meaning. Void uses `null`; an operation with an empty object payload, such as `books.list`, takes `{ "input": {} }`. After MCP initialization, a book creation call is:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "books.create",
+    "arguments": { "input": { "title": "A Field Guide", "pageCount": 120 } }
+  }
+}
+```
+
+Protected operations use the same authenticator and resource policies as RPC. Configure the MCP client to send `Authorization: Bearer alice-demo` for the authenticated examples; an MCP session is not an identity, and every tool call is authenticated independently. Tool discovery exposes contracts without credentials, not protected row data. Declared domain and authorization failures return `isError: true` with their encoded JSON error; unexpected defects return a generic error without internal details.
+
+The runtime negotiates MCP `2025-11-25`, `2025-06-18`, or `2025-03-26`. It rejects browser Origin headers by default. This is an HTTP tool server, not a stdio adapter, REST API, or inferred MCP resource/prompt interface. Custom Effect hosts can use `RpcMcp.layerHttp({ name, group, path })` from `effect-domains/rpc-mcp`, providing the group's handlers, middleware, and codec services. ([Adapter](../src/rpc-mcp.ts); [Bun wiring](../src/application-bun.ts))
+
 ## Review schema changes
 
 Schema commands run locally without a server. After changing a resource schema, `schema generate <name>` plans the next artifact from the registered manifest, writes that artifact, then atomically replaces the manifest registry only if the plan is valid:

@@ -10,6 +10,7 @@ import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { SqliteMigrations, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { MigrationError } from "./migrations.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
+import { RpcMcp } from "./rpc-mcp.ts"
 
 type DatabaseOptions =
   | Readonly<{ manifest: string; filename: Option.Option<string> }>
@@ -34,6 +35,7 @@ type RunRequirements<App extends Application, Services extends RuntimeLayer, Ini
 type RunErrors<App extends Application, Services extends RuntimeLayer, Initialize extends Initialization> =
   | Config.ConfigError | MigrationError | PlatformError.PlatformError | Schema.SchemaError | CliError.CliError
   | Layer.Error<ReturnType<typeof BunHttpServer.layer>> | Layer.Error<ReturnType<typeof SqliteBunRuntime.sqlClient>>
+  | Layer.Error<ReturnType<typeof RpcMcp.layerHttp>>
   | Layer.Error<App["handlers"]>
   | Layer.Error<Services> | Effect.Error<Initialize>
 
@@ -62,9 +64,11 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
 
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
   const database = SqliteBunRuntime.sqlClient(filename, { migrations })
+  const rpc = RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" })
+  const mcp = RpcMcp.layerHttp({ name: application.name, group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/mcp" })
 
   const routes = pipe(
-    RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" }),
+    Layer.merge(rpc, mcp),
     Layer.provide(application.handlers),
     Layer.provide(AuthorizationRpc.layer),
     Layer.provide(RpcSerialization.layerJson),
