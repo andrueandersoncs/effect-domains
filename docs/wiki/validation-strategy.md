@@ -30,6 +30,15 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-09: Repository-wide lint remediation
+
+- `bun run lint`, `bun run check`, `bun run test`, and `bun run build` pass. The test run covers 45 tests across 14 files. No lint rules, exclusions, or suppressions were added. ([Workspace commands](../../package.json))
+- Runtime entrypoints execute `ApplicationBun.run` with native `BunRuntime.runMain`; command layers take the optional tagged-error mapper directly. Authentication implementations use `AuthorizationRpc.Authenticator`; policy evaluation inputs use schema-backed `AuthorizationValues` and `PolicyEnvironment` with explicit `Option` row/next values. Migration planning continues to accept literal intent arrays. ([Runtime](../../packages/effect-domains/src/application-bun.ts); [commands](../../packages/effect-domains/src/commands.ts); [authentication](../../packages/example-support/src/authentication.ts); [policy tests](../../test/Policy.test.ts); [migration tests](../../test/SqliteMigrations.test.ts))
+- Policy regressions retain construction snapshots and reject copied or fabricated descriptors. Compiled policies use private instance state rather than a mutable native collection. MCP regressions preserve scalar, array, void, and declared-error responses plus per-call authentication. ([Authorization](../../packages/effect-domains/src/authorization.ts); [authorization tests](../../test/Authorization.test.ts); [MCP tests](../../test/RpcMcp.test.ts))
+- Real in-memory Bun servers exercised book create/update/get/remove, native numeric flags, complete JSON inputs, nested todo patch/filter flags, cursor pagination, owner visibility, and anonymous rejection. ([Book CLI guide](../../apps/basic-crud/README.md); [todo CLI guide](../../apps/resource-crud/README.md))
+- The browser created a book and displayed its stored numeric value. The authenticated todo browser applied an explicit false filter, followed Next, and returned Back to the first page. Initial anonymous loading renders an error, and entering a bearer token then reloading recovers. Local/session storage remained empty. ([Browser client](../../apps/admin/src/client.ts))
+- Both smoke servers were stopped, browser tabs released, and temporary formatter tooling removed. Smoke databases were in memory; no throwaway source files were retained.
+
 ### 2026-09-09: Abstraction simplification
 
 The approved review cutover removes intermediate runtime schemas and forwarding machinery while retaining canonical/storage/wire separation, narrow runtime services, explicit policy, and frozen migration artifacts. Package source decreased from 6,927 lines across 22 modules to 5,946 lines across 23 modules: 981 fewer lines (14.2%), including the private shared RPC compiler. These are source-line counts, not performance measurements. ([Framework source](../../packages/effect-domains/src/); [maintained contract](tables-and-queries.md))
