@@ -30,6 +30,17 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-09: Schema and invocation boundaries
+
+- Before concurrent workflow/cluster edits, `bun run check`, `bun run lint`, `bun run test`, and `bun run build` passed, with 61 tests across 14 files. The later expanded suite passed 62 tests across 15 files. Final aggregate type/lint checks reported unfinished concurrent changes, including a new `UnaryRpcProcedure` reference in `commands.ts` and the durable-workflow example. Lint passed for the other modified framework files and every modified boundary test. No rules or suppressions were added. ([Workspace commands](../../package.json))
+- Regressions exercise independent request survival after defects; handler-local payload/success/error codecs under conflicting ambient services; direct-call middleware requirements and finalization; and optional mapper outcome typing. ([Admin](../../test/ApplicationAdmin.test.ts); [MCP](../../test/RpcMcp.test.ts); [commands](../../test/Commands.test.ts); [command types](../../test/Commands.types.ts))
+- Persistence regressions cover suspended Boolean/timestamp codecs, nullable suspended wrappers, timestamp filtering across cursor pages, rejection of semantic numeric ordering, collision-free patch identifiers, directional subject bindings, nullable-key rejection, and Unicode string validation through SQLite. Rename chains and cycles are checked against applied row values. ([Table](../../test/Table.test.ts); [resources](../../test/ResourceCrud.test.ts); [authorization](../../test/Authorization.test.ts); [migrations](../../test/SqliteMigrations.test.ts))
+- A real browser created a Unicode todo with verified ownership, patched it through the generated `{ key, changes }` form, and displayed the changed row. The generated CLI then patched the same row using `--key` and `--changes-title`. The CLI regression also launches a real server and invokes both a no-payload RPC and an empty-struct RPC without input flags. ([CLI regression](../../test/RpcCli.test.ts); [todo application](../../apps/resource-crud/main.ts))
+- The document v1 seed was upgraded by normal application startup. Its title survived as `heading`, with `summary: null` and `priority: 0`; the ledger contained migrations 001, 002, and 003. The todo, document, and reservation histories append explicit string-check-removal rebuilds; earlier artifacts are unchanged. ([Document seed](../../apps/migration-lifecycle/seed-v1.ts); [document migration](../../apps/migration-lifecycle/migrations/003_schema_string_checks.json); [todo migration](../../apps/resource-crud/migrations/003_schema_string_checks.json); [reservation migration](../../apps/reservations/migrations/003_schema_string_checks.json))
+- The restarted todo server also accepted and returned a canonical string containing NUL through the generated CLI. Both smoke servers were stopped, the browser tab released, and isolated databases removed.
+
+These checks establish the corrected schema and invocation boundaries, not another database, production identity provider, or materially different business slice.
+
 ### 2026-09-09: Repository-wide lint remediation
 
 - `bun run lint`, `bun run check`, `bun run test`, and `bun run build` pass. The test run covers 45 tests across 14 files. No lint rules, exclusions, or suppressions were added. ([Workspace commands](../../package.json))
