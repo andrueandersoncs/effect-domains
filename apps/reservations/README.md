@@ -54,7 +54,7 @@ The server is loopback-only and unauthenticated, using Effect's JSON RPC protoco
 
 Only `stock.get` and `reservations.get` are generated resource operations. There is deliberately no generated create, update, list, or remove route for either resource.
 
-[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` with `Commands.rpc` and native `RpcGroup.make`. The constructor derives JSON codecs from explicit payload/success/error schemas and returns native Effect RPCs. `Commands.make({ name, group })` adds the injectable `Inventory` descriptor and handler layer while retaining that group. Confirm and release share `transition` schemas but have distinct tags. [`sqlite.ts`](sqlite.ts) installs handlers with `Inventory.layer(...)`; its `catchTags` maps only matching persistence errors raised during command invocation, after a transaction unwinds, while preserving unexpected and unmatched errors.
+[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` with native `Rpc.make`, grouped as `InventoryRpcs`. Its reservation success contract explicitly uses `Schema.toCodecJson(ReservationSchema)` so `createdAt` crosses the JSON RPC boundary as an ISO UTC string. Confirm and release share `transition` schemas but have distinct tags. [`sqlite.ts`](sqlite.ts) installs handlers with `InventoryRpcs.toLayer(...)`; authored effects translate only matching persistence failures after transactions unwind, preserving acquisition failures, defects, interruption, and unmatched errors.
 
 The implementations and policy remain explicit. `reserve` atomically verifies a SKU, decrements stock only when enough remains, creates a UUIDv7 reservation, and marks it `held`. `confirm` changes a hold to `confirmed` without restoring stock. `release` changes a hold to `released` and restores its quantity in the same transaction. The guarded SQL decrement prevents concurrent successful reservations from taking stock below zero.
 
@@ -93,8 +93,8 @@ Do not regenerate previously applied artifacts from current schemas: the runtime
 
 - [`domain.ts`](domain.ts): values, typed business errors, and the `held` → `confirmed`/`released` transition rule.
 - [`resources.ts`](resources.ts): the two permitted generated read operations.
-- [`contracts.ts`](contracts.ts): transport-independent contracts and the `Inventory` command descriptor.
-- [`sqlite.ts`](sqlite.ts): `Inventory.layer`, transactional guarded stock updates, transitions, and idempotent startup seed.
+- [`contracts.ts`](contracts.ts): transport-independent native RPC contracts in `InventoryRpcs`.
+- [`sqlite.ts`](sqlite.ts): `InventoryRpcs.toLayer` handlers, transactional guarded stock updates, transitions, and idempotent startup seed.
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry, including the timestamp conversion.
-- [`application.ts`](application.ts): resource and command-descriptor registration.
+- [`application.ts`](application.ts): resource registration plus the native RPC group and handler layer.
 - [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.

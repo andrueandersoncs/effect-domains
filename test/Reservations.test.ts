@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Context, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
+import { Array, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
+import { RpcTest } from "effect/unstable/rpc"
 import { ReservationApplication } from "../apps/reservations/application.ts"
-import { Inventory } from "../apps/reservations/contracts.ts"
 
 import {
   InsufficientStock,
@@ -17,9 +17,8 @@ import {
 
 import { InventoryMigrations } from "../apps/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../apps/reservations/resources.ts"
-import { InventorySqlite, seedStock } from "../apps/reservations/sqlite.ts"
+import { seedStock } from "../apps/reservations/sqlite.ts"
 import { Application } from "effect-domains/application"
-import { RepositoryStore } from "effect-domains/repository-store"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { makeMigrationStore } from "effect-domains/sqlite-migrations"
@@ -35,29 +34,27 @@ const inventoryClient = SqliteBunRuntime.sqlClient(":memory:", {
 const ReservationCodecSchema = Schema.toCodecJson(ReservationSchema)
 const encodeReservation = Schema.encodeEffect(ReservationCodecSchema)
 
-const withInventory = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    Context.Service.Identifier<typeof Inventory> | SqlClient.SqlClient | RepositoryStore
-  >,
+const withInventory = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
 ) =>
   pipe(
     Effect.fn("Reservations.withInventory")(function* () {
       yield* Application.prepare(ReservationApplication)
       yield* seedStock(initialStock)
 
-      return yield* pipe(effect, Effect.provide(InventorySqlite))
+      return yield* effect
     })(),
+    Effect.provide(ReservationApplication.handlers),
     Effect.provide(inventoryClient),
+    Effect.scoped,
   )
 
 const onlyOneConcurrentReservationAction = Effect.fn(
   "Reservations.onlyOneConcurrentReservation",
 )(function* () {
-  const inventory = yield* Inventory
-  const firstReservation = inventory.reserve(request)
-  const secondReservation = inventory.reserve(request)
+  const client = yield* RpcTest.makeClient(ReservationApplication.group)
+  const firstReservation = client.reserve(request)
+  const secondReservation = client.reserve(request)
   const firstOutcome = Effect.result(firstReservation)
   const secondOutcome = Effect.result(secondReservation)
 
@@ -108,17 +105,17 @@ it.effect(
 const terminalTransitionsAction = Effect.fn(
   "Reservations.terminalTransitions",
 )(function* () {
-  const inventory = yield* Inventory
-  const held = yield* inventory.reserve(request)
+  const client = yield* RpcTest.makeClient(ReservationApplication.group)
+  const held = yield* client.reserve(request)
   const heldInput = ReservationInputSchema.make({ id: held.id })
-  const released = yield* inventory.release(heldInput)
+  const released = yield* client.release(heldInput)
   const stockAfterRelease = yield* StockResource.repository.get(sku)
 
   expect(released.status).toBe("released")
   expect(stockAfterRelease).toEqual({ sku, available: 1 })
 
   const repeatedReleaseInput = ReservationInputSchema.make({ id: held.id })
-  const repeatedReleaseEffect = inventory.release(repeatedReleaseInput)
+  const repeatedReleaseEffect = client.release(repeatedReleaseInput)
   const repeatedRelease = yield* Effect.result(repeatedReleaseEffect)
 
   const repeatedReleaseFailure = InvalidReservationState.make({
@@ -133,14 +130,14 @@ const terminalTransitionsAction = Effect.fn(
   expect(repeatedRelease).toEqual(repeatedReleaseExpected)
   expect(stockAfterRepeatedRelease).toEqual({ sku, available: 1 })
 
-  const next = yield* inventory.reserve(request)
+  const next = yield* client.reserve(request)
   const nextInput = ReservationInputSchema.make({ id: next.id })
-  const confirmed = yield* inventory.confirm(nextInput)
+  const confirmed = yield* client.confirm(nextInput)
 
   expect(confirmed.status).toBe("confirmed")
 
   const invalidReleaseInput = ReservationInputSchema.make({ id: next.id })
-  const invalidReleaseEffect = inventory.release(invalidReleaseInput)
+  const invalidReleaseEffect = client.release(invalidReleaseInput)
   const invalidRelease = yield* Effect.result(invalidReleaseEffect)
 
   const invalidReleaseFailure = InvalidReservationState.make({
@@ -171,18 +168,18 @@ const failedInsertRollsBackStockAction = Effect.fn(
   "Reservations.failedInsertRollsBackStock",
 )(function* () {
   const database = yield* SqlClient.SqlClient
-  const inventory = yield* Inventory
+  const client = yield* RpcTest.makeClient(ReservationApplication.group)
 
   yield* database`CREATE TRIGGER reject_reservation BEFORE INSERT ON reservations
     BEGIN SELECT RAISE(ABORT, 'reservation storage unavailable'); END`
 
-  const reservationEffect = inventory.reserve(request)
+  const reservationEffect = client.reserve(request)
   const outcome = yield* Effect.result(reservationEffect)
   const inventoryUnavailable = InventoryUnavailable.make({})
   const expectedOutcome = Result.fail(inventoryUnavailable)
   const stockAfterFailure = yield* StockResource.repository.get(sku)
   yield* database`DROP TRIGGER reject_reservation`
-  const recovered = yield* inventory.reserve(request)
+  const recovered = yield* client.reserve(request)
   const stockAfterRecovery = yield* StockResource.repository.get(sku)
 
   expect(outcome).toEqual(expectedOutcome)
@@ -233,19 +230,10 @@ const historicalSecondsMigrationAction = Effect.fn(
   expect(stock).toEqual({ sku, available: 0 })
   expect(wire).toMatchObject({ createdAt: "2025-01-01T00:00:00.000Z" })
 
-  const releaseHistoricalReservationAction = Effect.fn(
-    "Reservations.releaseHistoricalReservation",
-  )(function* () {
-    const inventory = yield* Inventory
-    const historicalReservationInput = ReservationInputSchema.make({ id })
+  const client = yield* RpcTest.makeClient(ReservationApplication.group)
+  const historicalReservationInput = ReservationInputSchema.make({ id })
 
-    yield* inventory.release(historicalReservationInput)
-  })()
-
-  yield* pipe(
-    releaseHistoricalReservationAction,
-    Effect.provide(InventorySqlite),
-  )
+  yield* client.release(historicalReservationInput)
 
   const stockAfterRelease = yield* StockResource.repository.get(sku)
 
@@ -254,7 +242,9 @@ const historicalSecondsMigrationAction = Effect.fn(
 
 const historicalSecondsMigration = pipe(
   historicalSecondsMigrationAction,
+  Effect.provide(ReservationApplication.handlers),
   Effect.provide(inventoryClient),
+  Effect.scoped,
 )
 
 const historicalSecondsMigrationTest = Function.constant(

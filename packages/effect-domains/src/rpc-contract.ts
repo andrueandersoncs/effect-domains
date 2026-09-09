@@ -1,5 +1,5 @@
-import { Array, Option, Schema, Struct } from "effect"
-import { RpcSchema } from "effect/unstable/rpc"
+import { Array, type Layer, Option, Schema, Struct } from "effect"
+import { type Rpc, type RpcGroup, RpcSchema } from "effect/unstable/rpc"
 
 export interface UnaryRpcProcedure {
   readonly _tag: string
@@ -7,6 +7,11 @@ export interface UnaryRpcProcedure {
   readonly successSchema: Schema.Constraint
   readonly errorSchema: Schema.Constraint
   readonly middlewares: Iterable<Readonly<{ readonly error: Schema.Constraint }>>
+}
+
+export interface RpcBundle {
+  readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.Any & UnaryRpcProcedure>, "requests">
+  readonly handlers: Layer.Layer<never, any, any>
 }
 
 interface UnaryRpcContract {

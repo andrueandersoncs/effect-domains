@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equivalence, Layer, Option, Schema, type Types, pipe } from "effect"
+import { Array, Effect, Equivalence, Layer, Option, Ref, Schema, type Types, pipe } from "effect"
 import { McpSchema } from "effect/unstable/ai"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
@@ -7,7 +7,6 @@ import { ExampleAuthentication } from "@effect-domains/example-support/authentic
 import { StoragePrefix, StoredTextSchema } from "../apps/service-codec/storage.ts"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
-import { Commands } from "effect-domains/commands"
 import { RpcMcp } from "effect-domains/rpc-mcp"
 
 
@@ -73,7 +72,10 @@ const makeServer = Effect.fn("RpcMcp.testMakeServer")(function* (routes: Layer.L
 })
 
 class TimeUnavailable extends Schema.TaggedError<TimeUnavailable>()("TimeUnavailable", { at: Schema.Date }) {}
-const time = Commands.rpc("clock.time", { payload: Schema.Date, success: Schema.Date, error: TimeUnavailable })
+const DateCodecSchema = Schema.toCodecJson(Schema.Date)
+const TimeUnavailableCodecSchema = Schema.toCodecJson(TimeUnavailable)
+
+const time = Rpc.make("clock.time", { payload: DateCodecSchema, success: DateCodecSchema, error: TimeUnavailableCodecSchema })
 const StringListSchema = Schema.Array(Schema.String)
 const list = Rpc.make("clock.list", { success: StringListSchema })
 const clear = Rpc.make("clock.clear")
@@ -222,6 +224,42 @@ it.effect("MCP authenticates each call rather than trusting sessions or captured
     unconfiguredHeaders.set("authorization", "Bearer alice-demo")
     const missingAuthenticator = yield* call(unconfigured.handler, unconfiguredHeaders, 2, "identity.subject", null)
     expect(missingAuthenticator.result.content).toEqual([{ type: "text", text: '{"_tag":"Unauthenticated"}' }])
+  }),
+  Effect.scoped,
+))
+
+it.effect("MCP closes handler scopes after success and failure without closing the session", () => pipe(
+  Effect.gen(function* () {
+    const released = yield* Ref.make(0)
+    const probe = Rpc.make("scope", { payload: Schema.Boolean, error: Schema.String })
+    const group = RpcGroup.make(probe)
+
+    const handler = Effect.fn("RpcMcp.scope")(function* (fail: boolean) {
+      yield* Effect.addFinalizer(() => Ref.update(released, (count) => count + 1))
+      if (fail) return yield* Effect.fail("rejected")
+    })
+
+    const handlers = group.toLayer({ scope: handler })
+
+    const routes = pipe(
+      RpcMcp.layerHttp({ name: "scope", group, path: "/mcp" }),
+      Layer.provide(handlers),
+    )
+
+    const server = yield* makeServer(routes)
+    const headers = yield* openSession(server.handler)
+    const first = yield* call(server.handler, headers, 2, "scope", false)
+    const afterFirst = yield* Ref.get(released)
+    expect(first.result.isError).toBe(false)
+    expect(afterFirst).toBe(1)
+    const failed = yield* call(server.handler, headers, 3, "scope", true)
+    const afterFailure = yield* Ref.get(released)
+    expect(failed.result.isError).toBe(true)
+    expect(afterFailure).toBe(2)
+    const next = yield* call(server.handler, headers, 4, "scope", false)
+    const afterNext = yield* Ref.get(released)
+    expect(next.result.isError).toBe(false)
+    expect(afterNext).toBe(3)
   }),
   Effect.scoped,
 ))

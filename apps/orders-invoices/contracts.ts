@@ -1,8 +1,7 @@
 import { Schema } from "effect"
-import { RpcGroup } from "effect/unstable/rpc"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Forbidden } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
-import { Commands } from "effect-domains/commands"
 
 import {
   AddLineInputSchema,
@@ -64,39 +63,40 @@ const payInvoiceErrorsSchema = Schema.Union([
 
 const getOrderErrorsSchema = Schema.Union([Forbidden, OrderNotFound, BillingUnavailable])
 
-const createOrder = Commands.rpc("billing.createOrder", {
+const createOrder = Rpc.make("billing.createOrder", {
   payload: CreateOrderInputSchema,
   success: OrdersResource.table.rowSchema,
   error: createOrderErrorsSchema,
-}).middleware(AuthorizationRpc)
+})
 
-const addLine = Commands.rpc("billing.addLine", {
+const addLine = Rpc.make("billing.addLine", {
   payload: AddLineInputSchema,
   success: OrderSummary,
   error: addLineErrorsSchema,
-}).middleware(AuthorizationRpc)
+})
 
-const issueInvoice = Commands.rpc("billing.issueInvoice", {
+const issueInvoice = Rpc.make("billing.issueInvoice", {
   payload: IssueInvoiceInputSchema,
   success: InvoicesResource.table.rowSchema,
   error: issueInvoiceErrorsSchema,
-}).middleware(AuthorizationRpc)
+})
 
-const payInvoice = Commands.rpc("billing.payInvoice", {
+const payInvoice = Rpc.make("billing.payInvoice", {
   payload: PayInvoiceInputSchema,
   success: InvoicesResource.table.rowSchema,
   error: payInvoiceErrorsSchema,
-}).middleware(AuthorizationRpc)
+})
 
-const getOrder = Commands.rpc("billing.getOrder", {
+const getOrder = Rpc.make("billing.getOrder", {
   payload: GetOrderInputSchema,
   success: OrderSummary,
   error: getOrderErrorsSchema,
-}).middleware(AuthorizationRpc)
-
-const billingRpcs = RpcGroup.make(createOrder, addLine, issueInvoice, payInvoice, getOrder)
-
-export const Billing = Commands.make({
-  name: "apps/orders-invoices/Billing",
-  group: billingRpcs,
 })
+
+export const BillingRpcs = RpcGroup.make(
+  createOrder,
+  addLine,
+  issueInvoice,
+  payInvoice,
+  getOrder,
+).middleware(AuthorizationRpc)

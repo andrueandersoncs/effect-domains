@@ -8,7 +8,6 @@ import { Application } from "effect-domains/application"
 import { ApplicationAdmin } from "effect-domains/application-admin"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
-import { Commands } from "effect-domains/commands"
 import { ApplicationInspect } from "effect-domains/application-inspect"
 
 const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
@@ -126,7 +125,10 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
 ))
 
 class TooEarly extends Schema.TaggedError<TooEarly>()("TooEarly", { at: Schema.Date }) {}
-const time = Commands.rpc("time", { payload: Schema.Date, success: Schema.Date, error: TooEarly })
+const DateCodecSchema = Schema.toCodecJson(Schema.Date)
+const TooEarlyCodecSchema = Schema.toCodecJson(TooEarly)
+
+const time = Rpc.make("time", { payload: DateCodecSchema, success: DateCodecSchema, error: TooEarlyCodecSchema })
 const clear = Rpc.make("clear")
 const broken = Rpc.make("broken", { success: Schema.String })
 const clock = RpcGroup.make(time, clear, broken)

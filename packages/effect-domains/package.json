@@ -9,7 +9,6 @@
     "./application-inspect": "./src/application-inspect.ts",
     "./authorization": "./src/authorization.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",
-    "./commands": "./src/commands.ts",
     "./domain": "./src/domain.ts",
     "./migrations": "./src/migrations.ts",
     "./policy": "./src/policy.ts",

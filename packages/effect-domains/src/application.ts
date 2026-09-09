@@ -1,6 +1,6 @@
 import { Array, Effect, HashSet, Layer, Schema, Struct, pipe } from "effect"
 import { RpcGroup, RpcSchema } from "effect/unstable/rpc"
-import type { AnyCommandBundle } from "./commands.ts"
+import type { RpcBundle } from "./rpc-contract.ts"
 import { SchemaStore } from "./migrations.ts"
 import type { Resource } from "./resource.ts"
 import { Table } from "./table.ts"
@@ -11,7 +11,7 @@ type HandlerLayer<Bundle> = Bundle extends {
 
 type ApplicationGroup<
   Resources extends ReadonlyArray<Resource>,
-  Commands extends ReadonlyArray<AnyCommandBundle>,
+  Commands extends ReadonlyArray<RpcBundle>,
 > = RpcGroup.RpcGroup<RpcGroup.Rpcs<Resources[number]["group"] | Commands[number]["group"]>>
 
 class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitionError>()(
@@ -24,11 +24,11 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
 }
 
 const emptyResources = [] as const satisfies ReadonlyArray<Resource>
-const emptyCommands = [] as const satisfies ReadonlyArray<AnyCommandBundle>
+const emptyCommands = [] as const satisfies ReadonlyArray<RpcBundle>
 
 const make = <
   const Resources extends ReadonlyArray<Resource> = typeof emptyResources,
-  const Commands extends ReadonlyArray<AnyCommandBundle> = typeof emptyCommands,
+  const Commands extends ReadonlyArray<RpcBundle> = typeof emptyCommands,
 >(options: Readonly<{
   name: string
 }> & Readonly<Partial<{
@@ -53,7 +53,7 @@ const make = <
     const snapshots = Array.map(tables, Table.snapshot)
     yield* Table.validateRelations(snapshots)
 
-    const proceduresForGroup = (group: AnyCommandBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
+    const proceduresForGroup = (group: RpcBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
     const procedures = Array.flatMap(groups, proceduresForGroup)
 
     yield* Effect.reduce(procedures, HashSet.empty<string>, Effect.fn("Application.validateOperation")(function* (names, procedure) {
@@ -77,7 +77,7 @@ const make = <
   return Struct.assign(options, { resources, commands, group, tables, handlers })
 }
 
-export interface Application extends AnyCommandBundle {
+export interface Application extends RpcBundle {
   readonly name: string
   readonly resources: ReadonlyArray<Resource>
   readonly tables: ReadonlyArray<Table>

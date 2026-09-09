@@ -22,7 +22,7 @@ import {
   UnknownSku,
 } from "./domain.ts"
 
-import { Inventory } from "./contracts.ts"
+import { InventoryRpcs } from "./contracts.ts"
 import { ReservationResource, StockResource } from "./resources.ts"
 
 const persistenceFailure = Effect.fn("Inventory.persistenceFailure")(function* (
@@ -47,102 +47,104 @@ export const seedStock = Effect.fn("InventorySqlite.seedStock")(function* (
   }
 })
 
-const inventorySqliteEffect = Effect.gen(function* () {
+const reserve = Effect.fn("Inventory.reserve")(function* (
+  input: ReserveStockInput,
+) {
   const database = yield* SqlClient.SqlClient
 
-  const reserve = Effect.fn("Inventory.reserve")(function* (
-    input: ReserveStockInput,
-  ) {
-    const reservationTransaction = Effect.gen(function* () {
-      const stock = yield* StockResource.repository.find(input.sku)
+  const reservationTransaction = Effect.gen(function* () {
+    const stock = yield* StockResource.repository.find(input.sku)
 
-      if (Option.isNone(stock)) {
-        return yield* UnknownSku.make({ sku: input.sku })
-      }
-
-      const decremented = yield* database`
-        UPDATE ${database(StockResource.table.name)}
-        SET ${database("available")} = ${database("available")} - ${input.quantity}
-        WHERE ${database("sku")} = ${input.sku}
-          AND ${database("available")} >= ${input.quantity}
-        RETURNING 1
-      `
-
-      if (Array.isReadonlyArrayEmpty(decremented)) {
-        return yield* InsufficientStock.make({
-          sku: input.sku,
-          requested: input.quantity,
-          available: stock.value.available,
-        })
-      }
-
-      const generatedId = Bun.randomUUIDv7()
-
-      const id = yield* Effect.try({
-        try: () => ReservationIdSchema.make(generatedId),
-        catch: () => InventoryUnavailable.make({}),
-      })
-
-      const createdAt = yield* DateTime.now
-
-      return yield* ReservationResource.repository.create({
-        id,
-        sku: input.sku,
-        quantity: input.quantity,
-        status: "held",
-        createdAt,
-      })
-    })
-
-    return yield* database.withTransaction(reservationTransaction)
-  })
-
-  const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
-    reservation: Reservation,
-  ) {
-    const replenished = yield* database`
-        UPDATE ${database(StockResource.table.name)}
-        SET ${database("available")} = ${database("available")} + ${reservation.quantity}
-        WHERE ${database("sku")} = ${reservation.sku}
-          AND ${database("available")} <= ${Number.MAX_SAFE_INTEGER - reservation.quantity}
-        RETURNING 1
-      `
-
-    if (Array.isReadonlyArrayEmpty(replenished)) {
-      yield* Effect.logError("Reservation release could not restore stock")
-      return yield* InventoryUnavailable.make({})
+    if (Option.isNone(stock)) {
+      return yield* UnknownSku.make({ sku: input.sku })
     }
-  })
 
-  const transition = (action: "confirm" | "release") =>
-    Effect.fn("Inventory.transition")(function* (input: ReservationInput) {
-      const transitionTransaction = Effect.gen(function* () {
-        const reservation = yield* ReservationResource.repository.find(input.id)
+    const decremented = yield* database`
+      UPDATE ${database(StockResource.table.name)}
+      SET ${database("available")} = ${database("available")} - ${input.quantity}
+      WHERE ${database("sku")} = ${input.sku}
+        AND ${database("available")} >= ${input.quantity}
+      RETURNING 1
+    `
 
-        if (Option.isNone(reservation)) {
-          return yield* ReservationNotFound.make({ id: input.id })
-        }
-
-        const next = yield* transitionReservation(reservation.value, action)
-
-        if (Equivalence.strictEqual<typeof action>()(action, "release")) {
-          yield* restoreStock(next)
-        }
-
-        return yield* pipe(
-          ReservationResource.repository.update(next),
-          Effect.catchTag("ResourceNotFound", persistenceFailure),
-        )
+    if (Array.isReadonlyArrayEmpty(decremented)) {
+      return yield* InsufficientStock.make({
+        sku: input.sku,
+        requested: input.quantity,
+        available: stock.value.available,
       })
+    }
 
-      return yield* database.withTransaction(transitionTransaction)
+    const generatedId = Bun.randomUUIDv7()
+
+    const id = yield* Effect.try({
+      try: () => ReservationIdSchema.make(generatedId),
+      catch: () => InventoryUnavailable.make({}),
     })
 
-  return {
-    reserve,
-    confirm: transition("confirm"),
-    release: transition("release"),
+    const createdAt = yield* DateTime.now
+
+    return yield* ReservationResource.repository.create({
+      id,
+      sku: input.sku,
+      quantity: input.quantity,
+      status: "held",
+      createdAt,
+    })
+  })
+
+  return yield* pipe(
+    database.withTransaction(reservationTransaction),
+    Effect.catchTags(persistenceErrors),
+  )
+})
+
+const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
+  database: SqlClient.SqlClient,
+  reservation: Reservation,
+) {
+  const replenished = yield* database`
+    UPDATE ${database(StockResource.table.name)}
+    SET ${database("available")} = ${database("available")} + ${reservation.quantity}
+    WHERE ${database("sku")} = ${reservation.sku}
+      AND ${database("available")} <= ${Number.MAX_SAFE_INTEGER - reservation.quantity}
+    RETURNING 1
+  `
+
+  if (Array.isReadonlyArrayEmpty(replenished)) {
+    yield* Effect.logError("Reservation release could not restore stock")
+    return yield* InventoryUnavailable.make({})
   }
 })
 
-export const InventorySqlite = Inventory.layer(inventorySqliteEffect, persistenceErrors)
+const transition = (action: "confirm" | "release") =>
+  Effect.fn("Inventory.transition")(function* (input: ReservationInput) {
+    const database = yield* SqlClient.SqlClient
+
+    const transitionTransaction = Effect.gen(function* () {
+      const reservation = yield* ReservationResource.repository.find(input.id)
+
+      if (Option.isNone(reservation)) {
+        return yield* ReservationNotFound.make({ id: input.id })
+      }
+
+      const next = yield* transitionReservation(reservation.value, action)
+
+      if (Equivalence.strictEqual<typeof action>()(action, "release")) {
+        yield* restoreStock(database, next)
+      }
+
+      return yield* ReservationResource.repository.update(next)
+    })
+
+    return yield* pipe(
+      database.withTransaction(transitionTransaction),
+      Effect.catchTags({ ...persistenceErrors, ResourceNotFound: persistenceFailure }),
+    )
+  })
+
+export const InventorySqlite = InventoryRpcs.toLayer({
+  reserve,
+  confirm: transition("confirm"),
+  release: transition("release"),
+})

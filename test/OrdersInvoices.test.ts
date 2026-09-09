@@ -8,7 +8,6 @@ import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
 import { BillingApplication } from "../apps/orders-invoices/application.ts"
 import { BillingMigrations } from "../apps/orders-invoices/migrations.ts"
-import { BillingSqlite } from "../apps/orders-invoices/sqlite.ts"
 import { InvoiceNumberSchema, OrderNumberSchema } from "../apps/orders-invoices/domain.ts"
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: BillingMigrations })
 const alice = { authorization: "Bearer alice-demo" }
@@ -166,6 +165,5 @@ it.effect("keeps tenant-scoped billing lifecycle, foreign keys, transactions, an
   Effect.provide(BillingApplication.handlers),
   Effect.provide(AuthorizationRpc.layer),
   Effect.provide(ExampleAuthentication),
-  Effect.provide(BillingSqlite),
   Effect.provide(sqlite),
 ))

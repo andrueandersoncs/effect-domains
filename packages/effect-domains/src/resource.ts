@@ -3,7 +3,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RepositoryAccess, RepositoryError, RepositoryListCursor, RepositoryListOrder, RepositoryListQuery, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
 import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
 import { Value } from "./value.ts"
-import type { AnyCommandBundle } from "./commands.ts"
+import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier } from "./domain.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
@@ -116,7 +116,7 @@ const identityAnnotation = (schema: Schema.Constraint) => {
 const fieldNamed = (name: string) => (field: TableField) =>
   equals(field.name, name)
 
-export interface Resource extends AnyCommandBundle {
+export interface Resource extends RpcBundle {
   readonly name: string
   readonly schema: Schema.Struct<Schema.Struct.Fields>
   readonly storage: Schema.Struct<Schema.Struct.Fields>

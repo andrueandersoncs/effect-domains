@@ -79,8 +79,8 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 
 - `domain.ts`: canonical values and errors.
 - `resources.ts`: storage registration and selected generated operations.
-- `contracts.ts`: authored native RPCs using `Commands.rpc` for automatic JSON codecs, grouped with `RpcGroup.make`; absent for generated-only applications.
-- `application.ts`: resources and explicit command-descriptor registration.
+- `contracts.ts`: native `Rpc.make` contracts grouped with `RpcGroup.make`; use explicit `Schema.toCodecJson` for non-JSON-native representations such as dates. Absent for generated-only applications.
+- `application.ts`: resources and native `{ group, handlers }` bundle registration.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, generated remote commands, and `worker` when background layers are configured.

@@ -2,7 +2,7 @@ import { Array, Effect, Equivalence, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { AuthorizationSubject, Forbidden } from "effect-domains/authorization"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
-import { Billing, OrderSummary } from "./contracts.ts"
+import { BillingRpcs, OrderSummary } from "./contracts.ts"
 
 import {
   type AddLineInput,
@@ -326,147 +326,154 @@ const requireInvoice = Effect.fn("Billing.requireInvoice")(function* (
   return yield* Schema.decodeUnknownEffect(InvoicesResource.table.rowSchema)(first.value)
 })
 
-const billingSqliteEffect = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-
-  const createOrder = Effect.fn("Billing.createOrder")(function* (input: CreateOrderInput) {
-    const subject = yield* billingSubject()
-
-    const transaction = Effect.gen(function* () {
-      const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
-      const existing = yield* orderNumberForTenant(numberInput)
-      if (Option.isSome(existing)) return yield* DuplicateOrderNumber.make({ number: input.number })
-      const record = CreateOrderRecordSchema.make({ ...input, tenantId: subject.tenantId })
-      return yield* createOrderRecord(record)
-    })
-
-    return yield* sql.withTransaction(transaction)
-  })
-
-  const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
-    const subject = yield* billingSubject()
-    const lineTotal = input.quantity * input.unitAmountMinor
-    if (!Number.isSafeInteger(lineTotal)) return yield* TotalOverflow.make({ orderId: input.orderId })
-
-    const transaction = Effect.gen(function* () {
-      const current = yield* requireOrder(input.orderId, subject.tenantId)
-
-      if (current.version !== input.expectedVersion) {
-        return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
-      }
-
-      if (current.status !== "draft") {
-        return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "addLine", actual: current.status })
-      }
-
-      const totalMinor = current.totalMinor + lineTotal
-      if (!Number.isSafeInteger(totalMinor)) return yield* TotalOverflow.make({ orderId: input.orderId })
-
-      const record = AddLineRecordSchema.make({ ...input, tenantId: subject.tenantId, totalMinor })
-      const changed = yield* updateDraftOrderForLine(record)
-
-      if (Option.isNone(changed)) {
-        return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
-      }
-
-      yield* insertLineRecord(record)
-      const summary = yield* requireOrder(input.orderId, subject.tenantId)
-      return yield* summaryFromStorage(summary)
-    })
-
-    return yield* sql.withTransaction(transaction)
-  })
-
-  const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueInvoiceInput) {
-    const subject = yield* billingSubject()
-
-    const transaction = Effect.gen(function* () {
-      const current = yield* requireOrder(input.orderId, subject.tenantId)
-
-      if (current.version !== input.expectedVersion) {
-        return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
-      }
-
-      if (current.status !== "draft") {
-        return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "issueInvoice", actual: current.status })
-      }
-
-      const summary = yield* summaryFromStorage(current)
-
-      if (Array.isReadonlyArrayEmpty(summary.lines)) {
-        return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
-      }
-
-      const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
-      const existing = yield* invoiceNumberForTenant(numberInput)
-      if (Option.isSome(existing)) return yield* DuplicateInvoiceNumber.make({ number: input.number })
-
-      const record = IssueInvoiceRecordSchema.make({
-        ...input,
-        tenantId: subject.tenantId,
-        totalMinor: summary.order.totalMinor,
-      })
-
-      const changed = yield* markOrderInvoiced(record)
-
-      if (Option.isNone(changed)) {
-        return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
-      }
-
-      return yield* issueInvoiceRecord(record)
-    })
-
-    return yield* sql.withTransaction(transaction)
-  })
-
-  const payInvoice = Effect.fn("Billing.payInvoice")(function* (input: PayInvoiceInput) {
-    const subject = yield* billingSubject()
-
-    const transaction = Effect.gen(function* () {
-      const current = yield* requireInvoice(input.invoiceId, subject.tenantId)
-
-      if (current.version !== input.expectedVersion) {
-        return yield* VersionConflict.make({ resource: "invoice", id: input.invoiceId, expectedVersion: input.expectedVersion })
-      }
-
-      if (current.status !== "issued") {
-        return yield* InvalidInvoiceTransition.make({ invoiceId: input.invoiceId, action: "payInvoice", actual: current.status })
-      }
-
-      const record = PayInvoiceRecordSchema.make({ ...input, tenantId: subject.tenantId })
-      const changed = yield* markInvoicePaid(record)
-
-      if (Option.isNone(changed)) {
-        return yield* VersionConflict.make({ resource: "invoice", id: input.invoiceId, expectedVersion: input.expectedVersion })
-      }
-
-      return changed.value
-    })
-
-    return yield* sql.withTransaction(transaction)
-  })
-
-  const getOrder = Effect.fn("Billing.getOrder")(function* (input: GetOrderInput) {
-    const subject = yield* authenticatedSubject()
-    const stored = yield* requireOrder(input.orderId, subject.tenantId)
-    return yield* summaryFromStorage(stored)
-  })
-
-  return {
-    "billing.createOrder": createOrder,
-    "billing.addLine": addLine,
-    "billing.issueInvoice": issueInvoice,
-    "billing.payInvoice": payInvoice,
-    "billing.getOrder": getOrder,
-  }
-})
-
 const persistenceFailure = Effect.fn("Billing.persistenceFailure")(function* () {
   return yield* BillingUnavailable.make({})
 })
 
-export const BillingSqlite = Billing.layer(billingSqliteEffect, {
+const persistenceFailures = {
   SqlError: persistenceFailure,
   SchemaError: persistenceFailure,
-  NoSuchElementError: persistenceFailure,
+}
+
+const requiredRowFailures = { ...persistenceFailures, NoSuchElementError: persistenceFailure }
+
+const createOrder = Effect.fn("Billing.createOrder")(function* (input: CreateOrderInput) {
+  const subject = yield* billingSubject()
+  const sql = yield* SqlClient.SqlClient
+
+  const transaction = Effect.gen(function* () {
+    const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
+    const existing = yield* orderNumberForTenant(numberInput)
+    if (Option.isSome(existing)) return yield* DuplicateOrderNumber.make({ number: input.number })
+    const record = CreateOrderRecordSchema.make({ ...input, tenantId: subject.tenantId })
+    return yield* createOrderRecord(record)
+  })
+
+  return yield* pipe(sql.withTransaction(transaction), Effect.catchTags(requiredRowFailures))
+})
+
+const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
+  const subject = yield* billingSubject()
+  const sql = yield* SqlClient.SqlClient
+  const lineTotal = input.quantity * input.unitAmountMinor
+  if (!Number.isSafeInteger(lineTotal)) return yield* TotalOverflow.make({ orderId: input.orderId })
+
+  const transaction = Effect.gen(function* () {
+    const current = yield* requireOrder(input.orderId, subject.tenantId)
+
+    if (current.version !== input.expectedVersion) {
+      return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
+    }
+
+    if (current.status !== "draft") {
+      return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "addLine", actual: current.status })
+    }
+
+    const totalMinor = current.totalMinor + lineTotal
+    if (!Number.isSafeInteger(totalMinor)) return yield* TotalOverflow.make({ orderId: input.orderId })
+
+    const record = AddLineRecordSchema.make({ ...input, tenantId: subject.tenantId, totalMinor })
+    const changed = yield* updateDraftOrderForLine(record)
+
+    if (Option.isNone(changed)) {
+      return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
+    }
+
+    yield* insertLineRecord(record)
+    const summary = yield* requireOrder(input.orderId, subject.tenantId)
+    return yield* summaryFromStorage(summary)
+  })
+
+  return yield* pipe(sql.withTransaction(transaction), Effect.catchTags(requiredRowFailures))
+})
+
+const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueInvoiceInput) {
+  const subject = yield* billingSubject()
+  const sql = yield* SqlClient.SqlClient
+
+  const transaction = Effect.gen(function* () {
+    const current = yield* requireOrder(input.orderId, subject.tenantId)
+
+    if (current.version !== input.expectedVersion) {
+      return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
+    }
+
+    if (current.status !== "draft") {
+      return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "issueInvoice", actual: current.status })
+    }
+
+    const summary = yield* summaryFromStorage(current)
+
+    if (Array.isReadonlyArrayEmpty(summary.lines)) {
+      return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
+    }
+
+    const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
+    const existing = yield* invoiceNumberForTenant(numberInput)
+    if (Option.isSome(existing)) return yield* DuplicateInvoiceNumber.make({ number: input.number })
+
+    const record = IssueInvoiceRecordSchema.make({
+      ...input,
+      tenantId: subject.tenantId,
+      totalMinor: summary.order.totalMinor,
+    })
+
+    const changed = yield* markOrderInvoiced(record)
+
+    if (Option.isNone(changed)) {
+      return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
+    }
+
+    return yield* issueInvoiceRecord(record)
+  })
+
+  return yield* pipe(sql.withTransaction(transaction), Effect.catchTags(requiredRowFailures))
+})
+
+const payInvoice = Effect.fn("Billing.payInvoice")(function* (input: PayInvoiceInput) {
+  const subject = yield* billingSubject()
+  const sql = yield* SqlClient.SqlClient
+
+  const transaction = Effect.gen(function* () {
+    const current = yield* requireInvoice(input.invoiceId, subject.tenantId)
+
+    if (current.version !== input.expectedVersion) {
+      return yield* VersionConflict.make({ resource: "invoice", id: input.invoiceId, expectedVersion: input.expectedVersion })
+    }
+
+    if (current.status !== "issued") {
+      return yield* InvalidInvoiceTransition.make({ invoiceId: input.invoiceId, action: "payInvoice", actual: current.status })
+    }
+
+    const record = PayInvoiceRecordSchema.make({ ...input, tenantId: subject.tenantId })
+    const changed = yield* markInvoicePaid(record)
+
+    if (Option.isNone(changed)) {
+      return yield* VersionConflict.make({ resource: "invoice", id: input.invoiceId, expectedVersion: input.expectedVersion })
+    }
+
+    return changed.value
+  })
+
+  return yield* pipe(sql.withTransaction(transaction), Effect.catchTags(persistenceFailures))
+})
+
+const getOrder = Effect.fn("Billing.getOrder")(function* (input: GetOrderInput) {
+  const subject = yield* authenticatedSubject()
+  yield* SqlClient.SqlClient
+
+  const operation = Effect.gen(function* () {
+    const stored = yield* requireOrder(input.orderId, subject.tenantId)
+    return yield* summaryFromStorage(stored)
+  })
+
+  return yield* pipe(operation, Effect.catchTags(persistenceFailures))
+})
+
+export const BillingSqlite = BillingRpcs.toLayer({
+  "billing.createOrder": createOrder,
+  "billing.addLine": addLine,
+  "billing.issueInvoice": issueInvoice,
+  "billing.payInvoice": payInvoice,
+  "billing.getOrder": getOrder,
 })
