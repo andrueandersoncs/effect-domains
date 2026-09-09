@@ -10,7 +10,6 @@ Each application is a runnable Bun workspace package. The private repository roo
 | [authored-sql](#authored-sql) | Custom book contracts and authored SQL with Effect `SqlSchema` | `AUTHORED_SQL_DB` |
 | [resource-crud](resource-crud/README.md) | Tenant/owner todo policies, completion locks, pagination, and patch | `RESOURCE_CRUD_DB` |
 | [service-codec](service-codec/README.md) | Reader/editor/admin note permissions alongside a service-dependent storage codec | `SERVICE_CODEC_DB` |
-| [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
 | [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
 | [orders-invoices](#orders-and-invoices) | Tenant-scoped relational billing, authenticated transactions, and optimistic versions | `ORDERS_INVOICES_DB` |

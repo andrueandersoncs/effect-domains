@@ -15,6 +15,9 @@
   },
   "scripts": {
     "build": "bun run --filter @effect-domains/admin build",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "check": "bun run --workspaces check && tsc --noEmit",
     "lint": "bun run --workspaces lint && better-typescript",
     "test": "bun --bun vitest run",
@@ -39,22 +42,22 @@
     "resource-crud": "bun run apps/resource-crud/main.ts",
     "service-codec:server": "bun run apps/service-codec/main.ts serve",
     "service-codec": "bun run apps/service-codec/main.ts",
-    "persisted-ref:server": "bun run apps/persisted-ref/main.ts serve",
-    "persisted-ref": "bun run apps/persisted-ref/main.ts",
     "migration-lifecycle:server": "bun run apps/migration-lifecycle/main.ts serve",
     "migration-lifecycle": "bun run apps/migration-lifecycle/main.ts",
     "migration-lifecycle:seed-v1": "bun run apps/migration-lifecycle/seed-v1.ts"
   },
   "devDependencies": {
     "@better-typescript/better-typescript": "0.4.14",
-    "@effect/vitest": "catalog:",
-    "@types/bun": "latest",
-    "vitest": "4.1.11",
+    "@effect-domains/example-support": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "latest",
     "effect": "catalog:",
-    "@effect-domains/example-support": "workspace:*",
     "effect-domains": "workspace:*",
-    "typescript": "^7"
+    "typescript": "^7",
+    "vitepress": "1.6.4",
+    "vitest": "4.1.11",
+    "vue": "3.5.42"
   }
 }

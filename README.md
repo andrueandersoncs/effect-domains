@@ -165,15 +165,35 @@ The example is loopback-only and unauthenticated. Its [guide](apps/README.md#res
 
 The authenticated [orders/invoices walkthrough](apps/README.md#orders-and-invoices) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Run `bun run orders-invoices:server`, then use `ORDERS_INVOICES_TOKEN=alice-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'` in another terminal. Mutations remain authored transactions; generated reads stay tenant-scoped.
 
-All seven [example applications](apps/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, a process-local persisted counter, explicit schema evolution, and reservation policy.
+The [example applications](apps/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local schema commands. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
 
 ## Escape hatches and documentation
 
-Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper or database-service alias. `PersistedRef.make({ commit, load })` composes persistence into a synchronized, write-through value; `fromResource` binds it to one resource key. These helpers do not replace explicit authorization, transaction, concurrency, or recovery policy.
+Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper, database-service alias, or persistent-reference cache. Authorization, transactions, caching, concurrency, and recovery policy remain application concerns. Workflow diagnostics use native Effect services directly in the [workflow application](apps/durable-workflows/workflow.ts).
 
 - [Runnable applications](apps/README.md)
 - [Project wiki](docs/wiki/README.md)
 - [Tables and queries](docs/wiki/tables-and-queries.md)
+
+## Documentation site
+
+The VitePress site uses `docs/index.md` for the landing page, `docs/getting-started.md` for onboarding, and the maintained Markdown in `docs/wiki/` directly—no copied wiki content. Configuration and theme live in `docs/.vitepress/`. After `bun install`, run:
+
+```bash
+bun run docs:dev
+bun run docs:build
+bun run docs:preview
+```
+
+In the repository’s Pages settings, set **Source** to **GitHub Actions**. The [deployment workflow](.github/workflows/docs.yml) checks pull requests and publishes pushes to `main`; it also supports manual deployment from `main`. GitHub supplies the repository identifier and Pages base path, including project subdirectories and custom domains. To enable GitHub source links while developing locally, set the repository identifier:
+
+```bash
+GITHUB_REPOSITORY=owner/repo bun run docs:dev
+```
+
+Without `GITHUB_REPOSITORY`, source citations remain readable labels rather than links to an assumed repository. `DOCS_SOURCE_REF` overrides the source-link branch (default `main`). Use `DOCS_BASE=/effect-domains/` with both build and preview to check project-path hosting locally; otherwise local commands serve at `/`.
+
+Wiki citations keep their repository-relative Markdown URLs. The website maps code citations to GitHub and adapts numeric heading anchors to VitePress. Immutable `docs/wiki/raw/` sources are rendered as plain Markdown, are excluded from search, and have no edit link. Maintainer instructions are not published as site pages.
 
 ## Development
 

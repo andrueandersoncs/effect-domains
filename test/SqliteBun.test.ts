@@ -4,13 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
-  Array,
   Context,
   Effect,
   Equivalence,
   flow,
   Layer,
-  Option,
   pipe,
   Schema,
   SchemaGetter,
@@ -18,7 +16,6 @@ import {
 } from "effect"
 
 import { identifier } from "effect-domains/domain"
-import { PersistedRef } from "effect-domains/persisted-ref"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
@@ -70,13 +67,6 @@ describe("Bun SQLite tables and authored operations", () => {
   })
 
   interface User extends Schema.Schema.Type<typeof UserSchema> {}
-
-  const incrementUserScore = (user: User) =>
-    UserSchema.make({
-      ...user,
-      score: user.score + 1,
-    })
-
   const Users = Table.make({ name: "users", schema: UserSchema })
 
   const CreateUser = SqlSchema.findOne({
@@ -254,68 +244,6 @@ describe("Bun SQLite tables and authored operations", () => {
       Effect.provide(PrefixLive),
     )
 
-  const runPersistedRefContract = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
-    pipe(
-      Effect.gen(function* () {
-        yield* prepareTables([Users])
-
-        const id = UserIdSchema.make("persisted-ref-user")
-
-        const original = UserSchema.make({
-          id,
-          displayName: "Grace Hopper",
-          secret: "compiler",
-          score: 0,
-        })
-
-        yield* CreateUser(original)
-
-        const loadUser = Effect.fn("PersistedRefTest.loadUser")(function* () {
-          const found = yield* FindUser(id)
-
-          if (Option.isNone(found)) {
-            return yield* Effect.fail({
-              _tag: "PersistedUserNotFound" as const,
-              id,
-            })
-          }
-
-          return found.value
-        })
-
-        const commitUser = Effect.fn("PersistedRefTest.commitUser")(function* (
-          _previous: typeof UserSchema.Type,
-          next: typeof UserSchema.Type,
-        ) {
-          const updated = yield* UpdateUser(next)
-
-          if (Option.isNone(updated)) {
-            return yield* Effect.fail({
-              _tag: "PersistedUserNotFound" as const,
-              id,
-            })
-          }
-
-          return updated.value
-        })
-
-        const load = loadUser()
-        const userRef = yield* PersistedRef.make({ commit: commitUser, load })
-        const update = userRef.update(incrementUserScore)
-        const updates = Array.replicate(update, 10)
-
-        yield* Effect.all(updates, { concurrency: "unbounded" })
-
-        const cached = yield* userRef.get
-        const stored = yield* FindUser(id)
-        const storedUser = Option.getOrThrow(stored)
-
-        expect(cached.score).toBe(10)
-        expect(storedUser).toEqual(cached)
-      }),
-      Effect.provide(adapter),
-      Effect.provide(PrefixLive),
-    )
 
 
   const verifiesGeneratedArticle = Effect.fn(
@@ -337,8 +265,6 @@ describe("Bun SQLite tables and authored operations", () => {
   it.effect("creates a derived table and runs authored CRUD operations", () =>
     withTemporaryDatabase(runCrudContract))
 
-  it.effect("backs a shared persisted reference with authored operations", () =>
-    withTemporaryDatabase(runPersistedRefContract))
 
   it.effect.prop(
     "adds and generates a UUIDv7 identifier when the schema has none",
