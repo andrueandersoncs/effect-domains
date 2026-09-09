@@ -1,15 +1,14 @@
 import { Array, Effect, Equivalence, flow, Function, Layer, Option, Order, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { RepositoryAccess, RepositoryError, RepositoryListCursor, RepositoryListOrder, RepositoryListQuery, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
-import { Table, type TableField } from "./table.ts"
+import { RepositoryError, RepositoryListOrder, RepositoryStore, ResourceNotFound, type RepositoryAccess, type RepositoryListCursor, type RepositoryListQuery } from "./repository-store.ts"
+import { Table, type TableField, withImplicitIdentifier } from "./table.ts"
 import { Value } from "./value.ts"
 import type { AnyCommandBundle } from "./commands.ts"
 import { DomainIdentifier } from "./domain.ts"
-import { Authorization, AuthorizationValuesSchema, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationValues, type PolicyAuthorization, type PublicAuthorization, type SubjectOperand } from "./authorization.ts"
+import { Authorization, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationValues, type PolicyAuthorization, type PublicAuthorization, type SubjectOperand } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 
 const EmptyPayloadSchema = Schema.Struct({})
-interface EmptyPayload extends Schema.Schema.Type<typeof EmptyPayloadSchema> {}
 const PositiveLimitCheck = Schema.isGreaterThan(0)
 const PageLimitSchema = Schema.Int.check(PositiveLimitCheck)
 const OptionalLimitSchema = Schema.optionalKey(PageLimitSchema)
@@ -95,9 +94,9 @@ const invalidInput = (resource: string, reason: string) => {
 }
 
 const scalarMatches = (field: TableField, value: unknown) => {
-  const stringField = Equivalence.strictEqual<TableField["scalar"]>()(field.scalar, "string")
-  const integerField = Equivalence.strictEqual<TableField["scalar"]>()(field.scalar, "integer")
-  const numberField = Equivalence.strictEqual<TableField["scalar"]>()(field.scalar, "number")
+  const stringField = (field.scalar === "string")
+  const integerField = (field.scalar === "integer")
+  const numberField = (field.scalar === "number")
   const text = stringField && Predicate.isString(value)
   const integer = integerField && Number.isSafeInteger(value)
   const number = numberField && Number.isFinite(value)
@@ -107,11 +106,11 @@ const scalarMatches = (field: TableField, value: unknown) => {
 
 const identityAnnotation = (schema: Schema.Constraint) => {
   const annotations = Schema.resolveAnnotations(schema)
-  return Equivalence.strictEqual<unknown>()(annotations?.[DomainIdentifier], true)
+  return (annotations?.[DomainIdentifier] === true)
 }
 
 const fieldNamed = (name: string) => (field: TableField) =>
-  Equivalence.strictEqual<string>()(field.name, name)
+  (field.name === name)
 
 export interface Resource extends AnyCommandBundle {
   readonly name: string
@@ -232,20 +231,18 @@ export const Resource = {
       ? Record.set(declaredGenerated, table.identifier, "uuidV7" as const)
       : declaredGenerated
 
-    const canonicalRowFields = implicitIdentifier
-      ? Record.set(options.schema.fields, table.identifier, table.identifierSchema)
-      : options.schema.fields
-
-    const CanonicalShapeSchema = Schema.Struct(canonicalRowFields)
-    interface CanonicalShape extends Schema.Schema.Type<typeof CanonicalShapeSchema> {}
-
-    const canonicalRowSchema = implicitIdentifier
-      ? Schema.make<Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>>(CanonicalShapeSchema.ast)
-      : Schema.make<Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>>(options.schema.ast)
+    const canonicalRowSchema = (
+      implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
+    ) as Schema.Codec<
+      CanonicalRow,
+      unknown,
+      S["DecodingServices"],
+      S["EncodingServices"]
+    >
 
     const canonicalIdentifierSchema = pipe(
       Record.get(options.schema.fields, table.identifier),
-      Option.getOrElse(Function.constant(table.identifierSchema)),
+      Option.getOrElse(() => table.identifierSchema),
     )
 
     const authorization = pipe(Authorization.compile({
@@ -255,7 +252,7 @@ export const Resource = {
       table,
     }), Effect.runSync)
 
-    const access = (subject: Readonly<Record<string, unknown>>) => RepositoryAccess.make({
+    const access = (subject: Readonly<Record<string, unknown>>): RepositoryAccess => ({
       policy: authorization.visibility,
       subject,
     })
@@ -304,7 +301,7 @@ export const Resource = {
 
       const generate = Effect.fn("Repository.generate")(function* ([field, generation]: [string, "uuidV7" | "now"]) {
         const values = yield* Value
-        const uuid = Equivalence.strictEqual<string>()(generation, "uuidV7")
+        const uuid = (generation === "uuidV7")
         const value = uuid ? yield* values.uuidV7() : yield* values.now()
         return [field, value] as const
       })
@@ -319,11 +316,11 @@ export const Resource = {
       const store = yield* RepositoryStore
 
       const transaction = Effect.gen(function* () {
-        const candidate = AuthorizationValuesSchema.make({ next: complete })
+        const candidate: AuthorizationValues = { next: complete }
         yield* authorize("create", subject, candidate)
         const stored = yield* store.insert(table, encoded)
         const result = yield* decodeRow(stored)
-        const returned = AuthorizationValuesSchema.make({ row: result })
+        const returned: AuthorizationValues = { row: result }
         yield* authorize("read", subject, returned)
         return result
       })
@@ -363,7 +360,6 @@ export const Resource = {
     const filterEntries = Array.map(filterFields, optionalFieldEntry)
     const presentFilterFields: Readonly<Record<string, Schema.Constraint>> = pipe(filterEntries, Record.fromEntries, Record.getSomes)
     const FilterSchema = Schema.Struct(presentFilterFields)
-    interface Filter extends Schema.Schema.Type<typeof FilterSchema> {}
     const filterCodecSchema = Schema.make<Schema.Codec<Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>, never, Storage["EncodingServices"]>>(FilterSchema.ast)
     const encodeFilter = flow(Schema.encodeUnknownEffect(filterCodecSchema), Effect.mapError(repositoryFailure))
 
@@ -404,15 +400,15 @@ export const Resource = {
       const expectedFilter = JSON.stringify(filter)
 
       const cursor = yield* Option.match(cursorInput, {
-        onNone: () => pipe(Option.none<RepositoryListCursor>(), Effect.succeed),
+        onNone: () => Effect.succeed(Option.none<RepositoryListCursor>()),
         onSome: Effect.fn("Repository.cursor")(function* (source: string) {
           const decoded = yield* pipe(parseCursor(source), Effect.mapError(Function.constant(cursorFailure)))
-          const sameResource = Equivalence.strictEqual<string>()(decoded.resource, table.name)
+          const sameResource = (decoded.resource === table.name)
           const actualOrder = JSON.stringify(decoded.order)
           const actualFilter = JSON.stringify(decoded.filter)
-          const sameOrder = Equivalence.strictEqual<string>()(actualOrder, expectedOrder)
-          const sameFilter = Equivalence.strictEqual<string>()(actualFilter, expectedFilter)
-          const sameLength = Equivalence.strictEqual<number>()(decoded.values.length, order.length)
+          const sameOrder = (actualOrder === expectedOrder)
+          const sameFilter = (actualFilter === expectedFilter)
+          const sameLength = (decoded.values.length === order.length)
           const sameQuery = sameResource && sameOrder
           const sameShape = sameFilter && sameLength
           const same = sameQuery && sameShape
@@ -426,11 +422,11 @@ export const Resource = {
           const validIdentifier = matchesField(table.identifier, decoded.identifier)
           const valid = validValues && validIdentifier
           if (!valid) return yield* cursorFailure
-          return pipe(RepositoryListCursor.make(decoded), Option.some)
+          return Option.some({ values: decoded.values, identifier: decoded.identifier })
         }),
       })
 
-      const query = RepositoryListQuery.make({ filter, order, cursor, limit })
+      const query: RepositoryListQuery = { filter, order, cursor, limit }
       const store = yield* RepositoryStore
       const permission = access(subject)
       const result = yield* store.query(table, query, permission)
@@ -449,54 +445,44 @@ export const Resource = {
       return { items, nextCursor }
     })
 
-    const update = Effect.fn("Repository.update")(function* (value: CanonicalRow) {
-      const subject = yield* authorization.subject("update")
-      const encoded = yield* encodeRow(value)
+    const replaceExisting = <R>(
+      action: Extract<AuthorizationAction, "update" | "patch">,
+      subject: Readonly<Record<string, unknown>>,
+      key: unknown,
+      encodedKey: unknown,
+      prepareCandidate: (current: CanonicalRow) => Effect.Effect<readonly [CanonicalRow, Readonly<Record<string, unknown>>], RepositoryError, R>,
+    ) => Effect.gen(function* () {
       const store = yield* RepositoryStore
-      const key = encoded[table.identifier]
       const permission = access(subject)
-
-      const transaction = Effect.gen(function* () {
-        const stored = yield* store.find(table, key, permission)
+      return yield* store.transaction(table, Effect.gen(function* () {
+        const stored = yield* store.find(table, encodedKey, permission)
         if (Option.isNone(stored)) return yield* missing(key)
         const current = yield* decodeRow(stored.value)
-        const transition = AuthorizationValuesSchema.make({ row: current, next: value })
-        yield* authorize("update", subject, transition)
+        const [candidate, encoded] = yield* prepareCandidate(current)
+        yield* authorize(action, subject, { row: current, next: candidate })
         const updated = yield* store.update(table, encoded, permission)
         if (Option.isNone(updated)) return yield* missing(key)
         const result = yield* decodeRow(updated.value)
-        const returned = AuthorizationValuesSchema.make({ row: result })
-        yield* authorize("read", subject, returned)
+        yield* authorize("read", subject, { row: result })
         return result
-      })
+      }))
+    })
 
-      return yield* store.transaction(table, transaction)
+    const update = Effect.fn("Repository.update")(function* (value: CanonicalRow) {
+      const subject = yield* authorization.subject("update")
+      const encoded = yield* encodeRow(value)
+      const key = encoded[table.identifier]
+      return yield* replaceExisting("update", subject, key, key, () => Effect.succeed([value, encoded] as const))
     })
 
     const patch = Effect.fn("Repository.patch")(function* (key: CanonicalId, changes: PatchInput<S, CanonicalKey>) {
       const subject = yield* authorization.subject("patch")
       if (Record.has(changes, table.identifier)) return yield* inputFailure(`patch must not provide immutable field ${table.identifier}`)
       const encodedKey = yield* encodeKey(key)
-      const store = yield* RepositoryStore
-      const permission = access(subject)
-
-      const transaction = Effect.gen(function* () {
-        const stored = yield* store.find(table, encodedKey, permission)
-        if (Option.isNone(stored)) return yield* missing(key)
-        const current = yield* decodeRow(stored.value)
+      return yield* replaceExisting("patch", subject, key, encodedKey, (current) => {
         const candidate = Struct.assign(current, changes)
-        const encoded = yield* encodeRow(candidate)
-        const transition = AuthorizationValuesSchema.make({ row: current, next: candidate })
-        yield* authorize("patch", subject, transition)
-        const updated = yield* store.update(table, encoded, permission)
-        if (Option.isNone(updated)) return yield* missing(key)
-        const result = yield* decodeRow(updated.value)
-        const returned = AuthorizationValuesSchema.make({ row: result })
-        yield* authorize("read", subject, returned)
-        return result
+        return pipe(encodeRow(candidate), Effect.map((encoded) => [candidate, encoded] as const))
       })
-
-      return yield* store.transaction(table, transaction)
     })
 
     const remove = Effect.fn("Repository.remove")(function* (key: CanonicalId) {
@@ -509,7 +495,7 @@ export const Resource = {
         const stored = yield* store.find(table, encoded, permission)
         if (Option.isNone(stored)) return yield* missing(key)
         const current = yield* decodeRow(stored.value)
-        const target = AuthorizationValuesSchema.make({ row: current })
+        const target: AuthorizationValues = { row: current }
         yield* authorize("remove", subject, target)
         const removed = yield* store.remove(table, encoded, permission)
         if (!removed) return yield* missing(key)
@@ -535,7 +521,6 @@ export const Resource = {
       : declaredCreateFields
 
     const CreateShapeSchema = Schema.Struct(createFields)
-    interface CreateShape extends Schema.Schema.Type<typeof CreateShapeSchema> {}
     const createInputSchema = Schema.make<Schema.Codec<CreateInput<S, Creation>, unknown, S["DecodingServices"], S["EncodingServices"]>>(CreateShapeSchema.ast)
     const IdentifierKeySchema = Schema.Literal(table.identifier)
     const IdentifierShapeSchema = Schema.Record(IdentifierKeySchema, canonicalIdentifierSchema)
@@ -546,27 +531,22 @@ export const Resource = {
     const rowsWireSchema = Schema.Array(canonicalRowWireSchema)
     const canonicalFilterFields = Record.filter(options.schema.fields, (_schema, field) => Array.contains(filterFields, field))
     const CanonicalFilterSchema = Schema.Struct(Record.map(canonicalFilterFields, Schema.optionalKey))
-    interface CanonicalFilter extends Schema.Schema.Type<typeof CanonicalFilterSchema> {}
     const OptionalFilterSchema = Schema.optionalKey(CanonicalFilterSchema)
     const ListShapeSchema = Schema.Struct({ filter: OptionalFilterSchema, limit: OptionalLimitSchema, cursor: OptionalCursorSchema })
-    interface ListShape extends Schema.Schema.Type<typeof ListShapeSchema> {}
     const listInputSchema = Schema.make<Schema.Codec<ListInput<S, List>, unknown, S["DecodingServices"], S["EncodingServices"]>>(ListShapeSchema.ast)
     const listWireSchema = Option.isNone(listPolicy) ? EmptyPayloadSchema : Schema.toCodecJson(listInputSchema)
     const PageSchema = Schema.Struct({ items: rowsWireSchema, nextCursor: NextCursorSchema })
-    interface Page extends Schema.Schema.Type<typeof PageSchema> {}
     const listSuccessSchema = Option.isNone(listPolicy) ? rowsWireSchema : PageSchema
     const mutableFields = Record.remove(options.schema.fields, table.identifier)
     const optionalPatchFields = Record.map(mutableFields, Schema.optionalKey)
     const patchFields: Readonly<Record<string, Schema.Constraint>> = Record.set(optionalPatchFields, table.identifier, ForbiddenFieldSchema)
     const PatchFieldsSchema = Schema.Struct(patchFields)
-    interface PatchFields extends Schema.Schema.Type<typeof PatchFieldsSchema> {}
     const identifierFields = Record.singleton(table.identifier, canonicalIdentifierSchema)
     const patchPayloadFields: Readonly<Record<string, Schema.Constraint>> = Record.set(identifierFields, "patch", PatchFieldsSchema)
     const PatchShapeSchema = Schema.Struct(patchPayloadFields)
-    interface PatchShape extends Schema.Schema.Type<typeof PatchShapeSchema> {}
     const patchInputSchema = Schema.make<Schema.Codec<Readonly<Record<CanonicalKey, CanonicalId>> & { readonly patch: PatchInput<S, CanonicalKey> }, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchShapeSchema.ast)
     const patchWireSchema = Schema.toCodecJson(patchInputSchema)
-    const isPublic = Equivalence.strictEqual<AuthorizationDefinition["_tag"]>()(options.authorization._tag, "Public")
+    const isPublic = (options.authorization._tag === "Public")
     const errorSchema = (isPublic ? PublicResourceErrorSchema : ResourceErrorSchema) as ResourceErrors<Auth>
     const getProcedure = Rpc.make(`${options.name}.get`, { payload: identifierWireSchema, success: canonicalRowWireSchema, error: errorSchema })
     const listProcedure = Rpc.make(`${options.name}.list`, { payload: listWireSchema, success: listSuccessSchema, error: errorSchema })
@@ -591,7 +571,7 @@ export const Resource = {
       const tag = `${options.name}.${operation}`
 
       const isSelected = (procedure: typeof procedures[number]): procedure is SelectedRpc =>
-        Equivalence.strictEqual<string>()(procedure._tag, tag)
+        (procedure._tag === tag)
 
       const selected = Array.findFirst(procedures, isSelected)
       return Option.match(selected, {
@@ -603,7 +583,7 @@ export const Resource = {
     const selected = pipe(options.operations, Effect.forEach(selectProcedure), Effect.runSync)
     const selectedGroup = RpcGroup.make(...selected)
     type PublishedRpc = Auth extends PolicyAuthorization ? Rpc.AddMiddleware<SelectedRpc, typeof AuthorizationRpc> : SelectedRpc
-    const isProtected = Equivalence.strictEqual<AuthorizationDefinition["_tag"]>()(options.authorization._tag, "Policy")
+    const isProtected = (options.authorization._tag === "Policy")
 
     const group = (isProtected
       ? selectedGroup.middleware(AuthorizationRpc)

@@ -16,41 +16,25 @@ const makeLoaded = Effect.fn("PersistedRef.makeLoaded")(
     const backing = yield* SynchronizedRef.make(initial)
     const get = SynchronizedRef.get(backing)
 
-    const refresh = SynchronizedRef.updateAndGetEffect(
-      backing,
-      Function.constant(options.load),
+    const refresh = SynchronizedRef.updateAndGetEffect(backing, () => options.load)
+
+    const set = (value: A) => pipe(
+      SynchronizedRef.updateAndGetEffect(backing, (previous) => options.commit(previous, value)),
+      Effect.uninterruptible,
     )
 
-    const commit = (previous: A, value: A) => options.commit(previous, value)
-
-    const updateTo = (value: A) => SynchronizedRef.updateAndGetEffect(
-      backing,
-      (previous) => commit(previous, value),
+    const update = (updateValue: (current: A) => A) => pipe(
+      SynchronizedRef.updateAndGetEffect(backing, (previous) => options.commit(previous, updateValue(previous))),
+      Effect.uninterruptible,
     )
 
-    const set = (value: A) => pipe(updateTo(value), Effect.uninterruptible)
-
-    const commitUpdate = (updateValue: (current: A) => A) => (previous: A) => {
-      const next = updateValue(previous)
-      return options.commit(previous, next)
-    }
-
-    const updateWith = (updateValue: (current: A) => A) =>
-      SynchronizedRef.updateAndGetEffect(backing, commitUpdate(updateValue))
-
-    const update = (updateValue: (current: A) => A) =>
-      pipe(updateWith(updateValue), Effect.uninterruptible)
-
-    const modifyWith = <B>(
-      modifyValue: (current: A) => readonly [result: B, next: A],
-    ) => SynchronizedRef.modifyEffect(backing, (previous) => {
-      const [result, next] = modifyValue(previous)
-      const committed = options.commit(previous, next)
-      return Effect.map(committed, (persisted) => [result, persisted] as const)
-    })
-
-    const modify = <B>(modifyValue: (current: A) => readonly [result: B, next: A]) =>
-      pipe(modifyWith(modifyValue), Effect.uninterruptible)
+    const modify = <B>(modifyValue: (current: A) => readonly [result: B, next: A]) => pipe(
+      SynchronizedRef.modifyEffect(backing, (previous) => {
+        const [result, next] = modifyValue(previous)
+        return Effect.map(options.commit(previous, next), (persisted) => [result, persisted] as const)
+      }),
+      Effect.uninterruptible,
+    )
 
     return { get, refresh, set, update, modify }
   },

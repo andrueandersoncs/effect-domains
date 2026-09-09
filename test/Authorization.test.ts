@@ -1,9 +1,10 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Option, Order, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { Authorization, AuthorizationSubject, AuthorizationValuesSchema } from "effect-domains/authorization"
+import { Authorization, AuthorizationSubject, type PolicyAuthorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Policy, type Operand } from "effect-domains/policy"
 import { RepositoryStore } from "effect-domains/repository-store"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
@@ -230,9 +231,9 @@ const asNull = Effect.provideService(AuthorizationSubject, nullSubject)
 
 it.effect("native Boolean storage preserves equality, membership, subject, and null semantics before pagination", () => pipe(
   Effect.gen(function* () {
-    const permitted = AuthorizationValuesSchema.make({ row: { id: "feature", enabled: true } })
+    const permitted = { row: { id: "feature", enabled: true } }
     yield* pipe(Authorization.require(featurePermission, "read", permitted), asEnabled)
-    const withheld = AuthorizationValuesSchema.make({ row: { id: "feature", enabled: false } })
+    const withheld = { row: { id: "feature", enabled: false } }
     const denied = yield* pipe(Authorization.require(featurePermission, "read", withheld), asEnabled, rejectedTag)
     expect(denied).toBe("Forbidden")
 
@@ -246,4 +247,36 @@ it.effect("native Boolean storage preserves equality, membership, subject, and n
     const nullVisible = yield* pipe(FeaturePermissions.repository.list(), asNull)
     expect(nullVisible).toEqual([{ id: "unset", enabled: null }])
   }), Effect.provide(sqlite),
+))
+
+it.effect("policy construction snapshots compiled rules and rejects fabricated policy descriptors", () => pipe(
+  Effect.gen(function* () {
+    const rule = {
+      _tag: "Equal",
+      left: p.row.ownerId,
+      right: p.subject.userId,
+    } as unknown as typeof owned
+    const malformed = { _tag: "Equal", left: p.row.ownerId } as unknown as typeof owned
+    expect(() => p.policy({ scope: p.all(), allow: { read: malformed } })).toThrow()
+
+    const compiled = p.policy({ scope: p.all(), allow: { read: rule } })
+    const mutableRule = rule as unknown as { left: Operand }
+    mutableRule.left = Policy.literal("nobody")
+
+    yield* pipe(Authorization.require(compiled, "read", { row: { id: "owned", tenantId: "a", ownerId: "alice", title: "private" } }), asAlice)
+
+    const fabricated: PolicyAuthorization = {
+      _tag: "Policy",
+      resource: OwnedDocumentSchema,
+      subject: SubjectSchema,
+      scope: Policy.constant(true),
+      allow: { read: Policy.constant(true) },
+    }
+    const rejected = yield* pipe(
+      Authorization.require(fabricated, "read", { row: { id: "owned", tenantId: "a", ownerId: "alice", title: "private" } }),
+      asAlice,
+      rejectedTag,
+    )
+    expect(rejected).toBe("AuthorizationDefinitionError")
+  }),
 ))

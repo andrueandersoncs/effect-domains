@@ -1,11 +1,8 @@
 import { Context, Effect, Option, Schema } from "effect"
-import { Policy } from "./policy.ts"
+import type { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
 
 const RepositoryListDirectionSchema = Schema.Literals(["asc", "desc"])
-const RepositoryListValuesSchema = Schema.Array(Schema.Unknown)
-const RepositoryListFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
-
 export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
   "RepositoryListOrder",
 )({
@@ -13,31 +10,22 @@ export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
   direction: RepositoryListDirectionSchema,
 }) {}
 
-export class RepositoryListCursor extends Schema.Class<RepositoryListCursor>(
-  "RepositoryListCursor",
-)({
-  values: RepositoryListValuesSchema,
-  identifier: Schema.Unknown,
-}) {}
+export interface RepositoryListCursor {
+  readonly values: ReadonlyArray<unknown>
+  readonly identifier: unknown
+}
 
-const RepositoryListOrdersSchema = Schema.Array(RepositoryListOrder)
-const RepositoryListCursorSchema = Schema.Option(RepositoryListCursor)
+export interface RepositoryListQuery {
+  readonly filter: Readonly<Record<string, unknown>>
+  readonly order: ReadonlyArray<RepositoryListOrder>
+  readonly cursor: Option.Option<RepositoryListCursor>
+  readonly limit: number
+}
 
-export class RepositoryListQuery extends Schema.Class<RepositoryListQuery>(
-  "RepositoryListQuery",
-)({
-  filter: RepositoryListFilterSchema,
-  order: RepositoryListOrdersSchema,
-  cursor: RepositoryListCursorSchema,
-  limit: Schema.Number,
-}) {}
-
-const RepositorySubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
-
-export class RepositoryAccess extends Schema.Class<RepositoryAccess>("RepositoryAccess")({
-  policy: Policy.Schema,
-  subject: RepositorySubjectSchema,
-}) {}
+export interface RepositoryAccess {
+  readonly policy: Policy
+  readonly subject: Readonly<Record<string, unknown>>
+}
 
 interface RepositoryListPage {
   readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>

@@ -1,14 +1,10 @@
-import { Array, Equivalence, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
+import { Array, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
 import { Table, TableField, TableCheckSchema } from "./table.ts"
 import type { Resource } from "./resource.ts"
 import { Policy, type Operand } from "./policy.ts"
+import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
 
-type InspectableProcedure = Readonly<{
-  _tag: string
-  payloadSchema: Schema.Constraint
-  successSchema: Schema.Constraint
-  errorSchema: Schema.Constraint
-}>
+type InspectableProcedure = UnaryRpcProcedure
 
 type InspectableApplication = Readonly<{
   name: string
@@ -43,7 +39,6 @@ class PhysicalTable extends Schema.Class<PhysicalTable>("PhysicalTable")({
 
 const SubjectBindingsSchema = Schema.Record(Schema.String, Schema.String)
 const CreationSchema = Schema.Struct({ defaults: Schema.Unknown, generated: Schema.Unknown, fromSubject: SubjectBindingsSchema })
-interface Creation extends Schema.Schema.Type<typeof CreationSchema> {}
 
 const StorageSchema = Schema.Struct({
   schema: Schema.Unknown,
@@ -53,7 +48,6 @@ const StorageSchema = Schema.Struct({
   stored: Schema.Unknown,
 })
 
-interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
 const OperationNamesSchema = Schema.Array(Schema.String)
 
 const AuthorizationInspectionSchema = Schema.Union([
@@ -86,11 +80,8 @@ class OperationInspection extends Schema.Class<OperationInspection>("OperationIn
 const OperationsSchema = Schema.Array(OperationInspection)
 const ResourcesSchema = Schema.Array(ResourceInspection)
 const CommandsSchema = Schema.Struct({ local: OperationNamesSchema, remote: OperationNamesSchema })
-interface Commands extends Schema.Schema.Type<typeof CommandsSchema> {}
 const OpaqueRuntimeSchema = Schema.Struct({ opaque: Schema.String })
-interface OpaqueRuntime extends Schema.Schema.Type<typeof OpaqueRuntimeSchema> {}
 const RuntimeSchema = Schema.Struct({ services: OpaqueRuntimeSchema, transactions: OpaqueRuntimeSchema })
-interface Runtime extends Schema.Schema.Type<typeof RuntimeSchema> {}
 
 class ApplicationInspection extends Schema.Class<ApplicationInspection>("ApplicationInspection")({
   application: Schema.String,
@@ -160,17 +151,25 @@ const resource = (definition: Resource) => {
 }
 
 const operation = (procedure: InspectableProcedure) => {
-  const input = schemaDocument(procedure.payloadSchema)
-  const output = schemaDocument(procedure.successSchema)
-  const error = schemaDocument(procedure.errorSchema)
-  return OperationInspection.make({ name: procedure._tag, input, output, error })
+  const contract = Option.getOrElse(
+    compileUnaryRpc(procedure),
+    () => {
+      throw new Error(`Application inspection supports only unary RPC procedures: ${procedure._tag}`)
+    },
+  )
+  return OperationInspection.make({
+    name: contract.tag,
+    input: schemaDocument(contract.payload),
+    output: schemaDocument(contract.success),
+    error: schemaDocument(contract.error),
+  })
 }
 
 const describe = <App extends InspectableApplication>(application: App, selected: Option.Option<string> = Option.none()) => {
   const operations = pipe(application.group.requests.values(), Array.fromIterable, Array.map(operation))
 
   const matching = (name: string) => {
-    const named = (entry: OperationInspection) => Equivalence.strictEqual<string>()(entry.name, name)
+    const named = (entry: OperationInspection) => (entry.name === name)
     return Array.filter(operations, named)
   }
 

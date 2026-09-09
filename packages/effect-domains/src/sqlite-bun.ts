@@ -1,16 +1,16 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
+import { Array, DateTime, Effect, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
 import { SqlClient, SqlError, type Statement } from "effect/unstable/sql"
 import {
   RepositoryError,
-  RepositoryListCursor,
+  type RepositoryListCursor,
   RepositoryListOrder,
   RepositoryStore,
   type RepositoryAccess,
   type RepositoryListQuery,
 } from "./repository-store.ts"
 import { PolicySql } from "./policy-sql.ts"
-import { PolicyEnvironment, type Policy } from "./policy.ts"
+import type { Policy } from "./policy.ts"
 import { SchemaStore } from "./migrations.ts"
 import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { Table } from "./table.ts"
@@ -24,13 +24,8 @@ class InsertReturnedNoRow extends Schema.TaggedError<InsertReturnedNoRow>()(
 const repositoryFailure = (resource: string) => (cause: unknown) =>
   RepositoryError.make({ resource, cause })
 
-const isEqual = Equivalence.strictEqual<unknown>()
-const isAscending = Equivalence.strictEqual<"asc" | "desc">()
-
-const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) => {
-  const isNull = isEqual(value, null)
-  return isNull ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
-}
+const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
+  value === null ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
 const leadingEqualitySql = (
   sql: SqlClient.SqlClient,
@@ -50,7 +45,7 @@ const cursorTerm = (
   const equalPreceding = Array.map(preceding, leadingEqualitySql(sql, values))
   const valueOption = Array.get(values, index)
   const value = Option.getOrUndefined(valueOption)
-  const ascending = isAscending(entry.direction, "asc")
+  const ascending = entry.direction === "asc"
 
   const boundary = ascending
     ? sql`${sql(entry.field)} > ${value}`
@@ -78,7 +73,7 @@ const appendCursorCondition = (
 }
 
 const orderingFragment = (sql: SqlClient.SqlClient) => (entry: RepositoryListOrder) => {
-  const ascending = isAscending(entry.direction, "asc")
+  const ascending = entry.direction === "asc"
   const direction = sql.literal(ascending ? "ASC" : "DESC")
   return sql`${sql(entry.field)} ${direction}`
 }
@@ -127,7 +122,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
     function* (table: Table, access: RepositoryAccess) {
       const recover = Function.flow(repositoryFailure(table.name), Effect.fail)
       const binder = yield* pipe(Ref.modify(policyBinders, registerPolicy(access.policy)), Effect.catchDefect(recover))
-      const environment = PolicyEnvironment.make({ subject: access.subject }, { disableChecks: true })
+      const environment = { subject: access.subject }
       return yield* pipe(binder(sqlClient, environment), Effect.mapError(repositoryFailure(table.name)))
     },
   )

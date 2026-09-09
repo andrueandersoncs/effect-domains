@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Record, Schema, type Scope, pipe } from "effect"
+import { Context, Effect, Layer, Record, Schema, type Scope, pipe } from "effect"
 import { Rpc, type RpcGroup } from "effect/unstable/rpc"
 
 type CommandHandlerDefinitions<Rpcs extends Rpc.Any> = {
@@ -95,23 +95,15 @@ const withCapturedContext = <
 >(
   captured: Context.Context<any>,
   handlers: Handlers,
-  catchTags: Option.Option<CatchTags>,
-) => {
-  const capture = (handler: (input: never) => Effect.Effect<any, any, any>) => {
-    const invoke = (input: never) =>
-      Effect.contextWith((current: Context.Context<never>) => {
-        const context = Context.merge(captured, current)
-        const invocation = Option.isNone(catchTags)
-          ? handler(input)
-          : pipe(handler(input), Effect.catchTags(catchTags.value))
-        return pipe(invocation, Effect.provide(context))
-      })
-
-    return invoke
-  }
-
-  return Record.map(handlers, capture) as CommandHandlers<Rpcs>
-}
+  catchTags?: CatchTags,
+) => Record.map(handlers, (handler: (input: never) => Effect.Effect<any, any, any>) =>
+  (input: never) => Effect.contextWith((current: Context.Context<never>) => {
+    const invocation = catchTags === undefined
+      ? handler(input)
+      : pipe(handler(input), Effect.catchTags(catchTags))
+    return Effect.provide(invocation, Context.merge(captured, current))
+  }),
+) as CommandHandlers<Rpcs>
 
 const rpc = <
   const Tag extends string,
@@ -165,12 +157,7 @@ const make = <const Name extends string, Rpcs extends Rpc.Any>(
         >()
 
         const handlers = yield* (Effect.isEffect(value) ? value : Effect.succeed(value))
-        const catchTags = Option.fromNullishOr(options?.catchTags)
-        return withCapturedContext<Rpcs, Handlers, CatchTags>(
-          captured,
-          handlers,
-          catchTags,
-        )
+        return withCapturedContext<Rpcs, Handlers, CatchTags>(captured, handlers, options?.catchTags)
       })
 
       return Layer.effect(CommandService)(construction) as Layer.Layer<

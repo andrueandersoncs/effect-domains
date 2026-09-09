@@ -1,9 +1,10 @@
-import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Schema, pipe } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { type Rpc, type RpcGroup, RpcSchema } from "effect/unstable/rpc"
+import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { AdminPresentation } from "@effect-domains/admin/contract"
 import type { Application } from "./application.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
+import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
 
 export type AdminOptions = Readonly<Partial<{
@@ -17,7 +18,6 @@ class AdminDefinitionError extends Schema.TaggedError<AdminDefinitionError>()("A
 }) {}
 
 const CallSchema = Schema.Struct({ operation: Schema.String, input: Schema.Json })
-interface Call extends Schema.Schema.Type<typeof CallSchema> {}
 
 const responseHeaders = {
   "cache-control": "no-store",
@@ -63,24 +63,22 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
   const procedures = options.application.group.requests.values()
 
   const entries = yield* Effect.forEach(procedures, Effect.fn("ApplicationAdmin.compileOperation")(function* (procedure) {
-    if (RpcSchema.isStreamSchema(procedure.successSchema)) {
-      return yield* AdminDefinitionError.make({ reason: `Admin operations must be unary: ${procedure._tag}` })
-    }
-    const InputSchema = Schema.toCodecJson(procedure.payloadSchema)
-    const OutputSchema = Schema.Struct({ result: Schema.toCodecJson(procedure.successSchema) })
-    interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
-    const middlewareErrors = pipe(procedure.middlewares, Array.fromIterable, Array.map(Struct.get("error")))
-    const ErrorSchema = Schema.Struct({ error: Schema.toCodecJson(Schema.Union([procedure.errorSchema, ...middlewareErrors])) })
-    interface Error extends Schema.Schema.Type<typeof ErrorSchema> {}
+    const contract = yield* Effect.fromOption(
+      compileUnaryRpc(procedure),
+      () => AdminDefinitionError.make({ reason: `Admin operations must be unary: ${procedure._tag}` }),
+    )
+    const InputSchema = contract.payload
+    const OutputSchema = Schema.Struct({ result: contract.success })
+    const ErrorSchema = Schema.Struct({ error: contract.error })
     const decode = Schema.decodeUnknownEffect(InputSchema)
     const encodeResult = Schema.encodeUnknownEffect(OutputSchema)
     const encodeError = Schema.encodeUnknownEffect(ErrorSchema)
 
     const invoke = Effect.fn("ApplicationAdmin.invoke")(function* (input: unknown, request: HttpServerRequest.HttpServerRequest) {
       const decoded = yield* pipe(decode(input), Effect.result)
-      if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${procedure._tag}: ${decoded.failure.message}`)
+      if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${contract.tag}: ${decoded.failure.message}`)
       return yield* pipe(
-        client(procedure._tag, decoded.success, { headers: request.headers }),
+        client(contract.tag, decoded.success, { headers: request.headers }),
         Effect.matchEffect({
           onFailure: (error) => pipe(encodeError({ error }), Effect.flatMap(declaredErrorResponse), Effect.catch(internalFailure)),
           onSuccess: (result) => pipe(encodeResult({ result }), Effect.flatMap(successResponse), Effect.catch(internalFailure)),
@@ -94,11 +92,12 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
       Effect.catchDefect(internalFailure),
     )
 
-    return [procedure._tag, execute] as const
+    return [contract.tag, execute] as const
   }))
 
+
   const invocations = HashMap.fromIterable(entries)
-  const metadata = pipe(ApplicationInspect.describe(options.application), Struct.assign({ presentation: options.presentation ?? {} }))
+  const metadata = { ...ApplicationInspect.describe(options.application), presentation: options.presentation ?? {} }
 
   const document = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Effect Domains Admin</title><link rel="stylesheet" href="${path}/style.css"><script type="module" src="${path}/client.js"></script></head><body><div id="app" data-base="${path}"></div><noscript>This application requires JavaScript.</noscript></body></html>`

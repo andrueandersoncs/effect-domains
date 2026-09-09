@@ -45,3 +45,53 @@ it.effect(
     expect(result.stderr).toContain("SchemaError")
   }, Effect.provide(BunServices.layer)),
 )
+
+it.effect("native nested flags preserve prototype-named fields without mutating prototypes", () =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const source = `
+      import { BunServices } from "@effect/platform-bun"
+      import { Console, Effect, Layer, Schema } from "effect"
+      import { Command } from "effect/unstable/cli"
+      import { FetchHttpClient } from "effect/unstable/http"
+      import { Rpc, RpcClient, RpcGroup, RpcSerialization } from "effect/unstable/rpc"
+      import { RpcCli } from "effect-domains/rpc-cli"
+      let observed
+      const payload = Schema.Struct({
+        ["__proto__"]: Schema.Struct({ effectDomainsProbe: Schema.String }),
+      }).check(Schema.makeFilter(value => {
+        observed = { own: Object.hasOwn(value, "__proto__"), value: value.__proto__.effectDomainsProbe }
+        return false
+      }))
+      const group = RpcGroup.make(Rpc.make("probe", { payload, success: Schema.Void }))
+      const protocol = RpcClient.layerProtocolHttp({ url: "http://127.0.0.1:1" }).pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(RpcSerialization.layerJson),
+      )
+      const cli = RpcCli.make({ name: "probe-cli", group, protocol, subcommands: [] })
+      await Effect.runPromise(Effect.gen(function* () {
+        yield* Effect.exit(Command.runWith(cli, { version: "test", renderErrors: false })([
+          "probe", "----proto---effect-domains-probe", "sentinel",
+        ]))
+        yield* Console.log(JSON.stringify({
+          observed,
+          polluted: Object.hasOwn(Object.prototype, "effectDomainsProbe"),
+        }))
+      }).pipe(Effect.provide(BunServices.layer)))
+    `
+    const child = yield* spawner.spawn(ChildProcess.make(process.execPath, ["--eval", source], {
+      cwd: new URL("..", import.meta.url).pathname,
+    }))
+    const result = yield* Effect.all({
+      stdout: pipe(child.stdout, Stream.decodeText(), Stream.mkString),
+      stderr: pipe(child.stderr, Stream.decodeText(), Stream.mkString),
+      exitCode: child.exitCode,
+    }, { concurrency: "unbounded" })
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(JSON.parse(result.stdout)).toEqual({
+      observed: { own: true, value: "sentinel" },
+      polluted: false,
+    })
+  }).pipe(Effect.provide(BunServices.layer)),
+)

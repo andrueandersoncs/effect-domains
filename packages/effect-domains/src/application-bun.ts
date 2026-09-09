@@ -1,6 +1,6 @@
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun"
 import { AdminAssetFiles } from "@effect-domains/admin/assets"
-import { Array, Config, Context, Effect, Function, Layer, Option, type PlatformError, type Redacted, Schema, type Scope, Stdio, Stream, Struct, pipe } from "effect"
+import { Config, Context, Effect, Layer, Option, type PlatformError, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
@@ -54,17 +54,13 @@ type RunErrors<App extends Application, Services extends RuntimeLayer, Initializ
   | Layer.Error<App["handlers"]>
   | Layer.Error<Services> | Effect.Error<Initialize>
 
-const databaseEnvironmentVariable = (name: string) =>
-  `${name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_DB`
+const environmentPrefix = (name: string) => name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")
+const manifestPath = (manifest: string | URL) => manifest instanceof URL ? Bun.fileURLToPath(manifest) : manifest
 
-const serviceUrlEnvironmentVariable = (name: string) =>
-  `${name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_URL`
-
-const databaseFilename = (name: string, configured: Option.Option<string>) => {
-  const environment = databaseEnvironmentVariable(name)
-  const fallback = pipe(Config.schema(Schema.NonEmptyString, environment), Config.withDefault(`${name}.sqlite`))
-  return Option.match(configured, { onNone: Function.constant(fallback), onSome: Effect.succeed })
-}
+const databaseFilename = (name: string, configured?: string) =>
+  configured === undefined
+    ? pipe(Config.schema(Schema.NonEmptyString, `${environmentPrefix(name)}_DB`), Config.withDefault(`${name}.sqlite`))
+    : Effect.succeed(configured)
 
 const readAdminAsset = (file: URL) => Effect.tryPromise({
   try: () => Bun.file(file).text(),
@@ -84,36 +80,23 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   App extends Application,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
->(application: App, options: RunOptions<Services, Initialize>, manifest: Option.Option<string>) {
-  const filename = yield* databaseFilename(application.name, Option.fromNullishOr(options.database.filename))
-
+>(application: App, options: RunOptions<Services, Initialize>) {
+  const filename = yield* databaseFilename(application.name, options.database.filename)
   const migrations = yield* ("migrations" in options.database
     ? Effect.succeed(options.database.migrations)
-    : pipe(
-      manifest,
-      Option.match({
-        onNone: Function.constant(Effect.never),
-        onSome: SqliteMigrations.load,
-      }),
-    ))
+    : SqliteMigrations.load(manifestPath(options.database.manifest)))
 
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
   const database = SqliteBunRuntime.sqlClient(filename, { migrations })
   const rpc = RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" })
   const mcp = RpcMcp.layerHttp({ name: application.name, group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/mcp" })
-  const admin = yield* pipe(
-    Option.fromNullishOr(options.admin),
-    Option.match({
-      onNone: Function.constant(Effect.succeed(Layer.empty)),
-      onSome: (configured) => pipe(
-        readAdminAssets(),
-        Effect.map((assets) => {
-          const adminOptions = typeof configured === "boolean" ? {} : configured
-          return ApplicationAdmin.layerHttp({ application, ...assets, ...adminOptions })
-        }),
-      ),
-    }),
-  )
+  const admin = options.admin === undefined
+    ? Layer.empty
+    : ApplicationAdmin.layerHttp({
+      application,
+      ...(yield* readAdminAssets()),
+      ...(options.admin === true ? {} : options.admin),
+    })
 
   const routes = pipe(
     Layer.mergeAll(rpc, mcp, admin),
@@ -130,14 +113,11 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
       const databaseContext = yield* Layer.build(database)
       yield* pipe(Application.prepare(application), Effect.provideContext(databaseContext))
       const services = yield* pipe(
-        Option.fromNullishOr(options.services),
-        Option.getOrElse(Function.constant(Layer.empty)),
-        Layer.build,
+        Layer.build(options.services ?? Layer.empty),
         Effect.provideContext(databaseContext),
       )
       const serviceContext = Context.merge(databaseContext, services)
-      const initialize = pipe(Option.fromNullishOr(options.initialize), Option.getOrElse(Function.constant(Effect.void)))
-      yield* Effect.provideContext(initialize, serviceContext)
+      yield* Effect.provideContext(options.initialize ?? Effect.void, serviceContext)
       return yield* pipe(Layer.launch(server), Effect.provideContext(serviceContext))
     }),
     Effect.scoped,
@@ -149,11 +129,7 @@ const inspectCommand = (application: Application) => {
 
   const inspect = Effect.fn("ApplicationBun.inspect")(function* ({ operation }: Readonly<{ operation: Option.Option<string> }>) {
     const inspection = ApplicationInspect.describe(application, operation)
-    const selected = Option.isSome(operation)
-    const missing = Array.isReadonlyArrayEmpty(inspection.operations)
-    const unknownOperation = selected && missing
-
-    if (unknownOperation) {
+    if (Option.isSome(operation) && inspection.operations.length === 0) {
       return yield* CliError.UserError.make({
         cause: operation.value,
         userMessage: `Unknown application operation ${operation.value}`,
@@ -162,9 +138,7 @@ const inspectCommand = (application: Application) => {
 
     const output = JSON.stringify(inspection, null, 2)
     const stdio = yield* Stdio.Stdio
-    const stream = Stream.make(`${output}\n`)
-    const stdout = stdio.stdout()
-    yield* Stream.run(stream, stdout)
+    yield* Stream.run(Stream.make(`${output}\n`), stdio.stdout())
   })
 
   return Command.make("inspect", { operation }, inspect)
@@ -187,35 +161,27 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
   Services extends RuntimeLayer,
   Initialize extends Initialization,
 >(application: App, options: RunOptions<Services, Initialize>) {
-  const environment = serviceUrlEnvironmentVariable(application.name)
+  const environment = environmentPrefix(application.name)
   const defaultUrl = new URL("http://127.0.0.1:3000/rpc/v1")
 
   const protocol = pipe(
     Effect.gen(function* () {
-      const url = yield* pipe(Config.schema(Schema.URLFromString, environment), Config.withDefault(defaultUrl))
-      const tokenEnvironment = `${application.name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_TOKEN`
-      const token = yield* pipe(Config.redacted(tokenEnvironment), Config.option)
+      const url = yield* pipe(Config.schema(Schema.URLFromString, `${environment}_URL`), Config.withDefault(defaultUrl))
+      const token = yield* pipe(Config.redacted(`${environment}_TOKEN`), Config.option)
       return clientProtocol(url, token)
     }),
     Layer.unwrap,
   )
 
-  const migrations = "migrations" in options.database ? Option.some(options.database.migrations) : Option.none()
-  const sourceManifest = "manifest" in options.database ? Option.some(options.database.manifest) : Option.none()
-  const manifest = pipe(
-    sourceManifest,
-    Option.map((value) => value instanceof URL ? Bun.fileURLToPath(value) : value),
-  )
+  const manifest = "manifest" in options.database ? Option.some(manifestPath(options.database.manifest)) : Option.none()
 
   const schema = SqliteMigrations.command({
     name: "schema",
     tables: application.tables,
-    migrations,
     manifest,
   })
 
-  const serve = () => serveApplication(application, options, manifest)
-  const serveCommand = Command.make("serve", {}, serve)
+  const serveCommand = Command.make("serve", {}, () => serveApplication(application, options))
   const inspection = inspectCommand(application)
 
   const command = RpcCli.make({
@@ -233,9 +199,8 @@ const run = Effect.fn("ApplicationBun.run")(function* <
   Services extends RuntimeLayer = Layer.Layer<never, never, never>,
   Initialize extends Initialization = Effect.Effect<void>,
 >(application: App, options: RunOptions<Services, Initialize>) {
-  const applicationRun = runApplication(application, options)
   return yield* pipe(
-    applicationRun,
+    runApplication(application, options),
     Effect.provide(BunServices.layer),
   ) as Effect.Effect<void, RunErrors<App, Services, Initialize>, RunRequirements<App, Services, Initialize>>
 })
@@ -249,8 +214,7 @@ const runMain = <
   options: RunOptions<Services, Initialize> &
     ([RunRequirements<App, Services, Initialize>] extends [never] ? unknown : never),
 ): void => {
-  const applicationRun = run(application, options)
-  BunRuntime.runMain(applicationRun as Effect.Effect<void, RunErrors<App, Services, Initialize>>)
+  BunRuntime.runMain(run(application, options) as Effect.Effect<void, RunErrors<App, Services, Initialize>>)
 }
 
 export const ApplicationBun = { run, runMain }

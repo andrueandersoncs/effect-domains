@@ -108,15 +108,28 @@ describe("Table", () => {
   it.effect(
     "preserves root struct checks after compiling storage fields",
     Effect.fn("Table.preservesRootStructChecks")(function* () {
+      const invalidRow = {
+        id: "0192f8d1-ef4e-7dd4-a8f0-ec3d1fe71826",
+        lower: 4,
+        upper: 1,
+      }
       const invalidOrdered = OrderedFieldsSchema.make({ lower: 4, upper: 1 })
-      const decoded = Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered)
+      const failures = yield* Effect.all([
+        pipe(
+          Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered),
+          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        ),
+        pipe(
+          Schema.decodeUnknownEffect(Ordered.rowSchema)(invalidRow),
+          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        ),
+        pipe(
+          Schema.encodeUnknownEffect(Ordered.storageSchema)(invalidRow),
+          Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        ),
+      ])
 
-      const failure = yield* pipe(
-        decoded,
-        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
-      )
-
-      expect(failure).toBe(true)
+      expect(failures).toEqual([true, true, true])
     }),
   )
 

@@ -1,4 +1,4 @@
-import { Array, Equivalence, Match, Option, Predicate, Schema, pipe } from "effect"
+import { Array, Match, Option, Predicate, Schema, pipe } from "effect"
 import type { TableCheck, TableField, TableSnapshot } from "./table.ts"
 
 const quoteIdentifier = (identifier: string) =>
@@ -73,10 +73,10 @@ const uuidV7Default = `DEFAULT (lower(
 ))`
 
 export const renderColumn = (
-  table: TableSnapshot,
   field: TableField,
+  primaryKey: boolean,
 ) => {
-  const primaryKey = Equivalence.strictEqual<string>()(field.name, table.identifier)
+  const primaryKeyConstraint = primaryKey
     ? " PRIMARY KEY"
     : ""
 
@@ -90,11 +90,14 @@ export const renderColumn = (
     fieldTypeCheck,
   )
 
-  return `${quoteIdentifier(field.name)} ${columnType(field.scalar)}${primaryKey}${nullability}${generated} ${Array.join(checks, " ")}`
+  return `${quoteIdentifier(field.name)} ${columnType(field.scalar)}${primaryKeyConstraint}${nullability}${generated} ${Array.join(checks, " ")}`
 }
 
 export const renderCreateTable = (table: TableSnapshot) => {
-  const columns = Array.map(table.fields, (field) => renderColumn(table, field))
+  const columns = Array.map(
+    table.fields,
+    (field) => renderColumn(field, (field.name === table.identifier)),
+  )
 
   return `CREATE TABLE ${quoteIdentifier(table.name)} (${Array.join(columns, ", ")})`
 }

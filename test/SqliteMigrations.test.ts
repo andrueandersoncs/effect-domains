@@ -54,6 +54,21 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
 
   expect(unresolved.steps).toContainEqual(blockedChange)
 
+  const SummaryDocumentSchema = Schema.Struct({
+    ...before.schema.fields,
+    summary: NullableCommentSchema,
+  })
+  const summary = Resource.make({ authorization: Authorization.public, name: "documents", schema: SummaryDocumentSchema, operations: [] })
+  const impossibleRename = SqliteMigrations.plan({
+    id: "invalid_rename",
+    from: source,
+    to: SqliteMigrations.snapshot([summary.table]),
+    renames: [SqliteRename.make({ table: "documents", from: "titel", to: "summary" })],
+  })
+
+  expect(impossibleRename.steps).toContainEqual(blockedChange)
+  expect(impossibleRename.steps).not.toContainEqual(expect.objectContaining({ _tag: "SqliteAddColumn" }))
+
   const rename = SqliteRename.make({ table: "documents", from: "title", to: "heading" })
   const backfill = SqliteBackfill.make({ table: "documents", column: "priority", value: 0 })
 
@@ -76,6 +91,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   yield* store.prepare(target.tables)
   const renamedDocument = yield* renamed.repository.get(document.id)
 
+
   expect(nullableDocument).toEqual({ ...document, comment: null })
   expect(renamedDocument).toEqual({
     id: document.id,
@@ -89,6 +105,75 @@ const nullableAdditionsAndRenames = pipe(nullableAdditionsAndRenamesAction, Effe
 const nullableAdditionsAndRenamesTest = Function.constant(nullableAdditionsAndRenames)
 
 it.effect("nullable additions and explicit renames preserve records regardless of declaration order", nullableAdditionsAndRenamesTest)
+const repeatableIntentFlagsAction = Effect.fn("SqliteMigrations.repeatableIntentFlags")(function* () {
+  const temporaryPrefix = join(tmpdir(), "effect-domains-repeatable-intents-")
+  const directory = yield* Effect.acquireRelease(
+    Effect.sync(() => mkdtempDisposableSync(temporaryPrefix)),
+    (value) => Effect.sync(() => value.remove()),
+  )
+  const sourcePath = join(directory.path, "001_initial.json")
+  const artifactPath = join(directory.path, "002_backfills.json")
+  const SourceSchema = Schema.Struct({ title: Schema.String })
+  const TargetSchema = Schema.Struct({
+    ...SourceSchema.fields,
+    label: Schema.String,
+    priority: Schema.Int,
+  })
+  const source = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: SourceSchema, operations: [] })
+  const target = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: TargetSchema, operations: [] })
+  const initial = SqliteMigrations.plan({
+    id: "001_initial",
+    from: empty,
+    to: SqliteMigrations.snapshot([source.table]),
+  })
+  writeFileSync(sourcePath, JSON.stringify(encodeMigration(initial), null, 2))
+
+  const command = SqliteMigrations.command({
+    name: "schema",
+    tables: [target.table],
+    manifest: Option.none(),
+  })
+  const run = Command.runWith(command, { version: "test", renderErrors: false })
+  yield* run([
+    "plan",
+    "--from",
+    sourcePath,
+    "--id",
+    "002_backfills",
+    "--backfill",
+    'repeatable_intents:label:"json:colon"',
+    "--backfill",
+    "repeatable_intents:priority:0",
+    "--transform",
+    `repeatable_intents:title:replace("title", ':', '-')`,
+    "--out",
+    artifactPath,
+  ])
+  const [, artifact] = yield* SqliteMigrations.decodeHistory([
+    JSON.parse(readFileSync(sourcePath, "utf8")),
+    JSON.parse(readFileSync(artifactPath, "utf8")),
+  ])
+
+  expect(artifact?.steps).toEqual([
+    expect.objectContaining({
+      _tag: "SqliteRebuildTable",
+      copies: expect.arrayContaining([
+        expect.objectContaining({ _tag: "SqliteColumnValue", column: "label", value: "json:colon" }),
+        expect.objectContaining({ _tag: "SqliteColumnValue", column: "priority", value: 0 }),
+        expect.objectContaining({
+          _tag: "SqliteColumnExpression",
+          column: "title",
+          expression: `replace("title", ':', '-')`,
+        }),
+      ]),
+    }),
+  ])
+})
+
+it.effect(
+  "repeatable migration intent flags retain JSON and SQL colons",
+  () => pipe(repeatableIntentFlagsAction(), Effect.provide(BunServices.layer)),
+)
 
 const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(function* () {
   const database = yield* SqlClient.SqlClient
@@ -241,19 +326,15 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   })
 
   const encodedInitial = encodeMigration(initial)
-  const history = yield* SqliteMigrations.decodeHistory([encodedInitial])
   const initialText = JSON.stringify(encodedInitial, null, 2)
   writeFileSync(initialPath, initialText)
   const initialManifest = JSON.stringify({ migrations: ["001_initial.json"] }, null, 2)
   writeFileSync(manifest, initialManifest)
   const initialBytes = readFileSync(initialPath, "utf8")
-  const historyOption = Option.some(history)
   const manifestOption = Option.some(manifest)
-
   const accepted = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: historyOption,
     manifest: manifestOption,
   })
 
@@ -283,12 +364,9 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
     rename: renameWithFailure,
   }
 
-  const generatedHistoryOption = Option.some(generatedHistory)
-
   const bookkeeping = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: generatedHistoryOption,
     manifest: manifestOption,
   })
 
@@ -311,7 +389,6 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   const command = SqliteMigrations.command({
     name: "schema",
     tables: [targetResource.table],
-    migrations: generatedHistoryOption,
     manifest: manifestOption,
   })
 
@@ -324,24 +401,6 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   expect(blocked._tag).toBe("Failure")
   expect(manifestAfterBlockedGeneration).toBe(before)
   expect(requiredArtifactExists).toBe(false)
-  const emptyHistoryOption = Option.some<ReadonlyArray<SqliteMigration>>([])
-
-  const incoherent = SqliteMigrations.command({
-    name: "schema",
-    tables: [initialResource.table],
-    migrations: emptyHistoryOption,
-    manifest: manifestOption,
-  })
-
-  const incoherentRun = Command.runWith(incoherent, { version: "test", renderErrors: false })
-  const incoherentGeneration = incoherentRun(["generate", "reviewed"])
-  const incoherentFailure = yield* Effect.exit(incoherentGeneration)
-  const manifestAfterIncoherentFailure = readFileSync(manifest, "utf8")
-  const incoherentPath = join(directory.path, "003_reviewed.json")
-  const incoherentArtifactExists = existsSync(incoherentPath)
-  expect(incoherentFailure._tag).toBe("Failure")
-  expect(manifestAfterIncoherentFailure).toBe(before)
-  expect(incoherentArtifactExists).toBe(false)
 
   const repeat = SqliteMigrations.plan({
     id: "002_repeat",
@@ -357,7 +416,6 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
 
   const encodedRepeat = encodeMigration(repeat)
   const encodedFinal = encodeMigration(final)
-  const nonMonotonicHistory = yield* SqliteMigrations.decodeHistory([encodedInitial, encodedRepeat, encodedFinal])
   const seedPath = join(directory.path, "seed.json")
   const finalPath = join(directory.path, "final.json")
   const seedText = JSON.stringify(encodedRepeat, null, 2)
@@ -370,12 +428,9 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   writeFileSync(manifest, duplicateManifest)
 
   const duplicateBefore = readFileSync(manifest, "utf8")
-  const nonMonotonicHistoryOption = Option.some(nonMonotonicHistory)
-
   const duplicateId = SqliteMigrations.command({
     name: "schema",
     tables: [initialResource.table],
-    migrations: nonMonotonicHistoryOption,
     manifest: manifestOption,
   })
 
@@ -390,4 +445,4 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   expect(repeatArtifactExists).toBe(false)
 })
 
-it.effect("generate leaves the manifest unchanged for blocked, incoherent, and duplicate histories", () => pipe(generatedHistoryIsNeverRegisteredOnFailure(), Effect.provide(BunServices.layer)))
+it.effect("generate leaves the manifest unchanged for blocked and duplicate histories", () => pipe(generatedHistoryIsNeverRegisteredOnFailure(), Effect.provide(BunServices.layer)))

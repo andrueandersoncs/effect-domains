@@ -182,7 +182,7 @@ const integerRepresentation = (
 ) => {
   const representationIdOption = Option.fromNullishOr(check.annotations?.representation?.id)
   const representationIdValue = Option.getOrElse(representationIdOption, emptyId)
-  return Equivalence.strictEqual<string>()(representationIdValue, "effect/schema/isInt")
+  return representationIdValue === "effect/schema/isInt"
 }
 
 const integerCheckInGroup: (
@@ -224,7 +224,7 @@ const literalTableScalar = (
 }
 
 const DateTimeUtcId = "effect/schema/DateTimeUtc"
-const dateTimeUtcId = (id: string) => Equivalence.strictEqual<string>()(id, DateTimeUtcId)
+const dateTimeUtcId = (id: string) => id === DateTimeUtcId
 const stringScalar = Effect.succeed("string" as const)
 const integerScalar = Effect.succeed("integer" as const)
 const numberScalar = Effect.succeed("number" as const)
@@ -234,7 +234,7 @@ const NoTableChecks: ReadonlyArray<TableCheck> = []
 const noTableChecks = Function.constant(NoTableChecks)
 const noneLiteralValues = Option.none<ReadonlyArray<string | number>>()
 const noLiteralValues = Function.constant(noneLiteralValues)
-const trueFlag = (flag: unknown) => Equivalence.strictEqual<unknown>()(flag, true)
+const trueFlag = (flag: unknown) => flag === true
 const enumValue = ([, value]: SchemaAST.Enum["enums"][number]) => value
 
 const classifyEnumEntry = (
@@ -466,51 +466,23 @@ const literalValuesFromAst = (ast: SchemaAST.AST) =>
     Match.orElse(noLiteralValues),
   )
 
-const SchemaAstSchema = Schema.Union([
-  Schema.instanceOf(SchemaAST.Declaration),
-  Schema.instanceOf(SchemaAST.Null),
-  Schema.instanceOf(SchemaAST.Undefined),
-  Schema.instanceOf(SchemaAST.Void),
-  Schema.instanceOf(SchemaAST.Never),
-  Schema.instanceOf(SchemaAST.Unknown),
-  Schema.instanceOf(SchemaAST.Any),
-  Schema.instanceOf(SchemaAST.String),
-  Schema.instanceOf(SchemaAST.Number),
-  Schema.instanceOf(SchemaAST.Boolean),
-  Schema.instanceOf(SchemaAST.BigInt),
-  Schema.instanceOf(SchemaAST.Symbol),
-  Schema.instanceOf(SchemaAST.Literal),
-  Schema.instanceOf(SchemaAST.UniqueSymbol),
-  Schema.instanceOf(SchemaAST.ObjectKeyword),
-  Schema.instanceOf(SchemaAST.Enum),
-  Schema.instanceOf(SchemaAST.TemplateLiteral),
-  Schema.instanceOf(SchemaAST.Arrays),
-  Schema.instanceOf(SchemaAST.Objects),
-  Schema.instanceOf(SchemaAST.Union),
-  Schema.instanceOf(SchemaAST.Suspend),
-])
-
-class NullableAst extends Schema.Class<NullableAst>("NullableAst")({
-  ast: SchemaAstSchema,
-  nullable: Schema.Boolean,
-}) {}
+interface NullableAst {
+  readonly ast: SchemaAST.AST
+  readonly nullable: boolean
+}
 
 const nullableAst = (ast: SchemaAST.AST): NullableAst => {
-  if (!SchemaAST.isUnion(ast)) return NullableAst.make({ ast, nullable: false })
+  if (!SchemaAST.isUnion(ast)) return { ast, nullable: false }
 
   const nonNull = Array.filter(ast.types, nonNullAst)
-  const hasNull = nonNull.length < ast.types.length
-  const hasNonNull = Array.isReadonlyArrayNonEmpty(nonNull)
-  const nullable = hasNull && hasNonNull
-  if (!nullable) return NullableAst.make({ ast, nullable: false })
+  const nullable = nonNull.length < ast.types.length && Array.isReadonlyArrayNonEmpty(nonNull)
+  if (!nullable) return { ast, nullable: false }
 
-  const oneNonNull = Equivalence.strictEqual<number>()(nonNull.length, 1)
-
-  const narrowAst = oneNonNull
+  const narrowAst = nonNull.length === 1
     ? Array.headNonEmpty(nonNull)
     : new SchemaAST.Union(nonNull, ast.mode)
 
-  return NullableAst.make({ ast: narrowAst, nullable: true })
+  return { ast: narrowAst, nullable: true }
 }
 
 const physicalScalar = Effect.fn("Table.physicalScalar")(function* (
@@ -531,7 +503,7 @@ const appendOneOf = (checks: ReadonlyArray<TableCheck>) => (values: ReadonlyArra
 const tableChecks = (ast: SchemaAST.AST) => {
   const physical = nullableAst(ast)
   const direct = tableChecksFromAst(ast)
-  const sameAst = Equivalence.strictEqual<SchemaAST.AST>()(physical.ast, ast)
+  const sameAst = physical.ast === ast
   const fromNullable = sameAst ? NoTableChecks : tableChecksFromAst(physical.ast)
   const checks = Array.appendAll(direct, fromNullable)
   const oneOf = literalValuesFromAst(physical.ast)
@@ -589,17 +561,7 @@ type CompiledField = Readonly<{
   field: TableField
 }>
 
-const StorageSchemaSchema = Schema.declare<Schema.Constraint>(Schema.isSchema)
-
-class StorageEntry extends Schema.Class<StorageEntry>("StorageEntry")({
-  name: Schema.String,
-  storageSchema: StorageSchemaSchema,
-}) {}
-
-const compiledStorageEntry = (field: CompiledField) =>
-  StorageEntry.make({ name: field.name, storageSchema: field.storageSchema })
-
-const storagePair = (entry: StorageEntry) =>
+const storagePair = (entry: Pick<CompiledField, "name" | "storageSchema">) =>
   [entry.name, entry.storageSchema] as const
 
 const applyRootChecks = <Fields extends Schema.Struct.Fields>(
@@ -608,13 +570,11 @@ const applyRootChecks = <Fields extends Schema.Struct.Fields>(
 
 const compileStorageSchema = (
   schema: Schema.Struct<Schema.Struct.Fields>,
-  storageEntries: ReadonlyArray<StorageEntry>,
+  storageEntries: ReadonlyArray<Pick<CompiledField, "name" | "storageSchema">>,
 ) => {
-  const storagePairs = Array.map(storageEntries, storagePair)
-  const storageFields = Record.fromEntries(storagePairs)
-  const StorageSchema = pipe(storageFields, Schema.Struct)
-  const typeAst = SchemaAST.toType(schema.ast)
-  const rootChecks = Option.fromNullishOr(typeAst.checks)
+  const storageFields = Record.fromEntries(Array.map(storageEntries, storagePair))
+  const StorageSchema = Schema.Struct(storageFields)
+  const rootChecks = Option.fromNullishOr(SchemaAST.toType(schema.ast).checks)
 
   return Option.match(rootChecks, {
     onNone: Function.constant(StorageSchema),
@@ -638,6 +598,13 @@ type IdentifierSchema<S extends Schema.Struct<Schema.Struct.Fields>> =
     ? typeof DefaultIdentifierFields.id
     : S["fields"][IdentifierName<S>]
 
+export const withImplicitIdentifier = <
+  Fields extends Schema.Struct.Fields,
+>(schema: Schema.Struct<Fields>) =>
+  schema.mapFields(
+    (fields) => Struct.assign(fields, DefaultIdentifierFields),
+    { unsafePreserveChecks: true },
+  )
 
 const compileTable = Effect.fn("Table.compile")(function* <
   const Name extends string,
@@ -688,7 +655,7 @@ const compileTable = Effect.fn("Table.compile")(function* <
   )
 
   const fields = Array.map(compiledFields, Struct.get("field"))
-  const storageEntries = Array.map(compiledFields, compiledStorageEntry)
+  const storageEntries: ReadonlyArray<Pick<CompiledField, "name" | "storageSchema">> = compiledFields
 
   const identifierAnnotation = (fieldSchema: Schema.Constraint) => {
     const annotations = Schema.resolveAnnotations(fieldSchema)
@@ -729,8 +696,7 @@ const compileTable = Effect.fn("Table.compile")(function* <
     }
   }
 
-  const isNamedId = (field: TableField) =>
-    Equivalence.strictEqual<string>()(field.name, "id")
+  const isNamedId = (field: TableField) => field.name === "id"
 
   const idIsReserved = Array.some(fields, isNamedId)
   if (idIsReserved) {
@@ -740,15 +706,12 @@ const compileTable = Effect.fn("Table.compile")(function* <
     )
   }
 
-  const rowSchema = pipe(schema, Schema.fieldsAssign(DefaultIdentifierFields))
+  const rowSchema = withImplicitIdentifier(schema)
   const identifierStorageSchema = yield* storageSchemaFor(name, "id", rowSchema.fields.id)
-
-  const identifierStorageEntry = StorageEntry.make({
+  const storageEntriesWithIdentifier = Array.prepend(storageEntries, {
     name: "id",
     storageSchema: identifierStorageSchema,
   })
-
-  const storageEntriesWithIdentifier = Array.prepend(storageEntries, identifierStorageEntry)
   const insertSchema = compileStorageSchema(schema, storageEntries)
   const storageSchema = compileStorageSchema(rowSchema, storageEntriesWithIdentifier)
   const fieldsWithDefaultIdentifier = Array.prepend(fields, DefaultIdentifierField)

@@ -29,15 +29,12 @@ const PolicySchema: Schema.Codec<Policy> = Schema.suspend(() => Schema.Union([Po
 const AllPolicySchema = AllLayerSchema(PolicySchema)
 const AnyPolicySchema = AnyLayerSchema(PolicySchema)
 export class PolicyEvaluationError extends Schema.TaggedError<PolicyEvaluationError>()("PolicyEvaluationError", { reason: Schema.String }) {}
-const PolicyRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
-const OptionalPolicyRecordSchema = Schema.optional(PolicyRecordSchema)
 
-// Row and next are absent because read-time SQL compilation and action phases do not provide them.
-export class PolicyEnvironment extends Schema.Class<PolicyEnvironment>("PolicyEnvironment")({
-  subject: PolicyRecordSchema,
-  row: OptionalPolicyRecordSchema,
-  next: OptionalPolicyRecordSchema,
-}) {}
+export interface PolicyEnvironment {
+  readonly subject: Readonly<Record<string, unknown>>
+  readonly row?: Readonly<Record<string, unknown>>
+  readonly next?: Readonly<Record<string, unknown>>
+}
 
 type Algebra<A> = (layer: PolicyF<A>) => A
 type Evaluator = (environment: PolicyEnvironment) => Effect.Effect<boolean, PolicyEvaluationError>
@@ -74,25 +71,11 @@ const evaluationFailure = (reason: string) => pipe(PolicyEvaluationError.make({ 
 const isScalar = Schema.is(ScalarSchema)
 const isScalarCollection = Schema.is(ScalarCollectionSchema)
 
-const recordValue = (record: Option.Option<Readonly<Record<string, unknown>>>, source: string, field: string) =>
-  Option.match(record, {
-    onNone: () => evaluationFailure(`${source} is unavailable`),
-    onSome: (values) => (Record.has(values, field) ? Effect.succeed(values[field]) : evaluationFailure(`${source}.${field} is unavailable`)),
-  })
-
-const subjectValue = (environment: PolicyEnvironment, field: string) => {
-  const subject = Option.some(environment.subject)
-  return recordValue(subject, "subject", field)
-}
-
-const rowValue = (environment: PolicyEnvironment, field: string) => {
-  const row = Option.fromNullishOr(environment.row)
-  return recordValue(row, "row", field)
-}
-
-const nextValue = (environment: PolicyEnvironment, field: string) => {
-  const next = Option.fromNullishOr(environment.next)
-  return recordValue(next, "next", field)
+const recordValue = (record: Readonly<Record<string, unknown>> | undefined, source: string, field: string) => {
+  if (record === undefined) return evaluationFailure(`${source} is unavailable`)
+  return Record.has(record, field)
+    ? Effect.succeed(record[field])
+    : evaluationFailure(`${source}.${field} is unavailable`)
 }
 
 const resolveOperand = (operand: Operand, environment: PolicyEnvironment) =>
@@ -100,14 +83,22 @@ const resolveOperand = (operand: Operand, environment: PolicyEnvironment) =>
     Match.value(operand),
     Match.tagsExhaustive({
       Literal: ({ value }) => Effect.succeed(value),
-      SubjectField: ({ field }) => subjectValue(environment, field),
-      RowField: ({ field }) => rowValue(environment, field),
-      NextField: ({ field }) => nextValue(environment, field),
+      SubjectField: ({ field }) => recordValue(environment.subject, "subject", field),
+      RowField: ({ field }) => recordValue(environment.row, "row", field),
+      NextField: ({ field }) => recordValue(environment.next, "next", field),
     }),
   )
 
 const scalarValue = (value: unknown) => (isScalar(value) ? Effect.succeed(value) : evaluationFailure("policy operand must resolve to a finite scalar"))
 const scalarCollectionValue = (value: unknown) => (isScalarCollection(value) ? Effect.succeed(value) : evaluationFailure("policy collection must resolve to finite scalar values"))
+export const resolveScalarLiteralOrSubject = (
+  operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
+  environment: PolicyEnvironment,
+) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarValue))
+export const resolveScalarCollectionLiteralOrSubject = (
+  operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
+  environment: PolicyEnvironment,
+) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarCollectionValue))
 const scalarOperand = (operand: Operand, environment: PolicyEnvironment) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarValue))
 const scalarCollectionOperand = (operand: Operand, environment: PolicyEnvironment) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarCollectionValue))
 const scalarEquals = Equivalence.strictEqual<Scalar>()

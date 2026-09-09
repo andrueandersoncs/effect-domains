@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, pipe } from "effect"
+import { Array, Effect, Layer, Ref, Schema, pipe } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
@@ -8,6 +8,7 @@ import { ApplicationAdmin } from "effect-domains/application-admin"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { Commands } from "effect-domains/commands"
+import { ApplicationInspect } from "effect-domains/application-inspect"
 
 const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
 const identify = Rpc.make("identity", { success: SubjectSchema }).middleware(AuthorizationRpc)
@@ -106,3 +107,17 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
   }),
   Effect.scoped,
 ))
+
+it("inspection publishes middleware errors when the RPC declares no own errors", () => {
+  const probe = Rpc.make("probe", { success: Schema.String }).middleware(AuthorizationRpc)
+  const group = RpcGroup.make(probe)
+  const handlers = group.toLayer({ probe: () => Effect.succeed("ok") })
+  const application = Application.make({ name: "probe", resources: [], commands: [{ group, handlers }] })
+  const inspection = ApplicationInspect.describe(application)
+  const middlewareErrors = Array.map(Array.fromIterable(probe.middlewares), (middleware) => middleware.error)
+  const expected = Schema.toJsonSchemaDocument(Schema.toCodecJson(Schema.Union([probe.errorSchema, ...middlewareErrors])))
+
+  const operation = inspection.operations[0]
+  expect(operation?.name).toBe("probe")
+  expect(operation?.error).toEqual(expected)
+})

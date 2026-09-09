@@ -1,7 +1,8 @@
-import { Array, Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
+import { Effect, Layer, Option, Schema, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
-import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
 
 
@@ -16,17 +17,14 @@ const internalFailure = pipe(McpSchema.CallToolResult.make({
 }), Effect.succeed)
 
 
-const successResult = (encoded: Schema.JsonObject) => {
-  const text = JSON.stringify(encoded)
-  return McpSchema.CallToolResult.make({
-    isError: false,
-    structuredContent: encoded,
-    content: [{ type: "text", text }],
-  })
-}
+const successResult = (encoded: Schema.JsonObject) => McpSchema.CallToolResult.make({
+  isError: false,
+  structuredContent: encoded,
+  content: [{ type: "text", text: JSON.stringify(encoded) }],
+})
 
 const errorResult = (text: string) => McpSchema.CallToolResult.make({ isError: true, content: [{ type: "text", text }] })
-const failInternally = Function.constant(internalFailure)
+const failInternally = () => internalFailure
 const emptyHeaders = () => Headers.empty
 
 const toolSchema = (schema: Schema.Constraint) => pipe(
@@ -41,33 +39,30 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
-    if (RpcSchema.isStreamSchema(procedure.successSchema)) {
-      return yield* RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" })
-    }
-    if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(procedure._tag)) {
-      return yield* RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: "MCP tool names must contain 1–128 letters, digits, underscores, dots, or hyphens" })
+    const contract = yield* Effect.fromOption(
+      compileUnaryRpc(procedure),
+      () => RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" }),
+    )
+    if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract.tag)) {
+      return yield* RpcMcpDefinitionError.make({ procedure: contract.tag, reason: "MCP tool names must contain 1–128 letters, digits, underscores, dots, or hyphens" })
     }
 
-    // Envelopes preserve every unary RPC shape because MCP requires object input and output schemas.
-    const InputSchema = Schema.Struct({ input: Schema.toCodecJson(procedure.payloadSchema) })
-    interface Input extends Schema.Schema.Type<typeof InputSchema> {}
-    const OutputSchema = Schema.Struct({ result: Schema.toCodecJson(procedure.successSchema) })
-    interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
-    const middlewareErrors = pipe(procedure.middlewares, Array.fromIterable, Array.map(Struct.get("error")))
-    const ErrorSchema = Schema.fromJsonString(Schema.toCodecJson(Schema.Union([procedure.errorSchema, ...middlewareErrors])))
-    const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: String(cause) })
+    const InputSchema = Schema.Struct({ input: contract.payload })
+    const OutputSchema = Schema.Struct({ result: contract.success })
+    const ErrorSchema = Schema.fromJsonString(contract.error)
+    const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: contract.tag, reason: String(cause) })
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
-    const tool = McpSchema.Tool.make({ name: procedure._tag, inputSchema, outputSchema })
+    const tool = McpSchema.Tool.make({ name: contract.tag, inputSchema, outputSchema })
 
     const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown) {
-      const payload: Input = yield* pipe(
+      const payload = yield* pipe(
         Schema.decodeUnknownEffect(InputSchema)(arguments_),
-        Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${procedure._tag}` })),
+        Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${contract.tag}` })),
       )
 
       const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
-      const headers = Option.match(request, { onNone: emptyHeaders, onSome: Struct.get("headers") })
+      const headers = Option.match(request, { onNone: emptyHeaders, onSome: (value) => value.headers })
 
       const failureResponse = (cause: unknown) => pipe(
         Schema.encodeUnknownEffect(ErrorSchema)(cause),
@@ -76,7 +71,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
       )
 
       return yield* pipe(
-        client(procedure._tag, payload.input, { headers }),
+        client(contract.tag, payload.input, { headers }),
         Effect.matchEffect({
           onFailure: failureResponse,
           onSuccess: (result) => pipe(

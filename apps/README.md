@@ -204,7 +204,7 @@ bun run reservations schema plan --id 003_change \
 
 `generate` numbers the new artifact after the final registered migration; it requires a manifest and leaves the registry unchanged when a plan is blocked. Review the generated artifact and its manifest update as one change. Do not regenerate previously applied artifacts from current models.
 
-Intent flags use physical table and column names:
+Intent flags use physical table and column names. Each flag is repeatable; JSON values and SQL expressions retain embedded colons. Rename sources must exist in the physical `from` snapshot:
 
 | Flag | Meaning |
 | --- | --- |
