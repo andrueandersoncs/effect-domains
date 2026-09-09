@@ -21,10 +21,13 @@ interface Equal extends Schema.Schema.Type<typeof EqualSchema> {}
 interface Includes extends Schema.Schema.Type<typeof IncludesSchema> {}
 const AllLayerSchema = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("All", { children: Schema.Array(child) })
 const AnyLayerSchema = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("Any", { children: Schema.Array(child) })
-type AllLayer<A> = Schema.Schema.Type<ReturnType<typeof AllLayerSchema<Schema.Schema<A>>>>
-type AnyLayer<A> = Schema.Schema.Type<ReturnType<typeof AnyLayerSchema<Schema.Schema<A>>>>
 export type Policy = PolicyTerminal | { readonly _tag: "All"; readonly children: ReadonlyArray<Policy> } | { readonly _tag: "Any"; readonly children: ReadonlyArray<Policy> }
-export type PolicyF<A> = PolicyTerminal | AllLayer<A> | AnyLayer<A>
+
+export type PolicyF<A> =
+  | PolicyTerminal
+  | { readonly _tag: "All"; readonly children: ReadonlyArray<A> }
+  | { readonly _tag: "Any"; readonly children: ReadonlyArray<A> }
+
 const PolicySchema: Schema.Codec<Policy> = Schema.suspend(() => Schema.Union([PolicyTerminalSchema, AllPolicySchema, AnyPolicySchema]))
 const AllPolicySchema = AllLayerSchema(PolicySchema)
 const AnyPolicySchema = AnyLayerSchema(PolicySchema)
@@ -42,23 +45,23 @@ export class PolicyEnvironment extends Schema.Class<PolicyEnvironment>("PolicyEn
 type Algebra<A> = (layer: PolicyF<A>) => A
 type Evaluator = (environment: PolicyEnvironment) => Effect.Effect<boolean, PolicyEvaluationError>
 
-const transformPolicyLayer = <A, B>(layer: PolicyF<A>, transform: (child: A) => B) => {
-  const transformedChildren = (node: AllLayer<A> | AnyLayer<A>) => {
-    const children = Array.map(node.children, transform)
-    return Struct.assign(node, { children })
-  }
-
-  return pipe(
+const transformPolicyLayer = <A, B>(layer: PolicyF<A>, transform: (child: A) => B) =>
+  pipe(
     Match.value(layer),
     Match.tagsExhaustive({
       Constant: (node) => node,
       Equal: (node) => node,
       Includes: (node) => node,
-      All: transformedChildren,
-      Any: transformedChildren,
+      All: (node) => {
+        const children = Array.map(node.children, transform)
+        return Struct.assign(node, { children })
+      },
+      Any: (node) => {
+        const children = Array.map(node.children, transform)
+        return Struct.assign(node, { children })
+      },
     }),
   )
-}
 
 const fold = <A>(algebra: Algebra<A>) => {
   const foldPolicy: (policy: Policy) => A = (policy) => pipe(transformPolicyLayer(policy, foldPolicy), algebra)
@@ -100,6 +103,12 @@ const resolveOperand = (operand: Operand, environment: PolicyEnvironment) =>
     }),
   )
 
+const resolveValue = <Value>(
+  operand: Operand,
+  environment: PolicyEnvironment,
+  resolve: (value: unknown) => Effect.Effect<Value, PolicyEvaluationError>,
+) => pipe(resolveOperand(operand, environment), Effect.flatMap(resolve))
+
 const scalarValue = (value: unknown) => (isScalar(value) ? Effect.succeed(value) : evaluationFailure("policy operand must resolve to a finite scalar"))
 const scalarCollectionValue = (value: unknown) => (isScalarCollection(value) ? Effect.succeed(value) : evaluationFailure("policy collection must resolve to finite scalar values"))
 
@@ -108,7 +117,7 @@ export const resolveScalarLiteralOrSubject = Effect.fn("Policy.resolveScalarLite
     operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
     environment: PolicyEnvironment,
   ) {
-    return yield* pipe(resolveOperand(operand, environment), Effect.flatMap(scalarValue))
+    return yield* resolveValue(operand, environment, scalarValue)
   },
 )
 
@@ -117,12 +126,12 @@ export const resolveScalarCollectionLiteralOrSubject = Effect.fn("Policy.resolve
     operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
     environment: PolicyEnvironment,
   ) {
-    return yield* pipe(resolveOperand(operand, environment), Effect.flatMap(scalarCollectionValue))
+    return yield* resolveValue(operand, environment, scalarCollectionValue)
   },
 )
 
-const scalarOperand = (operand: Operand, environment: PolicyEnvironment) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarValue))
-const scalarCollectionOperand = (operand: Operand, environment: PolicyEnvironment) => pipe(resolveOperand(operand, environment), Effect.flatMap(scalarCollectionValue))
+const scalarOperand = (operand: Operand, environment: PolicyEnvironment) => resolveValue(operand, environment, scalarValue)
+const scalarCollectionOperand = (operand: Operand, environment: PolicyEnvironment) => resolveValue(operand, environment, scalarCollectionValue)
 const scalarEquals = Equivalence.strictEqual<Scalar>()
 const containsScalar = Array.containsWith(scalarEquals)
 const allInitial = Function.constant(true)
@@ -143,16 +152,14 @@ const evaluateIncludes = ({ collection, value }: Includes) =>
     return containsScalar(collectionValue, valueOperand)
   })
 
-const evaluateAll = ({ children }: AllLayer<Evaluator>) =>
+const evaluateAll = ({ children }: Extract<PolicyF<Evaluator>, { readonly _tag: "All" }>) =>
   Effect.fn("Policy.all")(function* (environment: PolicyEnvironment) {
-    const evaluateChild = (allowed: boolean, child: Evaluator) => (allowed ? child(environment) : Effect.succeed(false))
-    return yield* Effect.reduce(children, allInitial, evaluateChild)
+    return yield* Effect.reduce(children, allInitial, (allowed, child) => allowed ? child(environment) : Effect.succeed(false))
   })
 
-const evaluateAny = ({ children }: AnyLayer<Evaluator>) =>
+const evaluateAny = ({ children }: Extract<PolicyF<Evaluator>, { readonly _tag: "Any" }>) =>
   Effect.fn("Policy.any")(function* (environment: PolicyEnvironment) {
-    const evaluateChild = (allowed: boolean, child: Evaluator) => (allowed ? Effect.succeed(true) : child(environment))
-    return yield* Effect.reduce(children, anyInitial, evaluateChild)
+    return yield* Effect.reduce(children, anyInitial, (allowed, child) => allowed ? Effect.succeed(true) : child(environment))
   })
 
 const evaluateLayer: Algebra<Evaluator> = (layer) =>

@@ -700,6 +700,19 @@ const make = (authorization: PolicyAuthorization): CompiledAuthorization => {
     if (!(yield* scope(values))) return yield* forbidden()
   })
 
+  const checkScope = (
+    subject: Readonly<Record<string, unknown>>,
+    row: Option.Option<Readonly<Record<string, unknown>>>,
+    next: Option.Option<Readonly<Record<string, unknown>>>,
+  ) =>
+    pipe(
+      row,
+      Option.match({
+        onNone: Function.constant(Effect.void),
+        onSome: (row) => pipe(PolicyEnvironment.make({ subject, row: Option.some(row), next }), requireScope),
+      }),
+    )
+
   const subject = Effect.fn("Authorization.subject")(function* (action: AuthorizationAction) {
     const allowed = policyForAction(authorization, action)
     if (Option.isNone(allowed)) return yield* forbidden()
@@ -723,29 +736,8 @@ const make = (authorization: PolicyAuthorization): CompiledAuthorization => {
     const candidateRequired = needsCandidate && candidateUnavailable
     if (candidateRequired) return yield* forbidden()
 
-    yield* pipe(
-      values.row,
-      Option.match({
-        onNone: Function.constant(Effect.void),
-        onSome: (row) => {
-          const current = Option.some(row)
-          const scopeValues = PolicyEnvironment.make({ subject, row: current, next: values.next })
-          return requireScope(scopeValues)
-        },
-      }),
-    )
-
-    yield* pipe(
-      values.next,
-      Option.match({
-        onNone: Function.constant(Effect.void),
-        onSome: (next) => {
-          const current = Option.some(next)
-          const scopeValues = PolicyEnvironment.make({ subject, row: current, next: values.next })
-          return requireScope(scopeValues)
-        },
-      }),
-    )
+    yield* checkScope(subject, values.row, values.next)
+    yield* checkScope(subject, values.next, values.next)
 
     const ruleValues = PolicyEnvironment.make({ subject, row: values.row, next: values.next })
     if (!(yield* rule.value(ruleValues))) return yield* forbidden()
@@ -809,9 +801,6 @@ const denyCompiled: CompiledAuthorization = {
   check: forbidden,
 }
 
-const publicCompiledOption = Option.some(publicCompiled)
-const denyCompiledOption = Option.some(denyCompiled)
-const noCompiledOption = Option.none<CompiledAuthorization>()
 const publicCompiledEffect = Effect.succeed(publicCompiled)
 const denyCompiledEffect = Effect.succeed(denyCompiled)
 const invalidAuthorization = policyFailure({ reason: "authorization must be Public, Deny, or Policy" })
@@ -839,15 +828,6 @@ export const Authorization = {
       readonly table: Table
     }>,
   ) {
-    const staticCompilation = pipe(
-      Match.value(options.authorization),
-      Match.when(isPublicAuthorization, Function.constant(publicCompiledOption)),
-      Match.when(isDenyAuthorization, Function.constant(denyCompiledOption)),
-      Match.orElse(Function.constant(noCompiledOption)),
-    )
-
-    if (Option.isSome(staticCompilation)) return staticCompilation.value
-
     const compilePolicy = Effect.fn("Authorization.compilePolicy")(function* (policy: PolicyAuthorization) {
       const compiled = yield* compiledPolicy(policy, options.resource)
       yield* validate(policy, options.resource, options.storage, options.table, compiled.visibility)
@@ -856,6 +836,8 @@ export const Authorization = {
 
     return yield* pipe(
       Match.value(options.authorization),
+      Match.when(isPublicAuthorization, Function.constant(publicCompiledEffect)),
+      Match.when(isDenyAuthorization, Function.constant(denyCompiledEffect)),
       Match.when(isPolicyAuthorization, compilePolicy),
       Match.orElse(Function.constant(invalidAuthorization)),
     )

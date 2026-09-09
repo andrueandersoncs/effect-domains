@@ -9,8 +9,7 @@ import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type Au
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 const EmptyPayloadSchema = Schema.Struct({})
 interface EmptyPayload extends Schema.Schema.Type<typeof EmptyPayloadSchema> {}
-const PositiveLimitCheck = Schema.isGreaterThan(0)
-const PageLimitSchema = Schema.Int.check(PositiveLimitCheck)
+const PageLimitSchema = Schema.Int.check(Schema.isGreaterThan(0))
 const OptionalLimitSchema = Schema.optionalKey(PageLimitSchema)
 const OptionalCursorSchema = Schema.optionalKey(Schema.String)
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
@@ -306,6 +305,12 @@ export const Resource = {
     const generatedEntries = Record.toEntries(generated)
     const subjectBindingEntries = Record.toEntries(presentSubjectBindings)
 
+    const generate = Effect.fn("Repository.generate")(function* ([field, generation]: [string, "uuidV7" | "now"]) {
+      const values = yield* Value
+      const value = equals(generation, "uuidV7") ? yield* values.uuidV7() : yield* values.now()
+      return [field, value] as const
+    })
+
     const create = Effect.fn("Repository.create")(function* (input: CreateInput<S, Creation>) {
       yield* Effect.forEach(generatedEntries, ([field]) => Record.has(input, field)
         ? inputFailure(`create input must not provide generated field ${field}`) : Effect.void, { discard: true })
@@ -317,13 +322,6 @@ export const Resource = {
 
       const subjectValues = Array.map(subjectBindingEntries, ([target, binding]) =>
         [target, subject[binding.field]] as const)
-
-      const generate = Effect.fn("Repository.generate")(function* ([field, generation]: [string, "uuidV7" | "now"]) {
-        const values = yield* Value
-        const uuid = equals(generation, "uuidV7")
-        const value = uuid ? yield* values.uuidV7() : yield* values.now()
-        return [field, value] as const
-      })
 
       const generatedValues = yield* Effect.forEach(generatedEntries, generate)
       const generatedRecord = Record.fromEntries(generatedValues)

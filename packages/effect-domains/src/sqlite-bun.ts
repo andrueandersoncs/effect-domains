@@ -83,7 +83,6 @@ const orderingFragment = (sql: SqlClient.SqlClient) => (entry: RepositoryListOrd
   return sql`${sql(entry.field)} ${direction}`
 }
 
-
 const transactionFailure = (resource: string) => (cause: SqlError.SqlError) =>
   pipe(cause, repositoryFailure(resource), Effect.fail)
 

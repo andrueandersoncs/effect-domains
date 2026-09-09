@@ -156,60 +156,42 @@ const payloadFields = (
   ast: SchemaAST.AST,
   prefix: ReadonlyArray<string> = [],
 ): ReadonlyArray<PayloadField> => {
-  const objectPayloadFields = (object: SchemaAST.Objects): ReadonlyArray<PayloadField> => {
-    if (Array.isReadonlyArrayNonEmpty(object.indexSignatures)) return []
+  const object = SchemaAST.isObjects(ast)
+  const hasFields = object && Array.isReadonlyArrayEmpty(ast.indexSignatures)
+  if (!hasFields) return []
 
-    const toPayloadFields = (property: SchemaAST.PropertySignature): ReadonlyArray<PayloadField> => {
-      const path = Predicate.isString(property.name)
-        ? Array.append(prefix, property.name)
-        : prefix
+  return Array.flatMap(ast.propertySignatures, (property) => {
+    const path = Predicate.isString(property.name) ? Array.append(prefix, property.name) : prefix
 
-      return SchemaAST.isObjects(property.type)
-        ? payloadFields(property.type, path)
-        : [PayloadField.make({ property, path })]
-    }
-
-    return Array.flatMap(object.propertySignatures, toPayloadFields)
-  }
-
-  return pipe(
-    Match.value(ast),
-    Match.when(SchemaAST.isObjects, objectPayloadFields),
-    Match.orElse(Function.constant([])),
-  )
+    return SchemaAST.isObjects(property.type)
+      ? payloadFields(property.type, path)
+      : [PayloadField.make({ property, path })]
+  })
 }
 
 const PayloadRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
 const isPayloadRecords = Schema.is(PayloadRecordSchema)
 const emptyPayloads = (): Record<string, unknown> => Object.create(null)
 
-const setPayloadField: (
+const setPayloadFields = (
   payload: Record<string, unknown>,
   path: ReadonlyArray<string>,
   value: unknown,
-) => Record<string, unknown> = (payload, path, value) =>
-  pipe(
-    Array.head(path),
-    Option.match({
-      onNone: Function.constant(payload),
-      onSome: (field) => {
-        const remainingPath = Array.drop(path, 1)
-        const current = Record.get(payload, field)
+): Record<string, unknown> => {
+  const field = Array.head(path)
+  if (Option.isNone(field)) return payload
+  const remainingPath = Array.drop(path, 1)
+  if (Array.isReadonlyArrayEmpty(remainingPath)) return Record.set(payload, field.value, value)
 
-        const nestedPayload = pipe(
-          current,
-          Option.filter(isPayloadRecords),
-          Option.getOrElse(emptyPayloads),
-        )
-
-        const nextValue = Array.isReadonlyArrayNonEmpty(remainingPath)
-          ? setPayloadField(nestedPayload, remainingPath, value)
-          : value
-
-        return Record.set(payload, field, nextValue)
-      },
-    }),
+  const nested = pipe(
+    Record.get(payload, field.value),
+    Option.filter(isPayloadRecords),
+    Option.getOrElse(emptyPayloads),
   )
+
+  const updated = setPayloadFields(nested, remainingPath, value)
+  return Record.set(payload, field.value, updated)
+}
 
 const descriptionFor = (property: SchemaAST.PropertySignature) => {
   const annotations = property.type.context?.annotations ?? property.type.annotations
@@ -220,16 +202,13 @@ const descriptionFor = (property: SchemaAST.PropertySignature) => {
 const makeNativeFlag = (name: string, native: NativeFlag, description: Option.Option<string>) => {
   const toNumberChoice = (number: number) => [String(number), number] as const
 
-  const numberChoices = (numbers: ReadonlyArray<number>) =>
-    Array.map(numbers, toNumberChoice)
-
   const flag: Flag.Flag<string | number | boolean> = NativeFlag.$match(native, {
     String: () => Flag.string(name),
     Number: (value) => value.integer ? Flag.integer(name) : Flag.float(name),
     Boolean: () => Flag.boolean(name),
     StringEnum: (value) => Flag.choice(name, value.values),
     NumberEnum: (value) => {
-      const choices = numberChoices(value.values)
+      const choices = Array.map(value.values, toNumberChoice)
       return Flag.choiceWithValue(name, choices)
     },
   })
@@ -330,33 +309,19 @@ const makeRpcCli = <
       const configKey = Tuple.get<typeof nativeFields[number], 1>(1)
       const fieldsByConfigKey = Array.groupBy(nativeFields, configKey)
       const groupedFields = Record.values(fieldsByConfigKey)
-      const hasCollision = Function.compose(Array.drop(1), Array.isReadonlyArrayNonEmpty)
-      const collidingFields = Array.findFirst(groupedFields, hasCollision)
+      const collidingFields = Array.findFirst(groupedFields, (fields) => fields.length > 1)
 
-      yield* Option.match(collidingFields, {
-        onNone: Function.constant(Effect.void),
-        onSome: (fields) => pipe(
-          Array.head(fields),
-          Option.match({
-            onNone: Function.constant(Effect.void),
-            onSome: (field) => {
-              const key = Tuple.get(field, 1)
+      if (Option.isSome(collidingFields)) {
+        const key = pipe(collidingFields.value, Array.headNonEmpty, Tuple.get(1))
 
-              return RpcCliDefinitionError.make({
-                procedure: contract.tag,
-                reason: `payload fields collide with native flag --${key}`,
-              })
-            },
-          }),
-        ),
-      })
+        return yield* RpcCliDefinitionError.make({
+          procedure: contract.tag,
+          reason: `payload fields collide with native flag --${key}`,
+        })
+      }
 
       const inputJsonEntry = ["inputJson", makeInputJsonFlag()] as const
-
-      const toNativeConfigEntry = (field: typeof nativeFields[number]) =>
-        [Tuple.get(field, 1), Tuple.get(field, 2)] as const
-
-      const nativeEntries = Array.map(nativeFields, toNativeConfigEntry)
+      const nativeEntries = Array.map(nativeFields, ([, key, flag]) => [key, flag] as const)
 
       const config: Record<string, Flag.Flag<Option.Option<unknown>>> = Record.fromEntries([
         inputJsonEntry,
@@ -367,25 +332,13 @@ const makeRpcCli = <
         const readArgument = (key: string) => pipe(Record.get(arguments_, key), Option.flatten)
         const inputJson = readArgument("inputJson")
 
-        const toNativeEntry = (field: typeof nativeFields[number]) => {
-          const configKey = Tuple.get(field, 1)
-          const path = Tuple.get(field, 0)
-          return pipe(readArgument(configKey), Option.map((value) => [path, value] as const))
-        }
+        const toNativeEntry = ([path, key]: typeof nativeFields[number]) =>
+          pipe(readArgument(key), Option.map((value) => [path, value] as const))
 
         const nativeEntries = Array.map(nativeFields, toNativeEntry)
         const nativeInputEntries = Array.getSomes(nativeEntries)
         const hasNativeInput = Array.isReadonlyArrayNonEmpty(nativeInputEntries)
-        const initialPayload = emptyPayloads()
-
-        const nativeInput = Array.reduce(
-          nativeInputEntries,
-          initialPayload,
-          (payload, [path, value]) => setPayloadField(payload, path, value),
-        )
-
-        const hasInputJson = Option.isSome(inputJson)
-        const conflictingInputs = hasInputJson && hasNativeInput
+        const conflictingInputs = Option.isSome(inputJson) && hasNativeInput
 
         if (conflictingInputs) {
           return yield* CliError.UserError.make({
@@ -399,12 +352,12 @@ const makeRpcCli = <
 
         const decodeNativeInput = Effect.fn("RpcCli.decodeNativeInput")(function* () {
           const noNativeInput = !hasNativeInput
-          const voidPayload = SchemaAST.isVoid(decodedPayloadSchema.ast)
-          const emptyVoid = noNativeInput && voidPayload
+          const emptyVoid = noNativeInput && SchemaAST.isVoid(decodedPayloadSchema.ast)
+          const initialPayload = emptyPayloads()
 
           const encoded = emptyVoid
             ? yield* Schema.encodeUnknownEffect(contract.payload)(undefined)
-            : nativeInput
+            : Array.reduce(nativeInputEntries, initialPayload, (payload, [path, value]) => setPayloadFields(payload, path, value))
 
           return yield* decodeNative(encoded)
         })

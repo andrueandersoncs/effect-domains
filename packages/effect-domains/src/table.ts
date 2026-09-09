@@ -185,9 +185,6 @@ const unsupportedTableScalar = (table: string, field: string) =>
 
 const tableScalarEquals = Equivalence.strictEqual<TableField["scalar"]>()
 
-const tableScalarEqualsTo = (first: TableField["scalar"]) =>
-  (scalar: TableField["scalar"]) => tableScalarEquals(first, scalar)
-
 const isNumericTableScalar = (scalar: TableField["scalar"]) => {
   const integer = tableScalarEquals(scalar, "integer")
   const number = tableScalarEquals(scalar, "number")
@@ -300,63 +297,41 @@ const validateLocalRelations = Effect.fn("Table.validateLocalRelations")(functio
   }), { discard: true })
 })
 
-const commonTableScalarFor = (
-  table: string,
-  field: string,
-  scalars: ReadonlyArray<TableField["scalar"]>,
-) => (first: TableField["scalar"]) => {
-  const same = Array.every(scalars, tableScalarEqualsTo(first))
-  if (same) return Effect.succeed(first)
-
-  const numeric = Array.every(scalars, isNumericTableScalar)
-
-  return numeric
-    ? Effect.succeed("number" as const)
-    : unsupportedTableScalar(table, field)
-}
-
 const commonTableScalar = (
   table: string,
   field: string,
   scalars: ReadonlyArray<TableField["scalar"]>,
 ) => {
   const first = Array.head(scalars)
+  if (Option.isNone(first)) return unsupportedTableScalar(table, field)
 
-  return Option.match(first, {
-    onNone: () => unsupportedTableScalar(table, field),
-    onSome: commonTableScalarFor(table, field, scalars),
-  })
+  if (Array.every(scalars, (scalar) => tableScalarEquals(first.value, scalar))) {
+    return Effect.succeed(first.value)
+  }
+
+  return Array.every(scalars, isNumericTableScalar)
+    ? Effect.succeed("number" as const)
+    : unsupportedTableScalar(table, field)
 }
 
-const stringFromUnknown = (value: unknown) => {
-  const some = Option.some(value)
-  return Option.filter(some, Predicate.isString)
+const ownValue = (value: unknown, key: string): Option.Option<unknown> => {
+  if (!Predicate.isObject(value)) return Option.none()
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  const property = descriptor?.value
+  return Option.fromNullishOr(property)
 }
 
-const representationId = (ast: SchemaAST.AST) => {
-  const representation = Option.fromNullishOr(ast.annotations?.representation)
-
-  return Option.flatMap(representation, (value) => {
-    if (!Predicate.isObject(value)) {
-      return Option.none<string>()
-    }
-
-    const descriptor = Object.getOwnPropertyDescriptor(value, "id")
-    const id = Option.fromNullishOr(descriptor?.value)
-    return Option.flatMap(id, stringFromUnknown)
-  })
-}
+const representationId = (ast: SchemaAST.AST) =>
+  pipe(
+    ownValue(ast.annotations?.representation, "id"),
+    Option.filter(Predicate.isString),
+  )
 
 const equals = Equivalence.strictEqual<unknown>()
-const emptyId = Function.constant("")
 
 const integerRepresentation = (
   check: SchemaAST.Filter<unknown> | SchemaAST.FilterGroup<unknown>,
-) => {
-  const representationIdOption = Option.fromNullishOr(check.annotations?.representation?.id)
-  const representationIdValue = Option.getOrElse(representationIdOption, emptyId)
-  return equals(representationIdValue, "effect/schema/isInt")
-}
+) => equals(check.annotations?.representation?.id, "effect/schema/isInt")
 
 const integerCheckInGroup: (
   group: SchemaAST.FilterGroup<unknown>,
@@ -523,22 +498,11 @@ const flattenChecks = (checks: Option.Option<SchemaAST.Checks>) =>
     onSome: (group) => Array.flatMap(group, flattenFilterChecks),
   })
 
-const numberAt = (payload: unknown, key: string) => {
-  if (!Predicate.isObject(payload)) {
-    return Option.none<number>()
-  }
-
-  const descriptor = Object.getOwnPropertyDescriptor(payload, key)
-  const value = Option.fromNullishOr(descriptor?.value)
-  return Option.filter(value, Predicate.isNumber)
-}
+const numberAt = (payload: unknown, key: string) =>
+  pipe(ownValue(payload, key), Option.filter(Predicate.isNumber))
 
 const flagAt = (payload: unknown, key: string) => {
-  const descriptor = Predicate.isObject(payload)
-    ? Object.getOwnPropertyDescriptor(payload, key)
-    : undefined
-
-  const value = Option.fromNullishOr(descriptor?.value)
+  const value = ownValue(payload, key)
   return Option.exists(value, trueFlag)
 }
 
@@ -565,42 +529,44 @@ const betweenChecks = (payload: unknown) => (
   return [lower, upper]
 }
 
-const tableChecksFromUnknown = (representation: unknown) => {
-  if (!Predicate.isObject(representation)) return NoTableChecks
-
-  const idDescriptor = Object.getOwnPropertyDescriptor(representation, "id")
-  const id = idDescriptor?.value
-  if (!Predicate.isString(id)) return NoTableChecks
-
-  const payloadDescriptor = Object.getOwnPropertyDescriptor(representation, "payload")
-  const payload = payloadDescriptor?.value
-  const minimum = numberAt(payload, "minimum")
-  const maximum = numberAt(payload, "maximum")
-  const exclusiveMinimum = numberAt(payload, "exclusiveMinimum")
-  const exclusiveMaximum = numberAt(payload, "exclusiveMaximum")
-  const greater = singleChecks(exclusiveMinimum, greaterThan)
-  const greaterOrEqual = singleChecks(minimum, greaterThanOrEqualTo)
-  const less = singleChecks(exclusiveMaximum, lessThan)
-  const lessOrEqual = singleChecks(maximum, lessThanOrEqualTo)
-
-  const interval = pipe(
-    Option.all([minimum, maximum]),
+const tableChecksFromUnknown = (representation: unknown) =>
+  pipe(
+    ownValue(representation, "id"),
+    Option.filter(Predicate.isString),
     Option.match({
-      onNone: Function.constant(NoTableChecks),
-      onSome: betweenChecks(payload),
+      onNone: noTableChecks,
+      onSome: (id) => {
+        const payloadOption = ownValue(representation, "payload")
+        const payload = Option.getOrUndefined(payloadOption)
+        const minimum = numberAt(payload, "minimum")
+        const maximum = numberAt(payload, "maximum")
+        const exclusiveMinimum = numberAt(payload, "exclusiveMinimum")
+        const exclusiveMaximum = numberAt(payload, "exclusiveMaximum")
+        const greater = singleChecks(exclusiveMinimum, greaterThan)
+        const greaterOrEqual = singleChecks(minimum, greaterThanOrEqualTo)
+        const less = singleChecks(exclusiveMaximum, lessThan)
+        const lessOrEqual = singleChecks(maximum, lessThanOrEqualTo)
+
+        const interval = pipe(
+          Option.all([minimum, maximum]),
+          Option.match({
+            onNone: noTableChecks,
+            onSome: betweenChecks(payload),
+          }),
+        )
+
+        return pipe(
+          Match.value(id),
+          Match.when("effect/schema/isGreaterThan", Function.constant(greater)),
+          Match.when("effect/schema/isGreaterThanOrEqualTo", Function.constant(greaterOrEqual)),
+          Match.when("effect/schema/isLessThan", Function.constant(less)),
+          Match.when("effect/schema/isLessThanOrEqualTo", Function.constant(lessOrEqual)),
+          Match.when("effect/schema/isBetween", Function.constant(interval)),
+          Match.orElse(noTableChecks),
+        )
+      },
     }),
   )
-
-  return pipe(
-    Match.value(id),
-    Match.when("effect/schema/isGreaterThan", Function.constant(greater)),
-    Match.when("effect/schema/isGreaterThanOrEqualTo", Function.constant(greaterOrEqual)),
-    Match.when("effect/schema/isLessThan", Function.constant(less)),
-    Match.when("effect/schema/isLessThanOrEqualTo", Function.constant(lessOrEqual)),
-    Match.when("effect/schema/isBetween", Function.constant(interval)),
-    Match.orElse(Function.constant(NoTableChecks)),
-  )
-}
 
 const checksForFilter = (filter: SchemaAST.Filter<unknown>) => {
   const representation = Option.fromNullishOr(filter.annotations?.representation)
@@ -762,7 +728,6 @@ const storageSchemaFor = <S extends Schema.Constraint>(
   const encodedSchema = Schema.toEncoded(schema)
 
   if (!automaticStorageAst(encodedSchema.ast)) {
-
     return pipe(
       physicalScalar(table, field, encodedSchema.ast),
       Effect.as(schema),

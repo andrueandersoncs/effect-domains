@@ -153,15 +153,9 @@ const databasePathFromUrl = Effect.fn("ApplicationBun.databasePathFromUrl")(func
     })
   }
 
-  const hasQuery = Boolean(url.search)
+  const hasQueryOrFragment = Boolean(url.search || url.hash)
 
-  if (hasQuery) {
-    return yield* ExecutionDatabaseError.make({ reason: "Database file URLs cannot contain query parameters or fragments" })
-  }
-
-  const hasFragment = Boolean(url.hash)
-
-  if (hasFragment) {
+  if (hasQueryOrFragment) {
     return yield* ExecutionDatabaseError.make({ reason: "Database file URLs cannot contain query parameters or fragments" })
   }
 
@@ -384,27 +378,6 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   )
 })
 
-const workerLifetime = (name: string) => {
-  const ready = Effect.log(`Worker ready: ${name}`)
-  return Effect.andThen(ready, Effect.never)
-}
-
-const workerApplication = Effect.fn("ApplicationBun.worker")(function* <
-  App extends Application,
-  Services extends RuntimeLayer,
-  Initialize extends Initialization,
-  Execution extends RuntimeLayer,
-  Background extends RuntimeLayer,
-  Routes extends RuntimeLayer,
->(application: App, options: RunOptions<Services, Initialize, Execution, Background, Routes>) {
-  const lifetime = workerLifetime(application.name)
-
-  return yield* pipe(
-    withApplicationRuntime(application, options, lifetime),
-    Effect.scoped,
-  )
-
-})
 
 const inspectCommand = (application: Application, localCommands: ReadonlyArray<string>) => {
   const operation = pipe(Argument.string("operation"), Argument.optional)
@@ -482,7 +455,12 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
   const subcommands = Option.match(background, {
     onNone: () => [serveCommand, schema, inspection],
     onSome: () => {
-      const workerCommand = Command.make("worker", {}, () => workerApplication(application, options))
+      const worker = Effect.fn("ApplicationBun.worker")(function* () {
+        const lifetime = pipe(Effect.log(`Worker ready: ${application.name}`), Effect.andThen(Effect.never))
+        return yield* pipe(withApplicationRuntime(application, options, lifetime), Effect.scoped)
+      })
+
+      const workerCommand = Command.make("worker", {}, worker)
       return [serveCommand, workerCommand, schema, inspection]
     },
   })
