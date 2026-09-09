@@ -1,15 +1,15 @@
-import { Authorization, AuthorizationSubject } from "../src/authorization.ts"
+import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
-import { identifier } from "../src/domain.ts"
-import { Resource } from "../src/resource.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { identifier } from "effect-domains/domain"
+import { Resource } from "effect-domains/resource"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
-import { NotesResource } from "../examples/service-codec/resources.ts"
-import { StoragePrefix } from "../examples/service-codec/storage.ts"
-import { NoteIdSchema } from "../examples/service-codec/domain.ts"
-import { ExampleSubjectSchema } from "../examples/authentication.ts"
+import { NotesResource } from "../apps/service-codec/resources.ts"
+import { StoragePrefix } from "../apps/service-codec/storage.ts"
+import { NoteIdSchema } from "../apps/service-codec/domain.ts"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}

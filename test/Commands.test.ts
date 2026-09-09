@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Ref, Schema, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { Commands } from "../src/commands.ts"
+import { Commands } from "effect-domains/commands"
 
 class Greeting extends Context.Service<Greeting, { readonly value: string }>()("test/Commands/Greeting") {}
 

@@ -2,6 +2,8 @@
 
 Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and CLI flags from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
 
+The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and `BookSchema`, and `apps/` contains the seven runnable applications. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
+
 ## Declare an application
 
 ```ts
@@ -42,7 +44,7 @@ ApplicationBun.runMain(Library, {
 })
 ```
 
-Pass `database: { manifest, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. Callers that already own decoded history can instead pass `database: { migrations }`. `admin: true` is opt-in; the [examples' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+Pass `database: { manifest, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. Callers that already own decoded history can instead pass `database: { migrations }`. `admin: true` is opt-in; the [applications' shared admin guide](apps/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](apps/basic-crud/README.md); the [reservation application](apps/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -60,7 +62,7 @@ Use `operations: []` for an internal-only repository. Registering a resource doe
 
 `Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. For authored JSON operations, `Commands.rpc(tag, { payload, success, error })` accepts explicit schemas and derives their JSON codecs, returning a native Effect RPC. Use `Rpc.make` directly for native options or custom wire codecs. Install implementations through `descriptor.layer(handlers, { catchTags })` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. `catchTags` maps only tagged errors raised during handler invocation, after the authored transaction has unwound; it does not map layer acquisition failures, defects, interruption, or unmatched domain errors. Its mapped outputs are checked against the RPC success and error schemas. Resource-only applications can omit `commands`; `Application.prepare(application)` prepares tables through the migration store.
 
-RPCs may share schemas without sharing business behavior: the [reservation RPCs](examples/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
+RPCs may share schemas without sharing business behavior: the [reservation RPCs](apps/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
 
 For example, an authored operation keeps its meaningful contract without wire-schema variables:
 
@@ -72,7 +74,7 @@ const createBook = Commands.rpc("books.create", {
 })
 ```
 
-Routine CRUD needs none of these declarations: select `Resource.crud` instead. The [authored SQL example](examples/README.md#authored-sql) deliberately keeps custom SQL, errors, and a remove operation returning the deleted row.
+Routine CRUD needs none of these declarations: select `Resource.crud` instead. The [authored SQL example](apps/README.md#authored-sql) deliberately keeps custom SQL, errors, and a remove operation returning the deleted row.
 
 ## Resource authorization
 
@@ -133,12 +135,13 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 
 Fresh tables and nullable additions are mechanical. Renames, required-field backfills, and storage transformations require explicit intent. Historical artifacts contain frozen metadata, not imports of the latest domain schema. One migration ledger records applied history; the runtime checks artifact contents and actual schema drift, refuses untracked objects, and applies rebuilds transactionally.
 
-See the [migration workflow](examples/README.md#review-schema-changes) for commands and supported boundaries.
+See the [migration workflow](apps/README.md#review-schema-changes) for commands and supported boundaries.
 
 ## Run the reservation application
 
 ```bash
 bun install
+bun run build
 bun run reservations:server
 ```
 
@@ -150,19 +153,28 @@ bun run reservations reserve --sku book --quantity 2
 bun run reservations reservations.get --help
 ```
 
-The example is loopback-only and unauthenticated. Its [guide](examples/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
+The example is loopback-only and unauthenticated. Its [guide](apps/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
-All seven [example applications](examples/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](examples/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](examples/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](examples/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, a process-local persisted counter, explicit schema evolution, and reservation policy.
+All seven [example applications](apps/README.md) have persistent SQLite databases, frozen migrations, HTTP servers, generated CLIs, and local schema commands. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, a process-local persisted counter, explicit schema evolution, and reservation policy.
 
 ## Escape hatches and documentation
 
 Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper or database-service alias. `PersistedRef.make({ commit, load })` composes persistence into a synchronized, write-through value; `fromResource` binds it to one resource key. These helpers do not replace explicit authorization, transaction, concurrency, or recovery policy.
 
-- [Runnable examples](examples/README.md)
+- [Runnable applications](apps/README.md)
 - [Project wiki](docs/wiki/README.md)
 - [Tables and queries](docs/wiki/tables-and-queries.md)
 
 ## Development
+
+Install dependencies and prebuild the admin before running an application:
+
+```bash
+bun install
+bun run build
+```
+
+The root commands check the library, workspace applications, and root integration suite:
 
 ```bash
 bun run check

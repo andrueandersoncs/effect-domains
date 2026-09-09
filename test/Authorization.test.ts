@@ -1,12 +1,12 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Option, Order, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { Authorization, AuthorizationSubject, AuthorizationValuesSchema } from "../src/authorization.ts"
-import { identifier } from "../src/domain.ts"
-import { Resource } from "../src/resource.ts"
-import { RepositoryStore } from "../src/repository-store.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
-import { Table } from "../src/table.ts"
+import { Authorization, AuthorizationSubject, AuthorizationValuesSchema } from "effect-domains/authorization"
+import { identifier } from "effect-domains/domain"
+import { Resource } from "effect-domains/resource"
+import { RepositoryStore } from "effect-domains/repository-store"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { Table } from "effect-domains/table"
 import { prepareTables } from "./prepare-tables.ts"
 
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String, roles: Schema.Array(Schema.String) })

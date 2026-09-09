@@ -3,12 +3,12 @@ import { Array, Effect, Equivalence, Layer, Option, Schema, type Types, pipe } f
 import { McpSchema } from "effect/unstable/ai"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { ExampleAuthentication } from "../examples/authentication.ts"
-import { StoragePrefix, StoredTextSchema } from "../examples/service-codec/storage.ts"
-import { AuthorizationSubject } from "../src/authorization.ts"
-import { AuthorizationRpc } from "../src/authorization-rpc.ts"
-import { Commands } from "../src/commands.ts"
-import { RpcMcp } from "../src/rpc-mcp.ts"
+import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { StoragePrefix, StoredTextSchema } from "../apps/service-codec/storage.ts"
+import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { Commands } from "effect-domains/commands"
+import { RpcMcp } from "effect-domains/rpc-mcp"
 
 type Handler = (request: Request) => Promise<Response>
 

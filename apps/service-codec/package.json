@@ -1,0 +1,16 @@
+{
+  "name": "@effect-domains/example-service-codec",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "@effect-domains/example-support": "workspace:*",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@effect-domains/example-basic-crud",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "@effect-domains/example-support": "workspace:*",
+    "effect-domains": "workspace:*"
+  }
+}

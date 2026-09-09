@@ -1,9 +1,9 @@
 import { Effect, Layer, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { NotesApplication } from "../examples/service-codec/application.ts"
-import { StoragePrefix, StoredTextSchema } from "../examples/service-codec/storage.ts"
-import { Application } from "../src/application.ts"
-import { ApplicationBun } from "../src/application-bun.ts"
+import { NotesApplication } from "../apps/service-codec/application.ts"
+import { StoragePrefix, StoredTextSchema } from "../apps/service-codec/storage.ts"
+import { Application } from "effect-domains/application"
+import { ApplicationBun } from "effect-domains/application-bun"
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false
@@ -36,7 +36,7 @@ const complete = ApplicationBun.run(NotesApplication, {
 })
 
 const minimal = ApplicationBun.run(emptyApplication, {
-  database: { manifest: new URL("./migrations/manifest.json", import.meta.url) },
+  database: { manifest: new URL("../apps/service-codec/migrations/manifest.json", import.meta.url) },
   admin: true,
 })
 

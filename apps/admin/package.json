@@ -1,0 +1,22 @@
+{
+  "name": "@effect-domains/admin",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./assets": "./assets.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "files": [
+    "assets.ts",
+    "src/contract.ts",
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build.ts",
+    "check": "tsc --noEmit",
+    "lint": "better-typescript"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  }
+}

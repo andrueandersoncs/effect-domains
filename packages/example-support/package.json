@@ -1,0 +1,17 @@
+{
+  "name": "@effect-domains/example-support",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./authentication": "./src/authentication.ts",
+    "./book": "./src/book.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

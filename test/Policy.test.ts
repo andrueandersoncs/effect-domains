@@ -1,9 +1,9 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { OperandSchema, Policy, type Operand } from "../src/policy.ts"
-import { PolicySql } from "../src/policy-sql.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { OperandSchema, Policy, type Operand } from "effect-domains/policy"
+import { PolicySql } from "effect-domains/policy-sql"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
 const equalityPolicy = (left: Operand, right: Operand) => Policy.Schema.make({ _tag: "Equal", left, right })
 const membershipPolicy = (collection: Operand, value: Operand) => Policy.Schema.make({ _tag: "Includes", collection, value })

@@ -2,18 +2,19 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Ref, Schema, pipe } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { ExampleAuthentication } from "../examples/authentication.ts"
-import { Application } from "../src/application.ts"
-import { ApplicationAdmin } from "../src/application-admin.ts"
-import { AuthorizationSubject } from "../src/authorization.ts"
-import { AuthorizationRpc } from "../src/authorization-rpc.ts"
-import { Commands } from "../src/commands.ts"
+import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { Application } from "effect-domains/application"
+import { ApplicationAdmin } from "effect-domains/application-admin"
+import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { Commands } from "effect-domains/commands"
 
 const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
 const identify = Rpc.make("identity", { success: SubjectSchema }).middleware(AuthorizationRpc)
 const mutate = Rpc.make("mutate", { success: Schema.Number }).middleware(AuthorizationRpc)
 const identityGroup = RpcGroup.make(identify, mutate)
 const javascript = ""
+const stylesheet = ""
 
 type Handler = (request: Request) => Promise<Response>
 const call = Effect.fn("Admin.testCall")(function* (handler: Handler, operation: string, input: Schema.Json, headers: Record<string, string> = {}) {
@@ -40,7 +41,7 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
     })
     const application = Application.make({ name: "identity", resources: [], commands: [{ group: identityGroup, handlers }] })
     const routes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript }),
+      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
       Layer.provide(AuthorizationRpc.layer),
       Layer.provide(ExampleAuthentication),
@@ -91,7 +92,7 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
       broken: () => Effect.die("private database details"),
     })
     const application = Application.make({ name: "clock", resources: [], commands: [{ group: clock, handlers }] })
-    const handler = yield* serverFor(pipe(ApplicationAdmin.layerHttp({ application, javascript }), Layer.provide(application.handlers)))
+    const handler = yield* serverFor(pipe(ApplicationAdmin.layerHttp({ application, javascript, stylesheet }), Layer.provide(application.handlers)))
     const valid = "2026-09-09T00:00:00.000Z"
     expect(yield* call(handler, "time", valid)).toEqual({ status: 200, body: { result: valid } })
     const early = "2025-01-01T00:00:00.000Z"

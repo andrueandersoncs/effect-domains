@@ -1,10 +1,10 @@
-import { Authorization } from "../src/authorization.ts"
+import { Authorization } from "effect-domains/authorization"
 import { expect, it } from "@effect/vitest"
 import { Effect, Option, Result, pipe } from "effect"
-import { CounterIdSchema, CounterSchema, type Counter, VisitsCounterId } from "../examples/persisted-ref/domain.ts"
-import { PersistedRef } from "../src/persisted-ref.ts"
-import { Resource } from "../src/resource.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+import { CounterIdSchema, CounterSchema, type Counter, VisitsCounterId } from "../apps/persisted-ref/domain.ts"
+import { PersistedRef } from "effect-domains/persisted-ref"
+import { Resource } from "effect-domains/resource"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { prepareTables } from "./prepare-tables.ts"
 
 const incrementCounter = (row: Counter) => CounterSchema.make({ ...row, value: row.value + 1 })

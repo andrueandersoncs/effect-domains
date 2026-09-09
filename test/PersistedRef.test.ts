@@ -7,7 +7,7 @@ import {
   Ref,
   Schema,
 } from "effect"
-import { PersistedRef } from "../src/persisted-ref.ts"
+import { PersistedRef } from "effect-domains/persisted-ref"
 
 describe("PersistedRef", () => {
   const UpdateCountBounds = Schema.isBetween({ minimum: 1, maximum: 30 })

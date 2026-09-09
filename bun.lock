@@ -4,21 +4,105 @@
   "workspaces": {
     "": {
       "name": "effect-domains",
-      "dependencies": {
-        "@effect/platform-bun": "4.0.0-rc.112",
-        "@effect/sql-sqlite-bun": "4.0.0-rc.112",
-        "effect": "4.0.0-rc.112",
-      },
       "devDependencies": {
         "@better-typescript/better-typescript": "0.4.13",
-        "@effect/vitest": "4.0.0-rc.112",
+        "@effect-domains/example-support": "workspace:*",
+        "@effect/platform-bun": "catalog:",
+        "@effect/sql-sqlite-bun": "catalog:",
+        "@effect/vitest": "catalog:",
         "@types/bun": "latest",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+        "typescript": "^7",
         "vitest": "4.1.11",
+      },
+    },
+    "apps/admin": {
+      "name": "@effect-domains/admin",
+      "version": "0.1.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+    },
+    "apps/authored-sql": {
+      "name": "@effect-domains/example-authored-sql",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/basic-crud": {
+      "name": "@effect-domains/example-basic-crud",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/migration-lifecycle": {
+      "name": "@effect-domains/example-migration-lifecycle",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/persisted-ref": {
+      "name": "@effect-domains/example-persisted-ref",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/reservations": {
+      "name": "@effect-domains/example-reservations",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/resource-crud": {
+      "name": "@effect-domains/example-resource-crud",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/service-codec": {
+      "name": "@effect-domains/example-service-codec",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "packages/effect-domains": {
+      "name": "effect-domains",
+      "version": "0.1.0",
+      "dependencies": {
+        "@effect-domains/admin": "workspace:*",
+        "@effect/platform-bun": "catalog:",
+        "@effect/sql-sqlite-bun": "catalog:",
+        "effect": "catalog:",
       },
       "peerDependencies": {
         "typescript": "^7",
       },
     },
+    "packages/example-support": {
+      "name": "@effect-domains/example-support",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+  },
+  "catalog": {
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
   },
   "packages": {
     "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.13", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.13", "@better-typescript/better-typescript-darwin-arm64": "0.4.13", "@better-typescript/better-typescript-linux-amd64": "0.4.13", "@better-typescript/better-typescript-linux-arm64": "0.4.13" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-WNnx3dCOKdOXHYK3/uDcDL23BkdWoDxu756XI9Yegvsed79Q8e8PbQcM+WyrrhXxKtVGxn2ufyYFcJd/dpjDwA=="],
@@ -30,6 +114,24 @@
     "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.13", "", { "os": "linux", "cpu": "x64" }, "sha512-O5uIeyX1WSuuDmjITVny52/9sBRiEN0Gndf38+hZ+N9Uc7woLrrql9+R+jbjMFg5YX+no+S665hjAoUFaBYFaw=="],
 
     "@better-typescript/better-typescript-linux-arm64": ["@better-typescript/better-typescript-linux-arm64@0.4.13", "", { "os": "linux", "cpu": "arm64" }, "sha512-uKSDXU6gXdYi748SzZJ36ATa/SRtpZrLHWo39hOF0A2YdH2WlOM/5OB4UbLCdbg2OGpeeEnjCY55p6IrLqkHog=="],
+
+    "@effect-domains/admin": ["@effect-domains/admin@workspace:apps/admin"],
+
+    "@effect-domains/example-authored-sql": ["@effect-domains/example-authored-sql@workspace:apps/authored-sql"],
+
+    "@effect-domains/example-basic-crud": ["@effect-domains/example-basic-crud@workspace:apps/basic-crud"],
+
+    "@effect-domains/example-migration-lifecycle": ["@effect-domains/example-migration-lifecycle@workspace:apps/migration-lifecycle"],
+
+    "@effect-domains/example-persisted-ref": ["@effect-domains/example-persisted-ref@workspace:apps/persisted-ref"],
+
+    "@effect-domains/example-reservations": ["@effect-domains/example-reservations@workspace:apps/reservations"],
+
+    "@effect-domains/example-resource-crud": ["@effect-domains/example-resource-crud@workspace:apps/resource-crud"],
+
+    "@effect-domains/example-service-codec": ["@effect-domains/example-service-codec@workspace:apps/service-codec"],
+
+    "@effect-domains/example-support": ["@effect-domains/example-support@workspace:packages/example-support"],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.112", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.112" }, "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-Y5n2HhV/vsbrJls9ukX42RL7zqXQxISHegWFsP9njsCyDmGTnq7QYSO82rglwrLPwtTrv5dkSRTuGw4+oXxgMg=="],
 
@@ -166,6 +268,8 @@
     "detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
     "effect": ["effect@4.0.0-rc.112", "", { "dependencies": { "fast-check": "^4.9.0", "msgpackr": "^2.0.5" } }, "sha512-wXxwuh1Ywnv4cPRM3Wfa0vDwuOHnZ1TsTgHJkG9XgzND6inhBH9n1vBxhg3iIXOia/OrpmvVmd3lrD4vq6bF3A=="],
+
+    "effect-domains": ["effect-domains@workspace:packages/effect-domains"],
 
     "es-module-lexer": ["es-module-lexer@2.3.2", "", {}, "sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw=="],
 

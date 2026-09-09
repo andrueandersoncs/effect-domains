@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
-import { identifier } from "../src/domain.ts"
-import { Table, TableDefinitionError } from "../src/table.ts"
+import { identifier } from "effect-domains/domain"
+import { Table, TableDefinitionError } from "effect-domains/table"
 
 describe("Table", () => {
   const isMinimumLabelLength = Schema.isMinLength(2)

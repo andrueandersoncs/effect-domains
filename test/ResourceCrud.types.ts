@@ -1,7 +1,7 @@
-import { Authorization } from "../src/authorization.ts"
+import { Authorization } from "effect-domains/authorization"
 import { Schema } from "effect"
-import { identifier } from "../src/domain.ts"
-import { Resource } from "../src/resource.ts"
+import { identifier } from "effect-domains/domain"
+import { Resource } from "effect-domains/resource"
 
 const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}

@@ -1,6 +1,6 @@
 import { Schema } from "effect"
-import { Authorization } from "../src/authorization.ts"
-import { Resource } from "../src/resource.ts"
+import { Authorization } from "effect-domains/authorization"
+import { Resource } from "effect-domains/resource"
 
 const ScoredDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.String, score: Schema.Int })
 interface ScoredDocument extends Schema.Schema.Type<typeof ScoredDocumentSchema> {}

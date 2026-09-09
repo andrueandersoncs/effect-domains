@@ -1,0 +1,43 @@
+{
+  "name": "effect-domains",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./application": "./src/application.ts",
+    "./application-admin": "./src/application-admin.ts",
+    "./application-bun": "./src/application-bun.ts",
+    "./application-inspect": "./src/application-inspect.ts",
+    "./authorization": "./src/authorization.ts",
+    "./authorization-rpc": "./src/authorization-rpc.ts",
+    "./commands": "./src/commands.ts",
+    "./domain": "./src/domain.ts",
+    "./migrations": "./src/migrations.ts",
+    "./persisted-ref": "./src/persisted-ref.ts",
+    "./policy": "./src/policy.ts",
+    "./policy-sql": "./src/policy-sql.ts",
+    "./resource": "./src/resource.ts",
+    "./repository-store": "./src/repository-store.ts",
+    "./rpc-cli": "./src/rpc-cli.ts",
+    "./rpc-mcp": "./src/rpc-mcp.ts",
+    "./sqlite-bun": "./src/sqlite-bun.ts",
+    "./sqlite-migrations": "./src/sqlite-migrations.ts",
+    "./table": "./src/table.ts",
+    "./value": "./src/value.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript"
+  },
+  "dependencies": {
+    "@effect-domains/admin": "workspace:*",
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
+    "effect": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}

@@ -15,10 +15,10 @@ import {
   SchemaGetter,
   Struct,
 } from "effect"
-import { identifier } from "../src/domain.ts"
-import { PersistedRef } from "../src/persisted-ref.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
-import { Table } from "../src/table.ts"
+import { identifier } from "effect-domains/domain"
+import { PersistedRef } from "effect-domains/persisted-ref"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { Table } from "effect-domains/table"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
 import { adapterContract } from "./adapter-contract/effects.ts"

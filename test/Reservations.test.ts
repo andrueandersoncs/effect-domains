@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Context, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
-import { ReservationApplication } from "../examples/reservations/application.ts"
-import { Inventory } from "../examples/reservations/contracts.ts"
+import { ReservationApplication } from "../apps/reservations/application.ts"
+import { Inventory } from "../apps/reservations/contracts.ts"
 import {
   InsufficientStock,
   InvalidReservationState,
@@ -12,15 +12,15 @@ import {
   ReserveStockInputSchema,
   SkuSchema,
   StockSchema,
-} from "../examples/reservations/domain.ts"
-import { InventoryMigrations } from "../examples/reservations/migrations.ts"
-import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
-import { InventorySqlite, seedStock } from "../examples/reservations/sqlite.ts"
-import { Application } from "../src/application.ts"
-import { RepositoryStore } from "../src/repository-store.ts"
-import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
+} from "../apps/reservations/domain.ts"
+import { InventoryMigrations } from "../apps/reservations/migrations.ts"
+import { ReservationResource, StockResource } from "../apps/reservations/resources.ts"
+import { InventorySqlite, seedStock } from "../apps/reservations/sqlite.ts"
+import { Application } from "effect-domains/application"
+import { RepositoryStore } from "effect-domains/repository-store"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
-import { makeMigrationStore } from "../src/sqlite-migrations.ts"
+import { makeMigrationStore } from "effect-domains/sqlite-migrations"
 
 const sku = SkuSchema.make("book")
 const request = ReserveStockInputSchema.make({ sku, quantity: 1 })

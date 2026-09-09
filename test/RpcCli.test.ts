@@ -13,7 +13,7 @@ it.effect(
       process.execPath,
       [
         "run",
-        "examples/reservations/main.ts",
+        "apps/reservations/main.ts",
         "reserve",
         "--sku",
         "book",
