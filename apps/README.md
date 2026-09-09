@@ -1,6 +1,6 @@
 # Applications
 
-Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these nine loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local schema commands. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
+Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local schema commands. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
 
 ## Choose an application
 
@@ -15,6 +15,7 @@ Each application is a runnable Bun workspace package. The private repository roo
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
 | [durable-workflows](#durable-workflows) | Approval/export workflow with durable timing and queue-backed file creation | `DURABLE_WORKFLOWS_DB`, `DURABLE_WORKFLOWS_EXECUTION_DB` |
 | [durable-reminders](#durable-reminders) | Persisted per-recipient scheduling, receipt projection, and cron retention | `DURABLE_REMINDERS_DB`, `DURABLE_REMINDERS_EXECUTION_DB` |
+| [mcp-server](#mcp-client-walkthrough) | Generated book tools consumed by an official MCP SDK client | `MCP_SERVER_DB` |
 
 The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); compare [tenant/owner todo rules](resource-crud/resources.ts) with [role-based note rules](service-codec/resources.ts) to see custom authorization. [Authored SQL](#authored-sql) demonstrates the privileged escape hatch.
 
@@ -252,6 +253,52 @@ Tool arguments are `{ "input": <RPC JSON payload> }`; successful structured cont
 Protected operations use the same authenticator and resource policies as RPC. Configure the MCP client to send `Authorization: Bearer alice-demo` for the authenticated examples; an MCP session is not an identity, and every tool call is authenticated independently. Tool discovery exposes contracts without credentials, not protected row data. Declared domain and authorization failures return `isError: true` with their encoded JSON error; unexpected defects return a generic error without internal details.
 
 The runtime negotiates MCP `2025-11-25`, `2025-06-18`, or `2025-03-26`. It rejects browser Origin headers by default. This is an HTTP tool server, not a stdio adapter, REST API, or inferred MCP resource/prompt interface. Custom Effect hosts can use `RpcMcp.layerHttp({ name, group, path })` from `effect-domains/rpc-mcp`, providing the group's handlers, middleware, and codec services. ([Adapter](../packages/effect-domains/src/rpc-mcp.ts); [Bun wiring](../packages/effect-domains/src/application-bun.ts))
+
+### MCP client walkthrough
+
+[`mcp-server`](mcp-server/) is a dedicated, public book catalog with a runnable MCP client. Its [resource declaration](mcp-server/resources.ts) generates the same five CRUD operations as basic CRUD; [the runner](mcp-server/main.ts) exposes them as MCP tools without hand-written tool schemas or handlers. It does not enable the browser admin, so no admin build is needed.
+
+From the repository root:
+
+```bash
+bun install
+bun run mcp-server:server
+```
+
+In another terminal:
+
+```bash
+bun run mcp-server:client
+```
+
+The [client](mcp-server/client.ts) uses the official `@modelcontextprotocol/sdk` Streamable HTTP transport inside a scoped Effect program. `connect` performs initialization; `listTools` prints the discovered input/output schemas. It then creates a book, reads it, updates it, lists books, and removes only the book it created. Finally, it reads the deleted ID to demonstrate `isError: true` with `ResourceNotFound`, terminates the MCP session, and closes the connection. Unexpected tool failures exit nonzero. An interrupted walkthrough can leave its newly created book in the database.
+
+The create call illustrates the wire envelope:
+
+```ts
+await client.callTool({
+  name: "books.create",
+  arguments: { input: { title: "MCP Field Guide", pageCount: 120 } },
+})
+```
+
+Success includes `structuredContent.result` and equivalent JSON text; the client decodes the created row with its Effect Schema to obtain the generated UUID. List takes `{ input: {} }` and returns an array under `result`; removal returns `{ result: null }`. A declared domain error is returned as tool content, not thrown as a transport exception.
+
+To use a coding agent or another MCP client instead, configure **Streamable HTTP** with URL `http://127.0.0.1:3000/mcp`. No token is required for this explicitly public example. The generated CLI remains available separately:
+
+```bash
+bun run mcp-server books.list
+bun run mcp-server inspect books.create
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `MCP_SERVER_DB` | `mcp-server.sqlite` | Persistent application database |
+| `PORT` | `3000` | Loopback server port |
+| `MCP_SERVER_MCP_URL` | `http://127.0.0.1:3000/mcp` | Walkthrough client endpoint |
+| `MCP_SERVER_URL` | `http://127.0.0.1:3000/rpc/v1` | Generated CLI endpoint, not MCP |
+
+For a second server, set `PORT=3003` on the server and `MCP_SERVER_MCP_URL=http://127.0.0.1:3003/mcp` on the walkthrough client. Startup applies its own frozen [migration manifest](mcp-server/migrations/manifest.json); it does not reset existing rows. Keep this unauthenticated example on loopback. For protected MCP operations, use the tenant/owner or role-policy applications described above.
 
 ## Review schema changes
 
