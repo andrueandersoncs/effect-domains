@@ -30,17 +30,21 @@ const transition = {
   error: transitionErrorsSchema,
 }
 
-const reserve = Commands.rpc("reserve", {
+const reserveStock = Commands.rpc("reserve", {
   payload: ReserveStockInputSchema,
   success: transition.success,
   error: reserveErrorsSchema,
 })
+const confirmReservation = Commands.rpc("confirm", transition)
+const releaseReservation = Commands.rpc("release", transition)
 
-const confirm = Commands.rpc("confirm", transition)
-const release = Commands.rpc("release", transition)
-const reservationRpcs = RpcGroup.make(reserve, confirm, release)
+const inventoryRpcs = RpcGroup.make(
+  reserveStock,
+  confirmReservation,
+  releaseReservation,
+)
 
 export const Inventory = Commands.make({
   name: "examples/reservations/Inventory",
-  group: reservationRpcs,
+  group: inventoryRpcs,
 })

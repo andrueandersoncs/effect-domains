@@ -5,7 +5,7 @@ import type { Table } from "./table.ts"
 export class AuthorizationSubject extends Context.Service<AuthorizationSubject, Readonly<Record<string, unknown>>>()("@effect-domains/AuthorizationSubject") {}
 export class Unauthenticated extends Schema.TaggedError<Unauthenticated>()("Unauthenticated", {}) {}
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {}) {}
-export class AuthorizationDefinitionError extends Schema.TaggedError<AuthorizationDefinitionError>()("AuthorizationDefinitionError", { reason: Schema.String }) {}
+class AuthorizationDefinitionError extends Schema.TaggedError<AuthorizationDefinitionError>()("AuthorizationDefinitionError", { reason: Schema.String }) {}
 export type AuthorizationAction = "read" | "create" | "update" | "patch" | "remove"
 type AnyStruct = Schema.Struct<Schema.Struct.Fields>
 type FieldName<S extends AnyStruct> = Extract<keyof S["fields"], string>
@@ -19,6 +19,8 @@ type PolicyPhase = "subject" | "row" | "next"
 declare const PolicyPhases: unique symbol
 type PolicyExpression<Phases extends PolicyPhase = PolicyPhase> = PolicySyntax & Readonly<Record<typeof PolicyPhases, readonly [never, Phases]>>
 type TypedOperand<Value, Phases extends PolicyPhase> = Operand & Readonly<Record<typeof PolicyPhases, readonly [Value, Phases]>>
+export type SubjectOperand<Value> = TypedOperand<Value, "subject"> & Readonly<{ readonly _tag: "SubjectField" }>
+
 
 type FieldReferences<S extends AnyStruct, Tag extends Operand["_tag"], Phases extends PolicyPhase> = {
   readonly [Key in FieldName<S>]: FieldValue<S, Key> extends Scalar | ReadonlyArray<Scalar> ? TypedOperand<FieldValue<S, Key>, Phases> & Readonly<{ readonly _tag: Tag }> : never
@@ -33,10 +35,12 @@ type ScalarCollection = TypedOperand<ReadonlyArray<Scalar>, PolicyPhase> | Reado
 type ScalarKind<Value> = Exclude<Value, null> extends string ? "string" : Exclude<Value, null> extends number ? "number" : Exclude<Value, null> extends boolean ? "boolean" : never
 type Comparable<Left, Right> = [Exclude<Left, null>] extends [never] ? unknown : [Exclude<Right, null>] extends [never] ? unknown : ScalarKind<Left> extends ScalarKind<Right> ? unknown : never
 const PublicAuthorizationSchema = Schema.TaggedStruct("Public", {})
+
 const DenyAuthorizationSchema = Schema.TaggedStruct("Deny", {})
 const isPublicAuthorization = Schema.is(PublicAuthorizationSchema)
 const isDenyAuthorization = Schema.is(DenyAuthorizationSchema)
 export type PublicAuthorization = Schema.Schema.Type<typeof PublicAuthorizationSchema>
+
 type DenyAuthorization = Schema.Schema.Type<typeof DenyAuthorizationSchema>
 
 export type PolicyAuthorization<Resource extends AnyStruct = AnyStruct, Subject extends AnyStruct = AnyStruct> = Readonly<{
@@ -437,6 +441,53 @@ const checkDefinition = (authorization: unknown, resource: AnyStruct, subject: A
     Match.orElse(() => policyFailure({ reason: "authorization must be Public, Deny, or Policy" })),
   )
 
+const matchingDescription = (left: FieldDescription, right: FieldDescription) => {
+  const category = Option.makeEquivalence(Equivalence.strictEqual<ScalarCategory>())(left.category, right.category)
+  const nullable = sameValue(left.nullable, right.nullable)
+  const collection = sameValue(left.collection, right.collection)
+  const matchingCategory = category && nullable
+  return matchingCategory && collection
+}
+
+const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings")(function* (
+  authorization: AuthorizationDefinition,
+  resource: AnyStruct,
+  bindings: Readonly<Record<string, unknown>>,
+) {
+  const fields = Record.keys(bindings)
+  if (Array.isReadonlyArrayEmpty(fields)) return
+  if (!isPolicyAuthorization(authorization)) {
+    return yield* policyFailure({ reason: "create subject bindings require policy authorization" })
+  }
+  yield* checkDefinition(authorization, resource, authorization.subject)
+
+  const validateBinding = (target: string) => {
+    const binding = bindings[target]
+    const validOperand = Schema.is(OperandSchema)(binding)
+    if (!validOperand) {
+      return policyFailure({ reason: `create subject binding ${target} must reference a subject field` })
+    }
+
+    const subjectField = Predicate.isTagged(binding, "SubjectField")
+    if (!subjectField) {
+      return policyFailure({ reason: `create subject binding ${target} must reference a subject field` })
+    }
+
+    const destination = fieldFor(resource, target)
+    if (Option.isNone(destination)) return policyFailure({ reason: `create subject binding targets unknown field ${target}` })
+    const source = fieldFor(authorization.subject, binding.field)
+    if (Option.isNone(source)) return policyFailure({ reason: `create subject binding references unknown subject.${binding.field}` })
+
+    const compatible = matchingDescription(destination.value, source.value)
+    return compatible
+      ? Effect.void
+      : policyFailure({ reason: `create subject binding ${target} is incompatible with subject.${binding.field}` })
+  }
+
+  yield* Effect.forEach(fields, validateBinding, { discard: true })
+})
+
+
 const hasIdentityEncoding = (schema: Schema.Constraint) => {
   const encoding = Option.fromNullishOr(schema.ast.encoding)
   const noEncoding = Option.isNone(encoding)
@@ -458,12 +509,19 @@ const storageCompatible = (description: FieldDescription, field: Table["fields"]
   const nullable = sameValue(description.nullable, field.nullable)
   const string = sameValue(field.scalar, "string")
   const numeric = numericStorage(field)
+  const boolean = sameValue(field.scalar, "integer")
 
   const supported = pipe(
     description.category,
     Option.match({
       onNone: Function.constant(false),
-      onSome: (category) => pipe(Match.value(category), Match.when("string", Function.constant(string)), Match.when("number", Function.constant(numeric)), Match.when("boolean", Function.constant(false)), Match.exhaustive),
+      onSome: (category) => pipe(
+        Match.value(category),
+        Match.when("string", Function.constant(string)),
+        Match.when("number", Function.constant(numeric)),
+        Match.when("boolean", Function.constant(boolean)),
+        Match.exhaustive,
+      ),
     }),
   )
 
@@ -495,8 +553,6 @@ const validate = Effect.fn("Authorization.validateSqlStorage")(function* (author
     const physicalIdentity = hasIdentityEncoding(physical.value)
     if (!physicalIdentity) return policyFailure({ reason: `SQL policy row.${reference.field} must use an identity storage encoding` })
     if (scalar.value.collection) return policyFailure({ reason: `SQL policy row.${reference.field} uses an unsupported storage scalar` })
-    const booleanScalar = Option.contains(scalar.value.category, "boolean")
-    if (booleanScalar) return policyFailure({ reason: `SQL policy row.${reference.field} uses an unsupported storage scalar` })
 
     const compatible = storageCompatible(scalar.value, tableField.value)
     if (!compatible) return policyFailure({ reason: `SQL policy row.${reference.field} does not have a compatible physical scalar` })
@@ -630,6 +686,7 @@ export const Authorization = {
   public: publicAuthorization,
   deny: denyAuthorization,
   for: policyDsl,
+  validateSubjectBindings,
   compile: Effect.fn("Authorization.compile")(function* (
     options: Readonly<{
       readonly authorization: AuthorizationDefinition

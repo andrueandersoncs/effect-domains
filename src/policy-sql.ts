@@ -1,4 +1,4 @@
-import { Array, Effect, Function, Match, Option, Predicate, Record, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, pipe } from "effect"
 import { SqlClient, type Statement } from "effect/unstable/sql"
 import {
   Policy,
@@ -38,7 +38,9 @@ const matchExpression = (kind: ExpressionKind) => (fragment: Statement.Fragment)
 
 const scalarExpression = (sql: SqlClient.SqlClient) => (value: Scalar) => {
   const kind = scalarKind(value)
-  return pipe(sql`${value}`, matchExpression(kind))
+  const boolean = Equivalence.strictEqual<ScalarKind>()(kind, "boolean")
+  const encoded = boolean ? Number(value) : value
+  return pipe(sql`${encoded}`, matchExpression(kind))
 }
 
 const rowExpression = (sql: SqlClient.SqlClient) => (field: string) =>
@@ -65,6 +67,15 @@ const typeMatches = (
     Match.when("string", textTypeMatch(sql, expression)),
     Match.exhaustive,
   )
+
+const StorageKinds = {
+  boolean: "number",
+  null: "null",
+  number: "number",
+  string: "string",
+} as const
+
+const storageKind = (kind: ScalarKind) => StorageKinds[kind]
 
 const numericType = (
   sql: SqlClient.SqlClient,
@@ -97,9 +108,10 @@ const matchingRowScalar = (
   sql: SqlClient.SqlClient,
   left: Statement.Fragment,
   right: Statement.Fragment,
-  kind: Exclude<ScalarKind, "boolean">,
+  kind: ScalarKind,
 ) => (): Statement.Fragment => {
-  const matches = typeMatches(sql, left, kind)
+  const physical = storageKind(kind)
+  const matches = typeMatches(sql, left, physical)
   return sql`${matches} AND ${left} IS ${right}`
 }
 
@@ -112,7 +124,7 @@ const rowComparison = (
   pipe(
     Match.value(rightKind),
     Match.when("row", matchingRows(sql, left, right)),
-    Match.when("boolean", rejectedComparison(sql)),
+    Match.when("boolean", matchingRowScalar(sql, left, right, "boolean")),
     Match.when("null", matchingRowScalar(sql, left, right, "null")),
     Match.when("number", matchingRowScalar(sql, left, right, "number")),
     Match.when("string", matchingRowScalar(sql, left, right, "string")),
@@ -133,7 +145,7 @@ const matchingScalarRow = (
 ) => (): Statement.Fragment =>
   pipe(
     Match.value(leftKind),
-    Match.when("boolean", rejectedComparison(sql)),
+    Match.when("boolean", matchingRowScalar(sql, right, left, "boolean")),
     Match.when("null", matchingRowScalar(sql, right, left, "null")),
     Match.when("number", matchingRowScalar(sql, right, left, "number")),
     Match.when("string", matchingRowScalar(sql, right, left, "string")),

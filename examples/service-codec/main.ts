@@ -1,5 +1,4 @@
-import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Layer, Option } from "effect"
+import { Layer } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleAuthentication } from "../authentication.ts"
 import { NotesApplication } from "./application.ts"
@@ -7,14 +6,11 @@ import { StoragePrefix } from "./storage.ts"
 
 const prefix = Layer.succeed(StoragePrefix, { value: "stored:" })
 const services = Layer.mergeAll(prefix, ExampleAuthentication)
-const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
-const manifest = Bun.fileURLToPath(manifestUrl)
-const filename = Option.none()
 
-const program = ApplicationBun.run(NotesApplication, {
-  database: { manifest, filename },
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
+
+ApplicationBun.runMain(NotesApplication, {
+  database: { manifest },
   services,
-  initialize: Effect.void,
+  admin: true,
 })
-
-BunRuntime.runMain(program)

@@ -13,6 +13,23 @@ const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unchanged = p.unchanged("ownerId")
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
 Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: ["get"] })
+const BoundDocument = Resource.make({
+  name: "subject_bound_authorization",
+  schema: ScoredDocumentSchema,
+  authorization: policy,
+  create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
+  operations: ["create"],
+})
+const boundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1 }
+void boundCreate
+
+// @ts-expect-error because subject-bound fields are not caller-controlled.
+const forgedBoundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1, ownerId: "forged" }
+void forgedBoundCreate
+// @ts-expect-error because subject bindings must have the destination field's type.
+Resource.make({ name: "invalid_subject_binding_type", schema: ScoredDocumentSchema, authorization: policy, create: { fromSubject: { score: p.subject.userId } }, operations: [] })
+// @ts-expect-error because public resources do not have a verified subject.
+Resource.make({ name: "public_subject_binding", schema: ScoredDocumentSchema, authorization: Authorization.public, create: { fromSubject: { ownerId: p.subject.userId } }, operations: [] })
 
 // These probes are compile-only because rejected definitions intentionally fail at runtime.
 // @ts-expect-error Because authorization must be an explicit application choice.

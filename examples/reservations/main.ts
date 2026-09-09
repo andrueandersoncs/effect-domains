@@ -1,5 +1,3 @@
-import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
@@ -10,15 +8,12 @@ const InitialStock = StockSchema.make({
   available: 5,
 })
 
-const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
-const manifest = Bun.fileURLToPath(manifestUrl)
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
 const initialize = seedStock(InitialStock)
-const filename = Option.none()
 
-const program = ApplicationBun.run(ReservationApplication, {
-  database: { manifest, filename },
+ApplicationBun.runMain(ReservationApplication, {
+  database: { manifest },
   services: InventorySqlite,
   initialize,
+  admin: true,
 })
-
-BunRuntime.runMain(program)

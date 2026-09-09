@@ -12,6 +12,8 @@ From the repository root, start the server:
 bun run reservations:server
 ```
 
+The runner also enables the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). It invokes the same generated reads and explicit reservation commands; see the [shared admin guide](../README.md#generated-admin).
+
 In another terminal, inspect stock, create a hold, then release it:
 
 ```bash
@@ -52,7 +54,7 @@ The server is loopback-only and unauthenticated, using Effect's JSON RPC protoco
 
 Only `stock.get` and `reservations.get` are generated resource operations. There is deliberately no generated create, update, list, or remove route for either resource.
 
-[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` with `Commands.rpc` and native `RpcGroup.make`. The constructor derives JSON codecs from explicit payload/success/error schemas and returns native Effect RPCs. `Commands.make({ name, group })` adds the injectable `Inventory` descriptor and handler layer while retaining that group. Confirm and release share `transition` schemas but have distinct tags. [`sqlite.ts`](sqlite.ts) installs handlers with `Inventory.layer(...)`; construction captures fallback dependencies, while invocation context can override them.
+[`contracts.ts`](contracts.ts) declares `reserve`, `confirm`, and `release` with `Commands.rpc` and native `RpcGroup.make`. The constructor derives JSON codecs from explicit payload/success/error schemas and returns native Effect RPCs. `Commands.make({ name, group })` adds the injectable `Inventory` descriptor and handler layer while retaining that group. Confirm and release share `transition` schemas but have distinct tags. [`sqlite.ts`](sqlite.ts) installs handlers with `Inventory.layer(...)`; its `catchTags` maps only matching persistence errors raised during command invocation, after a transaction unwinds, while preserving unexpected and unmatched errors.
 
 The implementations and policy remain explicit. `reserve` atomically verifies a SKU, decrements stock only when enough remains, creates a UUIDv7 reservation, and marks it `held`. `confirm` changes a hold to `confirmed` without restoring stock. `release` changes a hold to `released` and restores its quantity in the same transaction. The guarded SQL decrement prevents concurrent successful reservations from taking stock below zero.
 

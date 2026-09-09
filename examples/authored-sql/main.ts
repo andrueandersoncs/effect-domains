@@ -1,17 +1,11 @@
-import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { AuthoredSqlApplication } from "./application.ts"
 import { BooksSqlite } from "./sqlite.ts"
 
-const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
-const manifest = Bun.fileURLToPath(manifestUrl)
-const filename = Option.none()
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
-const program = ApplicationBun.run(AuthoredSqlApplication, {
-  database: { manifest, filename },
+ApplicationBun.runMain(AuthoredSqlApplication, {
+  database: { manifest },
   services: BooksSqlite,
-  initialize: Effect.void,
+  admin: true,
 })
-
-BunRuntime.runMain(program)

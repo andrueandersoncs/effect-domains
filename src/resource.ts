@@ -5,7 +5,7 @@ import { Table, type TableField } from "./table.ts"
 import { Value } from "./value.ts"
 import type { AnyCommandBundle } from "./commands.ts"
 import { DomainIdentifier } from "./domain.ts"
-import { Authorization, AuthorizationValuesSchema, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationValues, type PolicyAuthorization, type PublicAuthorization } from "./authorization.ts"
+import { Authorization, AuthorizationValuesSchema, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationValues, type PolicyAuthorization, type PublicAuthorization, type SubjectOperand } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 
 const EmptyPayloadSchema = Schema.Struct({})
@@ -38,9 +38,18 @@ type CreationDefaultKeys<Creation> = Creation extends { readonly defaults: infer
 type CreationGeneratedKeys<Creation> = Creation extends { readonly generated: infer Generated }
   ? Extract<keyof Generated, string> : never
 
-type CreationPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<Partial<{
+type CreationSubjectKeys<Creation> = Creation extends { readonly fromSubject: infer Bindings }
+  ? Extract<keyof Bindings, string> : never
+
+type SubjectBindings<S extends Schema.Struct<Schema.Struct.Fields>, Auth> =
+  Auth extends PolicyAuthorization
+    ? Readonly<Partial<{ readonly [Key in Extract<keyof S["fields"], string>]: SubjectOperand<S["Type"][Key]> }>>
+    : never
+
+type CreationPolicy<S extends Schema.Struct<Schema.Struct.Fields>, Auth = PolicyAuthorization> = Readonly<Partial<{
   defaults: Partial<Pick<S["Type"], Extract<keyof S["fields"], string>>>
   generated: Partial<Record<Extract<keyof S["fields"], string>, "uuidV7" | "now">>
+  fromSubject: SubjectBindings<S, Auth>
 }>>
 
 type ListPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<{
@@ -51,7 +60,7 @@ type ListPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<{
 }>>
 
 type CreateInput<S extends Schema.Struct<Schema.Struct.Fields>, Creation> =
-  Omit<S["Type"], CreationDefaultKeys<Creation> | CreationGeneratedKeys<Creation>> &
+  Omit<S["Type"], CreationDefaultKeys<Creation> | CreationGeneratedKeys<Creation> | CreationSubjectKeys<Creation>> &
   Partial<Pick<S["Type"], Extract<CreationDefaultKeys<Creation>, keyof S["Type"]>>>
 
 type PatchInput<S extends Schema.Struct<Schema.Struct.Fields>, Key extends string> = Partial<Omit<S["Type"], Key>>
@@ -123,9 +132,9 @@ export const Resource = {
     const S extends Schema.Struct<Schema.Struct.Fields>,
     const Storage extends Schema.Struct<Schema.Struct.Fields> = S,
     const Operations extends ReadonlyArray<ResourceOperation> = ReadonlyArray<ResourceOperation>,
-    const Creation extends CreationPolicy<S> = {},
-    const List extends ListPolicy<S> = never,
     const Auth extends AuthorizationDefinition = AuthorizationDefinition,
+    const Creation extends CreationPolicy<S, Auth> = {},
+    const List extends ListPolicy<S> = never,
   >(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
     storage: Storage
     create: Creation
@@ -141,6 +150,8 @@ export const Resource = {
     const listPolicy = Option.fromNullishOr(options.list)
     const defaults: Readonly<Record<string, unknown>> = options.create?.defaults ?? Record.empty()
     const declaredGenerated: Readonly<Record<string, "uuidV7" | "now">> = options.create?.generated ?? Record.empty()
+    const subjectBindings: Readonly<Record<string, SubjectOperand<unknown>>> = options.create?.fromSubject ?? Record.empty()
+    const presentSubjectBindings = pipe(subjectBindings, Record.map(Option.fromNullishOr), Record.getSomes)
     const canonicalNames = pipe(options.schema.fields, Record.keys, Array.sort(Order.String))
     const storageNames = pipe(storageSchema.fields, Record.keys, Array.sort(Order.String))
     const filterFields: ReadonlyArray<string> = options.list?.filter ?? []
@@ -171,6 +182,23 @@ export const Resource = {
       })
 
       const generatedNames = Record.keys(declaredGenerated)
+      const subjectBindingNames = Record.keys(subjectBindings)
+
+      yield* Effect.forEach(subjectBindingNames, (field) => {
+        const canonical = Record.has(options.schema.fields, field)
+        const defaulted = Record.has(defaults, field)
+        const generated = Record.has(declaredGenerated, field)
+        const overlaps = defaulted || generated
+        const valid = canonical && !overlaps
+        return valid
+          ? Effect.void
+          : definitionFailure(`declares an unknown, defaulted, or generated create subject binding ${field}`)
+      })
+
+      yield* pipe(
+        Authorization.validateSubjectBindings(options.authorization, options.schema, subjectBindings),
+        Effect.mapError(({ reason }) => definitionFailure(reason)),
+      )
 
       const validateGeneratedField = (field: string) => Record.has(options.schema.fields, field)
         ? Effect.void : definitionFailure(`declares unknown generated field ${field}`)
@@ -259,11 +287,20 @@ export const Resource = {
 
     const missing = (key: unknown) => ResourceNotFound.make({ resource: table.name, key: String(key) })
     const generatedEntries = Record.toEntries(generated)
+    const subjectBindingEntries = Record.toEntries(presentSubjectBindings)
 
     const create = Effect.fn("Repository.create")(function* (input: CreateInput<S, Creation>) {
-      const subject = yield* authorization.subject("create")
       yield* Effect.forEach(generatedEntries, ([field]) => Record.has(input, field)
         ? inputFailure(`create input must not provide generated field ${field}`) : Effect.void)
+      yield* Effect.forEach(subjectBindingEntries, ([field]) => Record.has(input, field)
+        ? inputFailure(`create input must not provide subject-bound field ${field}`) : Effect.void)
+
+      const subject = yield* authorization.subject("create")
+
+      const subjectValues = Array.map(subjectBindingEntries, ([target, binding]) => {
+        const source = binding.field
+        return [target, subject[source]] as const
+      })
 
       const generate = Effect.fn("Repository.generate")(function* ([field, generation]: [string, "uuidV7" | "now"]) {
         const values = yield* Value
@@ -274,8 +311,10 @@ export const Resource = {
 
       const generatedValues = yield* Effect.forEach(generatedEntries, generate)
       const generatedRecord = Record.fromEntries(generatedValues)
+      const subjectRecord = Record.fromEntries(subjectValues)
       const supplied = Struct.assign(defaults, input)
-      const complete = Struct.assign(supplied, generatedRecord)
+      const bound = Struct.assign(supplied, subjectRecord)
+      const complete = Struct.assign(bound, generatedRecord)
       const encoded = yield* encodeRow(complete)
       const store = yield* RepositoryStore
 
@@ -482,7 +521,10 @@ export const Resource = {
     const repository = { find, get, list, page, create, update, patch, remove }
 
     const createField = (fieldSchema: Schema.Constraint, field: string) => {
-      if (Record.has(generated, field)) return ForbiddenFieldSchema
+      const generatedField = Record.has(generated, field)
+      const subjectBoundField = Record.has(subjectBindings, field)
+      const forbidden = generatedField || subjectBoundField
+      if (forbidden) return ForbiddenFieldSchema
       return Record.has(defaults, field) ? Schema.optionalKey(fieldSchema) : fieldSchema
     }
 

@@ -4,7 +4,7 @@ This example separates the note a client sees from the representation SQLite sto
 
 ## What is generated and what is authored
 
-[`domain.ts`](domain.ts) defines the canonical `NoteSchema`: an application-supplied `id` and ordinary text. [`storage.ts`](storage.ts) defines a separate `StoredNoteSchema`. Its `StoredTextSchema` converts canonical text to and from storage text by reading the `StoragePrefix` service.
+[`domain.ts`](domain.ts) defines the canonical `NoteSchema`: an application-supplied `id` and ordinary text. [`storage.ts`](storage.ts) builds `StoredNoteSchema` with native `Schema.fieldsAssign({ text: StoredTextSchema })`, retaining the canonical fields while overlaying only the storage representation of `text`. Its `StoredTextSchema` converts canonical text to and from storage text by reading the `StoragePrefix` service.
 
 [`resources.ts`](resources.ts) supplies the canonical schema and storage codec to `Resource.make` with `operations: Resource.crud`. It derives the physical table, generated create/get/list/update/remove procedures, repository, and handlers. No command contracts, service wrapper, or SQL implementation is authored. The generated wire schemas use canonical notes; the table and repository use `StoredNoteSchema`.
 
@@ -21,6 +21,8 @@ Run commands from the repository root. Start the server in one terminal:
 ```bash
 bun run service-codec:server
 ```
+
+The runner also enables the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). Its bearer entry exercises the same authenticator and note policy; see the [shared admin guide](../README.md#generated-admin) for its generated forms and security boundary.
 
 In another terminal, Alice's editor token can create and update a shared note:
 

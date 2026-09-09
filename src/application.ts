@@ -23,18 +23,22 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   }
 }
 
+const emptyResources = [] as const satisfies ReadonlyArray<Resource>
+const emptyCommands = [] as const satisfies ReadonlyArray<AnyCommandBundle>
+
 const make = <
-  const Resources extends ReadonlyArray<Resource>,
-  const Commands extends ReadonlyArray<AnyCommandBundle>,
+  const Resources extends ReadonlyArray<Resource> = typeof emptyResources,
+  const Commands extends ReadonlyArray<AnyCommandBundle> = typeof emptyCommands,
 >(options: Readonly<{
   name: string
-  resources: Resources
-  commands: Commands
+  resources?: Resources
+  commands?: Commands
 }>) => {
-  const { resources, commands } = options
+  const resources = options.resources ?? emptyResources
+  const commands = options.commands ?? emptyCommands
   const bundles = [...resources, ...commands]
   const groups = Array.map(bundles, Struct.get("group"))
-  const tables = Array.map(resources, Struct.get("table")) as Array<Resources[number]["table"]>
+  const tables = Array.map(resources, (resource: Resource) => resource.table) as Array<Resources[number]["table"]>
   const tableNames = HashSet.empty<string>()
   const operationNames = HashSet.empty<string>()
 
@@ -65,7 +69,7 @@ const make = <
   const layers = Array.map(bundles, Struct.get("handlers")) as Array<HandlerLayer<Resources[number] | Commands[number]>>
   const handlers = Layer.mergeAll(Layer.empty, ...layers)
 
-  return Struct.assign(options, { group, tables, handlers })
+  return Struct.assign(options, { resources, commands, group, tables, handlers })
 }
 
 export interface Application extends AnyCommandBundle {

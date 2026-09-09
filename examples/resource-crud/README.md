@@ -1,6 +1,6 @@
 # Resource CRUD: tenant-owned todo operations
 
-This generated CRUD application demonstrates resource authorization with actual todo ownership data. A todo has a non-empty `title`, a `completed` flag, and required `tenantId` and `ownerId` strings. `Resource.make` supplies generated storage, repository, RPC procedures, and handlers; no todo-specific command service or SQL implementation is authored.
+This generated CRUD application demonstrates resource authorization with actual todo ownership data. A stored todo has a non-empty `title`, a `completed` flag, and required `tenantId` and `ownerId` strings. `Resource.make` supplies generated storage, repository, RPC procedures, and handlers; no todo-specific command service or SQL implementation is authored.
 
 ## Authorization policy
 
@@ -29,11 +29,27 @@ const authorization = p.policy({
     remove: administrator,
   },
 })
+
+const TodosResource = Resource.make({
+  authorization,
+  name: "todos",
+  schema: TodoSchema,
+  create: {
+    defaults: { completed: false },
+    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+  },
+  list: {
+    filter: ["completed"],
+    order: [{ field: "title" }],
+    limit: 25,
+  },
+  operations: [...Resource.crud, "patch"] as const,
+})
 ```
 
-Every operation is tenant-scoped. Within a tenant, an owner can read a todo; an administrator can read every todo. A create request must make the caller the owner. Owners may update or patch only incomplete todos and cannot change either ownership field. Administrators can update, reopen, and delete tenant todos, but cannot transfer ownership because `tenantId` and `ownerId` must remain unchanged. Omitted actions deny access.
+Every operation is tenant-scoped. Within a tenant, an owner can read a todo; an administrator can read every todo. Creation derives the caller's tenant and owner from the typed subject bindings. Owners may update or patch only incomplete todos and cannot change either ownership field. Administrators can update, reopen, and delete tenant todos, but cannot transfer ownership because `tenantId` and `ownerId` must remain unchanged. Omitted actions deny access.
 
-`completed` is optional on create and defaults to `false` when absent; an explicit value wins. `id` is generated, create input must not provide it, `get` and `remove` take `id`, `update` takes the complete stored row, and `patch` takes `{ id, patch }`. `patch` may include any non-id todo field, validates the complete candidate row after merging, and commits atomically. Hidden rows behave as missing rather than disclosing their existence.
+`completed` is optional on create and defaults to `false` when absent; an explicit value wins. `id`, `tenantId`, and `ownerId` are absent from create input: the identifier is generated, and the ownership values come from the authenticated subject. The server rejects an attempted `tenantId` or `ownerId` create value before policy evaluation. `get` and `remove` take `id`, `update` takes the complete stored row, and `patch` takes `{ id, patch }`. `patch` may include any non-id todo field, validates the complete candidate row after merging, and commits atomically. Hidden rows behave as missing rather than disclosing their existence.
 
 ## Run with the demo credentials
 
@@ -42,6 +58,8 @@ Run commands from the repository root. Start the loopback server:
 ```bash
 bun run resource-crud:server
 ```
+
+The same runner opts into the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). Enter one of the demo bearer tokens there to make the same policy-protected calls; see the [shared admin guide](../README.md#generated-admin).
 
 The generated CLI reads `RESOURCE_CRUD_TOKEN` and sends it as a bearer token. The following deliberately public demo fixtures are only for this loopback example:
 
@@ -52,11 +70,11 @@ The generated CLI reads `RESOURCE_CRUD_TOKEN` and sends it as a bearer token. Th
 | `admin-demo` | `admin` in `acme`, `admin` | Reads, reopens, updates, and deletes every Acme todo. |
 | `outsider-demo` | `alice` in `other`, `editor` | Cannot see any Acme todo, even one owned by `alice`. |
 
-Create an Alice-owned todo with the ownership fields supplied explicitly:
+Create an Alice-owned todo without supplying ownership:
 
 ```bash
 export RESOURCE_CRUD_TOKEN=alice-demo
-bun run resource-crud todos.create --title "Ship applications" --tenant-id acme --owner-id alice
+bun run resource-crud todos.create --title "Ship applications"
 bun run resource-crud todos.list --filter-completed false --limit 10
 ```
 

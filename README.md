@@ -26,13 +26,23 @@ const Books = Resource.make({
 export const Library = Application.make({
   name: "library",
   resources: [Books],
-  commands: [],
 })
 ```
 
-This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
+This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. `Application.make` groups optional `resources` and `commands`; omitted groups are empty. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.run(application, { database: { manifest, filename }, services, initialize })` supplies one entrypoint for `serve`, generated remote commands, `schema`, and `inspect`. Use `Option.none()` for the environment/default filename, `Layer.empty` when no authored services are needed, and `Effect.void` when no initialization is needed. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+`ApplicationBun.run(application, options)` returns the application Effect; `ApplicationBun.runMain(application, options)` is the Bun entrypoint convenience. A manifest may be a path or `URL`, and `filename`, `services`, and `initialize` are optional:
+
+```ts
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
+
+ApplicationBun.runMain(Library, {
+  database: { manifest },
+  admin: true,
+})
+```
+
+Pass `database: { manifest, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. Callers that already own decoded history can instead pass `database: { migrations }`. `admin: true` is opt-in; the [examples' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -48,7 +58,7 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 
 Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
 
-`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. For authored JSON operations, `Commands.rpc(tag, { payload, success, error })` accepts explicit schemas and derives their JSON codecs, returning a native Effect RPC. Use `Rpc.make` directly for native options or custom wire codecs. Install implementations through `descriptor.layer(handlers)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. Resource-only applications use `commands: []`. `Application.prepare(application)` prepares tables through the migration store.
+`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. For authored JSON operations, `Commands.rpc(tag, { payload, success, error })` accepts explicit schemas and derives their JSON codecs, returning a native Effect RPC. Use `Rpc.make` directly for native options or custom wire codecs. Install implementations through `descriptor.layer(handlers, { catchTags })` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. `catchTags` maps only tagged errors raised during handler invocation, after the authored transaction has unwound; it does not map layer acquisition failures, defects, interruption, or unmatched domain errors. Its mapped outputs are checked against the RPC success and error schemas. Resource-only applications can omit `commands`; `Application.prepare(application)` prepares tables through the migration store.
 
 RPCs may share schemas without sharing business behavior: the [reservation RPCs](examples/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
 
@@ -88,17 +98,22 @@ const Documents = Resource.make({
   name: "documents",
   schema: DocumentSchema,
   authorization,
+  create: {
+    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+  },
   operations: [...Resource.crud, "patch"],
 })
 ```
 
-Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults/generation or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
+Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults, subject bindings, generation, or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
+
+`create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input; a supplied bound field is rejected before authorization, and the server injects trusted subject claims before checking the candidate policy.
 
 Repositories enforce policy even when invoked by authored code. Hidden rows behave as missing; lists filter in SQL before pagination. Create/update/patch require a readable candidate, and returned rows are checked again. Checks and writes share a transaction, so a denied mutation leaves no changes. Missing or invalid identity yields `Unauthenticated`; denied actions yield `Forbidden`.
 
 Protected generated RPCs use request-local `AuthorizationSubject`, supplied by `Authenticator` from `effect-domains/authorization-rpc`. Provide that service through the application's `services` layer. Its `authenticate(headers)` Effect must verify credentials and return trusted subject claims, or fail with `Unauthenticated`; the framework does not trust caller-supplied identity headers or provide a token issuer. The generated CLI sends `<APP>_TOKEN` as an HTTP bearer token. Local authored Effects can supply `AuthorizationSubject` explicitly; `Authorization.require(definition, action, values)` evaluates the same policy outside a repository.
 
-The closed `Policy` AST supports constants, total scalar equality, collection membership, conjunction, and disjunction. Its fold drives evaluation, SQL, reference validation, and inspection. SQL visibility fields must share identity-encoded canonical/storage schemas with supported string or finite numeric physical scalars, optionally nullable. Boolean storage coercions and semantic codecs are rejected for these fields rather than approximated. Standalone evaluation supports booleans too. Native `SqlClient` and `RepositoryStore` are privileged escape hatches, not authorization boundaries.
+The closed `Policy` AST supports constants, total scalar equality, collection membership, conjunction, and disjunction. Its fold drives evaluation, SQL, reference validation, and inspection. SQL visibility fields must use identical, identity-encoded canonical and storage schemas. Supported physical values are strings and finite numeric scalars; booleans are supported only by the native Boolean-to-checked-`0`/`1` SQLite mapping. Arbitrary semantic codecs are rejected rather than approximated. Standalone evaluation supports booleans too. Native `SqlClient` and `RepositoryStore` are privileged escape hatches, not authorization boundaries.
 
 ## Storage conventions
 

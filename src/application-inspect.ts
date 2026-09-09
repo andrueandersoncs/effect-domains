@@ -1,7 +1,7 @@
 import { Array, Equivalence, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
 import { Table, TableField, TableCheckSchema } from "./table.ts"
 import type { Resource } from "./resource.ts"
-import { Policy } from "./policy.ts"
+import { Policy, type Operand } from "./policy.ts"
 
 type InspectableProcedure = Readonly<{
   _tag: string
@@ -41,7 +41,8 @@ class PhysicalTable extends Schema.Class<PhysicalTable>("PhysicalTable")({
   fields: PhysicalFieldsSchema,
 }) {}
 
-const CreationSchema = Schema.Struct({ defaults: Schema.Unknown, generated: Schema.Unknown })
+const SubjectBindingsSchema = Schema.Record(Schema.String, Schema.String)
+const CreationSchema = Schema.Struct({ defaults: Schema.Unknown, generated: Schema.Unknown, fromSubject: SubjectBindingsSchema })
 interface Creation extends Schema.Schema.Type<typeof CreationSchema> {}
 
 const StorageSchema = Schema.Struct({
@@ -132,10 +133,19 @@ const resource = (definition: Resource) => {
   const insert = schemaDocument(definition.table.insertSchema)
   const row = schemaDocument(definition.table.rowSchema)
   const stored = schemaDocument(definition.table.storageSchema)
+  const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
   const defaults = pipe(definition.create, Option.flatMap(flow(Struct.get("defaults"), Option.fromNullishOr)), Option.getOrElse(Record.empty))
   const generated = pipe(definition.create, Option.flatMap(flow(Struct.get("generated"), Option.fromNullishOr)), Option.getOrElse(Record.empty))
-  const creation = CreationSchema.make({ defaults, generated })
-  const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
+
+  const fromSubject = Option.match(definition.create, {
+    onNone: Record.empty,
+    onSome: (creation) => {
+      const bindings = creation.fromSubject ?? Record.empty()
+      const subjectBindings = bindings as Readonly<Record<string, Extract<Operand, { readonly _tag: "SubjectField" }>>>
+      return Record.map(subjectBindings, (binding) => `subject.${binding.field}`)
+    },
+  })
+  const creation = CreationSchema.make({ defaults, generated, fromSubject })
   const authorization = inspectAuthorization(definition.authorization)
 
   return ResourceInspection.make({

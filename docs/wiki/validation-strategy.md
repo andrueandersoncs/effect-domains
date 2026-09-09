@@ -30,6 +30,20 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-09: Declarative inputs and generated admin
+
+The approved cutover adds trusted-subject creation bindings, native Boolean SQL visibility, optional application/runtime configuration, invocation error mapping, and an opt-in generated browser admin. Canonical schemas, operation exposure, authorization decisions, authored transactions, and frozen migration intent remain separate. ([Resource](../../src/resource.ts); [Runtime](../../src/application-bun.ts); [Commands](../../src/commands.ts); [Admin adapter](../../src/application-admin.ts))
+
+- `bun run check` passes. All 40 tests across 14 files pass. Added coverage exercises subject-derived create inputs and forbidden overrides, native Boolean visibility/pagination, mapper error types and finalizer ordering, admin per-call identity isolation, cross-origin/untrusted-origin rejection, Date/void codecs, declared errors, and defect redaction. ([Authorization tests](../../test/Authorization.test.ts); [RPC tests](../../test/AuthorizationRpc.test.ts); [Command tests](../../test/Commands.test.ts); [Admin tests](../../test/ApplicationAdmin.test.ts); [Runtime types](../../test/Application.types.ts))
+- Real browser sessions against isolated Bun todo and book applications exercised generated create/list/patch forms, one-item next/back cursor navigation, denied owner mutations, and whole-payload JSON rejection of forged ownership. Todo creation supplied only a title; returned rows contained the verified `acme`/`alice` claims. The final Effect-based patch form read enabled optional fields at submission time.
+- Book text containing an HTML image/event-handler string rendered literally in the table: no image element or script execution occurred. A configured `/console` surface applied a custom title, resource/operation labels, description, and column selection. A 390-pixel mobile viewport had no page overflow. Bearer input with credentials present left local and session storage empty. ([Client](../../src/admin-client.ts); [Presentation](../../src/application-admin.ts))
+- Generated reservation forms executed reserve and release, returning the authored `held` and `released` states. The CLI and MCP each created a todo from a title alone; a subsequent MCP call without credentials returned `Unauthenticated`. A note created through the CLI returned canonical text while direct SQLite inspection showed `stored:Canonical storage overlay`, exercising the native `Schema.fieldsAssign` storage declaration.
+- A minimal `runMain` application without admin returned HTTP 404 at `/admin`. An explicit database filename took precedence over a conflicting environment setting; URL-based manifests initialized the isolated databases. No migration artifacts or canonical schemas were changed.
+- `bun run lint` does **not** pass. Remaining diagnostics include DOM/native collection style, declaration spacing, configuration-object rules, and the imperative `runMain` boundary. No rules, exclusions, or suppressions were added; type/runtime verification does not imply lint compliance.
+- Final browser filtering selected only the completed row for `true` and only incomplete rows for explicit `false`. All six smoke servers were stopped, browser tabs released, and the three temporary entrypoints and isolated SQLite directory removed.
+
+These checks establish the exercised generated surface, not a production authentication system, inferred permissions, arbitrary custom UI layouts, REST semantics, or another database implementation.
+
 ### 2026-09-09: MCP runtime derivation
 
 The `serve` command derived by `ApplicationBun.run` now mounts `/mcp` beside `/rpc/v1`; applications do not redeclare tools. Native Effect MCP handles HTTP/session negotiation, while `RpcMcp` derives tool schemas and dispatches through the existing RPC handlers and middleware. ([Adapter](../../src/rpc-mcp.ts); [Runtime](../../src/application-bun.ts); [Usage](../../examples/README.md#mcp-server))

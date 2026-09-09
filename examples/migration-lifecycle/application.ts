@@ -4,5 +4,4 @@ import { DocumentsResource } from "./resources.ts"
 export const MigrationLifecycleApplication = Application.make({
   name: "migration-lifecycle",
   resources: [DocumentsResource],
-  commands: [],
 })

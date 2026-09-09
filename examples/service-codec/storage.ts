@@ -1,5 +1,5 @@
 import { Context, Effect, Schema, SchemaGetter, pipe } from "effect"
-import { NoteIdSchema } from "./domain.ts"
+import { NoteSchema } from "./domain.ts"
 
 export class StoragePrefix extends Context.Service<
   StoragePrefix,
@@ -36,9 +36,9 @@ export const StoredTextSchema = pipe(
   }),
 )
 
-export const StoredNoteSchema = Schema.Struct({
-  id: NoteIdSchema,
-  text: StoredTextSchema,
-})
+export const StoredNoteSchema = pipe(
+  NoteSchema,
+  Schema.fieldsAssign({ text: StoredTextSchema }),
+)
 
 interface StoredNote extends Schema.Schema.Type<typeof StoredNoteSchema> {}

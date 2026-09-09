@@ -1,9 +1,9 @@
-import { Array, Deferred, Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
-import { Rpc, RpcClient, RpcGroup, RpcSchema, RpcServer } from "effect/unstable/rpc"
+import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
+import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
 
-type UnaryRpc = Rpc.Rpc<string, Schema.Top, Schema.Top, Schema.Top>
 
 class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
   "RpcMcpDefinitionError",
@@ -15,25 +15,6 @@ const internalFailure = pipe(McpSchema.CallToolResult.make({
   content: [{ type: "text", text: "Tool execution failed due to an internal server error." }],
 }), Effect.succeed)
 
-const makeClient = Effect.fn("RpcMcp.makeClient")(function* (group: RpcGroup.RpcGroup<UnaryRpc>) {
-  type Client = Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<UnaryRpc, never, true>>>
-  const ready = yield* Deferred.make<Client>()
-
-  const deliver = (response: Parameters<Client["write"]>[0]) => pipe(
-    Deferred.await(ready),
-    Effect.flatMap((client) => client.write(response)),
-  )
-
-  const server = yield* RpcServer.makeNoSerialization(group, { onFromServer: deliver })
-
-  const client = yield* RpcClient.makeNoSerialization(group, {
-    flatten: true,
-    onFromClient: ({ message }) => server.write(0, message),
-  })
-
-  yield* Deferred.succeed(ready, client)
-  return client.client
-})
 
 const successResult = (encoded: Schema.JsonObject) => {
   const text = JSON.stringify(encoded)

@@ -1,16 +1,9 @@
-import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Layer, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { MigrationLifecycleApplication } from "./application.ts"
 
-const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
-const manifest = Bun.fileURLToPath(manifestUrl)
-const filename = Option.none()
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
-const program = ApplicationBun.run(MigrationLifecycleApplication, {
-  database: { manifest, filename },
-  services: Layer.empty,
-  initialize: Effect.void,
+ApplicationBun.runMain(MigrationLifecycleApplication, {
+  database: { manifest },
+  admin: true,
 })
-
-BunRuntime.runMain(program)

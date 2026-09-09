@@ -47,9 +47,15 @@ const removeBook = Commands.rpc("books.remove", {
   error: requiredBookErrorsSchema,
 })
 
-const bookRpcs = RpcGroup.make(createBook, getBook, listBooks, updateBook, removeBook)
+const booksServiceRpcs = RpcGroup.make(
+  createBook,
+  getBook,
+  listBooks,
+  updateBook,
+  removeBook,
+)
 
 export const BooksService = Commands.make({
   name: "examples/authored-sql/BooksService",
-  group: bookRpcs,
+  group: booksServiceRpcs,
 })

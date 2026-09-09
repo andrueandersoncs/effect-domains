@@ -13,6 +13,8 @@ MIGRATION_LIFECYCLE_DB=migration-demo.sqlite bun run migration-lifecycle:seed-v1
 MIGRATION_LIFECYCLE_DB=migration-demo.sqlite bun run migration-lifecycle:server
 ```
 
+The runner also opts into the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). It exposes the current published document operations, not the legacy seed path; see the [shared admin guide](../README.md#generated-admin).
+
 In another terminal, inspect the migrated legacy row and create a current document:
 
 ```bash

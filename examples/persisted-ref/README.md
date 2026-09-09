@@ -12,6 +12,8 @@ From the repository root, start the server:
 bun run persisted-ref:server
 ```
 
+The runner enables the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin); its command forms call the same published RPCs. The shared [admin guide](../README.md#generated-admin) covers the optional surface and browser boundary.
+
 In another terminal, exercise the cached and stored paths:
 
 ```bash
@@ -41,7 +43,7 @@ The server is loopback-only and unauthenticated, using Effect's JSON RPC protoco
 
 ## What is generated and what is authored
 
-The `counters` resource deliberately publishes **no generated operations**. [`contracts.ts`](contracts.ts) declares `counters.get`, `counters.increment`, `counters.set`, and `counters.refresh` as native RPCs and passes their `RpcGroup` to `Commands.make({ name, group })` for the injectable `CounterCommands` descriptor. [`sqlite.ts`](sqlite.ts) installs the explicit handler record with `CounterCommands.layer(...)`. `Application.make` combines that descriptor's RPC group with the resource group. The frozen `001_initial` artifact supplies the `counters` table, but it is not an API generator.
+The `counters` resource deliberately publishes **no generated operations**. [`contracts.ts`](contracts.ts) declares `counters.get`, `counters.increment`, `counters.set`, and `counters.refresh` as native RPCs and passes their `RpcGroup` to `Commands.make({ name, group })` for the injectable `CounterCommands` descriptor. [`sqlite.ts`](sqlite.ts) installs the explicit handler record with `CounterCommands.layer(...)`, using `catchTags` only to translate declared persistence-tag failures from an invocation to `CounterUnavailable`; unmatched errors are not remapped. `Application.make` combines that descriptor's RPC group with the resource group. The frozen `001_initial` artifact supplies the `counters` table, but it is not an API generator.
 
 On startup, `PersistedRef.fromResource(CounterResource, { key: VisitsCounterId, ifMissing: { value: 0 } })` binds the ref to the `visits` identity. Within the resource transaction it loads that row or creates it once if absent; `ifMissing` supplies only non-key fields and the bound key is injected. The initial committed row becomes one process-local cache. A synchronized `increment` calculates from that cache, commits through the bound resource row, and updates the cache only from the committed result. A commit cannot change the bound identity.
 

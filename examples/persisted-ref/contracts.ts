@@ -15,16 +15,20 @@ const counterOperation = {
   error: CounterUnavailable,
 }
 
-const get = Commands.rpc("counters.get", counterOperation)
-const increment = Commands.rpc("counters.increment", counterOperation)
-
-const set = Commands.rpc("counters.set", {
+const getCounter = Commands.rpc("counters.get", counterOperation)
+const incrementCounter = Commands.rpc("counters.increment", counterOperation)
+const setCounter = Commands.rpc("counters.set", {
   ...counterOperation,
   payload: SetCounterPayloadSchema,
 })
+const refreshCounter = Commands.rpc("counters.refresh", counterOperation)
 
-const refresh = Commands.rpc("counters.refresh", counterOperation)
-const counterRpcs = RpcGroup.make(get, increment, set, refresh)
+const counterRpcs = RpcGroup.make(
+  getCounter,
+  incrementCounter,
+  setCounter,
+  refreshCounter,
+)
 
 export const CounterCommands = Commands.make({
   name: "examples/persisted-ref/Counter",

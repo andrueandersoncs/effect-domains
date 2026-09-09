@@ -36,7 +36,7 @@ PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
 BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
 ```
 
-Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. Todo and note RPCs require the demo credentials below; the other five examples remain explicitly public. These are runnable loopback examples, not production deployment templates.
+Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. Todo and note RPCs require the demo credentials below; the other five examples remain explicitly public. All seven `main.ts` runners opt into the generated admin at `/admin`. These are runnable loopback examples, not production deployment templates.
 
 ### Demo authentication
 
@@ -55,15 +55,17 @@ Set the token on the **client**, not the server:
 
 ```bash
 RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.create \
-  --tenant-id acme --owner-id alice --title "Ship authorization examples"
+  --title "Ship authorization examples"
 SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --id example-note --text "Shared notes"
 ```
+
+Todo creation binds `tenantId` and `ownerId` from the authenticated subject. They are deliberately absent from the generated create input; sending either field is rejected by the server. Full-row updates still include both ownership fields, while the todo guide retains forbidden ownership-patch examples.
 
 Todo policies combine tenant scope, ownership, current completion state, immutable ownership, and admin-only removal. `outsider-demo` deliberately has Alice's user ID in another tenant, demonstrating that ownership alone does not grant access. Existing todos migrate to tenant `acme`, owner `alice`; this is explicit demo backfill intent, not an inferred ownership rule.
 
 Notes instead form one global shared collection: readers can read, editors can create/update, and admins can also remove. Tenant claims do not partition this collection. The storage codec remains independent of authorization. Follow each guide for successful and denied operations.
 
-Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. Generated repositories enforce it before SQL pagination and transactionally around mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
+Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
 
 ### Shared structure
 
@@ -75,7 +77,30 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, and generated remote commands.
 
-`Application.make({ name, resources, commands: [descriptor] })` combines resource and command-descriptor groups; absent groups use empty arrays. `main.ts` resolves the manifest to an absolute path and calls `ApplicationBun.run(app, { database: { manifest, filename: Option.none() }, services, initialize })`; callers owning decoded history may instead pass `database: { migrations, filename: Option.none() }`. Use `Layer.empty` for no authored services and `Effect.void` for no initialization. The same runner supplies the loopback server, generated RPC client, local schema commands, and inspection; `*:server` scripts alias `main.ts serve`. Authored applications pass native RPC groups to `Commands.make({ name, group })` and install implementations with `descriptor.layer(handlers)`.
+`Application.make({ name, resources, commands })` groups optional resource and command arrays; omitted groups are empty. Each `main.ts` resolves its manifest as `new URL("./migrations/manifest.json", import.meta.url)` and calls `ApplicationBun.runMain(app, { database: { manifest }, admin: true })`, adding `services` and `initialize` only where its handlers need them. `ApplicationBun.run` returns a typed Effect when the caller owns the runtime. `database.filename`, `services`, and `initialize` are optional; callers with decoded history may instead pass `database: { migrations, filename? }`. The shared runner supplies the loopback server, generated RPC client, local schema commands, inspection, MCP, and opted-in admin; `*:server` scripts alias `main.ts serve`. Authored applications pass native RPC groups to `Commands.make({ name, group })` and install implementations with `descriptor.layer(handlers, { catchTags })`. `catchTags` maps only matching tagged invocation errors after the handler's authored transaction has unwound; acquisition failures, defects, interruption, and unmatched domain errors are retained, and mapped output must satisfy the RPC contract.
+
+## Generated admin
+
+Every example enables the optional admin server in its `main.ts`. Start an example and open `http://127.0.0.1:3000/admin` (or its configured port). It exposes only the application's published unary RPC operations; it does not infer permissions or bypass resource policy. Its in-process transport shares the RPC handlers, middleware, codecs, and request headers with the MCP server, and every protected call forwards and authenticates its bearer token independently.
+
+The page keeps a manually entered bearer token in the browser's current memory only; it has no login, issuer, persistence, or token refresh. It builds scalar and structured forms from the RPC JSON schemas, hides forbidden fields, offers an entire-input JSON fallback for complex values, renders resource lists with declared filters and cursor next/back controls, and displays declared input/domain errors plus transport failures in the page.
+
+`admin: true` uses `/admin`. A host can instead use the lower-level layer with presentation metadata:
+
+```ts
+ApplicationAdmin.layerHttp({
+  application,
+  javascript,
+  path: "/operations",
+  presentation: {
+    title: "Library operations",
+    resources: { books: { label: "Catalog", columns: ["id", "title"] } },
+    operations: { "books.create": { label: "Add book", description: "Creates a catalog entry." } },
+  },
+})
+```
+
+The default Bun runner listens only on the loopback hostname. Admin browser calls must be same-origin; custom non-loopback hosts must explicitly name allowed origins with `allowedOrigins`. That allow-list validates trusted same-origin browser requests; it is not a CORS grant or a general cross-origin API.
 
 ## Authored SQL
 

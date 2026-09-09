@@ -10,7 +10,7 @@ export const BookResource = Resource.make({
 })
 ```
 
-The resource derives the table, UUIDv7 identifier, request/result/error schemas, JSON codecs, RPC group, and handlers. There is no `contracts.ts`, authored SQL, or command service. The application uses `commands: []` and the runner supplies `Layer.empty`.
+The resource derives the table, UUIDv7 identifier, request/result/error schemas, JSON codecs, RPC group, and handlers. There is no `contracts.ts`, authored SQL, command service, authored service layer, or initialization effect.
 
 For custom SQL and public error/result contracts, see the [authored SQL guide](../README.md#authored-sql). For defaults, pagination, and patch policy, see [resource-crud](../resource-crud/README.md).
 
@@ -21,6 +21,8 @@ From the repository root, start the server:
 ```bash
 bun run basic-crud:server
 ```
+
+The runner also enables the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). It is an opt-in browser surface over the same published RPCs; see the [shared admin guide](../README.md#generated-admin) for bearer entry, forms, JSON fallback, and browser-origin boundaries.
 
 In another terminal:
 
@@ -63,5 +65,5 @@ Review migrations; do not regenerate already-applied artifacts from current mode
 - [`domain.ts`](domain.ts): canonical book schema.
 - [`resources.ts`](resources.ts): one generated CRUD declaration.
 - [`application.ts`](application.ts): resource registration, with no authored commands.
-- [`main.ts`](main.ts): shared server, CLI, schema, and inspection runner.
+- [`main.ts`](main.ts): `ApplicationBun.runMain` with a URL manifest and optional runtime settings omitted.
 - [`migrations/manifest.json`](migrations/manifest.json) and [artifacts](migrations/): frozen runtime history.

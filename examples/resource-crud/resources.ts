@@ -32,6 +32,7 @@ export const TodosResource = Resource.make({
   schema: TodoSchema,
   create: {
     defaults: { completed: false },
+    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
   },
   list: {
     filter: ["completed"],

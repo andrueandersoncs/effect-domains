@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Option, Record, Schema, Struct, pipe } from "effect"
+import { Effect, Option, Record, Result, Schema, Struct, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
@@ -16,9 +16,16 @@ const PrivateNoteSchema = Schema.Struct({ id: identifier(Schema.String), ownerId
 interface PrivateNote extends Schema.Schema.Type<typeof PrivateNoteSchema> {}
 const p = Authorization.for({ resource: PrivateNoteSchema, subject: NoteReaderSchema })
 const owned = p.eq(p.row.ownerId, p.subject.userId)
+const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unrestrictedScope = p.all()
-const policy = p.policy({ scope: unrestrictedScope, allow: { read: owned } })
-const Notes = Resource.make({ name: "private_notes", schema: PrivateNoteSchema, authorization: policy, operations: ["get"] })
+const policy = p.policy({ scope: unrestrictedScope, allow: { read: owned, create: candidateOwned } })
+const Notes = Resource.make({
+  name: "private_notes",
+  schema: PrivateNoteSchema,
+  authorization: policy,
+  create: { fromSubject: { ownerId: p.subject.userId } },
+  operations: ["get", "create"],
+})
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)
 interface Sessions extends Schema.Schema.Type<typeof SessionsSchema> {}
 const sessions = SessionsSchema.make({ "Bearer alice-session": { userId: "alice" }, "Bearer bob-session": { userId: "bob" } })
@@ -40,6 +47,17 @@ it.effect("RPC authentication overrides captured identity and isolates concurren
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO private_notes (id, ownerId, text) VALUES ('alice-note', 'alice', 'alice secret'), ('bob-note', 'bob', 'bob secret')`
     const client = yield* RpcTest.makeClient(Notes.group)
+    const forgedPayload = yield* pipe(
+      Schema.decodeUnknownEffect(Schema.toCodecJson(Notes.createInputSchema))({ id: "forged-note", ownerId: "bob", text: "forged" }),
+      Effect.result,
+    )
+    expect(Result.isFailure(forgedPayload)).toBe(true)
+
+    const aliceCreated = client["private_notes.create"]({ id: "alice-created", text: "alice authored" }, { headers: aliceHeaders })
+    const bobCreated = client["private_notes.create"]({ id: "bob-created", text: "bob authored" }, { headers: bobHeaders })
+    const created = yield* Effect.all({ alice: aliceCreated, bob: bobCreated }, { concurrency: 2 })
+    expect(created.alice.ownerId).toBe("alice")
+    expect(created.bob.ownerId).toBe("bob")
     const anonymous = yield* pipe(client["private_notes.get"]({ id: "alice-note" }), Effect.flip, Effect.map(Struct.get("_tag")))
     expect(anonymous).toBe("Unauthenticated")
     const aliceRead = client["private_notes.get"]({ id: "alice-note" }, { headers: aliceHeaders })

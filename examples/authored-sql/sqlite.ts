@@ -1,4 +1,4 @@
-import { Effect, Option, pipe } from "effect"
+import { Effect, Option } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { type Book, BookSchema } from "../basic-crud/domain.ts"
 import { BooksService } from "./contracts.ts"
@@ -13,7 +13,9 @@ import {
 import { BookResource } from "./resources.ts"
 type SqliteRow = Readonly<Record<string, unknown>>
 
-const persistenceFailure = () => BookPersistenceError.make({})
+const persistenceFailure = Effect.fn("Books.persistenceFailure")(function* () {
+  return yield* BookPersistenceError.make({})
+})
 
 const createBook = SqlSchema.findOne({
   Request: BookSchema,
@@ -21,13 +23,10 @@ const createBook = SqlSchema.findOne({
   execute: Effect.fn("Books.create.implementation")(function* (book) {
     const database = yield* SqlClient.SqlClient
 
-    return yield* pipe(
-      database<SqliteRow>`
-        INSERT INTO ${database(BookResource.table.name)} ${database.insert(book)}
-        RETURNING *
-      `,
-      Effect.mapError(persistenceFailure),
-    )
+    return yield* database<SqliteRow>`
+      INSERT INTO ${database(BookResource.table.name)} ${database.insert(book)}
+      RETURNING *
+    `
   }),
 })
 
@@ -37,14 +36,11 @@ const findBook = SqlSchema.findOneOption({
   execute: Effect.fn("Books.get.implementation")(function* (input) {
     const database = yield* SqlClient.SqlClient
 
-    return yield* pipe(
-      database<SqliteRow>`
-        SELECT * FROM ${database(BookResource.table.name)}
-        WHERE ${database(BookResource.table.identifier)} = ${input.id}
-        LIMIT 1
-      `,
-      Effect.mapError(persistenceFailure),
-    )
+    return yield* database<SqliteRow>`
+      SELECT * FROM ${database(BookResource.table.name)}
+      WHERE ${database(BookResource.table.identifier)} = ${input.id}
+      LIMIT 1
+    `
   }),
 })
 
@@ -53,10 +49,7 @@ const listBooks = SqlSchema.findAll({
   Result: BookResource.table.rowSchema,
   execute: Effect.fn("Books.list.implementation")(function* () {
     const database = yield* SqlClient.SqlClient
-    return yield* pipe(
-      database<SqliteRow>`SELECT * FROM ${database(BookResource.table.name)}`,
-      Effect.mapError(persistenceFailure),
-    )
+    return yield* database<SqliteRow>`SELECT * FROM ${database(BookResource.table.name)}`
   }),
 })
 
@@ -67,15 +60,12 @@ const updateBook = SqlSchema.findOneOption({
     const database = yield* SqlClient.SqlClient
     const changes = database.update(input, [BookResource.table.identifier])
 
-    return yield* pipe(
-      database<SqliteRow>`
-        UPDATE ${database(BookResource.table.name)}
-        SET ${changes}
-        WHERE ${database(BookResource.table.identifier)} = ${input.id}
-        RETURNING *
-      `,
-      Effect.mapError(persistenceFailure),
-    )
+    return yield* database<SqliteRow>`
+      UPDATE ${database(BookResource.table.name)}
+      SET ${changes}
+      WHERE ${database(BookResource.table.identifier)} = ${input.id}
+      RETURNING *
+    `
   }),
 })
 
@@ -85,14 +75,11 @@ const removeBook = SqlSchema.findOneOption({
   execute: Effect.fn("Books.remove.implementation")(function* (input) {
     const database = yield* SqlClient.SqlClient
 
-    return yield* pipe(
-      database<SqliteRow>`
-        DELETE FROM ${database(BookResource.table.name)}
-        WHERE ${database(BookResource.table.identifier)} = ${input.id}
-        RETURNING *
-      `,
-      Effect.mapError(persistenceFailure),
-    )
+    return yield* database<SqliteRow>`
+      DELETE FROM ${database(BookResource.table.name)}
+      WHERE ${database(BookResource.table.identifier)} = ${input.id}
+      RETURNING *
+    `
   }),
 })
 
@@ -107,35 +94,33 @@ const requireBook = Effect.fn("Books.require")(function* (
   return book.value
 })
 
-const create = Effect.fn("Books.create")(function* (input: Book) {
-  return yield* pipe(createBook(input), Effect.mapError(persistenceFailure))
-})
-
 const get = Effect.fn("Books.get")(function* (input: BookIdentifierInput) {
-  const found = yield* pipe(findBook(input), Effect.mapError(persistenceFailure))
+  const found = yield* findBook(input)
   return yield* requireBook(input.id, found)
-})
-
-const list = Effect.fn("Books.list")(function* (input: ListBooksInput) {
-  return yield* pipe(listBooks(input), Effect.mapError(persistenceFailure))
 })
 
 const update = Effect.fn("Books.update")(function* (
   input: typeof BookResource.table.rowSchema.Type,
 ) {
-  const found = yield* pipe(updateBook(input), Effect.mapError(persistenceFailure))
+  const found = yield* updateBook(input)
   return yield* requireBook(input.id, found)
 })
 
 const remove = Effect.fn("Books.remove")(function* (input: BookIdentifierInput) {
-  const found = yield* pipe(removeBook(input), Effect.mapError(persistenceFailure))
+  const found = yield* removeBook(input)
   return yield* requireBook(input.id, found)
 })
 
 export const BooksSqlite = BooksService.layer({
-  "books.create": create,
+  "books.create": createBook,
   "books.get": get,
-  "books.list": list,
+  "books.list": listBooks,
   "books.update": update,
   "books.remove": remove,
+}, {
+  catchTags: {
+    SqlError: persistenceFailure,
+    SchemaError: persistenceFailure,
+    NoSuchElementError: persistenceFailure,
+  },
 })

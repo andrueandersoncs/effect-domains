@@ -1,4 +1,4 @@
-import { Effect, Number, Struct, pipe } from "effect"
+import { Effect, Function, Number, Struct } from "effect"
 import { PersistedRef } from "effect-domains/persisted-ref"
 import { CounterCommands, type SetCounterPayload } from "./contracts.ts"
 import {
@@ -9,10 +9,15 @@ import {
 } from "./domain.ts"
 import { CounterResource } from "./resources.ts"
 
-const unavailable = () => CounterUnavailable.make({})
+const unavailable = Effect.fn("Counter.unavailable")(function* () {
+  return yield* CounterUnavailable.make({})
+})
 
-const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  pipe(effect, Effect.mapError(unavailable))
+const persistenceErrors = {
+  PersistedRefKeyError: unavailable,
+  RepositoryError: unavailable,
+  ResourceNotFound: unavailable,
+}
 
 const incrementedValue = Struct.evolve<
   CounterValue,
@@ -25,32 +30,25 @@ const counterHandlers = Effect.gen(function* () {
     ifMissing: { value: 0 },
   })
 
-  const get = Effect.fn("Counter.get")(function* () {
-    return yield* persisted.get
-  })
-
   const increment = Effect.fn("Counter.increment")(function* () {
-    const updated = persisted.update(incrementedValue)
-    return yield* persistence(updated)
+    return yield* persisted.update(incrementedValue)
   })
 
   // Bypass the cache because refresh makes the external write visible.
   const set = Effect.fn("Counter.set")(function* ({ value }: SetCounterPayload) {
     const next = CounterSchema.make({ id: VisitsCounterId, value })
-    const updated = CounterResource.repository.update(next)
-    return yield* persistence(updated)
-  })
-
-  const refresh = Effect.fn("Counter.refresh")(function* () {
-    return yield* persistence(persisted.refresh)
+    return yield* CounterResource.repository.update(next)
   })
 
   return {
-    "counters.get": get,
+    "counters.get": Function.constant(persisted.get),
     "counters.increment": increment,
     "counters.set": set,
-    "counters.refresh": refresh,
+    "counters.refresh": Function.constant(persisted.refresh),
   }
 })
 
-export const CounterSqlite = CounterCommands.layer(counterHandlers)
+export const CounterSqlite = CounterCommands.layer(counterHandlers, {
+  catchTags: persistenceErrors,
+})
+

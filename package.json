@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./application": "./src/application.ts",
+    "./application-admin": "./src/application-admin.ts",
     "./application-bun": "./src/application-bun.ts",
     "./application-inspect": "./src/application-inspect.ts",
     "./authorization": "./src/authorization.ts",

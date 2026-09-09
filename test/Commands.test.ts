@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Layer, Schema, pipe } from "effect"
+import { Context, Effect, Layer, Ref, Schema, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Commands } from "../src/commands.ts"
 
@@ -12,6 +12,8 @@ class TimeUnavailable extends Schema.TaggedError<TimeUnavailable>()("TimeUnavail
   at: Schema.Date,
 }) {}
 
+class HandlerFailed extends Schema.TaggedError<HandlerFailed>()("HandlerFailed", {}) {}
+
 const timeRpc = Commands.rpc("time", {
   payload: Schema.Date,
   success: Schema.Date,
@@ -21,6 +23,11 @@ const timeRpc = Commands.rpc("time", {
 const Greeter = Commands.make({
   name: "test/Commands/Greeter",
   group: greeterRpcs,
+})
+
+const Clock = Commands.make({
+  name: "test/Commands/Clock",
+  group: RpcGroup.make(timeRpc),
 })
 
 const greet = Effect.fn("Greeter.greet")(function* () {
@@ -50,6 +57,31 @@ it.effect("captures command handler services and lets invocation context overrid
   const scopedProgram = Effect.scoped(program)
   return scopedProgram
 })
+
+it.effect("maps tagged invocation failures after handler finalizers", () =>
+  Effect.scoped(Effect.gen(function* () {
+    const released = yield* Ref.make(false)
+    const at = new Date("2026-01-02T03:04:05.000Z")
+    const handlers = yield* Layer.build(Clock.layer({
+      time: () =>
+        Effect.scoped(Effect.gen(function* () {
+          yield* Effect.addFinalizer(() => Ref.set(released, true))
+          return yield* HandlerFailed.make({})
+        })),
+    }, {
+      catchTags: {
+        HandlerFailed: () =>
+          Effect.gen(function* () {
+            expect(yield* Ref.get(released)).toBe(true)
+            return yield* TimeUnavailable.make({ at })
+          }),
+      },
+    }))
+    const clock = Context.get(handlers, Clock)
+
+    expect(yield* Effect.flip(clock.time(at))).toEqual(TimeUnavailable.make({ at }))
+  })),
+)
 
 it("derives JSON codecs for transformed RPC schemas", () => {
   const at = new Date("2026-01-02T03:04:05.000Z")

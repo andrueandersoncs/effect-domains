@@ -1,17 +1,11 @@
-import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Option } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleAuthentication } from "../authentication.ts"
 import { ResourceCrudApplication } from "./application.ts"
 
-const manifestUrl = new URL("./migrations/manifest.json", import.meta.url)
-const manifest = Bun.fileURLToPath(manifestUrl)
-const filename = Option.none()
+const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
-const program = ApplicationBun.run(ResourceCrudApplication, {
-  database: { manifest, filename },
+ApplicationBun.runMain(ResourceCrudApplication, {
+  database: { manifest },
   services: ExampleAuthentication,
-  initialize: Effect.void,
+  admin: true,
 })
-
-BunRuntime.runMain(program)

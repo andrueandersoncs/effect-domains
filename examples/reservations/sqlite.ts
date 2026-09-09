@@ -88,12 +88,7 @@ const inventorySqliteEffect = Effect.gen(function* () {
       })
     })
 
-    const transaction = database.withTransaction(reservationTransaction)
-
-    return yield* pipe(
-      transaction,
-      Effect.catchTags(persistenceErrors),
-    )
+    return yield* database.withTransaction(reservationTransaction)
   })
 
   const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
@@ -132,12 +127,7 @@ const inventorySqliteEffect = Effect.gen(function* () {
         )
       })
 
-      const transaction = database.withTransaction(transitionTransaction)
-
-      return yield* pipe(
-        transaction,
-        Effect.catchTags(persistenceErrors),
-      )
+      return yield* database.withTransaction(transitionTransaction)
     })
 
   return {
@@ -147,4 +137,6 @@ const inventorySqliteEffect = Effect.gen(function* () {
   }
 })
 
-export const InventorySqlite = Inventory.layer(inventorySqliteEffect)
+export const InventorySqlite = Inventory.layer(inventorySqliteEffect, {
+  catchTags: persistenceErrors,
+})
