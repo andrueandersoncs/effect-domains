@@ -30,6 +30,18 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-09: Authorized examples
+
+The todo and service-codec applications now use authored resource policies and a shared demo-token authenticator. The other five examples remain explicitly public. These fixtures demonstrate the existing authorization API rather than adding framework behavior. ([Todo policy](../../examples/resource-crud/resources.ts); [Note policy](../../examples/service-codec/resources.ts); [Demo authenticator](../../examples/authentication.ts); [Walkthroughs](../../examples/README.md#demo-authentication))
+
+- `bun run check`, `bun run lint`, and all 34 tests across 12 files pass. The existing codec regression now supplies an authorized subject for its protected note creation. No suppressions or new test scaffolding were added. ([Codec regression](../../test/ResourceCrud.test.ts))
+- Real Bun example servers and their generated CLIs rejected missing/unknown credentials; isolated owner and tenant rows; and traversed Alice's three visible todos in one-item cursor pages while excluding interleaved rows. Forged owner/tenant creates and ownership transfers failed. Owners could edit incomplete todos, but not completed ones; denied edits and removals preserved state. An administrator reopened and removed a todo, and the owner could edit again after reopening.
+- The note CLI allowed editor create/update and reader reads, denied reader writes and editor deletion, and allowed administrator deletion. Another tenant's editor could read the intentionally global collection. RPC returned canonical `Revised domain text`; direct SQLite inspection showed `stored:Revised domain text`.
+- An isolated database was prepared using the original todo migration and seeded with one old-format row. Normal example startup applied `002_ownership`, retained the row, and filled `tenantId = "acme"` and `ownerId = "alice"`. The existing CLI supports one backfill and one transform flag; generation therefore supplied an explicit tenant backfill and constant owner SQL expression. Restart retained both migrated and newly created rows. ([Ownership artifact](../../examples/resource-crud/migrations/002_ownership.json); [Manifest](../../examples/resource-crud/migrations/manifest.json))
+- Both local `inspect` commands exposed subject schemas and rendered action policies without credentials. Both smoke servers were stopped and isolated SQLite files removed afterward.
+
+The session tokens are public fixtures without login, expiry, or revocation. Production identity lifecycle, arbitrary authored SQL authorization, other databases, and distributed coordination remain outside this evidence.
+
 ### 2026-09-08: Resource authorization
 
 The user-approved resource policy DSL requires explicit public, deny, or typed authorization. Canonical schemas remain authorization-free. One closed schema-backed AST and fold support evaluation, SQL visibility, reference validation, and inspection; request-local authenticated subjects reach protected generated RPCs. ([Authorization](../../src/authorization.ts); [Policy](../../src/policy.ts); [RPC authentication](../../src/authorization-rpc.ts))
@@ -100,6 +112,6 @@ That historical work observed generated todo CRUD, authored book queries, servic
 
 ## Evidence Boundary
 
-The shipped examples remain explicitly public and loopback-only; the isolated authorization smoke application exercised authenticated requests with test sessions. Evidence does not establish production identity issuance/revocation, multi-process coordination, idempotent reservation creation, cancellation recovery, production deployment readiness, another database, relationships, or a materially different business domain. An external write can supersede a persisted reference unless the application defines a concurrency policy; refresh alone is not one. ([Authorization verification](#2026-09-08-resource-authorization); [PersistedRef](../../src/persisted-ref.ts); [Research agenda](research-agenda.md))
+The todo and note examples authenticate public demo sessions; the other five examples remain public. All are loopback-only, not production deployment templates. Evidence does not establish production identity issuance/revocation, multi-process coordination, idempotent reservation creation, cancellation recovery, another database, relationships, or a materially different business domain. An external write can supersede a persisted reference unless the application defines a concurrency policy; refresh alone is not one. ([Example verification](#2026-09-09-authorized-examples); [PersistedRef](../../src/persisted-ref.ts); [Research agenda](research-agenda.md))
 
 The next architectural evidence should be another material slice rather than further generalization around the reservation application.
