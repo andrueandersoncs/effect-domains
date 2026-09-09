@@ -1,25 +1,14 @@
+import { Authorization } from "../src/authorization.ts"
 import { expect, it } from "@effect/vitest"
 import { Effect, Option, Result, pipe } from "effect"
-import {
-  CounterIdSchema,
-  CounterSchema,
-  type Counter,
-  VisitsCounterId,
-} from "../examples/persisted-ref/domain.ts"
+import { CounterIdSchema, CounterSchema, type Counter, VisitsCounterId } from "../examples/persisted-ref/domain.ts"
 import { PersistedRef } from "../src/persisted-ref.ts"
 import { Resource } from "../src/resource.ts"
 import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
 import { prepareTables } from "./prepare-tables.ts"
 
-const incrementCounter = (row: Counter) =>
-  CounterSchema.make({ ...row, value: row.value + 1 })
-
-const Counters = Resource.make({
-  name: "reference_counters",
-  schema: CounterSchema,
-  operations: [],
-})
-
+const incrementCounter = (row: Counter) => CounterSchema.make({ ...row, value: row.value + 1 })
+const Counters = Resource.make({ authorization: Authorization.public, name: "reference_counters", schema: CounterSchema, operations: [] })
 const otherCounterId = CounterIdSchema.make("other")
 
 const otherCounter = CounterSchema.make({
@@ -83,7 +72,4 @@ const persistedResourceProgram = Effect.gen(function* () {
   expect(visitsAreMissing).toBe(true)
 })
 
-it.effect(
-  "a resource reference cannot redirect writes or recreate a deleted row on refresh",
-  () => pipe(persistedResourceProgram, Effect.provide(sqlite)),
-)
+it.effect("a resource reference cannot redirect writes or recreate a deleted row on refresh", () => pipe(persistedResourceProgram, Effect.provide(sqlite)))

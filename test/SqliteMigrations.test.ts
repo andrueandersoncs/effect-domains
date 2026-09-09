@@ -1,3 +1,4 @@
+import { Authorization } from "../src/authorization.ts"
 import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
 import { existsSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
@@ -11,37 +12,18 @@ import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "../src/migrations.ts"
 import { Resource } from "../src/resource.ts"
 import { SqliteBunRuntime } from "../src/sqlite-bun.ts"
-import {
-  makeMigrationStore,
-  SqliteBackfill,
-  SqliteMigrations,
-  SqliteRename,
-  SqliteSchemaSnapshot,
-  SqliteMigration,
-  SqliteTransform,
-} from "../src/sqlite-migrations.ts"
+import { makeMigrationStore, SqliteBackfill, SqliteMigrations, SqliteRename, SqliteSchemaSnapshot, SqliteMigration, SqliteTransform } from "../src/sqlite-migrations.ts"
 
 const empty = SqliteSchemaSnapshot.make({ version: 1, tables: [] })
 const sqliteClient = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
-
 const SqliteMigrationJsonSchema = Schema.toCodecJson(SqliteMigration)
 const encodeMigration = Schema.encodeUnknownSync(SqliteMigrationJsonSchema)
-
 const TitleSchema = Schema.Struct({ title: Schema.NonEmptyString })
-
 interface Title extends Schema.Schema.Type<typeof TitleSchema> {}
 
-const nullableAdditionsAndRenamesAction = Effect.fn(
-  "SqliteMigrations.nullableAdditionsAndRenames",
-)(function* () {
+const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAdditionsAndRenames")(function* () {
   const database = yield* SqlClient.SqlClient
-
-  const before = Resource.make({
-    name: "documents",
-    schema: TitleSchema,
-    operations: [],
-  })
-
+  const before = Resource.make({ authorization: Authorization.public, name: "documents", schema: TitleSchema, operations: [] })
   const NullableCommentSchema = Schema.NullOr(Schema.String)
 
   const NullableDocumentSchema = Schema.Struct({
@@ -50,13 +32,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn(
   })
 
   interface NullableDocument extends Schema.Schema.Type<typeof NullableDocumentSchema> {}
-
-  const nullable = Resource.make({
-    name: "documents",
-    schema: NullableDocumentSchema,
-    operations: [],
-  })
-
+  const nullable = Resource.make({ authorization: Authorization.public, name: "documents", schema: NullableDocumentSchema, operations: [] })
   const isNonNegative = Schema.isGreaterThanOrEqualTo(0)
   const NonNegativeIntSchema = Schema.Int.check(isNonNegative)
 
@@ -67,14 +43,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn(
   })
 
   interface RenamedDocument extends Schema.Schema.Type<typeof RenamedDocumentSchema> {}
-
-  const renamed = Resource.make({
-    name: "documents",
-    schema: RenamedDocumentSchema,
-    operations: [],
-  })
-
-
+  const renamed = Resource.make({ authorization: Authorization.public, name: "documents", schema: RenamedDocumentSchema, operations: [] })
   const source = SqliteMigrations.snapshot([before.table])
   const withComment = SqliteMigrations.snapshot([nullable.table])
   const target = SqliteMigrations.snapshot([renamed.table])
@@ -116,82 +85,47 @@ const nullableAdditionsAndRenamesAction = Effect.fn(
   })
 })()
 
-const nullableAdditionsAndRenames = pipe(
-  nullableAdditionsAndRenamesAction,
-  Effect.provide(sqliteClient),
-)
+const nullableAdditionsAndRenames = pipe(nullableAdditionsAndRenamesAction, Effect.provide(sqliteClient))
+const nullableAdditionsAndRenamesTest = Function.constant(nullableAdditionsAndRenames)
 
-const nullableAdditionsAndRenamesTest = Function.constant(
-  nullableAdditionsAndRenames,
-)
+it.effect("nullable additions and explicit renames preserve records regardless of declaration order", nullableAdditionsAndRenamesTest)
 
-it.effect(
-  "nullable additions and explicit renames preserve records regardless of declaration order",
-  nullableAdditionsAndRenamesTest,
-)
+const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const OriginalLabelSchema = Schema.Literal("two  spaces")
+  const OriginalSchema = Schema.Struct({ label: OriginalLabelSchema })
+  interface Original extends Schema.Schema.Type<typeof OriginalSchema> {}
+  const original = Resource.make({ authorization: Authorization.public, name: "labels", schema: OriginalSchema, operations: [] })
+  const ChangedLabelSchema = Schema.Literal("two spaces")
+  const ChangedSchema = Schema.Struct({ label: ChangedLabelSchema })
+  interface Changed extends Schema.Schema.Type<typeof ChangedSchema> {}
+  const changed = Resource.make({ authorization: Authorization.public, name: "labels", schema: ChangedSchema, operations: [] })
+  const source = SqliteMigrations.snapshot([original.table])
+  const initial = SqliteMigrations.plan({ id: "001_drift", from: empty, to: source })
+  const store = makeMigrationStore(database, [initial])
+  yield* store.prepare(source.tables)
+  yield* database`DROP TABLE labels`
+  const changedSnapshot = Table.snapshot(changed.table)
+  const changedTableSql = renderCreateTable(changedSnapshot)
+  const changedTable = database.literal(changedTableSql)
+  yield* pipe(database`${changedTable}`, Effect.asVoid)
+  const record = yield* changed.repository.create({ label: "two spaces" })
+  const prepareSource = store.prepare(source.tables)
+  const outcome = yield* Effect.result(prepareSource)
+  const loadedRecord = yield* changed.repository.get(record.id)
 
-const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(
-  function* () {
-    const database = yield* SqlClient.SqlClient
-    const OriginalLabelSchema = Schema.Literal("two  spaces")
-    const OriginalSchema = Schema.Struct({ label: OriginalLabelSchema })
-    interface Original extends Schema.Schema.Type<typeof OriginalSchema> {}
-
-    const original = Resource.make({
-      name: "labels",
-      schema: OriginalSchema,
-      operations: [],
-    })
-
-    const ChangedLabelSchema = Schema.Literal("two spaces")
-    const ChangedSchema = Schema.Struct({ label: ChangedLabelSchema })
-    interface Changed extends Schema.Schema.Type<typeof ChangedSchema> {}
-
-    const changed = Resource.make({
-      name: "labels",
-      schema: ChangedSchema,
-      operations: [],
-    })
-
-    const source = SqliteMigrations.snapshot([original.table])
-    const initial = SqliteMigrations.plan({ id: "001_drift", from: empty, to: source })
-    const store = makeMigrationStore(database, [initial])
-    yield* store.prepare(source.tables)
-    yield* database`DROP TABLE labels`
-    const changedSnapshot = Table.snapshot(changed.table)
-    const changedTableSql = renderCreateTable(changedSnapshot)
-    const changedTable = database.literal(changedTableSql)
-    yield* pipe(database`${changedTable}`, Effect.asVoid)
-    const record = yield* changed.repository.create({ label: "two spaces" })
-    const prepareSource = store.prepare(source.tables)
-    const outcome = yield* Effect.result(prepareSource)
-    const loadedRecord = yield* changed.repository.get(record.id)
-
-    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
-    expect(loadedRecord).toEqual(record)
-  },
-)()
+  expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(loadedRecord).toEqual(record)
+})()
 
 const driftDetection = pipe(driftDetectionAction, Effect.provide(sqliteClient))
-
 const driftDetectionTest = Function.constant(driftDetection)
 
-it.effect(
-  "drift detection preserves whitespace inside SQL constraint literals",
-  driftDetectionTest,
-)
+it.effect("drift detection preserves whitespace inside SQL constraint literals", driftDetectionTest)
 
-const missingInitialHistoryAction = Effect.fn(
-  "SqliteMigrations.missingInitialHistory",
-)(function* () {
+const missingInitialHistoryAction = Effect.fn("SqliteMigrations.missingInitialHistory")(function* () {
   const database = yield* SqlClient.SqlClient
-
-  const resource = Resource.make({
-    name: "requires_initial_history",
-    schema: TitleSchema,
-    operations: [],
-  })
-
+  const resource = Resource.make({ authorization: Authorization.public, name: "requires_initial_history", schema: TitleSchema, operations: [] })
   const target = SqliteMigrations.snapshot([resource.table])
   const emptyStore = makeMigrationStore(database, [])
   const prepareTarget = emptyStore.prepare(target.tables)
@@ -212,22 +146,11 @@ const missingInitialHistoryAction = Effect.fn(
   expect(tables).toEqual([])
 })()
 
-it.effect(
-  "nonempty schemas reject missing initial migration history instead of initializing tables",
-  () => pipe(missingInitialHistoryAction, Effect.provide(sqliteClient)),
-)
+it.effect("nonempty schemas reject missing initial migration history instead of initializing tables", () => pipe(missingInitialHistoryAction, Effect.provide(sqliteClient)))
 
-const failedTransformsRollBackAction = Effect.fn(
-  "SqliteMigrations.failedTransformsRollBack",
-)(function* () {
+const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransformsRollBack")(function* () {
   const database = yield* SqlClient.SqlClient
-
-  const before = Resource.make({
-    name: "jobs",
-    schema: TitleSchema,
-    operations: [],
-  })
-
+  const before = Resource.make({ authorization: Authorization.public, name: "jobs", schema: TitleSchema, operations: [] })
   const isPositive = Schema.isGreaterThan(0)
   const PositiveIntSchema = Schema.Int.check(isPositive)
 
@@ -237,14 +160,7 @@ const failedTransformsRollBackAction = Effect.fn(
   })
 
   interface Job extends Schema.Schema.Type<typeof JobSchema> {}
-
-  const after = Resource.make({
-    name: "jobs",
-    schema: JobSchema,
-    operations: [],
-  })
-
-
+  const after = Resource.make({ authorization: Authorization.public, name: "jobs", schema: JobSchema, operations: [] })
   const source = SqliteMigrations.snapshot([before.table])
   const target = SqliteMigrations.snapshot([after.table])
   const initial = SqliteMigrations.plan({ id: "001", from: empty, to: source })
@@ -292,30 +208,16 @@ const failedTransformsRollBackAction = Effect.fn(
   expect(migratedJob).toEqual({ ...job, priority: 1 })
 })()
 
-const failedTransformsRollBack = pipe(
-  failedTransformsRollBackAction,
-  Effect.provide(sqliteClient),
-)
+const failedTransformsRollBack = pipe(failedTransformsRollBackAction, Effect.provide(sqliteClient))
+const failedTransformsRollBackTest = Function.constant(failedTransformsRollBack)
 
-const failedTransformsRollBackTest = Function.constant(
-  failedTransformsRollBack,
-)
+it.effect("failed transforms roll back table data and migration history before a corrected retry", failedTransformsRollBackTest)
 
-it.effect(
-  "failed transforms roll back table data and migration history before a corrected retry",
-  failedTransformsRollBackTest,
-)
-
-const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
-  "SqliteMigrations.generatedHistoryIsNeverRegisteredOnFailure",
-)(function* () {
+const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.generatedHistoryIsNeverRegisteredOnFailure")(function* () {
   const temporaryRoot = tmpdir()
   const temporaryPrefix = join(temporaryRoot, "effect-domains-migrations-")
   const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
-
-  const releaseDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) =>
-    Effect.sync(() => directory.remove())
-
+  const releaseDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) => Effect.sync(() => directory.remove())
   const directory = yield* Effect.acquireRelease(createDirectory, releaseDirectory)
   const manifest = join(directory.path, "manifest.json")
   const initialPath = join(directory.path, "001_initial.json")
@@ -328,20 +230,8 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
   })
 
   interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
-
-  const initialResource = Resource.make({
-    name: "generated_history",
-    schema: InitialSchema,
-    operations: [],
-  })
-
-  const targetResource = Resource.make({
-    name: "generated_history",
-    schema: TargetSchema,
-    operations: [],
-  })
-
-
+  const initialResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: InitialSchema, operations: [] })
+  const targetResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: TargetSchema, operations: [] })
   const initialTarget = SqliteMigrations.snapshot([initialResource.table])
 
   const initial = SqliteMigrations.plan({
@@ -359,7 +249,6 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
   const initialBytes = readFileSync(initialPath, "utf8")
   const historyOption = Option.some(history)
   const manifestOption = Option.some(manifest)
-
 
   const accepted = SqliteMigrations.command({
     name: "schema",
@@ -405,12 +294,7 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
 
   const bookkeepingRun = Command.runWith(bookkeeping, { version: "test", renderErrors: false })
   const bookkeepingGeneration = bookkeepingRun(["generate", "bookkeeping"])
-
-  const bookkeepingWithFailure = pipe(
-    bookkeepingGeneration,
-    Effect.provideService(FileSystem.FileSystem, bookkeepingFailureFileSystem),
-  )
-
+  const bookkeepingWithFailure = pipe(bookkeepingGeneration, Effect.provideService(FileSystem.FileSystem, bookkeepingFailureFileSystem))
   const bookkeepingFailure = yield* Effect.exit(bookkeepingWithFailure)
   const manifestAfterBookkeepingFailure = readFileSync(manifest, "utf8")
   const initialAfterBookkeepingFailure = readFileSync(initialPath, "utf8")
@@ -473,13 +357,7 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
 
   const encodedRepeat = encodeMigration(repeat)
   const encodedFinal = encodeMigration(final)
-
-  const nonMonotonicHistory = yield* SqliteMigrations.decodeHistory([
-    encodedInitial,
-    encodedRepeat,
-    encodedFinal,
-  ])
-
+  const nonMonotonicHistory = yield* SqliteMigrations.decodeHistory([encodedInitial, encodedRepeat, encodedFinal])
   const seedPath = join(directory.path, "seed.json")
   const finalPath = join(directory.path, "final.json")
   const seedText = JSON.stringify(encodedRepeat, null, 2)
@@ -487,11 +365,7 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
   writeFileSync(seedPath, seedText)
   writeFileSync(finalPath, finalText)
 
-  const duplicateManifest = JSON.stringify(
-    { migrations: ["001_initial.json", "seed.json", "final.json"] },
-    null,
-    2,
-  )
+  const duplicateManifest = JSON.stringify({ migrations: ["001_initial.json", "seed.json", "final.json"] }, null, 2)
 
   writeFileSync(manifest, duplicateManifest)
 
@@ -516,11 +390,4 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn(
   expect(repeatArtifactExists).toBe(false)
 })
 
-
-it.effect(
-  "generate leaves the manifest unchanged for blocked, incoherent, and duplicate histories",
-  () => pipe(
-    generatedHistoryIsNeverRegisteredOnFailure(),
-    Effect.provide(BunServices.layer),
-  ),
-)
+it.effect("generate leaves the manifest unchanged for blocked, incoherent, and duplicate histories", () => pipe(generatedHistoryIsNeverRegisteredOnFailure(), Effect.provide(BunServices.layer)))

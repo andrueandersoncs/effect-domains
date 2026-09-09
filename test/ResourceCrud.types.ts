@@ -1,28 +1,14 @@
+import { Authorization } from "../src/authorization.ts"
 import { Schema } from "effect"
 import { identifier } from "../src/domain.ts"
 import { Resource } from "../src/resource.ts"
 
 const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
-
 interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}
-
-const TypeProbe = Resource.make({
-  name: "resource_type_probe",
-  schema: TypeProbeSchema,
-  create: { defaults: { completed: false } },
-  list: { filter: ["completed"], order: [{ field: "title" }] },
-  operations: [...Resource.crud, "patch"] as const,
-})
-
+const TypeProbe = Resource.make({ authorization: Authorization.public, name: "resource_type_probe", schema: TypeProbeSchema, create: { defaults: { completed: false } }, list: { filter: ["completed"], order: [{ field: "title" }] }, operations: [...Resource.crud, "patch"] as const })
 const NoPolicyProbeSchema = Schema.Struct({ id: identifier(Schema.String), value: Schema.Int })
-
 interface NoPolicyProbe extends Schema.Schema.Type<typeof NoPolicyProbeSchema> {}
-
-const NoPolicyProbe = Resource.make({
-  name: "resource_no_policy_probe",
-  schema: NoPolicyProbeSchema,
-  operations: [],
-})
+const NoPolicyProbe = Resource.make({ authorization: Authorization.public, name: "resource_no_policy_probe", schema: NoPolicyProbeSchema, operations: [] })
 
 const noPolicyCreate: Parameters<typeof NoPolicyProbe.repository.create>[0] = {
   id: "required",
@@ -53,14 +39,7 @@ const GeneratedProbeSchema = Schema.Struct({
 })
 
 interface GeneratedProbe extends Schema.Schema.Type<typeof GeneratedProbeSchema> {}
-
-const GeneratedProbe = Resource.make({
-  name: "generated_type_probe",
-  schema: GeneratedProbeSchema,
-  create: { generated: { id: "uuidV7", createdAt: "now" } },
-  operations: Resource.crud,
-})
-
+const GeneratedProbe = Resource.make({ authorization: Authorization.public, name: "generated_type_probe", schema: GeneratedProbeSchema, create: { generated: { id: "uuidV7", createdAt: "now" } }, operations: Resource.crud })
 const generatedInput: Parameters<typeof GeneratedProbe.repository.create>[0] = { title: "only authored input" }
 // @ts-expect-error because generated fields cannot be provided by callers.
 const generatedOverride: Parameters<typeof GeneratedProbe.repository.create>[0] = { id: "override", title: "bad" }

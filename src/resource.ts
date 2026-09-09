@@ -1,10 +1,12 @@
 import { Array, Effect, Equivalence, flow, Function, Layer, Option, Order, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { RepositoryError, RepositoryListCursor, RepositoryListOrder, RepositoryListQuery, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
+import { RepositoryAccess, RepositoryError, RepositoryListCursor, RepositoryListOrder, RepositoryListQuery, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
 import { Table, type TableField } from "./table.ts"
 import { Value } from "./value.ts"
 import type { AnyCommandBundle } from "./commands.ts"
 import { DomainIdentifier } from "./domain.ts"
+import { Authorization, AuthorizationValuesSchema, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationValues, type PolicyAuthorization, type PublicAuthorization } from "./authorization.ts"
+import { AuthorizationRpc } from "./authorization-rpc.ts"
 
 const EmptyPayloadSchema = Schema.Struct({})
 interface EmptyPayload extends Schema.Schema.Type<typeof EmptyPayloadSchema> {}
@@ -28,9 +30,7 @@ class ListCursor extends Schema.Class<ListCursor>("ListCursor")({
 
 const ListCursorJsonSchema = Schema.fromJsonString(ListCursor)
 const parseCursor = Schema.decodeUnknownEffect(ListCursorJsonSchema)
-
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch"
-type FieldName<S extends Schema.Struct<Schema.Struct.Fields>> = Extract<keyof S["fields"], string>
 
 type CreationDefaultKeys<Creation> = Creation extends { readonly defaults: infer Defaults }
   ? Extract<keyof Defaults, string> : never
@@ -39,14 +39,14 @@ type CreationGeneratedKeys<Creation> = Creation extends { readonly generated: in
   ? Extract<keyof Generated, string> : never
 
 type CreationPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<Partial<{
-  defaults: Partial<Pick<S["Type"], FieldName<S>>>
-  generated: Partial<Record<FieldName<S>, "uuidV7" | "now">>
+  defaults: Partial<Pick<S["Type"], Extract<keyof S["fields"], string>>>
+  generated: Partial<Record<Extract<keyof S["fields"], string>, "uuidV7" | "now">>
 }>>
 
 type ListPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<{
-  order: ReadonlyArray<Readonly<{ field: FieldName<S> }> & Readonly<Partial<{ direction: "asc" | "desc" }>>>
+  order: ReadonlyArray<Readonly<{ field: Extract<keyof S["fields"], string> }> & Readonly<Partial<{ direction: "asc" | "desc" }>>>
 }> & Readonly<Partial<{
-  filter: ReadonlyArray<FieldName<S>>
+  filter: ReadonlyArray<Extract<keyof S["fields"], string>>
   limit: number
 }>>
 
@@ -65,7 +65,15 @@ type ListInput<S extends Schema.Struct<Schema.Struct.Fields>, Policy extends Lis
 type CompatibleStorage<Canonical extends Schema.Struct<Schema.Struct.Fields>, Storage extends Schema.Struct<Schema.Struct.Fields>> =
   Storage["Type"] extends Canonical["Type"] ? Canonical["Type"] extends Storage["Type"] ? unknown : never : never
 
-const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound])
+const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, Unauthenticated, Forbidden])
+const PublicResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound])
+type ResourceErrors<Auth> = Auth extends PublicAuthorization ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema
+
+type AuthorizedRepository<Repository, Auth> = {
+  readonly [Key in keyof Repository]: Repository[Key] extends (...args: infer Args) => Effect.Effect<infer Value, infer Error, infer Services>
+    ? (...args: Args) => Effect.Effect<Value, Auth extends PublicAuthorization ? Exclude<Error, Forbidden | Unauthenticated> : Error, Services>
+    : never
+}
 
 class ResourceDefinitionError extends Schema.TaggedError<ResourceDefinitionError>()(
   "ResourceDefinitionError",
@@ -102,6 +110,7 @@ export interface Resource extends AnyCommandBundle {
   readonly storage: Schema.Struct<Schema.Struct.Fields>
   readonly table: Table
   readonly operations: ReadonlyArray<ResourceOperation>
+  readonly authorization: AuthorizationDefinition
   readonly create: Option.Option<CreationPolicy<Schema.Struct<Schema.Struct.Fields>>>
   readonly list: Option.Option<ListPolicy<Schema.Struct<Schema.Struct.Fields>>>
 }
@@ -116,7 +125,8 @@ export const Resource = {
     const Operations extends ReadonlyArray<ResourceOperation> = ReadonlyArray<ResourceOperation>,
     const Creation extends CreationPolicy<S> = {},
     const List extends ListPolicy<S> = never,
-  >(options: Readonly<{ name: Name; schema: S; operations: Operations }> & Readonly<Partial<{
+    const Auth extends AuthorizationDefinition = AuthorizationDefinition,
+  >(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
     storage: Storage
     create: Creation
     list: List
@@ -210,6 +220,27 @@ export const Resource = {
       Option.getOrElse(Function.constant(table.identifierSchema)),
     )
 
+    const authorization = pipe(Authorization.compile({
+      authorization: options.authorization,
+      resource: options.schema,
+      storage: storageSchema,
+      table,
+    }), Effect.runSync)
+
+    const access = (subject: Readonly<Record<string, unknown>>) => RepositoryAccess.make({
+      policy: authorization.visibility,
+      subject,
+    })
+
+    const authorize = (
+      action: AuthorizationAction,
+      subject: Readonly<Record<string, unknown>>,
+      values: AuthorizationValues,
+    ) => pipe(
+      authorization.check(action, subject, values),
+      Effect.catchTag("PolicyEvaluationError", () => RepositoryError.make({ resource: table.name, cause: "Authorization evaluation failed" })),
+    )
+
     const repositoryFailure = (cause: Schema.SchemaError) => RepositoryError.make({ resource: table.name, cause })
     const isCanonical = Schema.is(canonicalRowSchema)
     const canonicalFailure = inputFailure("value does not satisfy the canonical schema")
@@ -230,6 +261,7 @@ export const Resource = {
     const generatedEntries = Record.toEntries(generated)
 
     const create = Effect.fn("Repository.create")(function* (input: CreateInput<S, Creation>) {
+      const subject = yield* authorization.subject("create")
       yield* Effect.forEach(generatedEntries, ([field]) => Record.has(input, field)
         ? inputFailure(`create input must not provide generated field ${field}`) : Effect.void)
 
@@ -246,14 +278,26 @@ export const Resource = {
       const complete = Struct.assign(supplied, generatedRecord)
       const encoded = yield* encodeRow(complete)
       const store = yield* RepositoryStore
-      const stored = yield* store.insert(table, encoded)
-      return yield* decodeRow(stored)
+
+      const transaction = Effect.gen(function* () {
+        const candidate = AuthorizationValuesSchema.make({ next: complete })
+        yield* authorize("create", subject, candidate)
+        const stored = yield* store.insert(table, encoded)
+        const result = yield* decodeRow(stored)
+        const returned = AuthorizationValuesSchema.make({ row: result })
+        yield* authorize("read", subject, returned)
+        return result
+      })
+
+      return yield* store.transaction(table, transaction)
     })
 
     const find = Effect.fn("Repository.find")(function* (key: CanonicalId) {
+      const subject = yield* authorization.subject("read")
       const encoded = yield* encodeKey(key)
       const store = yield* RepositoryStore
-      const stored = yield* store.find(table, encoded)
+      const permission = access(subject)
+      const stored = yield* store.find(table, encoded, permission)
       if (Option.isNone(stored)) return Option.none<CanonicalRow>()
       return yield* pipe(decodeRow(stored.value), Effect.map(Option.some))
     })
@@ -265,8 +309,10 @@ export const Resource = {
     })
 
     const list = Effect.fn("Repository.list")(function* () {
+      const subject = yield* authorization.subject("read")
       const store = yield* RepositoryStore
-      const stored = yield* store.list(table)
+      const permission = access(subject)
+      const stored = yield* store.list(table, permission)
       return yield* decodeRows(stored)
     })
 
@@ -297,6 +343,7 @@ export const Resource = {
     }
 
     const page = Effect.fn("Repository.page")(function* (input: ListInput<S, List>) {
+      const subject = yield* authorization.subject("read")
       if (Option.isNone(listPolicy)) return yield* inputFailure("list policy is not declared")
       const limit = input.limit ?? maximum
       const integer = Number.isSafeInteger(limit)
@@ -346,7 +393,8 @@ export const Resource = {
 
       const query = RepositoryListQuery.make({ filter, order, cursor, limit })
       const store = yield* RepositoryStore
-      const result = yield* store.query(table, query)
+      const permission = access(subject)
+      const result = yield* store.query(table, query, permission)
       const items = yield* decodeRows(result.rows)
 
       const nextCursor = result.hasMore ? pipe(
@@ -363,37 +411,72 @@ export const Resource = {
     })
 
     const update = Effect.fn("Repository.update")(function* (value: CanonicalRow) {
+      const subject = yield* authorization.subject("update")
       const encoded = yield* encodeRow(value)
       const store = yield* RepositoryStore
-      const stored = yield* store.update(table, encoded)
-      if (Option.isNone(stored)) return yield* missing(encoded[table.identifier])
-      return yield* decodeRow(stored.value)
+      const key = encoded[table.identifier]
+      const permission = access(subject)
+
+      const transaction = Effect.gen(function* () {
+        const stored = yield* store.find(table, key, permission)
+        if (Option.isNone(stored)) return yield* missing(key)
+        const current = yield* decodeRow(stored.value)
+        const transition = AuthorizationValuesSchema.make({ row: current, next: value })
+        yield* authorize("update", subject, transition)
+        const updated = yield* store.update(table, encoded, permission)
+        if (Option.isNone(updated)) return yield* missing(key)
+        const result = yield* decodeRow(updated.value)
+        const returned = AuthorizationValuesSchema.make({ row: result })
+        yield* authorize("read", subject, returned)
+        return result
+      })
+
+      return yield* store.transaction(table, transaction)
     })
 
     const patch = Effect.fn("Repository.patch")(function* (key: CanonicalId, changes: PatchInput<S, CanonicalKey>) {
+      const subject = yield* authorization.subject("patch")
       if (Record.has(changes, table.identifier)) return yield* inputFailure(`patch must not provide immutable field ${table.identifier}`)
       const encodedKey = yield* encodeKey(key)
       const store = yield* RepositoryStore
+      const permission = access(subject)
 
       const transaction = Effect.gen(function* () {
-        const stored = yield* store.find(table, encodedKey)
+        const stored = yield* store.find(table, encodedKey, permission)
         if (Option.isNone(stored)) return yield* missing(key)
         const current = yield* decodeRow(stored.value)
         const candidate = Struct.assign(current, changes)
         const encoded = yield* encodeRow(candidate)
-        const updated = yield* store.update(table, encoded)
+        const transition = AuthorizationValuesSchema.make({ row: current, next: candidate })
+        yield* authorize("patch", subject, transition)
+        const updated = yield* store.update(table, encoded, permission)
         if (Option.isNone(updated)) return yield* missing(key)
-        return yield* decodeRow(updated.value)
+        const result = yield* decodeRow(updated.value)
+        const returned = AuthorizationValuesSchema.make({ row: result })
+        yield* authorize("read", subject, returned)
+        return result
       })
 
       return yield* store.transaction(table, transaction)
     })
 
     const remove = Effect.fn("Repository.remove")(function* (key: CanonicalId) {
+      const subject = yield* authorization.subject("remove")
       const encoded = yield* encodeKey(key)
       const store = yield* RepositoryStore
-      const removed = yield* store.remove(table, encoded)
-      if (!removed) return yield* missing(key)
+      const permission = access(subject)
+
+      const transaction = Effect.gen(function* () {
+        const stored = yield* store.find(table, encoded, permission)
+        if (Option.isNone(stored)) return yield* missing(key)
+        const current = yield* decodeRow(stored.value)
+        const target = AuthorizationValuesSchema.make({ row: current })
+        yield* authorize("remove", subject, target)
+        const removed = yield* store.remove(table, encoded, permission)
+        if (!removed) return yield* missing(key)
+      })
+
+      return yield* store.transaction(table, transaction)
     })
 
     const repository = { find, get, list, page, create, update, patch, remove }
@@ -441,12 +524,14 @@ export const Resource = {
     interface PatchShape extends Schema.Schema.Type<typeof PatchShapeSchema> {}
     const patchInputSchema = Schema.make<Schema.Codec<Readonly<Record<CanonicalKey, CanonicalId>> & { readonly patch: PatchInput<S, CanonicalKey> }, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchShapeSchema.ast)
     const patchWireSchema = Schema.toCodecJson(patchInputSchema)
-    const getProcedure = Rpc.make(`${options.name}.get`, { payload: identifierWireSchema, success: canonicalRowWireSchema, error: ResourceErrorSchema })
-    const listProcedure = Rpc.make(`${options.name}.list`, { payload: listWireSchema, success: listSuccessSchema, error: ResourceErrorSchema })
-    const createProcedure = Rpc.make(`${options.name}.create`, { payload: createWireSchema, success: canonicalRowWireSchema, error: ResourceErrorSchema })
-    const updateProcedure = Rpc.make(`${options.name}.update`, { payload: canonicalRowWireSchema, success: canonicalRowWireSchema, error: ResourceErrorSchema })
-    const patchProcedure = Rpc.make(`${options.name}.patch`, { payload: patchWireSchema, success: canonicalRowWireSchema, error: ResourceErrorSchema })
-    const removeProcedure = Rpc.make(`${options.name}.remove`, { payload: identifierWireSchema, success: Schema.Void, error: ResourceErrorSchema })
+    const isPublic = Equivalence.strictEqual<AuthorizationDefinition["_tag"]>()(options.authorization._tag, "Public")
+    const errorSchema = (isPublic ? PublicResourceErrorSchema : ResourceErrorSchema) as ResourceErrors<Auth>
+    const getProcedure = Rpc.make(`${options.name}.get`, { payload: identifierWireSchema, success: canonicalRowWireSchema, error: errorSchema })
+    const listProcedure = Rpc.make(`${options.name}.list`, { payload: listWireSchema, success: listSuccessSchema, error: errorSchema })
+    const createProcedure = Rpc.make(`${options.name}.create`, { payload: createWireSchema, success: canonicalRowWireSchema, error: errorSchema })
+    const updateProcedure = Rpc.make(`${options.name}.update`, { payload: canonicalRowWireSchema, success: canonicalRowWireSchema, error: errorSchema })
+    const patchProcedure = Rpc.make(`${options.name}.patch`, { payload: patchWireSchema, success: canonicalRowWireSchema, error: errorSchema })
+    const removeProcedure = Rpc.make(`${options.name}.remove`, { payload: identifierWireSchema, success: Schema.Void, error: errorSchema })
     const identifierFrom = (input: typeof identifierRequestSchema.Type) => input[table.identifier as CanonicalKey]
     const getHandler = flow(identifierFrom, repository.get)
     const removeHandler = flow(identifierFrom, repository.remove)
@@ -474,16 +559,26 @@ export const Resource = {
     }
 
     const selected = pipe(options.operations, Effect.forEach(selectProcedure), Effect.runSync)
-    const group = RpcGroup.make(...selected)
+    const selectedGroup = RpcGroup.make(...selected)
+    type PublishedRpc = Auth extends PolicyAuthorization ? Rpc.AddMiddleware<SelectedRpc, typeof AuthorizationRpc> : SelectedRpc
+    const isProtected = Equivalence.strictEqual<AuthorizationDefinition["_tag"]>()(options.authorization._tag, "Policy")
+
+    const group = (isProtected
+      ? selectedGroup.middleware(AuthorizationRpc)
+      : selectedGroup) as RpcGroup.Any as RpcGroup.RpcGroup<PublishedRpc>
+
     const handlerEntry = (operation: Operations[number]) => [`${options.name}.${operation}`, handlerByOperation[operation]] as const
     const handlerRecord = pipe(options.operations, Array.map(handlerEntry), Record.fromEntries)
 
-    const handlers = group.toLayer(handlerRecord as typeof handlerRecord & RpcGroup.HandlersFrom<SelectedRpc>) as Layer.Layer<
+    const handlers = selectedGroup.toLayer(handlerRecord as typeof handlerRecord & RpcGroup.HandlersFrom<SelectedRpc>) as Layer.Layer<
       Rpc.ToHandler<SelectedRpc>,
       never,
       Effect.Services<ReturnType<typeof handlerByOperation[Operations[number]]>>
     >
 
-    return Struct.assign(options, { storage: storageSchema, table, create: creation, list: listPolicy, createInputSchema, repository, group, handlers })
+    return Struct.assign(options, {
+      storage: storageSchema, table, create: creation, list: listPolicy, createInputSchema,
+      repository: repository as AuthorizedRepository<typeof repository, Auth>, group, handlers,
+    })
   },
 }

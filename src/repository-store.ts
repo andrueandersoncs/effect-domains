@@ -1,4 +1,5 @@
 import { Context, Effect, Option, Schema } from "effect"
+import { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
 
 const RepositoryListDirectionSchema = Schema.Literals(["asc", "desc"])
@@ -31,6 +32,13 @@ export class RepositoryListQuery extends Schema.Class<RepositoryListQuery>(
   limit: Schema.Number,
 }) {}
 
+const RepositorySubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
+
+export class RepositoryAccess extends Schema.Class<RepositoryAccess>("RepositoryAccess")({
+  policy: Policy.Schema,
+  subject: RepositorySubjectSchema,
+}) {}
+
 interface RepositoryListPage {
   readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>
   readonly hasMore: boolean
@@ -57,15 +65,31 @@ export class ResourceNotFound extends Schema.TaggedError<ResourceNotFound>()(
 }
 
 export class RepositoryStore extends Context.Service<RepositoryStore, {
-  readonly find: (table: Table, key: unknown) => Effect.Effect<Option.Option<unknown>, RepositoryError>
-  readonly list: (table: Table) => Effect.Effect<ReadonlyArray<unknown>, RepositoryError>
+  readonly find: (
+    table: Table,
+    key: unknown,
+    access: RepositoryAccess,
+  ) => Effect.Effect<Option.Option<unknown>, RepositoryError>
+  readonly list: (
+    table: Table,
+    access: RepositoryAccess,
+  ) => Effect.Effect<ReadonlyArray<unknown>, RepositoryError>
   readonly query: (
     table: Table,
     query: RepositoryListQuery,
+    access: RepositoryAccess,
   ) => Effect.Effect<RepositoryListPage, RepositoryError>
   readonly insert: (table: Table, value: Readonly<Record<string, unknown>>) => Effect.Effect<unknown, RepositoryError>
-  readonly update: (table: Table, value: Readonly<Record<string, unknown>>) => Effect.Effect<Option.Option<unknown>, RepositoryError>
-  readonly remove: (table: Table, key: unknown) => Effect.Effect<boolean, RepositoryError>
+  readonly update: (
+    table: Table,
+    value: Readonly<Record<string, unknown>>,
+    access: RepositoryAccess,
+  ) => Effect.Effect<Option.Option<unknown>, RepositoryError>
+  readonly remove: (
+    table: Table,
+    key: unknown,
+    access: RepositoryAccess,
+  ) => Effect.Effect<boolean, RepositoryError>
   readonly transaction: <A, E, R>(
     table: Table,
     effect: Effect.Effect<A, E, R>,

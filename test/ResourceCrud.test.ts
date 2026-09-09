@@ -1,3 +1,4 @@
+import { Authorization } from "../src/authorization.ts"
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
 import { identifier } from "../src/domain.ts"
@@ -10,15 +11,8 @@ import { StoragePrefix } from "../examples/service-codec/storage.ts"
 import { NoteIdSchema } from "../examples/service-codec/domain.ts"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
-
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
-
-const GeneratedTodos = Resource.make({
-  name: "generated_todo_policies",
-  schema: GeneratedTodoSchema,
-  create: { defaults: { completed: false } },
-  operations: [],
-})
+const GeneratedTodos = Resource.make({ authorization: Authorization.public, name: "generated_todo_policies", schema: GeneratedTodoSchema, create: { defaults: { completed: false } }, operations: [] })
 
 const PagedTodoSchema = Schema.Struct({
   id: identifier(Schema.String),
@@ -27,14 +21,7 @@ const PagedTodoSchema = Schema.Struct({
 })
 
 interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
-
-const PagedTodos = Resource.make({
-  name: "paged_todo_policies",
-  schema: PagedTodoSchema,
-  list: { filter: ["completed"], order: [{ field: "title" }], limit: 1 },
-  operations: [],
-})
-
+const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, list: { filter: ["completed"], order: [{ field: "title" }], limit: 1 }, operations: [] })
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const todoIdentifier = Struct.get<PagedTodo, "id">("id")
 
@@ -70,14 +57,7 @@ const generatedCrudProgram = Effect.gen(function* () {
   expect(overrideFailed).toBe(true)
 })
 
-it.effect(
-  "generated CRUD keeps storage codecs off the canonical wire and applies defaults",
-  () => pipe(
-    generatedCrudProgram,
-    Effect.provideService(StoragePrefix, { value: "stored:" }),
-    Effect.provide(sqlite),
-  ),
-)
+it.effect("generated CRUD keeps storage codecs off the canonical wire and applies defaults", () => pipe(generatedCrudProgram, Effect.provideService(StoragePrefix, { value: "stored:" }), Effect.provide(sqlite)))
 
 const pagedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([PagedTodos.table])
@@ -130,7 +110,4 @@ const pagedCrudProgram = Effect.gen(function* () {
   expect(todo).toMatchObject({ id: "1", title: "alpha" })
 })
 
-it.effect(
-  "declared list cursors preserve page boundaries and patch keeps keys immutable and rows valid",
-  () => pipe(pagedCrudProgram, Effect.provide(sqlite)),
-)
+it.effect("declared list cursors preserve page boundaries and patch keeps keys immutable and rows valid", () => pipe(pagedCrudProgram, Effect.provide(sqlite)))

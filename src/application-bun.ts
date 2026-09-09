@@ -1,7 +1,7 @@
 import { BunHttpServer, BunServices } from "@effect/platform-bun"
-import { Array, Config, Context, Effect, Function, Layer, Option, type PlatformError, Schema, type Scope, Stdio, Stream, pipe } from "effect"
+import { Array, Config, Context, Effect, Function, Layer, Option, type PlatformError, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
-import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Application } from "./application.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
@@ -9,6 +9,7 @@ import { RpcCli } from "./rpc-cli.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { SqliteMigrations, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { MigrationError } from "./migrations.ts"
+import { AuthorizationRpc } from "./authorization-rpc.ts"
 
 type DatabaseOptions =
   | Readonly<{ manifest: string; filename: Option.Option<string> }>
@@ -65,6 +66,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   const routes = pipe(
     RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" }),
     Layer.provide(application.handlers),
+    Layer.provide(AuthorizationRpc.layer),
     Layer.provide(RpcSerialization.layerJson),
   )
 
@@ -110,8 +112,14 @@ const inspectCommand = (application: Application) => {
   return Command.make("inspect", { operation }, inspect)
 }
 
-const clientProtocol = (url: URL) => pipe(
-  RpcClient.layerProtocolHttp({ url: url.href }),
+const clientProtocol = (url: URL, token: Option.Option<Redacted.Redacted<string>>) => pipe(
+  RpcClient.layerProtocolHttp({
+    url: url.href,
+    transformClient: (client) => Option.match(token, {
+      onNone: () => client,
+      onSome: (value) => HttpClient.mapRequest(client, HttpClientRequest.bearerToken(value)),
+    }),
+  }),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerJson),
 )
@@ -125,9 +133,12 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
   const defaultUrl = new URL("http://127.0.0.1:3000/rpc/v1")
 
   const protocol = pipe(
-    Config.schema(Schema.URLFromString, environment),
-    Config.withDefault(defaultUrl),
-    Effect.map(clientProtocol),
+    Effect.gen(function* () {
+      const url = yield* pipe(Config.schema(Schema.URLFromString, environment), Config.withDefault(defaultUrl))
+      const tokenEnvironment = `${application.name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")}_TOKEN`
+      const token = yield* pipe(Config.redacted(tokenEnvironment), Config.option)
+      return clientProtocol(url, token)
+    }),
     Layer.unwrap,
   )
 

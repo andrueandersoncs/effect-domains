@@ -1,13 +1,16 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, DateTime, Effect, Equivalence, Function, Layer, Option, Record, Schema, pipe } from "effect"
+import { Array, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
 import { SqlClient, SqlError, type Statement } from "effect/unstable/sql"
 import {
   RepositoryError,
   RepositoryListCursor,
   RepositoryListOrder,
   RepositoryStore,
+  type RepositoryAccess,
   type RepositoryListQuery,
 } from "./repository-store.ts"
+import { PolicySql } from "./policy-sql.ts"
+import { PolicyEnvironment, type Policy } from "./policy.ts"
 import { SchemaStore } from "./migrations.ts"
 import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { Table } from "./table.ts"
@@ -84,11 +87,12 @@ const queryStatement = (
   sql: SqlClient.SqlClient,
   table: Table,
   query: RepositoryListQuery,
+  policy: Statement.Fragment,
 ) => {
   const identifierOrder = RepositoryListOrder.make({ field: table.identifier, direction: "asc" })
   const order = Array.append(query.order, identifierOrder)
   const filterEntries = Record.toEntries(query.filter)
-  const predicates = Array.map(filterEntries, whereFragment(sql))
+  const predicates = [policy, ...Array.map(filterEntries, whereFragment(sql))]
 
   const predicatesWithCursor = Option.match(query.cursor, {
     onNone: Function.constant(predicates),
@@ -108,13 +112,34 @@ const queryStatement = (
 const transactionFailure = (resource: string) => (cause: SqlError.SqlError) =>
   pipe(cause, repositoryFailure(resource), Effect.fail)
 
-const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
-  RepositoryStore.of({
-    find: Effect.fn("RepositoryStore.find")(function* (table, key) {
+const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClient: SqlClient.SqlClient) {
+  const policyBinders = yield* pipe(HashMap.empty<Policy, ReturnType<typeof PolicySql.compile>>(), Ref.make)
+
+  const registerPolicy = (policy: Policy) => (registry: HashMap.HashMap<Policy, ReturnType<typeof PolicySql.compile>>) => {
+    const cached = HashMap.get(registry, policy)
+    if (Option.isSome(cached)) return [cached.value, registry] as const
+    const compiled = PolicySql.compile(policy)
+    const updated = HashMap.set(registry, policy, compiled)
+    return [compiled, updated] as const
+  }
+
+  const policyBinding = Effect.fn("RepositoryStore.policyBinding")(
+    function* (table: Table, access: RepositoryAccess) {
+      const recover = Function.flow(repositoryFailure(table.name), Effect.fail)
+      const binder = yield* pipe(Ref.modify(policyBinders, registerPolicy(access.policy)), Effect.catchDefect(recover))
+      const environment = PolicyEnvironment.make({ subject: access.subject }, { disableChecks: true })
+      return yield* pipe(binder(sqlClient, environment), Effect.mapError(repositoryFailure(table.name)))
+    },
+  )
+
+  return RepositoryStore.of({
+    find: Effect.fn("RepositoryStore.find")(function* (table, key, access) {
+      const policy = yield* policyBinding(table, access)
+
       const rows = yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           SELECT * FROM ${sqlClient(table.name)}
-          WHERE ${sqlClient(table.identifier)} = ${key}
+          WHERE ${policy} AND ${sqlClient(table.identifier)} = ${key}
           LIMIT 1
         `,
         Effect.mapError(repositoryFailure(table.name)),
@@ -122,14 +147,19 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
 
       return pipe(rows, Array.get(0))
     }),
-    list: Effect.fn("RepositoryStore.list")(function* (table) {
+    list: Effect.fn("RepositoryStore.list")(function* (table, access) {
+      const policy = yield* policyBinding(table, access)
       return yield* pipe(
-        sqlClient<Readonly<Record<string, unknown>>>`SELECT * FROM ${sqlClient(table.name)}`,
+        sqlClient<Readonly<Record<string, unknown>>>`
+          SELECT * FROM ${sqlClient(table.name)}
+          WHERE ${policy}
+        `,
         Effect.mapError(repositoryFailure(table.name)),
       )
     }),
-    query: Effect.fn("RepositoryStore.query")(function* (table, query) {
-      const statement = queryStatement(sqlClient, table, query)
+    query: Effect.fn("RepositoryStore.query")(function* (table, query, access) {
+      const policy = yield* policyBinding(table, access)
+      const statement = queryStatement(sqlClient, table, query, policy)
 
       const rows = yield* pipe(
         statement,
@@ -160,14 +190,15 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
 
       return row.value
     }),
-    update: Effect.fn("RepositoryStore.update")(function* (table, value) {
+    update: Effect.fn("RepositoryStore.update")(function* (table, value, access) {
       const key = value[table.identifier]
+      const policy = yield* policyBinding(table, access)
 
       const rows = yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           UPDATE ${sqlClient(table.name)}
           SET ${sqlClient.update(value as Record<string, unknown>, [table.identifier])}
-          WHERE ${sqlClient(table.identifier)} = ${key}
+          WHERE ${policy} AND ${sqlClient(table.identifier)} = ${key}
           RETURNING *
         `,
         Effect.mapError(repositoryFailure(table.name)),
@@ -175,11 +206,13 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
 
       return pipe(rows, Array.get(0))
     }),
-    remove: Effect.fn("RepositoryStore.remove")(function* (table, key) {
+    remove: Effect.fn("RepositoryStore.remove")(function* (table, key, access) {
+      const policy = yield* policyBinding(table, access)
+
       const rows = yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           DELETE FROM ${sqlClient(table.name)}
-          WHERE ${sqlClient(table.identifier)} = ${key}
+          WHERE ${policy} AND ${sqlClient(table.identifier)} = ${key}
           RETURNING ${sqlClient(table.identifier)}
         `,
         Effect.mapError(repositoryFailure(table.name)),
@@ -194,6 +227,7 @@ const makeRepositoryStore = (sqlClient: SqlClient.SqlClient) =>
       )
     }),
   })
+})
 
 const runtimeValues = Value.of({
   uuidV7: () => Effect.sync(() => Bun.randomUUIDv7()),
@@ -210,7 +244,7 @@ const sqlClient = (
   filename: string,
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
 ) => {
-  const repositoryStore = Effect.map(SqlClient.SqlClient, makeRepositoryStore)
+  const repositoryStore = Effect.flatMap(SqlClient.SqlClient, makeRepositoryStore)
   const migrationStoreEffect = Effect.map(SqlClient.SqlClient, migrationStore(options))
   const repositoryLayer = Layer.effect(RepositoryStore, repositoryStore)
   const schemaStoreLayer = Layer.effect(SchemaStore, migrationStoreEffect)

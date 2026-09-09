@@ -1,6 +1,7 @@
-import { Array, Equivalence, flow, Function, Option, Record, Schema, Struct, pipe } from "effect"
+import { Array, Equivalence, flow, Function, Option, Record, Schema, Struct, Tuple, pipe } from "effect"
 import { Table, TableField, TableCheckSchema } from "./table.ts"
 import type { Resource } from "./resource.ts"
+import { Policy } from "./policy.ts"
 
 type InspectableProcedure = Readonly<{
   _tag: string
@@ -52,8 +53,17 @@ const StorageSchema = Schema.Struct({
 })
 
 interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
-
 const OperationNamesSchema = Schema.Array(Schema.String)
+
+const AuthorizationInspectionSchema = Schema.Union([
+  Schema.TaggedStruct("Public", {}),
+  Schema.TaggedStruct("Deny", {}),
+  Schema.TaggedStruct("Policy", {
+    subject: Schema.Unknown,
+    scope: Schema.String,
+    allow: Schema.Record(Schema.String, Schema.String),
+  }),
+])
 
 class ResourceInspection extends Schema.Class<ResourceInspection>("ResourceInspection")({
   name: Schema.String,
@@ -61,6 +71,7 @@ class ResourceInspection extends Schema.Class<ResourceInspection>("ResourceInspe
   schema: Schema.Unknown,
   creation: CreationSchema,
   list: Schema.Unknown,
+  authorization: AuthorizationInspectionSchema,
   storage: StorageSchema,
 }) {}
 
@@ -88,17 +99,30 @@ class ApplicationInspection extends Schema.Class<ApplicationInspection>("Applica
   runtime: RuntimeSchema,
 }) {}
 
-const physicalField = (field: TableField) => PhysicalField.make({
-  name: field.name,
-  scalar: field.scalar,
-  nullable: field.nullable,
-  generated: Option.getOrUndefined(field.generation),
-  checks: field.checks,
-})
+const physicalField = (field: TableField) =>
+  PhysicalField.make({
+    name: field.name,
+    scalar: field.scalar,
+    nullable: field.nullable,
+    generated: Option.getOrUndefined(field.generation),
+    checks: field.checks,
+  })
 
 const physicalTable = (table: Table) => {
   const fields = Array.map(table.fields, physicalField)
+
   return PhysicalTable.make({ name: table.name, identifier: table.identifier, fields })
+}
+
+const renderPolicies = (rules: Readonly<Partial<Record<string, Policy>>>) => pipe(rules, Record.map(Option.fromNullishOr), Record.getSomes, Record.map(Policy.render))
+
+const inspectAuthorization = (authorization: Resource["authorization"]) => {
+  if (authorization._tag !== "Policy") return authorization
+  const subject = schemaDocument(authorization.subject)
+  const scope = Policy.render(authorization.scope)
+  const allow = renderPolicies(authorization.allow)
+  const policyInspectionSchema = Tuple.get(AuthorizationInspectionSchema.members, 2)
+  return policyInspectionSchema.make({ subject, scope, allow })
 }
 
 const resource = (definition: Resource) => {
@@ -112,6 +136,7 @@ const resource = (definition: Resource) => {
   const generated = pipe(definition.create, Option.flatMap(flow(Struct.get("generated"), Option.fromNullishOr)), Option.getOrElse(Record.empty))
   const creation = CreationSchema.make({ defaults, generated })
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
+  const authorization = inspectAuthorization(definition.authorization)
 
   return ResourceInspection.make({
     name: definition.name,
@@ -119,6 +144,7 @@ const resource = (definition: Resource) => {
     schema,
     creation,
     list: Option.getOrNull(definition.list),
+    authorization,
     storage,
   })
 }
