@@ -1,7 +1,7 @@
-import { Effect, Option } from "effect"
+import { Effect, Option, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { BookSchema } from "@effect-domains/example-support/book"
-import { BooksService } from "./contracts.ts"
+import { BooksRpcs } from "./contracts.ts"
 
 import {
   type BookIdentifierInput,
@@ -18,6 +18,11 @@ type SqliteRow = Readonly<Record<string, unknown>>
 const persistenceFailure = Effect.fn("Books.persistenceFailure")(function* () {
   return yield* BookPersistenceError.make({})
 })
+
+const persistenceFailures = {
+  SqlError: persistenceFailure,
+  SchemaError: persistenceFailure,
+}
 
 const createBook = SqlSchema.findOne({
   Request: BookSchema,
@@ -96,31 +101,38 @@ const requireBook = Effect.fn("Books.require")(function* (
   return book.value
 })
 
+const create = Effect.fn("Books.create")(function* (input: typeof BookSchema.Type) {
+  return yield* pipe(createBook(input), Effect.catchTags({
+    ...persistenceFailures,
+    NoSuchElementError: persistenceFailure,
+  }))
+})
+
+const list = Effect.fn("Books.list")(function* (input: ListBooksInput) {
+  return yield* pipe(listBooks(input), Effect.catchTags(persistenceFailures))
+})
+
 const get = Effect.fn("Books.get")(function* (input: BookIdentifierInput) {
-  const found = yield* findBook(input)
+  const found = yield* pipe(findBook(input), Effect.catchTags(persistenceFailures))
   return yield* requireBook(input.id, found)
 })
 
 const update = Effect.fn("Books.update")(function* (
   input: typeof BookResource.table.rowSchema.Type,
 ) {
-  const found = yield* updateBook(input)
+  const found = yield* pipe(updateBook(input), Effect.catchTags(persistenceFailures))
   return yield* requireBook(input.id, found)
 })
 
 const remove = Effect.fn("Books.remove")(function* (input: BookIdentifierInput) {
-  const found = yield* removeBook(input)
+  const found = yield* pipe(removeBook(input), Effect.catchTags(persistenceFailures))
   return yield* requireBook(input.id, found)
 })
 
-export const BooksSqlite = BooksService.layer({
-  "books.create": createBook,
+export const BooksSqlite = BooksRpcs.toLayer({
+  "books.create": create,
   "books.get": get,
-  "books.list": listBooks,
+  "books.list": list,
   "books.update": update,
   "books.remove": remove,
-}, {
-  SqlError: persistenceFailure,
-  SchemaError: persistenceFailure,
-  NoSuchElementError: persistenceFailure,
 })

@@ -115,7 +115,7 @@ The default Bun runner listens only on the loopback hostname. Admin browser call
 
 [`authored-sql`](authored-sql/) preserves the custom book behavior separately from minimal generated CRUD. It reuses the canonical [`BookSchema`](../packages/example-support/src/book.ts), while its [`Resource.make`](authored-sql/resources.ts) uses `operations: []`: table derivation stays automatic, but no generated RPC handlers are published.
 
-[`contracts.ts`](authored-sql/contracts.ts) declares explicit payload/success/error schemas with `Commands.rpc`, which derives JSON codecs and returns native Effect RPCs. [`sqlite.ts`](authored-sql/sqlite.ts) installs `BooksService.layer` handlers using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query behavior and error translation remain authored.
+[`contracts.ts`](authored-sql/contracts.ts) declares JSON-native payload/success/error schemas directly with `Rpc.make` and exports `BooksRpcs`. [`sqlite.ts`](authored-sql/sqlite.ts) installs handlers with `BooksRpcs.toLayer`, using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query failures are translated with explicit `Effect.catchTags`; missing-row domain errors are preserved. [`application.ts`](authored-sql/application.ts) registers `{ group: BooksRpcs, handlers: BooksSqlite }` directly, without a `Commands` service or a separate entrypoint service layer.
 
 Unlike generated CRUD, missing rows report `BookNotFound`, database/query failures report `BookPersistenceError`, and `books.remove` returns the deleted row. List returns an array with no ordering or pagination guarantees.
 

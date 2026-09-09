@@ -1,9 +1,10 @@
 import { Application } from "effect-domains/application"
-import { BooksService } from "./contracts.ts"
+import { BooksRpcs } from "./contracts.ts"
 import { BookResource } from "./resources.ts"
+import { BooksSqlite } from "./sqlite.ts"
 
 export const AuthoredSqlApplication = Application.make({
   name: "authored-sql",
   resources: [BookResource],
-  commands: [BooksService],
+  commands: [{ group: BooksRpcs, handlers: BooksSqlite }],
 })

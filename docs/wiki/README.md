@@ -26,6 +26,8 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
+The [native authored-SQL record](validation-strategy.md#2026-09-09-native-authored-sql-rpc) exercises a public application using native RPC contracts and handler layers without `Commands`. CLI, HTTP RPC, and MCP retain CRUD, deleted-row results, and declared failures without adapter changes. This is a bounded simplification slice, not removal of the framework wrapper from its remaining consumers.
+
 The [feature-retirement record](validation-strategy.md#2026-09-09-persistent-reference-and-cluster-wrapper-removal) documents removal of `PersistedRef`, its counter demonstration, and the framework cluster wrapper. Caching remains application policy; the workflow application owns its native diagnostic schemas and authenticated status command. Generated CLI flags are unchanged.
 
 The [orders/invoices slice](validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) adds a second business-policy domain: authenticated multi-table transactions, tenant-local uniqueness, composite foreign keys, secondary indexes, and explicit optimistic versions. Relational declarations belong to Table/Resource configuration, not canonical schemas; joins and transitions remain authored. The [walkthrough](../../apps/README.md#orders-and-invoices) runs the complete order → invoice → payment lifecycle.

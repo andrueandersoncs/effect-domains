@@ -1,6 +1,5 @@
 import { Schema } from "effect"
-import { RpcGroup } from "effect/unstable/rpc"
-import { Commands } from "effect-domains/commands"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { BookSchema } from "@effect-domains/example-support/book"
 
 import {
@@ -19,45 +18,40 @@ const requiredBookErrorsSchema = Schema.Union([
 
 const StoredBooksSchema = Schema.Array(BookResource.table.rowSchema)
 
-const createBook = Commands.rpc("books.create", {
+const createBook = Rpc.make("books.create", {
   payload: BookSchema,
   success: BookResource.table.rowSchema,
   error: BookPersistenceError,
 })
 
-const getBook = Commands.rpc("books.get", {
+const getBook = Rpc.make("books.get", {
   payload: BookIdentifierInputSchema,
   success: BookResource.table.rowSchema,
   error: requiredBookErrorsSchema,
 })
 
-const listBooks = Commands.rpc("books.list", {
+const listBooks = Rpc.make("books.list", {
   payload: ListBooksInputSchema,
   success: StoredBooksSchema,
   error: BookPersistenceError,
 })
 
-const updateBook = Commands.rpc("books.update", {
+const updateBook = Rpc.make("books.update", {
   payload: BookResource.table.rowSchema,
   success: BookResource.table.rowSchema,
   error: requiredBookErrorsSchema,
 })
 
-const removeBook = Commands.rpc("books.remove", {
+const removeBook = Rpc.make("books.remove", {
   payload: BookIdentifierInputSchema,
   success: BookResource.table.rowSchema,
   error: requiredBookErrorsSchema,
 })
 
-const booksServiceRpcs = RpcGroup.make(
+export const BooksRpcs = RpcGroup.make(
   createBook,
   getBook,
   listBooks,
   updateBook,
   removeBook,
 )
-
-export const BooksService = Commands.make({
-  name: "apps/authored-sql/BooksService",
-  group: booksServiceRpcs,
-})

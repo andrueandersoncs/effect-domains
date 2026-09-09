@@ -30,6 +30,19 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-09: Native authored-SQL RPC
+
+The authored book application now declares `BooksRpcs` using native `Rpc.make` and `RpcGroup.make`, installs `BooksRpcs.toLayer` handlers, and registers `{ group, handlers }` directly. It removes its `Commands` dependency and separate entrypoint service provision. SQL/schema error translation is explicit in authored Effects; create alone also translates a missing SQL result. Resource table derivation, migrations, runtime adapters, and the other applications' command services are unchanged. ([Contracts](../../apps/authored-sql/contracts.ts); [handlers](../../apps/authored-sql/sqlite.ts); [composition](../../apps/authored-sql/application.ts); [entrypoint](../../apps/authored-sql/main.ts))
+
+A throwaway Effect program exercised the real Bun server on loopback with isolated SQLite storage:
+
+- Generated CLI creation/listing/removal, operation inspection, invalid-input rejection, and nonzero missing-row failure.
+- Native HTTP `RpcClient` reads, updates, lists, and declared `BookNotFound` after deletion.
+- Official-SDK MCP initialization, discovery of all five tools, create/get/update/list/remove, deleted-row results, declared missing-row errors, and session termination.
+- SQLite triggers forced both `SqlError` and an absent create result; HTTP RPC and MCP reported `BookPersistenceError` in both cases. The final list was empty.
+
+`bun run check`, `bun run lint`, and `bun run docs:build` passed. The existing suite passed all 62 tests across 16 files. The owned server was stopped, and the throwaway source and isolated database artifacts were removed. This public, JSON-native slice does not establish wrapper equivalence for authentication context, service-dependent codecs, acquisition failure handling, or invocation finalizers. No browser interaction was revalidated.
+
 ### 2026-09-09: Tenant-scoped orders and invoices
 
 The slice declares canonical orders, lines, and invoices, exposes generated tenant-scoped reads, and authors create/add-line/issue/pay/summary commands. Resource `relations` supplies composite tenant foreign keys, tenant-local number uniqueness, one invoice per order, and tenant/status indexes. Business rules, authenticated subject binding, checked minor-unit arithmetic, and expected-version writes remain explicit. ([Domain](../../apps/orders-invoices/domain.ts); [resources](../../apps/orders-invoices/resources.ts); [contracts](../../apps/orders-invoices/contracts.ts); [SQL](../../apps/orders-invoices/sqlite.ts); [walkthrough](../../apps/README.md#orders-and-invoices))
