@@ -6,6 +6,7 @@
     "./application": "./src/application.ts",
     "./application-admin": "./src/application-admin.ts",
     "./application-bun": "./src/application-bun.ts",
+    "./application-cluster": "./src/application-cluster.ts",
     "./application-inspect": "./src/application-inspect.ts",
     "./authorization": "./src/authorization.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",

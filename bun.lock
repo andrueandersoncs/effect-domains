@@ -39,6 +39,22 @@
         "effect-domains": "workspace:*",
       },
     },
+    "apps/durable-reminders": {
+      "name": "@effect-domains/example-durable-reminders",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "apps/durable-workflows": {
+      "name": "@effect-domains/example-durable-workflows",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
     "apps/migration-lifecycle": {
       "name": "@effect-domains/example-migration-lifecycle",
       "dependencies": {
@@ -120,6 +136,10 @@
     "@effect-domains/example-authored-sql": ["@effect-domains/example-authored-sql@workspace:apps/authored-sql"],
 
     "@effect-domains/example-basic-crud": ["@effect-domains/example-basic-crud@workspace:apps/basic-crud"],
+
+    "@effect-domains/example-durable-reminders": ["@effect-domains/example-durable-reminders@workspace:apps/durable-reminders"],
+
+    "@effect-domains/example-durable-workflows": ["@effect-domains/example-durable-workflows@workspace:apps/durable-workflows"],
 
     "@effect-domains/example-migration-lifecycle": ["@effect-domains/example-migration-lifecycle@workspace:apps/migration-lifecycle"],
 

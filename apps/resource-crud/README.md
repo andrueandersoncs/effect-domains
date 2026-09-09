@@ -92,15 +92,15 @@ Set `TODO_ID` to the identifier returned by Alice's create command. Alice can pa
 ```bash
 export RESOURCE_CRUD_TOKEN=alice-demo
 bun run resource-crud todos.get --id "$TODO_ID"
-bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Ship released applications"
-bun run resource-crud todos.patch --id "$TODO_ID" --patch-owner-id bob
+bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Ship released applications"
+bun run resource-crud todos.patch --key "$TODO_ID" --changes-owner-id bob
 ```
 
 The last command exits nonzero with `Forbidden`: ownership fields are immutable even while the todo is incomplete. Alice can complete the todo, but cannot edit or reopen it afterward:
 
 ```bash
 bun run resource-crud todos.update --id "$TODO_ID" --title "Ship released applications" --completed true --tenant-id acme --owner-id alice
-bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Blocked edit"
+bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Blocked edit"
 ```
 
 The last command fails with `Forbidden` and leaves the completed todo unchanged. An Acme administrator can reopen it and delete it:
@@ -110,7 +110,7 @@ RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.update --id "$TODO_ID
 RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.remove --id "$TODO_ID"
 ```
 
-`patch` need not repeat unchanged fields; `update` does. `title` must be non-empty. Native nested flags include `--filter-completed` and `--patch-title`; `--input-json` remains available for the complete request shape.
+`patch` accepts `{ key, changes }` and need not repeat unchanged fields; `update` requires the complete row. `title` must be non-empty. Native flags include `--key`, `--changes-title`, and `--filter-completed`; `--input-json` remains available for the complete request shape.
 
 ## Runtime and persistence
 
@@ -131,6 +131,8 @@ RESOURCE_CRUD_URL=http://127.0.0.1:3001/rpc/v1 RESOURCE_CRUD_TOKEN=alice-demo bu
 The credentials are hard-coded public fixtures, not production authentication: they have no password verification, rotation, expiry, transport security, or token issuance. They demonstrate that `AuthorizationRpc.Authenticator` produces trusted request-local claims. Do not reuse them outside a local demo. Other examples remain public unless they declare authorization policy.
 
 Startup applies the checked-in, frozen migration chain and preserves existing rows; it does not reset the database. Migration `002_ownership` adds the ownership columns and backfills existing todos with `tenantId = "acme"` and `ownerId = "alice"`. An untracked database is rejected rather than silently adopted.
+
+[`003_schema_string_checks`](migrations/003_schema_string_checks.json) preserves the rows while removing the old SQLite title-length constraint. Canonical non-empty validation remains authoritative because JavaScript and SQLite string lengths are not equivalent.
 
 List ordering is deliberately restricted to declared, non-nullable fields with the same canonical and storage schema and a supported physical scalar representation (`string`, `integer`, or `number`). This resource orders by its physical string `title`. Custom codecs whose storage differs from their canonical field and nullable fields cannot be declared as list-order fields; arbitrary codec ordering is not inferred.
 

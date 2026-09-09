@@ -1,8 +1,9 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Layer, Option, Ref, Schema, Struct, pipe } from "effect"
+import { Array, Deferred, Effect, Equivalence, Fiber, Layer, Option, Ref, Schema, Struct, pipe } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { StoragePrefix, StoredTextSchema } from "../apps/service-codec/storage.ts"
 import { Application } from "effect-domains/application"
 import { ApplicationAdmin } from "effect-domains/application-admin"
 import { AuthorizationSubject } from "effect-domains/authorization"
@@ -169,6 +170,99 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
     const serializedDefect = JSON.stringify(defect.body)
     const defectExpectation = expect(serializedDefect)
     defectExpectation.not.toContain("private database details")
+  }),
+  Effect.scoped,
+))
+
+it.effect("admin isolates a slow call from an unrelated handler defect", () => pipe(
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const slow = Rpc.make("slow", { success: Schema.String })
+    const defect = Rpc.make("defect", { success: Schema.String })
+    const group = RpcGroup.make(slow, defect)
+
+    const slowHandler = Effect.fn("ApplicationAdmin.testSlowHandler")(function* () {
+      yield* Deferred.succeed(started, undefined)
+      yield* Deferred.await(release)
+      return "healthy"
+    })
+
+    const handlers = group.toLayer({
+      slow: slowHandler,
+      defect: () => Effect.die("unrelated defect"),
+    })
+
+    const application = Application.make({ name: "isolation", resources: [], commands: [{ group, handlers }] })
+
+    const routes = pipe(
+      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      Layer.provide(application.handlers),
+    )
+
+    const handler = yield* serverFor(routes)
+
+    const healthy = yield* pipe(
+      call(handler, "slow", null),
+      Effect.forkScoped,
+    )
+
+    yield* Deferred.await(started)
+    const defectResponse = yield* call(handler, "defect", null)
+
+    yield* Deferred.succeed(release, undefined)
+
+    const healthyResponse = yield* Fiber.join(healthy)
+
+    expect(defectResponse.status).toBe(500)
+    expect(healthyResponse).toEqual({ status: 200, body: { result: "healthy" } })
+  }),
+  Effect.scoped,
+))
+
+it.effect("admin uses handler-only codec context instead of its ambient context", () => pipe(
+  Effect.gen(function* () {
+    const echo = Rpc.make("echo", {
+      payload: StoredTextSchema,
+      success: StoredTextSchema,
+      error: StoredTextSchema,
+    })
+
+    const group = RpcGroup.make(echo)
+    const innerPrefix = Layer.succeed(StoragePrefix, { value: "inner:" })
+    const outerPrefix = Layer.succeed(StoragePrefix, { value: "outer:" })
+
+    const handlers = pipe(
+      group.toLayer({ echo: (text) => Equivalence.strictEqual<string>()(text, "fail") ? Effect.fail("failure") : Effect.succeed(`${text}!`) }),
+      Layer.provide(innerPrefix),
+    )
+
+    const application = Application.make({ name: "codec", resources: [], commands: [{ group, handlers }] })
+
+    const handlerOnlyRoutes = pipe(
+      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      Layer.provide(application.handlers),
+    )
+
+    const handlerOnly = yield* serverFor(handlerOnlyRoutes as Layer.Layer<never, unknown, HttpRouter.HttpRouter>)
+    const handlerOnlyResponse = yield* call(handlerOnly, "echo", "inner:hello")
+    const handlerOnlyFailure = yield* call(handlerOnly, "echo", "inner:fail")
+
+    expect(handlerOnlyResponse).toEqual({ status: 200, body: { result: "inner:hello!" } })
+    expect(handlerOnlyFailure).toEqual({ status: 422, body: { error: "inner:failure" } })
+
+    const routes = pipe(
+      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      Layer.provide(application.handlers),
+      Layer.provide(outerPrefix),
+    )
+
+    const handler = yield* serverFor(routes)
+    const response = yield* call(handler, "echo", "inner:hello")
+    const failure = yield* call(handler, "echo", "inner:fail")
+
+    expect(response).toEqual({ status: 200, body: { result: "inner:hello!" } })
+    expect(failure).toEqual({ status: 422, body: { error: "inner:failure" } })
   }),
   Effect.scoped,
 ))

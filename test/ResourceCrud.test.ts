@@ -1,6 +1,6 @@
 import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
+import { Array, DateTime, Effect, Option, Result, Schema, Struct, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -10,6 +10,7 @@ import { NotesResource } from "../apps/service-codec/resources.ts"
 import { StoragePrefix } from "../apps/service-codec/storage.ts"
 import { NoteIdSchema } from "../apps/service-codec/domain.ts"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { RpcTest } from "effect/unstable/rpc"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
@@ -163,3 +164,88 @@ it.effect(
   "implicit identifiers preserve canonical checks for SQLite create, update, and patch",
   () => pipe(orderedCrudProgram, Effect.provide(sqlite)),
 )
+
+const TimestampSchema = Schema.Struct({ id: identifier(Schema.String), at: Schema.DateTimeUtc })
+interface Timestamp extends Schema.Schema.Type<typeof TimestampSchema> {}
+
+const Timestamps = Resource.make({
+  name: "timestamp_query_codec",
+  schema: TimestampSchema,
+  authorization: Authorization.public,
+  operations: [],
+  list: { filter: ["at"], order: [], limit: 1 },
+})
+
+it.effect("timestamp filters use the physical codec across cursor pages", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([Timestamps.table])
+    const at = yield* pipe(DateTime.make("2026-09-09T00:00:00.000Z"), Effect.fromOption)
+    const different = yield* pipe(DateTime.make("2026-09-10T00:00:00.000Z"), Effect.fromOption)
+    yield* Timestamps.repository.create({ id: "a", at })
+    yield* Timestamps.repository.create({ id: "b", at: different })
+    yield* Timestamps.repository.create({ id: "c", at })
+    const first = yield* Timestamps.repository.page({ filter: { at } })
+    const firstIds = Array.map(first.items, Struct.get("id"))
+    expect(firstIds).toEqual(["a"])
+    const cursor = yield* pipe(Option.fromNullishOr(first.nextCursor), Effect.fromOption)
+    const second = yield* Timestamps.repository.page({ filter: { at }, cursor })
+    const secondIds = Array.map(second.items, Struct.get("id"))
+    expect(secondIds).toEqual(["c"])
+    expect(second.nextCursor).toBeNull()
+  }),
+  Effect.provide(sqlite),
+))
+
+const EncodedNumberSchema = Schema.Struct({ id: identifier(Schema.String), quantity: Schema.NumberFromString })
+interface EncodedNumber extends Schema.Schema.Type<typeof EncodedNumberSchema> {}
+
+it("rejects inferred ordering through a semantic numeric codec", () => {
+  expect(() => Resource.make({
+    name: "semantic_numeric_order",
+    schema: EncodedNumberSchema,
+    authorization: Authorization.public,
+    operations: [],
+    list: { order: [{ field: "quantity" }] },
+  })).toThrow()
+})
+
+const PatchNamedKeySchema = Schema.Struct({
+  patch: identifier(Schema.String),
+  key: Schema.String,
+  changes: Schema.String,
+})
+
+interface PatchNamedKey extends Schema.Schema.Type<typeof PatchNamedKeySchema> {}
+
+const PatchNamedKeys = Resource.make({
+  name: "patch_named_keys",
+  schema: PatchNamedKeySchema,
+  authorization: Authorization.public,
+  operations: ["patch"],
+})
+
+it.effect("generated patch envelopes cannot collide with canonical field names", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([PatchNamedKeys.table])
+    yield* PatchNamedKeys.repository.create({ patch: "row", key: "before-key", changes: "before-changes" })
+
+    const procedure = yield* pipe(
+      PatchNamedKeys.group.requests.get("patch_named_keys.patch"),
+      Option.fromUndefinedOr,
+      Effect.fromOption,
+    )
+
+    const decoded = yield* Schema.decodeUnknownEffect(procedure.payloadSchema)({
+      key: "row",
+      changes: { key: "after-key", changes: "after-changes" },
+    })
+
+    const client = yield* RpcTest.makeClient(PatchNamedKeys.group)
+    yield* client["patch_named_keys.patch"](decoded)
+    const stored = yield* PatchNamedKeys.repository.get("row")
+    expect(stored).toEqual({ patch: "row", key: "after-key", changes: "after-changes" })
+  }),
+  Effect.provide(PatchNamedKeys.handlers),
+  Effect.provide(sqlite),
+  Effect.scoped,
+))

@@ -1,6 +1,6 @@
 # Applications
 
-Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these seven loopback applications. Each application has a persistent SQLite database, a manifest registry of frozen migration artifacts, an HTTP RPC server, a generated CLI, and local schema commands. They demonstrate different framework boundaries rather than seven copies of the same CRUD implementation.
+Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these nine loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local schema commands. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
 
 ## Choose an application
 
@@ -13,6 +13,8 @@ Each application is a runnable Bun workspace package. The private repository roo
 | [persisted-ref](persisted-ref/README.md) | A shared counter bound to one persisted resource identity with explicit refresh | `PERSISTED_REF_DB` |
 | [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
 | [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
+| [durable-workflows](#durable-workflows) | Approval/export workflow with durable timing and queue-backed file creation | `DURABLE_WORKFLOWS_DB`, `DURABLE_WORKFLOWS_EXECUTION_DB` |
+| [durable-reminders](#durable-reminders) | Persisted per-recipient scheduling, receipt projection, and cron retention | `DURABLE_REMINDERS_DB`, `DURABLE_REMINDERS_EXECUTION_DB` |
 
 The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); compare [tenant/owner todo rules](resource-crud/resources.ts) with [role-based note rules](service-codec/resources.ts) to see custom authorization. [Authored SQL](#authored-sql) demonstrates the privileged escape hatch.
 
@@ -41,11 +43,11 @@ PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
 BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
 ```
 
-Client settings follow the database naming convention: `BASIC_CRUD_URL`, `AUTHORED_SQL_URL`, `RESOURCE_CRUD_URL`, `SERVICE_CODEC_URL`, `PERSISTED_REF_URL`, `MIGRATION_LIFECYCLE_URL`, and `RESERVATIONS_URL`. Todo and note RPCs require the demo credentials below; the other five examples remain explicitly public. All seven `main.ts` runners opt into the generated admin at `/admin`. These are runnable loopback examples, not production deployment templates.
+Client settings follow the database naming convention: `<APPLICATION_NAME>_URL` and `<APPLICATION_NAME>_TOKEN`, with hyphens replaced by underscores and names uppercased. Todo and note RPCs require the demo credentials below; the other five original examples remain explicitly public. The seven resource-focused examples opt into admin at `/admin`; the two durable examples do not. Durable reminders require the admin demo session, while durable workflows require an explicitly configured operator token. These are loopback examples, not production deployment templates.
 
 ### Demo authentication
 
-[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo and note applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
+[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo, note, and durable-reminder applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
 
 | Token | User | Tenant | Roles |
 | --- | --- | --- | --- |
@@ -80,13 +82,13 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 - `application.ts`: resources and explicit command-descriptor registration.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
-- `main.ts`: the sole runner for `serve`, schema commands, `inspect`, and generated remote commands.
+- `main.ts`: the sole runner for `serve`, schema commands, `inspect`, generated remote commands, and `worker` when background layers are configured.
 
-`Application.make({ name, resources, commands })` groups optional resource/command arrays. Each `main.ts` resolves its manifest with `new URL("./migrations/manifest.json", import.meta.url)` and passes `ApplicationBun.run(app, { database: { manifest }, admin: true })` to native `BunRuntime.runMain`. Services and initialization are supplied only where needed. Database filenames are optional; callers with decoded history may instead pass `{ migrations, filename? }`. The runner supplies the loopback server, RPC client, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; admin uses prebuilt assets and never bundles at runtime.
+`Application.make({ name, resources, commands })` groups optional resource/command arrays, including native `{ group, handlers }` bundles. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, private `execution: { database, layer }`, native `background`, HTTP `routes`, and admin are explicit options. The runner supplies loopback RPC, CLI, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets and never bundles at runtime.
 
 ## Generated admin
 
-Every example enables the optional admin server in its `main.ts`. Build its browser assets first with `bun install` followed by `bun run build` at the repository root, then start an example and open `http://127.0.0.1:3000/admin` (or its configured port). The browser sources are [`client.ts`](admin/src/client.ts) and [`style.css`](admin/src/style.css); the native adapter is [`application-admin.ts`](../packages/effect-domains/src/application-admin.ts). It exposes only the application's published unary RPC operations; it does not infer permissions or bypass resource policy. Its in-process transport shares the RPC handlers, middleware, codecs, and request headers with the MCP server, and every protected call forwards and authenticates its bearer token independently.
+The seven resource-focused examples enable the optional admin server in `main.ts`; the durable examples do not. Build its browser assets first with `bun install` followed by `bun run build` at the repository root, then start an admin-enabled example and open `http://127.0.0.1:3000/admin` (or its configured port). The browser sources are [`client.ts`](admin/src/client.ts) and [`style.css`](admin/src/style.css); the native adapter is [`application-admin.ts`](../packages/effect-domains/src/application-admin.ts). It exposes only the application's published unary RPC operations; it does not infer permissions or bypass resource policy. Its in-process transport shares the RPC handlers, middleware, codecs, and request headers with the MCP server, and every protected call forwards and authenticates its bearer token independently.
 
 The page keeps a manually entered bearer token in the browser's current memory only; it has no login, issuer, persistence, or token refresh. It builds scalar and structured forms from the RPC JSON schemas, hides forbidden fields, offers an entire-input JSON fallback for complex values, renders resource lists with declared filters and cursor next/back controls, and displays declared input/domain errors plus transport failures in the page.
 
@@ -144,13 +146,80 @@ bun run authored-sql inspect books.create
 
 The [reservation guide](reservations/README.md) covers the business-policy slice: generated read operations alongside explicit transactional reserve, confirm, and release commands. It includes the stock walkthrough, transition errors, restart behavior, and historical timestamp migration. The [validation record](../docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
+## Durable workflows
+
+[`durable-workflows`](durable-workflows/main.ts) registers a native Workflow and its proxy commands directly in the application. The workflow waits five seconds through `DurableClock`, optionally waits for a `DurableDeferred` approval, renders JSON in an Activity, and uses a SQL-backed `DurableQueue` worker to publish the artifact. Queue completion resumes the workflow; no custom jobs registry is involved. ([Workflow](durable-workflows/workflow.ts); [native layers](durable-workflows/runtime.ts); [writer](durable-workflows/writer.ts))
+
+Start the server:
+
+```bash
+export DURABLE_WORKFLOWS_TOKEN=local-operator-secret
+export DURABLE_WORKFLOWS_OUTPUT_DIR="$PWD/export-artifacts"
+PORT=3001 bun run durable-workflows:server
+```
+
+In another terminal, configure the same token and submit:
+
+```bash
+export DURABLE_WORKFLOWS_TOKEN=local-operator-secret
+export DURABLE_WORKFLOWS_URL=http://127.0.0.1:3001/rpc/v1
+bun run durable-workflows DurableWorkflow.ExportDiscard --input-json '{"exportId":"demo-export","records":[{"id":"alice","name":"Alice","attributes":{"active":true}}],"requiresApproval":true}'
+```
+
+Set `EXECUTION_ID` to the returned execution ID, without its JSON quotes:
+
+```bash
+bun run durable-workflows DurableWorkflow.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run durable-workflows DurableWorkflow.Approve --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run durable-workflows DurableWorkflow.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run durable-workflows DurableWorkflow.Status
+curl -H "Authorization: Bearer $DURABLE_WORKFLOWS_TOKEN" http://127.0.0.1:3001/operator/metrics
+```
+
+Poll again until `Succeeded`; success contains `artifactPath` and `recordCount`. `PendingOrUnknown` deliberately does not distinguish a pending/suspended execution from an unknown ID. `Export` waits for completion; `ExportDiscard` returns the stable execution ID. Repeating the same `exportId` targets the same execution: use a new ID for different input. An operator can explicitly request native resume with `DurableWorkflow.ExportResume` and the same execution-ID payload. Submission, resume, approval, polling, and status are authenticated; metrics independently requires the configured bearer token.
+
+Application storage defaults to `durable-workflows.sqlite` (`DURABLE_WORKFLOWS_DB`); private native execution storage defaults to `durable-workflows-execution.sqlite` (`DURABLE_WORKFLOWS_EXECUTION_DB`). This example has no application tables and uses empty application history. Native Effect owns execution-table migrations.
+
+To run without HTTP, stop the server and run `PORT=3001 bun run durable-workflows:worker` with the same database, output-directory, and token settings. Accepted executions continue after restart, including durable sleep and queue-backed file creation. Remote CLI/MCP calls require a running server; switch back to `serve` for approval or inspection of execution state.
+
+## Durable reminders
+
+[`durable-reminders`](durable-reminders/main.ts) uses one native Entity identity per recipient, not one actor per Resource. Persisted `Schedule` messages carry native `PrimaryKey` and `DeliverAt` protocols. Delivery records an application receipt transactionally, with `(recipient, requestId)` deduplication. A native Singleton writes a receipt projection every five seconds; a native ClusterCron archives receipts older than 90 days. This is a receipt-delivery demonstration, not an email/SMS integration. ([Protocol](durable-reminders/reminder-entity.ts); [registrations](durable-reminders/background.ts))
+
+```bash
+PORT=3002 bun run durable-reminders:server
+```
+
+In another terminal:
+
+```bash
+export DURABLE_REMINDERS_URL=http://127.0.0.1:3002/rpc/v1
+export DURABLE_REMINDERS_TOKEN=admin-demo
+REQUEST_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
+DELIVER_AT=$(bun -e 'console.log(new Date(Date.now() + 30000).toISOString())')
+bun run durable-reminders ReminderRecipient.ScheduleDiscard --input-json "{\"entityId\":\"alice\",\"payload\":{\"recipient\":\"alice\",\"requestId\":\"$REQUEST_ID\",\"message\":\"Review the export\",\"deliverAt\":\"$DELIVER_AT\"}}"
+bun run durable-reminders reminder_receipts.list --filter-recipient alice
+```
+
+`ScheduleDiscard` acknowledges acceptance without waiting for delivery. `Schedule` takes the same envelope and waits for the receipt. Repeat a request with the same recipient, request ID, and payload to retrieve the existing result rather than deliver again. The handler rejects an `entityId` that differs from the payload recipient. Missing credentials fail authentication; valid non-admin demo sessions cannot schedule or read receipts.
+
+Application storage defaults to `durable-reminders.sqlite` (`DURABLE_REMINDERS_DB`), with its frozen [initial migration](durable-reminders/migrations/001_initial.json). Private execution storage defaults to `durable-reminders.execution.sqlite` (`DURABLE_REMINDERS_EXECUTION_DB`). The projection defaults to `durable-reminders.receipts.json` (`DURABLE_REMINDERS_PROJECTION_FILE`). Retention runs at midnight UTC; `DURABLE_REMINDERS_RETENTION_CRON` explicitly overrides the native cron expression.
+
+To exercise restart recovery, schedule a future message, stop the server, and start `PORT=3002 bun run durable-reminders:worker` with the same database and projection settings. The persisted delivery, singleton projection, and retention work continue without an HTTP listener. Switch back to `serve` to query receipts remotely.
+
+### Durable execution boundaries
+
+Both examples use native `SingleRunner`: run either `serve` or `worker` against an execution store, never both concurrently. Multi-runner topology requires an explicitly different native composition. Preserve both databases across restarts and back them up according to application recovery requirements; the runner rejects filename aliases, dangling symlinks, and ambiguous SQLite URI filenames before opening an execution-enabled runtime.
+
+Application and execution transactions are separate. No cross-database transaction or automatic outbox is supplied. Retried external effects need explicit idempotency: the export writes the same execution-ID artifact through an atomic rename, while reminders deduplicate application receipt writes. Neither establishes exactly-once delivery to an arbitrary external service. Native Entity/Cron work explicitly captures application SQL during registration because Sharding supplies private execution SQL in its invocation context. ([Runtime contract](../docs/wiki/tables-and-queries.md#native-durable-execution); [verification and limits](../docs/wiki/validation-strategy.md#2026-09-09-native-durable-execution))
+
 ## CLI conventions
 
-Scalar payload fields become kebab-case flags. Nested payload fields use their path, so `filter.completed` is `--filter-completed` and `patch.title` is `--patch-title`. Explicit false booleans are accepted as `--enabled false`; finite numeric fields have native flags, and use `--amount=-1` for negative numeric arguments. `--input-json` accepts the canonical JSON payload, including shapes that cannot be represented by native flags. It cannot be mixed with field flags.
+Scalar payload fields become kebab-case flags. Nested paths produce flags such as `--filter-completed` and `--changes-title`; patch identity is supplied as `--key`. Explicit false booleans are accepted as `--enabled false`; finite numeric fields have native flags, and use `--amount=-1` for negative numeric arguments. `--input-json` accepts the canonical JSON payload, including shapes that cannot be represented by native flags, and cannot be mixed with field flags. No-payload procedures require no input flags; empty struct payloads still decode as `{}`.
 
 ```bash
 RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list --filter-completed false --limit 10
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --id "$TODO_ID" --patch-title "Ship docs"
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Ship docs"
 bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 ```
 
@@ -197,9 +266,9 @@ Use `schema snapshot` or `schema plan` to inspect a prospective artifact without
 
 ```bash
 bun run reservations schema snapshot --out current-schema.json
-bun run reservations schema plan --id 003_change \
-  --from apps/reservations/migrations/002_timestamp.json \
-  --out 003_change.json
+bun run reservations schema plan --id 004_change \
+  --from apps/reservations/migrations/003_schema_string_checks.json \
+  --out 004_change.json
 ```
 
 `generate` numbers the new artifact after the final registered migration; it requires a manifest and leaves the registry unchanged when a plan is blocked. Review the generated artifact and its manifest update as one change. Do not regenerate previously applied artifacts from current models.
@@ -213,6 +282,8 @@ Intent flags use physical table and column names. Each flag is repeatable; JSON 
 | `--transform 'table:column:SQL-expression'` | Explicit stored-value transformation |
 
 A transform runs in the `SELECT` over the physical **from** table, before renames or rebuilding. The checked-in [timestamp artifact](reservations/migrations/002_timestamp.json) converts historical epoch seconds to ISO text. Its snapshot does not import the latest reservation schema.
+
+Rename chains and cycles also copy original source columns through a transactional rebuild. The todo, document, and reservation manifests append `003_schema_string_checks` to remove previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas; historical artifacts are not rewritten.
 
 The planner emits blocked changes with their reasons instead of guessing drops, renames, or required values. The runtime checks manifest history and actual table definitions, applies rebuilds transactionally, and refuses untracked tables, indexes, and triggers. Relationships, indexes, destructive drops, and arbitrary custom table objects are outside the current migration model.
 

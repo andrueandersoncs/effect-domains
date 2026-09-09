@@ -22,7 +22,7 @@ import {
 import * as Stdio from "effect/Stdio"
 import { CliError, Command, Flag } from "effect/unstable/cli"
 import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc"
-import { compileUnaryRpc } from "./rpc-contract.ts"
+import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
 
 class RpcCliDefinitionError extends Schema.TaggedError<RpcCliDefinitionError>()(
   "RpcCliDefinitionError",
@@ -275,7 +275,7 @@ const makeInputJsonFlag = () => {
 }
 
 const makeRpcCli = <
-  Group extends RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.AnyWithProps>, "requests">,
+  Group extends RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.Any & UnaryRpcProcedure>, "requests">,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
   ProtocolError = never,
   ProtocolRequirements = never,
@@ -384,15 +384,15 @@ const makeRpcCli = <
 
         const nativeEntries = Array.map(nativeFields, toNativeEntry)
         const nativeInputEntries = Array.getSomes(nativeEntries)
-        const emptyNativeInput = emptyPayloads()
+        const hasNativeInput = Array.isReadonlyArrayNonEmpty(nativeInputEntries)
+        const initialPayload = emptyPayloads()
 
         const nativeInput = Array.reduce(
           nativeInputEntries,
-          emptyNativeInput,
+          initialPayload,
           (payload, [path, value]) => setPayloadField(payload, path, value),
         )
 
-        const hasNativeInput = Array.isReadonlyArrayNonEmpty(nativeInputEntries)
         const hasInputJson = Option.isSome(inputJson)
         const conflictingInputs = hasInputJson && hasNativeInput
 
@@ -405,7 +405,18 @@ const makeRpcCli = <
 
         const decodeInputJson = Schema.decodeUnknownEffect(inputJsonSchema)
         const decodeNative = Schema.decodeUnknownEffect(contract.payload)
-        const decodeNativeInput = () => decodeNative(nativeInput)
+
+        const decodeNativeInput = Effect.fn("RpcCli.decodeNativeInput")(function* () {
+          const noNativeInput = !hasNativeInput
+          const voidPayload = SchemaAST.isVoid(decodedPayloadSchema.ast)
+          const emptyVoid = noNativeInput && voidPayload
+
+          const encoded = emptyVoid
+            ? yield* Schema.encodeUnknownEffect(contract.payload)(undefined)
+            : nativeInput
+
+          return yield* decodeNative(encoded)
+        })
 
         const payload = yield* Option.match(inputJson, {
           onNone: decodeNativeInput,

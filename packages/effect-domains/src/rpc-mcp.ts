@@ -32,8 +32,7 @@ const toolSchema = (schema: Schema.Constraint) => pipe(
 
 const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGroup<UnaryRpc>) {
   const registry = yield* McpServer.McpServer
-  const client = yield* makeClient(group)
-  const services = yield* Effect.context<Rpc.ServicesServer<UnaryRpc>>()
+  const { client, withHandlerContext } = yield* makeClient(group)
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
@@ -57,20 +56,20 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
     const tool = McpSchema.Tool.make({ name: contract.tag, inputSchema, outputSchema })
+    const withCodecContext = withHandlerContext(procedure as UnaryRpc)
 
-    const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown) {
+    const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown, headers: Headers.Headers) {
       const decodeInput = Schema.decodeUnknownEffect(InputSchema)
 
       const payload: Input = yield* pipe(
         decodeInput(arguments_),
+        withCodecContext,
         Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${contract.tag}` })),
       )
 
-      const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
-      const headers = Option.match(request, { onNone: emptyHeaders, onSome: Struct.get("headers") })
-
       const failureResponse = (cause: unknown) => pipe(
         Schema.encodeUnknownEffect(ErrorSchema)(cause),
+        withCodecContext,
         Effect.map(errorResult),
         Effect.catch(failInternally),
       )
@@ -84,6 +83,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
           onSuccess: (result) => pipe(
             OutputSchema.make({ result }),
             encodeOutput,
+            withCodecContext,
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
             Effect.map(successResult),
             Effect.catch(failInternally),
@@ -95,11 +95,15 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
     yield* registry.addTool({
       tool,
       annotations: procedure.annotations,
-      handle: (payload) => pipe(
-        execute(payload),
-        Effect.provideContext(services),
-        Effect.catchDefect(failInternally),
-      ),
+      handle: Effect.fn("RpcMcp.handle")(function* (payload) {
+        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
+        const headers = Option.match(request, { onNone: emptyHeaders, onSome: Struct.get("headers") })
+
+        return yield* pipe(
+          execute(payload, headers),
+          Effect.catchDefect(failInternally),
+        )
+      }),
     })
   }))
 })

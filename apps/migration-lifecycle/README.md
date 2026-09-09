@@ -46,6 +46,8 @@ The current `DocumentsResource` declares all five generated operations: `documen
 
 The migration story is authored and reviewed instead. [`legacy.ts`](legacy.ts) describes the version-one `title` shape solely for the seed program. [`migrations/001_initial.json`](migrations/001_initial.json) and [`migrations/002_document_metadata.json`](migrations/002_document_metadata.json) are frozen artifacts. The second artifact rebuilds the table, copies `title` to `heading`, leaves the new nullable `summary` as `NULL`, and supplies `0` for the newly required `priority`.
 
+[`003_schema_string_checks`](migrations/003_schema_string_checks.json) then rebuilds without the misderived SQLite heading-length constraint, copying existing values unchanged. The first two artifacts retain their historical meaning; canonical non-empty validation remains in the schema.
+
 The current schema requires a non-empty `heading`, allows `summary` to be `null`, and requires an integer `priority` of at least zero. Generated identifiers are UUIDv7 values.
 
 ## Review a migration plan

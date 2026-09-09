@@ -2,6 +2,10 @@ import { describe, expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
 import { Table } from "effect-domains/table"
+import { Resource } from "effect-domains/resource"
+import { Authorization } from "effect-domains/authorization"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { prepareTables } from "./prepare-tables.ts"
 
 describe("Table", () => {
   const isMinimumLabelLength = Schema.isMinLength(2)
@@ -48,6 +52,52 @@ describe("Table", () => {
   const NullableOptionsTable = Table.make({
     name: "nullable_options",
     schema: NullableOptionsSchema,
+  })
+
+  const SuspendedBooleanSchema = Schema.Struct({
+    active: Schema.suspend(() => Schema.Boolean),
+    occurredAt: Schema.suspend(() => Schema.DateTimeUtc),
+  })
+
+  interface SuspendedBoolean extends Schema.Schema.Type<typeof SuspendedBooleanSchema> {}
+
+  const SuspendedBooleans = Table.make({
+    name: "suspended_booleans",
+    schema: SuspendedBooleanSchema,
+  })
+
+  const NullableSuspendedBooleanSchema = Schema.Struct({
+    active: Schema.NullOr(Schema.suspend(() => Schema.Boolean)),
+  })
+
+  interface NullableSuspendedBoolean extends Schema.Schema.Type<typeof NullableSuspendedBooleanSchema> {}
+
+  const NullableSuspendedBooleans = Table.make({
+    name: "nullable_suspended_booleans",
+    schema: NullableSuspendedBooleanSchema,
+  })
+
+  const UnicodeLabelSchema = Schema.String.check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(2),
+  )
+
+  const UnicodeLabelsSchema = Schema.Struct({ label: UnicodeLabelSchema })
+  interface UnicodeLabels extends Schema.Schema.Type<typeof UnicodeLabelsSchema> {}
+
+  const UnicodeLabels = Resource.make({
+    name: "unicode_labels",
+    schema: UnicodeLabelsSchema,
+    authorization: Authorization.public,
+    operations: [],
+  })
+
+  const NumberStringsSchema = Schema.Struct({ value: Schema.NumberFromString })
+  interface NumberStrings extends Schema.Schema.Type<typeof NumberStringsSchema> {}
+
+  const NumberStrings = Table.make({
+    name: "number_strings",
+    schema: NumberStringsSchema,
   })
 
   it.effect(
@@ -102,6 +152,30 @@ describe("Table", () => {
       expect(storedNone).toEqual({ value: null })
       const expectedSome = Option.some("retained")
       expect(loadedSome).toEqual({ value: expectedSome })
+    }),
+  )
+
+  it.effect(
+    "normalizes suspended scalar codecs before storage compilation",
+    Effect.fn("Table.normalizesSuspendedScalarCodecs")(function* () {
+      const occurredAt = yield* pipe(DateTime.make("2025-01-02T03:04:05.000Z"), Effect.fromOption)
+      const value = SuspendedBooleanSchema.make({ active: true, occurredAt })
+      const stored = yield* Schema.encodeEffect(SuspendedBooleans.insertSchema)(value)
+      const decoded = yield* Schema.decodeUnknownEffect(SuspendedBooleans.insertSchema)(stored)
+      const nullableValue = NullableSuspendedBooleanSchema.make({ active: true })
+
+      const nullableStored = yield* Schema.encodeEffect(NullableSuspendedBooleans.insertSchema)(
+        nullableValue,
+      )
+
+      const nullableDecoded = yield* Schema.decodeUnknownEffect(
+        NullableSuspendedBooleans.insertSchema,
+      )(nullableStored)
+
+      expect(stored).toEqual({ active: 1, occurredAt: "2025-01-02T03:04:05.000Z" })
+      expect(decoded).toEqual(value)
+      expect(nullableStored).toEqual({ active: 1 })
+      expect(nullableDecoded).toEqual(nullableValue)
     }),
   )
 
@@ -168,6 +242,18 @@ describe("Table", () => {
       })
     }))
 
+  const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
+
+  it.effect("preserves canonical Unicode length semantics through SQLite", () => pipe(
+    Effect.gen(function* () {
+      yield* prepareTables([UnicodeLabels.table])
+      const created = yield* UnicodeLabels.repository.create({ label: "😀" })
+      const loaded = yield* UnicodeLabels.repository.get(created.id)
+      expect(loaded.label).toBe("😀")
+    }),
+    Effect.provide(sqlite),
+  ))
+
   it.effect("rejects ambiguous or lossy representations", () =>
     Effect.sync(() => {
       const IdentifiedStringSchema = pipe(Schema.String, identifier)
@@ -192,11 +278,16 @@ describe("Table", () => {
       const CyclicValueSchema: Schema.Codec<never> = Schema.suspend(() => CyclicValueSchema)
       const CyclicSchema = Schema.Struct({ value: CyclicValueSchema })
       interface Cyclic extends Schema.Schema.Type<typeof CyclicSchema> {}
+      const NullableIdentifierSchema = pipe(Schema.NullOr(Schema.String), identifier)
+      const NullableIdentifierTableSchema = Schema.Struct({ id: NullableIdentifierSchema })
+      interface NullableIdentifierTable extends Schema.Schema.Type<typeof NullableIdentifierTableSchema> {}
+
       expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow()
       expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow()
       expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow()
       expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow()
       expect(() => Table.make({ name: "cyclic", schema: CyclicSchema })).toThrow()
+      expect(() => Table.make({ name: "nullable_identifier", schema: NullableIdentifierTableSchema })).toThrow()
 
     }))
 })

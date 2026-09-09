@@ -1,6 +1,8 @@
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Ref, Schema, pipe } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { Rpc, RpcGroup, RpcTest } from "effect/unstable/rpc"
+import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { Commands } from "effect-domains/commands"
 
 class Greeting extends Context.Service<Greeting, { readonly value: string }>()("test/Commands/Greeting") {}
@@ -32,33 +34,122 @@ const Clock = Commands.make({
   group: clockRpcs,
 })
 
+const identityRpc = Rpc.make("identity", { success: Schema.String }).middleware(AuthorizationRpc)
+const identityRpcs = RpcGroup.make(identityRpc)
+
+const Identity = Commands.make({
+  name: "test/Commands/Identity",
+  group: identityRpcs,
+})
+
+const scopedRpc = Rpc.make("scoped", { success: Schema.Void })
+const scopedRpcs = RpcGroup.make(scopedRpc)
+
+const Scoped = Commands.make({
+  name: "test/Commands/Scoped",
+  group: scopedRpcs,
+})
+
 const greet = Effect.fn("Greeter.greet")(function* () {
   const greeting = yield* Greeting
   return greeting.value
 })
 
+const identity = Effect.fn("Commands.identity")(function* () {
+  yield* AuthorizationSubject
+  return "authorized"
+})
+
+const scoped = Effect.fn("Commands.scoped")(function* (
+  onRelease: () => Effect.Effect<void>,
+) {
+  yield* Effect.addFinalizer(onRelease)
+})
+
+const authenticator = AuthorizationRpc.Authenticator.of({
+  authenticate: () => Effect.succeed({}),
+})
+
 it.effect("captures command handler services and lets invocation context override them", () => {
   const capturedGreeting = Layer.succeed(Greeting, { value: "captured" })
-  const handlersLayer = Greeter.layer({ greet })
-  const capturedHandlersLayer = Layer.provide(handlersLayer, capturedGreeting)
 
-  const program = Effect.gen(function* () {
-    const handlers = yield* Layer.build(capturedHandlersLayer)
-    const greeter = Context.get(handlers, Greeter)
-    const captured = yield* greeter.greet(undefined)
-    expect(captured).toBe("captured")
+  const capturedHandlersLayer = pipe(
+    Greeter.layer({ greet }),
+    Layer.provide(capturedGreeting),
+  )
 
-    const current = yield* pipe(
-      greeter.greet(undefined),
-      Effect.provideService(Greeting, { value: "current" }),
-    )
+  return pipe(
+    Effect.gen(function* () {
+      const handlers = yield* pipe(capturedHandlersLayer, Layer.build)
+      const greeter = Context.get(handlers, Greeter)
+      const captured = yield* greeter.greet(undefined)
+      expect(captured).toBe("captured")
 
-    expect(current).toBe("current")
-  })
+      const current = yield* pipe(
+        greeter.greet(undefined),
+        Effect.provideService(Greeting, { value: "current" }),
+      )
 
-  const scopedProgram = Effect.scoped(program)
-  return scopedProgram
+      expect(current).toBe("current")
+    }),
+    Effect.scoped,
+  )
 })
+
+it.effect("uses middleware-provided services for direct command invocations", () =>
+  pipe(
+    Effect.gen(function* () {
+      const commandLayer = Identity.layer({ identity })
+      const handlers = yield* pipe(commandLayer, Layer.build)
+      const commands = Context.get(handlers, Identity)
+
+      const result = yield* pipe(
+        commands.identity(undefined),
+        Effect.provideService(AuthorizationSubject, {}),
+      )
+
+      expect(result).toBe("authorized")
+    }),
+    Effect.scoped,
+  ))
+
+it.effect("lets RPC middleware provide command handler services", () => {
+  const commandLayer = Identity.layer({ identity })
+  const handlers = pipe(Identity.handlers, Layer.provide(commandLayer))
+
+  return pipe(
+    Effect.gen(function* () {
+      const client = yield* RpcTest.makeClient(Identity.group)
+      const result = yield* client.identity(undefined)
+      expect(result).toBe("authorized")
+    }),
+    Effect.provide(handlers),
+    Effect.provide(AuthorizationRpc.layer),
+    Effect.provideService(AuthorizationRpc.Authenticator, authenticator),
+    Effect.scoped,
+  )
+})
+
+it.effect("closes each direct command invocation scope before returning", () =>
+  pipe(
+    Effect.gen(function* () {
+      const released = yield* Ref.make(0)
+      const onRelease = () => Ref.update(released, (count) => count + 1)
+      const invokeScoped = () => scoped(onRelease)
+      const commandLayer = Scoped.layer({ scoped: invokeScoped })
+      const handlers = yield* pipe(commandLayer, Layer.build)
+      const commands = Context.get(handlers, Scoped)
+
+      yield* commands.scoped(undefined)
+      const releasedAfterFirstCall = yield* Ref.get(released)
+      expect(releasedAfterFirstCall).toBe(1)
+
+      yield* commands.scoped(undefined)
+      const releasedAfterSecondCall = yield* Ref.get(released)
+      expect(releasedAfterSecondCall).toBe(2)
+    }),
+    Effect.scoped,
+  ))
 
 const failingTime = (released: Ref.Ref<boolean>) =>
   Effect.fn("Commands.failingTime")(function* () {

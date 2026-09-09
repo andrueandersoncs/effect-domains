@@ -70,6 +70,8 @@ The implementations and policy remain explicit. `reserve` atomically verifies a 
 
 The frozen [`002_timestamp`](migrations/002_timestamp.json) artifact rebuilds `reservations` and converts the historical `created_at_seconds` epoch value into the current ISO UTC `createdAt` text using SQLite's `strftime`. It is a reviewed stored-data transformation, not a transport formatting change.
 
+[`003_schema_string_checks`](migrations/003_schema_string_checks.json) preserves stock and reservation rows while removing the misderived SQLite SKU-length constraints. Non-empty SKU validation remains in the canonical schemas; the earlier artifacts are unchanged.
+
 Schema commands run locally; no server is required. After changing a resource schema, generate against the ordered frozen history in [`migrations/manifest.json`](migrations/manifest.json):
 
 ```bash
@@ -80,9 +82,9 @@ bun run reservations inspect reserve
 `generate` writes the next valid artifact and atomically updates the manifest; blocked plans report their reasons and leave the registry untouched. Use `schema plan` when reviewing an unregistered prospective change:
 
 ```bash
-bun run reservations schema plan --id 003_change \
-  --from apps/reservations/migrations/002_timestamp.json \
-  --out 003_change.json
+bun run reservations schema plan --id 004_change \
+  --from apps/reservations/migrations/003_schema_string_checks.json \
+  --out 004_change.json
 ```
 
 Do not regenerate previously applied artifacts from current schemas: the runtime validates recorded history and actual table definitions before applying migrations.

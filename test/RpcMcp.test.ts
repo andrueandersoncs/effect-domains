@@ -135,6 +135,53 @@ it.effect("MCP discovers codecs and preserves scalar, array, void, and declared 
   Effect.scoped,
 ))
 
+it.effect("MCP uses handler-only codec context instead of its ambient context", () => pipe(
+  Effect.gen(function* () {
+    const echo = Rpc.make("codec.echo", {
+      payload: StoredTextSchema,
+      success: StoredTextSchema,
+      error: StoredTextSchema,
+    })
+
+    const group = RpcGroup.make(echo)
+    const innerPrefix = Layer.succeed(StoragePrefix, { value: "inner:" })
+    const outerPrefix = Layer.succeed(StoragePrefix, { value: "outer:" })
+
+    const handlers = pipe(
+      group.toLayer({ "codec.echo": (text) => Equivalence.strictEqual<string>()(text, "fail") ? Effect.fail("failure") : Effect.succeed(`${text}!`) }),
+      Layer.provide(innerPrefix),
+    )
+
+    const handlerOnlyRoutes = pipe(
+      RpcMcp.layerHttp({ name: "codec", group, path: "/mcp" }),
+      Layer.provide(handlers),
+    )
+
+    const handlerOnly = yield* makeServer(handlerOnlyRoutes as Layer.Layer<never, unknown, HttpRouter.HttpRouter>)
+    const handlerOnlyHeaders = yield* openSession(handlerOnly.handler)
+    const handlerOnlyResponse = yield* call(handlerOnly.handler, handlerOnlyHeaders, 2, "codec.echo", "inner:hello")
+    const handlerOnlyFailure = yield* call(handlerOnly.handler, handlerOnlyHeaders, 3, "codec.echo", "inner:fail")
+
+    expect(handlerOnlyResponse.result.structuredContent).toEqual({ result: "inner:hello!" })
+    expect(handlerOnlyFailure.result.content).toEqual([{ type: "text", text: '"inner:failure"' }])
+
+    const routes = pipe(
+      RpcMcp.layerHttp({ name: "codec", group, path: "/mcp" }),
+      Layer.provide(handlers),
+      Layer.provide(outerPrefix),
+    )
+
+    const server = yield* makeServer(routes)
+    const headers = yield* openSession(server.handler)
+    const response = yield* call(server.handler, headers, 2, "codec.echo", "inner:hello")
+    const failure = yield* call(server.handler, headers, 3, "codec.echo", "inner:fail")
+
+    expect(response.result.structuredContent).toEqual({ result: "inner:hello!" })
+    expect(failure.result.content).toEqual([{ type: "text", text: '"inner:failure"' }])
+  }),
+  Effect.scoped,
+))
+
 const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
 const subject = Rpc.make("identity.subject", { success: SubjectSchema }).middleware(AuthorizationRpc)
 const identity = RpcGroup.make(subject)

@@ -63,8 +63,7 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
   }
 
   const router = yield* HttpRouter.HttpRouter
-  const client = yield* makeClient(options.application.group as RpcGroup.RpcGroup<UnaryRpc>)
-  const services = yield* Effect.context<Rpc.ServicesServer<UnaryRpc>>()
+  const { client, withHandlerContext } = yield* makeClient(options.application.group as RpcGroup.RpcGroup<UnaryRpc>)
   const procedures = options.application.group.requests.values()
 
   const entries = yield* Effect.forEach(procedures, Effect.fn("ApplicationAdmin.compileOperation")(function* (procedure) {
@@ -78,23 +77,23 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
     const decode = Schema.decodeUnknownEffect(contract.payload)
     const encodeResult = pipe(Schema.Struct({ result: contract.success }), Schema.encodeUnknownEffect)
     const encodeError = pipe(Schema.Struct({ error: contract.error }), Schema.encodeUnknownEffect)
+    const withCodecContext = withHandlerContext(procedure as UnaryRpc)
 
     const invoke = Effect.fn("ApplicationAdmin.invoke")(function* (input: unknown, request: HttpServerRequest.HttpServerRequest) {
-      const decoded = yield* pipe(decode(input), Effect.result)
+      const decoded = yield* pipe(decode(input), withCodecContext, Effect.result)
       if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${contract.tag}: ${decoded.failure.message}`)
 
       return yield* pipe(
         client(contract.tag, decoded.success, { headers: request.headers }),
         Effect.matchEffect({
-          onFailure: (error) => pipe(encodeError({ error }), Effect.flatMap(declaredErrorResponse), Effect.catch(internalFailure)),
-          onSuccess: (result) => pipe(encodeResult({ result }), Effect.flatMap(successResponse), Effect.catch(internalFailure)),
+          onFailure: (error) => pipe(encodeError({ error }), withCodecContext, Effect.flatMap(declaredErrorResponse), Effect.catch(internalFailure)),
+          onSuccess: (result) => pipe(encodeResult({ result }), withCodecContext, Effect.flatMap(successResponse), Effect.catch(internalFailure)),
         }),
       )
     })
 
     const execute = (input: unknown, request: HttpServerRequest.HttpServerRequest) => pipe(
       invoke(input, request),
-      Effect.provideContext(services),
       Effect.catchDefect(internalFailure),
     )
 

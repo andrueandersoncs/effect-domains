@@ -1,6 +1,7 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { Effect, Layer, Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { Context, Effect, Layer, Schema, pipe } from "effect"
+import { Rpc, RpcGroup, RpcMiddleware } from "effect/unstable/rpc"
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { NotesApplication } from "../apps/service-codec/application.ts"
 import { StoragePrefix, StoredTextSchema } from "../apps/service-codec/storage.ts"
 import { Application } from "effect-domains/application"
@@ -40,6 +41,65 @@ const complete = ApplicationBun.run(NotesApplication, {
   services: storedPrefix,
 })
 
+class ExecutionDependency extends Context.Service<ExecutionDependency, {}>()("test/ApplicationBunExecution/ExecutionDependency") {}
+class ExecutionOutput extends Context.Service<ExecutionOutput, {}>()("test/ApplicationBunExecution/ExecutionOutput") {}
+class BackgroundDependency extends Context.Service<BackgroundDependency, {}>()("test/ApplicationBunExecution/BackgroundDependency") {}
+class RoutesDependency extends Context.Service<RoutesDependency, {}>()("test/ApplicationBunExecution/RoutesDependency") {}
+
+const makeExecution = Effect.gen(function* () {
+  yield* ExecutionDependency
+  return {}
+})
+
+const execution = Layer.effect(ExecutionOutput, makeExecution)
+
+const executionOutput = Effect.gen(function* () {
+  yield* ExecutionOutput
+})
+
+const background = pipe(BackgroundDependency, Effect.asVoid, Layer.effectDiscard)
+
+const route = Effect.gen(function* () {
+  yield* RoutesDependency
+  return HttpServerResponse.empty()
+})
+
+const routes = HttpRouter.add("GET", "/probe", route)
+const services = Layer.effectDiscard(executionOutput)
+
+const nativeRuntime = ApplicationBun.run(emptyApplication, {
+  database: { migrations: [] },
+  execution: { database: "execution.sqlite", layer: execution },
+  services,
+  initialize: executionOutput,
+  background,
+  routes,
+})
+
+class MiddlewareRequirement extends RpcMiddleware.Service<MiddlewareRequirement>()("test/ApplicationBunExecution/MiddlewareRequirement", {
+  error: Schema.Never,
+}) {}
+
+const middlewareRpc = Rpc.make("middleware-requirement", {
+  payload: Schema.Void,
+  success: Schema.Void,
+  error: Schema.Never,
+})
+
+const middlewareGroup = RpcGroup.make(middlewareRpc).middleware(MiddlewareRequirement)
+
+const middlewareApplication = Application.make({
+  name: "middleware-requirement",
+  commands: [{
+    group: middlewareGroup,
+    handlers: Layer.empty,
+  }],
+})
+
+const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
+  database: { migrations: [] },
+})
+
 const manifest = new URL("../apps/service-codec/migrations/manifest.json", import.meta.url)
 
 const minimal = ApplicationBun.run(emptyApplication, {
@@ -58,6 +118,20 @@ BunRuntime.runMain(storedTextCli)
 // A missing storage service remains a caller requirement because it is not needed by the wire client.
 const preservesMissing = true satisfies Equal<Effect.Services<typeof missing>, StoragePrefix>
 const dischargesProvided = true satisfies Equal<Effect.Services<typeof complete>, never>
+
+const preservesNativeRequirements = true satisfies Equal<
+  Effect.Services<typeof nativeRuntime>,
+  ExecutionDependency | BackgroundDependency | RoutesDependency
+>
+
+
+const preservesMiddlewareRequirement = true satisfies Equal<
+  Effect.Services<typeof middlewareRuntime>,
+  MiddlewareRequirement
+>
+
+void preservesMiddlewareRequirement
+void preservesNativeRequirements
 const defaultsAreRunnable = true satisfies Equal<Effect.Services<typeof minimal>, never>
 const preservesWireCodec = true satisfies Equal<Effect.Services<typeof storedTextCli>, StoragePrefix>
 

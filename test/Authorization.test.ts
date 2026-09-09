@@ -168,6 +168,54 @@ it("rejects unsafe create subject binding definitions", () => {
   expect(() => make('{"name":"generated_binding","authorization":"policy","create":{"generated":{"ownerId":"uuidV7"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
 })
 
+it.effect("populates nullable resource fields from required subject fields", () => pipe(
+  Effect.gen(function* () {
+    const NullableOwnerSchema = Schema.Struct({
+      id: identifier(Schema.String),
+      ownerId: Schema.NullOr(Schema.String),
+    })
+
+    interface NullableOwner extends Schema.Schema.Type<typeof NullableOwnerSchema> {}
+    const nullableOwner = Authorization.for({ resource: NullableOwnerSchema, subject: SubjectSchema })
+    const all = nullableOwner.all()
+    const policy = nullableOwner.policy({ scope: all, allow: { create: all, read: all } })
+
+    const resource = Resource.make({
+      name: "nullable_owner_subject_binding",
+      schema: NullableOwnerSchema,
+      authorization: policy,
+      create: { fromSubject: { ownerId: nullableOwner.subject.userId } },
+      operations: [],
+    })
+
+    yield* prepareTables([resource.table])
+    const created = yield* pipe(resource.repository.create({ id: "bound" }), asAlice)
+    expect(created.ownerId).toBe("alice")
+  }),
+  Effect.provide(sqlite),
+))
+
+it("rejects nullable subject fields bound to required resource fields", () => {
+  const NullableOwnerSubjectSchema = Schema.Struct({
+    userId: Schema.NullOr(Schema.String),
+    tenantId: Schema.String,
+    roles: Schema.Array(Schema.String),
+  })
+
+  interface NullableOwnerSubject extends Schema.Schema.Type<typeof NullableOwnerSubjectSchema> {}
+  const nullableOwnerSubject = Authorization.for({ resource: OwnedDocumentSchema, subject: NullableOwnerSubjectSchema })
+  const all = nullableOwnerSubject.all()
+  const policy = nullableOwnerSubject.policy({ scope: all, allow: { create: all } })
+
+  expect(() => Resource.make({
+    name: "required_owner_subject_binding",
+    schema: OwnedDocumentSchema,
+    authorization: policy,
+    create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId } as never },
+    operations: [],
+  })).toThrow()
+})
+
 
 const PublicationSchema = Schema.Struct({ id: identifier(Schema.String), state: Schema.Literals(["draft", "published"]), title: Schema.String })
 interface Publication extends Schema.Schema.Type<typeof PublicationSchema> {}

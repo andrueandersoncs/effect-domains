@@ -1,0 +1,17 @@
+{
+  "name": "@effect-domains/example-durable-workflows",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve",
+    "worker": "bun run main.ts worker"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

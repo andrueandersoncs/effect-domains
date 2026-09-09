@@ -228,7 +228,10 @@ export const Resource = {
         const stored = Record.get(storageSchema.fields, entry.field)
         const same = Option.makeEquivalence(Equivalence.strictEqual<Schema.Constraint>())(canonical, stored)
         const declared = Record.has(options.schema.fields, entry.field)
-        const ordered = required && same
+        const column = Record.get(table.columns, entry.field)
+        const preservesOrder = Option.exists(column, Struct.get("orderable"))
+        const compatible = required && same
+        const ordered = compatible && preservesOrder
         const valid = declared && ordered
         return valid ? Effect.void : definitionFailure(`declares invalid list order ${entry.field}`)
       })
@@ -375,7 +378,11 @@ export const Resource = {
     })
 
     const optionalFieldEntry = (field: string) => {
-      const schema = pipe(Record.get(storageSchema.fields, field), Option.map(Schema.optionalKey))
+      const schema = pipe(
+        Record.get(table.columns as Table["columns"], field),
+        Option.map(flow(Struct.get("storageSchema"), Schema.optionalKey)),
+      )
+
       return [field, schema] as const
     }
 
@@ -606,11 +613,9 @@ export const Resource = {
     const patchFields: Readonly<Record<string, Schema.Constraint>> = Record.set(optionalPatchFields, table.identifier, ForbiddenFieldSchema)
     const PatchFieldsSchema = Schema.Struct(patchFields)
     interface PatchFields extends Schema.Schema.Type<typeof PatchFieldsSchema> {}
-    const identifierFields = Record.singleton(table.identifier, canonicalIdentifierSchema)
-    const patchPayloadFields: Readonly<Record<string, Schema.Constraint>> = Record.set(identifierFields, "patch", PatchFieldsSchema)
-    const PatchShapeSchema = Schema.Struct(patchPayloadFields)
+    const PatchShapeSchema = Schema.Struct({ key: canonicalIdentifierSchema, changes: PatchFieldsSchema })
     interface PatchShape extends Schema.Schema.Type<typeof PatchShapeSchema> {}
-    const patchInputSchema = Schema.make<Schema.Codec<Readonly<Record<CanonicalKey, CanonicalId>> & { readonly patch: PatchInput<S, CanonicalKey> }, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchShapeSchema.ast)
+    const patchInputSchema = Schema.make<Schema.Codec<Readonly<{ key: CanonicalId; changes: PatchInput<S, CanonicalKey> }>, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchShapeSchema.ast)
     const patchWireSchema = Schema.toCodecJson(patchInputSchema)
     const isPublic = equals(options.authorization._tag, "Public")
     const errorSchema = (isPublic ? PublicResourceErrorSchema : ResourceErrorSchema) as ResourceErrors<Auth>
@@ -626,7 +631,7 @@ export const Resource = {
     const listHandler = Option.isNone(listPolicy) ? repository.list : repository.page
 
     const patchHandler = Effect.fn("Resource.patch")(function* (input: typeof patchInputSchema.Type) {
-      return yield* repository.patch(input[table.identifier as CanonicalKey], input.patch)
+      return yield* repository.patch(input.key, input.changes)
     })
 
     const procedures = [getProcedure, listProcedure, createProcedure, updateProcedure, patchProcedure, removeProcedure]

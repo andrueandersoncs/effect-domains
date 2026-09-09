@@ -1,6 +1,6 @@
 import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { Effect, Stream, pipe } from "effect"
+import { Array, Effect, Stream, pipe } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 it.effect(
@@ -108,4 +108,67 @@ const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields
 it.effect(
   "native nested flags preserve prototype-named fields without mutating prototypes",
   preservesPrototypeNamedFields,
+)
+
+it.effect(
+  "native CLI derives void JSON null while retaining empty struct payloads",
+  Effect.fn("RpcCli.testEmptyPayloads")(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+
+    const source = `
+      import { BunServices } from "@effect/platform-bun"
+      import { Effect, Layer, Schema } from "effect"
+      import { Command } from "effect/unstable/cli"
+      import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
+      import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
+      import { RpcCli } from "effect-domains/rpc-cli"
+      const observed = { pingPayloadIsVoid: false, emptyPayloadIsEmpty: false }
+      const ping = Rpc.make("ping")
+      const empty = Rpc.make("empty", { payload: Schema.Struct({}), success: Schema.Void })
+      const group = RpcGroup.make(ping, empty)
+      const handlers = group.toLayer({
+        ping: (payload) => Effect.sync(() => { observed.pingPayloadIsVoid = payload === undefined }),
+        empty: (payload) => Effect.sync(() => { observed.emptyPayloadIsEmpty = Object.keys(payload).length === 0 }),
+      })
+      const routes = RpcServer.layerHttp({ group, path: "/rpc", protocol: "http" }).pipe(
+        Layer.provide(handlers),
+        Layer.provide(RpcSerialization.layerJson),
+      )
+      const web = HttpRouter.toWebHandler(routes, { disableLogger: true })
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: web.handler })
+      const protocol = RpcClient.layerProtocolHttp({ url: "http://127.0.0.1:" + server.port + "/rpc" }).pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(RpcSerialization.layerJson),
+      )
+      const cli = RpcCli.make({ name: "probe-cli", group, protocol, subcommands: [] })
+      try {
+        await Effect.runPromise(Effect.gen(function* () {
+          const run = Command.runWith(cli, { version: "test", renderErrors: false })
+          yield* run(["ping"])
+          yield* run(["empty"])
+        }).pipe(Effect.provide(BunServices.layer)))
+        console.log(JSON.stringify(observed))
+      } finally {
+        server.stop()
+        await web.dispose()
+      }
+    `
+
+    const rootUrl = new URL("..", import.meta.url)
+    const command = ChildProcess.make(process.execPath, ["--eval", source], { cwd: rootUrl.pathname })
+    const child = yield* spawner.spawn(command)
+    const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
+    const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
+
+    const result = yield* Effect.all(
+      { stdout, stderr, exitCode: child.exitCode },
+      { concurrency: "unbounded" },
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    const outputLines = result.stdout.trim().split("\n")
+    const values = Array.map(outputLines, (line) => JSON.parse(line, undefined))
+    expect(values).toEqual([null, null, { pingPayloadIsVoid: true, emptyPayloadIsEmpty: true }])
+  }, Effect.provide(BunServices.layer)),
 )

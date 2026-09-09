@@ -33,6 +33,31 @@ Resource.make({ name: "invalid_subject_binding_type", schema: ScoredDocumentSche
 // @ts-expect-error because public resources do not have a verified subject.
 Resource.make({ name: "public_subject_binding", schema: ScoredDocumentSchema, authorization: Authorization.public, create: { fromSubject: { ownerId: p.subject.userId } }, operations: [] })
 
+const NullableOwnerDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.NullOr(Schema.String), score: Schema.Int })
+interface NullableOwnerDocument extends Schema.Schema.Type<typeof NullableOwnerDocumentSchema> {}
+
+const nullableOwner = Authorization.for({ resource: NullableOwnerDocumentSchema, subject: PolicyAuthorSchema })
+const nullableOwnerAll = nullableOwner.all()
+const nullableOwnerPolicy = nullableOwner.policy({ scope: nullableOwnerAll, allow: { create: nullableOwnerAll } })
+
+Resource.make({
+  name: "nullable_subject_binding_target",
+  schema: NullableOwnerDocumentSchema,
+  authorization: nullableOwnerPolicy,
+  create: { fromSubject: { ownerId: nullableOwner.subject.userId } },
+  operations: [],
+})
+
+const NullableBindingIdentitySchema = Schema.Struct({ userId: Schema.NullOr(Schema.String) })
+interface NullableBindingIdentity extends Schema.Schema.Type<typeof NullableBindingIdentitySchema> {}
+
+const nullableOwnerSubject = Authorization.for({ resource: ScoredDocumentSchema, subject: NullableBindingIdentitySchema })
+const nullableOwnerSubjectAll = nullableOwnerSubject.all()
+const nullableOwnerSubjectPolicy = nullableOwnerSubject.policy({ scope: nullableOwnerSubjectAll, allow: { create: nullableOwnerSubjectAll } })
+
+// @ts-expect-error because a nullable subject field cannot populate a required destination.
+Resource.make({ name: "nullable_subject_binding_source", schema: ScoredDocumentSchema, authorization: nullableOwnerSubjectPolicy, create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId } }, operations: [] })
+
 // These probes are compile-only because rejected definitions intentionally fail at runtime.
 // @ts-expect-error Because authorization must be an explicit application choice.
 Resource.make({ name: "implicit_access", schema: ScoredDocumentSchema, operations: [] })

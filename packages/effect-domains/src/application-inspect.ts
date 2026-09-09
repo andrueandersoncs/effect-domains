@@ -175,7 +175,11 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
 const operation = flow(inspectOperation, Effect.runSync)
 const sameName = Equivalence.strictEqual<string>()
 
-const describe = <App extends InspectableApplication>(application: App, selected: Option.Option<string> = Option.none()) => {
+const describe = <App extends InspectableApplication>(
+  application: App,
+  selected: Option.Option<string> = Option.none(),
+  localCommands: ReadonlyArray<string> = ["serve", "schema", "inspect"],
+) => {
   const operations = pipe(application.group.requests.values(), Array.fromIterable, Array.map(operation))
 
   const matching = (name: string) => {
@@ -189,7 +193,7 @@ const describe = <App extends InspectableApplication>(application: App, selected
   })
 
   const remote = Array.map(operations, Struct.get("name"))
-  const commands = CommandsSchema.make({ local: ["serve", "schema", "inspect"], remote })
+  const commands = CommandsSchema.make({ local: localCommands, remote })
   const resources = Array.map(application.resources, resource)
 
   const services = OpaqueRuntimeSchema.make({

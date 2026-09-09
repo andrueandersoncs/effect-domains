@@ -4,9 +4,9 @@ import { expect, it } from "@effect/vitest"
 import { existsSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Array, Effect, Equivalence, FileSystem, Function, Option, pipe, Result, Schema } from "effect"
+import { Array, Effect, Equivalence, FileSystem, Function, Option, pipe, Record, Result, Schema, Struct } from "effect"
 import { Command } from "effect/unstable/cli"
-import { Table } from "effect-domains/table"
+import { Table, TableField, TableSnapshot } from "effect-domains/table"
 import { renderCreateTable } from "../packages/effect-domains/src/sqlite-ddl.ts"
 import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "effect-domains/migrations"
@@ -109,6 +109,159 @@ const nullableAdditionsAndRenames = pipe(nullableAdditionsAndRenamesAction, Effe
 const nullableAdditionsAndRenamesTest = Function.constant(nullableAdditionsAndRenames)
 
 it.effect("nullable additions and explicit renames preserve records regardless of declaration order", nullableAdditionsAndRenamesTest)
+
+const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const ChainSourceSchema = Schema.Struct({ a: Schema.String, b: Schema.String })
+  interface ChainSource extends Schema.Schema.Type<typeof ChainSourceSchema> {}
+  const ChainTargetSchema = Schema.Struct({ b: Schema.String, c: Schema.String })
+  interface ChainTarget extends Schema.Schema.Type<typeof ChainTargetSchema> {}
+
+  const source = Resource.make({
+    authorization: Authorization.public,
+    name: "rename_chain",
+    schema: ChainSourceSchema,
+    operations: [],
+  })
+
+  const target = Resource.make({
+    authorization: Authorization.public,
+    name: "rename_chain",
+    schema: ChainTargetSchema,
+    operations: [],
+  })
+
+  const sourceSnapshot = SqliteMigrations.snapshot([source.table])
+  const targetSnapshot = SqliteMigrations.snapshot([target.table])
+  const initial = SqliteMigrations.plan({ id: "001_rename_chain", from: empty, to: sourceSnapshot })
+
+  const chain = SqliteMigrations.plan({
+    id: "002_rename_chain",
+    from: sourceSnapshot,
+    to: targetSnapshot,
+    renames: [
+      { table: "rename_chain", from: "a", to: "b" },
+      { table: "rename_chain", from: "b", to: "c" },
+    ],
+  })
+
+  const initialStore = makeMigrationStore(database, [initial])
+
+  yield* initialStore.prepare(sourceSnapshot.tables)
+  const sourceRecord = yield* source.repository.create({ a: "original a", b: "original b" })
+  const chainedStore = makeMigrationStore(database, [initial, chain])
+
+  yield* chainedStore.prepare(targetSnapshot.tables)
+  const chainedRecord = yield* target.repository.get(sourceRecord.id)
+
+  expect(chainedRecord).toEqual({ id: sourceRecord.id, b: sourceRecord.a, c: sourceRecord.b })
+
+  const CycleSchema = Schema.Struct({ a: Schema.String, b: Schema.String })
+  interface Cycle extends Schema.Schema.Type<typeof CycleSchema> {}
+
+  const cycle = Resource.make({
+    authorization: Authorization.public,
+    name: "rename_cycle",
+    schema: CycleSchema,
+    operations: [],
+  })
+
+  const cycleSnapshot = SqliteMigrations.snapshot([target.table, cycle.table])
+
+  const addCycle = SqliteMigrations.plan({
+    id: "003_rename_cycle",
+    from: targetSnapshot,
+    to: cycleSnapshot,
+  })
+
+  const swap = SqliteMigrations.plan({
+    id: "004_rename_cycle",
+    from: cycleSnapshot,
+    to: cycleSnapshot,
+    renames: [
+      { table: "rename_cycle", from: "a", to: "b" },
+      { table: "rename_cycle", from: "b", to: "a" },
+    ],
+  })
+
+  const cycleStore = makeMigrationStore(database, [initial, chain, addCycle])
+
+  yield* cycleStore.prepare(cycleSnapshot.tables)
+  const cycleRecord = yield* cycle.repository.create({ a: "left", b: "right" })
+  const swappedStore = makeMigrationStore(database, [initial, chain, addCycle, swap])
+
+  yield* swappedStore.prepare(cycleSnapshot.tables)
+  const swappedRecord = yield* cycle.repository.get(cycleRecord.id)
+
+  expect(swappedRecord).toEqual({ id: cycleRecord.id, a: cycleRecord.b, b: cycleRecord.a })
+})()
+
+const interactingRenames = pipe(interactingRenamesAction, Effect.provide(sqliteClient))
+const interactingRenamesTest = Function.constant(interactingRenames)
+
+it.effect("interacting column renames rebuild from original source values", interactingRenamesTest)
+
+const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableIdentifierSnapshots")(function* () {
+  const temporaryRoot = tmpdir()
+  const temporaryPrefix = join(temporaryRoot, "effect-domains-nullable-identifiers-")
+  const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
+  const removeDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) => Effect.sync(() => directory.remove())
+  const directory = yield* Effect.acquireRelease(createDirectory, removeDirectory)
+
+  const resource = Resource.make({
+    authorization: Authorization.public,
+    name: "nullable_history_identifier",
+    schema: TitleSchema,
+    operations: [],
+  })
+
+  const target = SqliteMigrations.snapshot([resource.table])
+  const initial = SqliteMigrations.plan({ id: "nullable_identifier", from: empty, to: target })
+
+  const nullableField = (identifier: string) =>
+    (field: TableField) =>
+      Equivalence.strictEqual<string>()(field.name, identifier)
+        ? TableField.make({ ...field, nullable: true })
+        : field
+
+  const nullableTable = (table: TableSnapshot) => {
+    const fields = pipe(table.fields, Array.map(nullableField(table.identifier)))
+    return TableSnapshot.make({ ...table, fields })
+  }
+
+  const nullableTables = pipe(initial.to.tables, Array.map(nullableTable))
+  const nullableTarget = SqliteMigration.fields.to.make({ ...initial.to, tables: nullableTables })
+  const nullableArtifact = SqliteMigration.make({ ...initial, to: nullableTarget })
+  const encodedArtifact = encodeMigration(nullableArtifact)
+  const history = SqliteMigrations.decodeHistory([encodedArtifact])
+  const decodedHistory = yield* Effect.result(history)
+
+  expect(decodedHistory).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+
+  const snapshotPath = join(directory.path, "nullable-snapshot.json")
+  const jsonArtifact = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(encodedArtifact)
+  const encodedTarget = yield* pipe(Record.get(jsonArtifact, "to"), Effect.fromOption)
+  const encodedSnapshot = JSON.stringify(encodedTarget)
+  writeFileSync(snapshotPath, encodedSnapshot)
+  const manifest = Option.none<string>()
+
+  const command = SqliteMigrations.command({
+    name: "schema",
+    tables: [resource.table],
+    manifest,
+  })
+
+  const run = Command.runWith(command, { version: "test", renderErrors: false })
+  const snapshotPlanning = run(["plan", "--from", snapshotPath, "--id", "invalid_snapshot"])
+  const decodedSnapshot = yield* Effect.result(snapshotPlanning)
+
+  expect(decodedSnapshot).toMatchObject({ _tag: "Failure" })
+})()
+
+it.effect(
+  "nullable identifiers in migration history and snapshots fail validation",
+  () => pipe(nullableIdentifierSnapshotsAction, Effect.provide(BunServices.layer)),
+)
 
 const repeatableIntentFlagsAction = Effect.fn("SqliteMigrations.repeatableIntentFlags")(function* () {
   const temporaryRoot = tmpdir()

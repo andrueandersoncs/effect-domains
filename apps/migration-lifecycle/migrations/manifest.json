@@ -1,6 +1,7 @@
 {
   "migrations": [
     "001_initial.json",
-    "002_document_metadata.json"
+    "002_document_metadata.json",
+    "003_schema_string_checks.json"
   ]
 }

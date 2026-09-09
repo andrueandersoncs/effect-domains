@@ -1,5 +1,6 @@
 import { Authorization } from "effect-domains/authorization"
 import { Schema } from "effect"
+import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 
@@ -48,3 +49,13 @@ void undeclaredFilter
 void redirectedPatch
 void generatedInput
 void generatedOverride
+
+type PublishedPatch = Extract<RpcGroup.Rpcs<typeof TypeProbe.group>, { readonly _tag: "resource_type_probe.patch" }>
+const publishedPatch: Rpc.Payload<PublishedPatch> = { key: "row", changes: { title: "changed" } }
+// @ts-expect-error because patch identity has its own envelope field.
+const missingPatchKey: Rpc.Payload<PublishedPatch> = { changes: { title: "changed" } }
+// @ts-expect-error because canonical identifiers remain immutable inside changes.
+const changedPatchKey: Rpc.Payload<PublishedPatch> = { key: "row", changes: { id: "other" } }
+void publishedPatch
+void missingPatchKey
+void changedPatchKey

@@ -541,12 +541,13 @@ const compiledPolicy = (authorization: PolicyAuthorization, resource: AnyStruct)
     : policyFailure({ reason: "authorization resource schema must match the compiled resource schema" })
 }
 
-const matchingDescription = (left: FieldDescription, right: FieldDescription) => {
-  const category = Option.makeEquivalence(scalarCategoryEquals)(left.category, right.category)
-  const nullable = Equivalence.strictEqual<boolean>()(left.nullable, right.nullable)
-  const collection = Equivalence.strictEqual<boolean>()(left.collection, right.collection)
-  const matchingCategory = category && nullable
-  return matchingCategory && collection
+const subjectBindingCompatible = (destination: FieldDescription, source: FieldDescription) => {
+  const category = Option.makeEquivalence(scalarCategoryEquals)(destination.category, source.category)
+  const sourceIsRequired = !source.nullable
+  const sourceCanPopulateDestination = destination.nullable || sourceIsRequired
+  const collection = Equivalence.strictEqual<boolean>()(destination.collection, source.collection)
+  const shapeMatches = category && collection
+  return shapeMatches && sourceCanPopulateDestination
 }
 
 const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings")(function* (
@@ -582,7 +583,7 @@ const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings
     const source = fieldFor(authorization.subject, binding.field)
     if (Option.isNone(source)) return policyFailure({ reason: `create subject binding references unknown subject.${binding.field}` })
 
-    const compatible = matchingDescription(destination.value, source.value)
+    const compatible = subjectBindingCompatible(destination.value, source.value)
 
     return compatible
       ? Effect.void

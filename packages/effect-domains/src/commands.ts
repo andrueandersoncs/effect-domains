@@ -1,5 +1,6 @@
-import { Array, Context, Effect, Layer, Option, Record, Schema, type Scope, pipe } from "effect"
+import { Array, Context, Effect, Function, Layer, Option, Record, Schema, type Scope, pipe } from "effect"
 import { Rpc, type RpcGroup } from "effect/unstable/rpc"
+import type { UnaryRpcProcedure } from "./rpc-contract.ts"
 
 type CommandHandlerDefinitions<Rpcs extends Rpc.Any> = {
   readonly [Current in Rpcs as Current["_tag"]]: (
@@ -10,7 +11,11 @@ type CommandHandlerDefinitions<Rpcs extends Rpc.Any> = {
 type CommandHandlers<Rpcs extends Rpc.Any, R = never> = {
   readonly [Current in Rpcs as Current["_tag"]]: (
     input: Rpc.Payload<Current>,
-  ) => Effect.Effect<Rpc.Success<Current>, Rpc.Error<Current>, R>
+  ) => Effect.Effect<
+    Rpc.Success<Current>,
+    Rpc.Error<Current>,
+    R | Rpc.ExtractProvides<Rpcs, Current["_tag"]>
+  >
 }
 
 type HandlerEffect<Handler> = Handler extends (...args: ReadonlyArray<never>) => infer Result
@@ -39,7 +44,7 @@ type RequiredCatchTagKeys<CatchTags> = {
 }[keyof CatchTags]
 
 type SelectedCatchTagEffects<Effect_, CatchTags> = HandlerEffect<
-  CatchTags[Extract<RequiredCatchTagKeys<CatchTags>, ErrorTags<Effect_>>]
+  CatchTags[Extract<keyof CatchTags, ErrorTags<Effect_>>]
 >
 
 type InvocationSuccess<Effect_, CatchTags> =
@@ -81,7 +86,7 @@ type ValidCatchTags<Handlers, CatchTags> =
   Exclude<keyof CatchTags, ErrorTags<HandlerEffects<Handlers>>> extends never ? unknown : never
 
 export interface AnyCommandBundle {
-  readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.AnyWithProps>, "requests">
+  readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.Any & UnaryRpcProcedure>, "requests">
   readonly handlers: Layer.Layer<never, any, any>
 }
 
@@ -93,19 +98,22 @@ const withCapturedContext = <
   captured: Context.Context<any>,
   handlers: Handlers,
   catchTags: Option.Option<CatchTags>,
-) => {
+): CommandHandlers<Rpcs> => {
   const capture = (handler: (input: never) => Effect.Effect<unknown, unknown, unknown>) =>
     (input: never) => Effect.contextWith((current: Context.Context<never>) => {
+      const handled = handler(input)
+
       const invocation = Option.match(catchTags, {
-        onNone: () => handler(input),
-        onSome: (tags) => pipe(handler(input), Effect.catchTags(tags)),
+        onNone: Function.constant(handled),
+        onSome: (tags) => pipe(handled, Effect.scoped, Effect.catchTags(tags)),
       })
 
       const context = Context.merge(captured, current)
-      return Effect.provide(invocation, context)
+      return pipe(invocation, Effect.scoped, Effect.provide(context))
     })
 
-  return Record.map(handlers, capture) as CommandHandlers<Rpcs>
+  const capturedHandlers = Record.map(handlers, capture)
+  return capturedHandlers as typeof capturedHandlers & CommandHandlers<Rpcs>
 }
 
 const rpc = <
@@ -132,16 +140,16 @@ const make = <const Name extends string, Rpcs extends Rpc.Any>(
     handlers as CommandHandlers<Rpcs> & RpcGroup.HandlersFrom<Rpcs>
 
   const handlerLayer = (service: Context.Service<CommandService, CommandHandlers<Rpcs>>) =>
-    pipe(service, Effect.map(rpcHandlers), group.toLayer.bind(group))
+    pipe(service, Effect.map(rpcHandlers), group.toLayer.bind(group)) as Layer.Layer<
+      Rpc.ToHandler<Rpcs>,
+      never,
+      CommandService | RpcGroup.HandlersServices<Rpcs, CommandHandlers<Rpcs>>
+    >
 
   class CommandService extends Context.Service<CommandService, CommandHandlers<Rpcs>>()(options.name) {
     static readonly group = group
 
-    static readonly handlers = handlerLayer(CommandService) as Layer.Layer<
-      Rpc.ToHandler<Rpcs>,
-      never,
-      CommandService
-    >
+    static readonly handlers = handlerLayer(CommandService)
 
     static layer<
       Handlers extends CommandHandlerDefinitions<Rpcs>,
