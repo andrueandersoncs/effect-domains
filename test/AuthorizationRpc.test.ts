@@ -24,8 +24,7 @@ const Notes = Resource.make({
   name: "private_notes",
   schema: PrivateNoteSchema,
   authorization: policy,
-  create: { fromSubject: { ownerId: p.subject.userId } },
-  operations: ["get", "create"],
+  operations: { get: true, create: { fromSubject: { ownerId: p.subject.userId } } },
 })
 
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)

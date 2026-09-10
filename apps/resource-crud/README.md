@@ -7,6 +7,11 @@ This generated CRUD application demonstrates resource authorization with actual 
 [`resources.ts`](resources.ts) declares a typed policy over the todo and the authenticated demo subject:
 
 ```ts
+import { Authorization } from "effect-domains/authorization"
+import { Resource } from "effect-domains/resource"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { TodoSchema } from "./domain.ts"
+
 const p = Authorization.for({ resource: TodoSchema, subject: ExampleSubjectSchema })
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const owned = p.eq(p.row.ownerId, p.subject.userId)
@@ -34,22 +39,25 @@ const TodosResource = Resource.make({
   authorization,
   name: "todos",
   schema: TodoSchema,
-  create: {
-    defaults: { completed: false },
-    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+  operations: {
+    ...Resource.crud,
+    patch: true,
+    create: {
+      defaults: { completed: false },
+      fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+    },
+    list: {
+      filter: ["completed"],
+      order: [{ field: "title" }],
+      limit: 25,
+    },
   },
-  list: {
-    filter: ["completed"],
-    order: [{ field: "title" }],
-    limit: 25,
-  },
-  operations: [...Resource.crud, "patch"] as const,
 })
 ```
 
 Every operation is tenant-scoped. Within a tenant, an owner can read a todo; an administrator can read every todo. Creation derives the caller's tenant and owner from the typed subject bindings. Owners may update or patch only incomplete todos and cannot change either ownership field. Administrators can update, reopen, and delete tenant todos, but cannot transfer ownership because `tenantId` and `ownerId` must remain unchanged. Omitted actions deny access.
 
-`completed` is optional on create and defaults to `false` when absent; an explicit value wins. `id`, `tenantId`, and `ownerId` are absent from create input: the identifier is generated, and the ownership values come from the authenticated subject. The server rejects an attempted `tenantId` or `ownerId` create value before policy evaluation. `get` and `remove` take `id`, `update` takes the complete stored row, and `patch` takes `{ id, patch }`. `patch` may include any non-id todo field, validates the complete candidate row after merging, and commits atomically. Hidden rows behave as missing rather than disclosing their existence.
+`completed` is optional on create and defaults to `false` when absent; an explicit value wins. `id`, `tenantId`, and `ownerId` are absent from create input: the identifier is generated, and the ownership values come from the authenticated subject. The server rejects an attempted `tenantId` or `ownerId` create value before policy evaluation. `get` and `remove` take `id`, `update` takes the complete stored row, and `patch` takes `{ key, changes }`. `patch` may include any non-id todo field, validates the complete candidate row after merging, and commits atomically. Hidden rows behave as missing rather than disclosing their existence.
 
 ## Run with the demo credentials
 

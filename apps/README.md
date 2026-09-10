@@ -73,19 +73,19 @@ Todo policies combine tenant scope, ownership, current completion state, immutab
 
 Notes instead form one global shared collection: readers can read, editors can create/update, and admins can also remove. Tenant claims do not partition this collection. The storage codec remains independent of authorization. Follow each guide for successful and denied operations.
 
-Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
+Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `operations.create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
 
 ### Shared structure
 
 - `domain.ts`: canonical values and errors.
 - `resources.ts`: storage registration and selected generated operations.
 - `contracts.ts`: native `Rpc.make` contracts grouped with `RpcGroup.make`; use explicit `Schema.toCodecJson` for non-JSON-native representations such as dates. Absent for generated-only applications.
-- `application.ts`: resources and native `{ group, handlers }` bundle registration.
+- `application.ts`: `Application.make({ name, parts })`, which accepts resources, native `{ group, handlers }` bundles, and nested applications.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
 - `main.ts`: the sole runner for `serve`, schema commands, `inspect`, generated remote commands, and `worker` when background layers are configured.
 
-`Application.make({ name, resources, commands })` groups optional resource/command arrays, including native `{ group, handlers }` bundles. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, private `execution: { database, layer }`, native `background`, HTTP `routes`, and admin are explicit options. The runner supplies loopback RPC, CLI, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets and never bundles at runtime.
+`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, private `execution: { database, layer }`, native `background`, HTTP `routes`, and admin are explicit options. The runner supplies loopback RPC, CLI, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
 
 ## Generated admin
 
@@ -113,9 +113,9 @@ The default Bun runner listens only on the loopback hostname. Admin browser call
 
 ## Authored SQL
 
-[`authored-sql`](authored-sql/) preserves the custom book behavior separately from minimal generated CRUD. It reuses the canonical [`BookSchema`](../packages/example-support/src/book.ts), while its [`Resource.make`](authored-sql/resources.ts) uses `operations: []`: table derivation stays automatic, but no generated RPC handlers are published.
+[`authored-sql`](authored-sql/) preserves the custom book behavior separately from minimal generated CRUD. It reuses the canonical [`BookSchema`](../packages/example-support/src/book.ts), while its [`Resource.make`](authored-sql/resources.ts) uses `operations: {}`: table derivation stays automatic, but no generated RPC handlers are published.
 
-[`contracts.ts`](authored-sql/contracts.ts) declares JSON-native payload/success/error schemas directly with `Rpc.make` and exports `BooksRpcs`. [`sqlite.ts`](authored-sql/sqlite.ts) installs handlers with `BooksRpcs.toLayer`, using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query failures are translated with explicit `Effect.catchTags`; missing-row domain errors are preserved. [`application.ts`](authored-sql/application.ts) registers `{ group: BooksRpcs, handlers: BooksSqlite }` directly, without a `Commands` service or a separate entrypoint service layer.
+[`contracts.ts`](authored-sql/contracts.ts) declares JSON-native payload/success/error schemas directly with `Rpc.make` and exports `BooksRpcs`. [`sqlite.ts`](authored-sql/sqlite.ts) installs handlers with `BooksRpcs.toLayer`, using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query failures are translated with explicit `Effect.catchTags`; missing-row domain errors are preserved. [`application.ts`](authored-sql/application.ts) registers `{ group: BooksRpcs, handlers: BooksSqlite }` directly, without an extra service wrapper or entrypoint service layer.
 
 Unlike generated CRUD, missing rows report `BookNotFound`, database/query failures report `BookPersistenceError`, and `books.remove` returns the deleted row. List returns an array with no ordering or pagination guarantees.
 
@@ -263,7 +263,7 @@ RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --key "$TODO_ID
 bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 ```
 
-The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, storage/physical fields, creation and list policies, local and remote commands, and selected operation contracts. Runtime requirements and authored transaction boundaries remain opaque metadata.
+The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, a JSON-encoded physical `Table.snapshot` (including its native `generation` key), creation/list policies, local and remote commands, and selected operation contracts. It does not invent opaque runtime fields: handler services and transaction boundaries remain uninspectable.
 
 ## MCP server
 

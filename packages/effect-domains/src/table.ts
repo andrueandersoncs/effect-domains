@@ -119,7 +119,7 @@ const OptionalUniqueRelationsSchema = Schema.optionalKey(UniqueRelationsSchema)
 const OptionalForeignKeyRelationsSchema = Schema.optionalKey(ForeignKeyRelationsSchema)
 const OptionalIndexRelationsSchema = Schema.optionalKey(IndexRelationsSchema)
 
-export class TableRelations extends Schema.Class<TableRelations>("TableRelations")({
+class TableRelations extends Schema.Class<TableRelations>("TableRelations")({
   unique: OptionalUniqueRelationsSchema,
   foreignKeys: OptionalForeignKeyRelationsSchema,
   indexes: OptionalIndexRelationsSchema,

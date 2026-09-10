@@ -1,4 +1,4 @@
-import { Array, Effect, HashSet, Layer, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Function, HashSet, Layer, Match, Schema, Struct, pipe } from "effect"
 import { RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { SchemaStore } from "./migrations.ts"
@@ -9,10 +9,20 @@ type HandlerLayer<Bundle> = Bundle extends {
   readonly handlers: infer Handlers extends Layer.Layer<never, any, any>
 } ? Handlers : never
 
-type ApplicationGroup<
-  Resources extends ReadonlyArray<Resource>,
-  Commands extends ReadonlyArray<RpcBundle>,
-> = RpcGroup.RpcGroup<RpcGroup.Rpcs<Resources[number]["group"] | Commands[number]["group"]>>
+type PartResources<Part> = Part extends Resource ? Part
+  : Part extends { readonly resources: ReadonlyArray<infer R extends Resource> } ? R
+  : never
+
+const isApplication = (part: RpcBundle): part is Application => "resources" in part
+const isResource = (part: RpcBundle): part is Resource => "table" in part
+const noResources = Function.constant<ReadonlyArray<Resource>>([])
+
+const resourcesFrom = (part: RpcBundle) => pipe(
+  Match.value(part),
+  Match.when(isApplication, Struct.get<Application, "resources">("resources")),
+  Match.when(isResource, Array.of),
+  Match.orElse(noResources),
+)
 
 class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitionError>()(
   "ApplicationDefinitionError",
@@ -23,23 +33,15 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   }
 }
 
-const emptyResources = [] as const satisfies ReadonlyArray<Resource>
-const emptyCommands = [] as const satisfies ReadonlyArray<RpcBundle>
+const emptyParts = [] as const
 
-const make = <
-  const Resources extends ReadonlyArray<Resource> = typeof emptyResources,
-  const Commands extends ReadonlyArray<RpcBundle> = typeof emptyCommands,
->(options: Readonly<{
-  name: string
-}> & Readonly<Partial<{
-  resources: Resources
-  commands: Commands
-}>>) => {
-  const resources = options.resources ?? emptyResources
-  const commands = options.commands ?? emptyCommands
-  const bundles = [...resources, ...commands]
-  const groups = Array.map(bundles, Struct.get("group"))
-  const tables = Array.map(resources as ReadonlyArray<Resource>, Struct.get("table")) as Array<Resources[number]["table"]>
+const make = <const Parts extends ReadonlyArray<RpcBundle> = typeof emptyParts>(
+  options: Readonly<{ name: string }> & Readonly<Partial<{ parts: Parts }>>,
+) => {
+  const parts: ReadonlyArray<Parts[number]> = options.parts ?? emptyParts
+  const resources = Array.flatMap(parts, resourcesFrom) as Array<PartResources<Parts[number]>>
+  const groups = Array.map(parts, Struct.get("group"))
+  const tables = Array.map(resources, Struct.get("table"))
 
   const validate = Effect.gen(function* () {
     yield* Effect.reduce(tables, HashSet.empty<string>, Effect.fn("Application.validateTable")(function* (names, table) {
@@ -70,11 +72,11 @@ const make = <
   })
 
   pipe(validate, Effect.runSync)
-  const group = RpcGroup.make().merge(...groups) as ApplicationGroup<Resources, Commands>
-  const layers = Array.map(bundles, Struct.get("handlers")) as Array<HandlerLayer<Resources[number] | Commands[number]>>
+  const group = RpcGroup.make().merge(...groups) as RpcGroup.RpcGroup<RpcGroup.Rpcs<Parts[number]["group"]>>
+  const layers = Array.map(parts, Struct.get("handlers")) as Array<HandlerLayer<Parts[number]>>
   const handlers = Layer.mergeAll(Layer.empty, ...layers)
 
-  return Struct.assign(options, { resources, commands, group, tables, handlers })
+  return Struct.assign(options, { resources, tables, group, handlers })
 }
 
 export interface Application extends RpcBundle {

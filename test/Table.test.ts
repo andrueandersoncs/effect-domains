@@ -89,7 +89,7 @@ describe("Table", () => {
     name: "unicode_labels",
     schema: UnicodeLabelsSchema,
     authorization: Authorization.public,
-    operations: [],
+    operations: {},
   })
 
   const NumberStringsSchema = Schema.Struct({ value: Schema.NumberFromString })

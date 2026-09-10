@@ -5,6 +5,5 @@ import { BooksSqlite } from "./sqlite.ts"
 
 export const AuthoredSqlApplication = Application.make({
   name: "authored-sql",
-  resources: [BookResource],
-  commands: [{ group: BooksRpcs, handlers: BooksSqlite }],
+  parts: [BookResource, { group: BooksRpcs, handlers: BooksSqlite }],
 })

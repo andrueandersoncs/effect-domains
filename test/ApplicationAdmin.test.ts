@@ -57,7 +57,7 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
       mutate: () => Ref.updateAndGet(writes, (value) => value + 1),
     })
 
-    const application = Application.make({ name: "identity", resources: [], commands: [{ group: identityGroup, handlers }] })
+    const application = Application.make({ name: "identity", parts: [{ group: identityGroup, handlers }] })
     const capturedSubject = Layer.succeed(AuthorizationSubject, { userId: "captured" })
 
     const routes = pipe(
@@ -142,7 +142,7 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
       broken: () => Effect.die("private database details"),
     })
 
-    const application = Application.make({ name: "clock", resources: [], commands: [{ group: clock, handlers }] })
+    const application = Application.make({ name: "clock", parts: [{ group: clock, handlers }] })
 
     const routes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -195,7 +195,7 @@ it.effect("admin isolates a slow call from an unrelated handler defect", () => p
       defect: () => Effect.die("unrelated defect"),
     })
 
-    const application = Application.make({ name: "isolation", resources: [], commands: [{ group, handlers }] })
+    const application = Application.make({ name: "isolation", parts: [{ group, handlers }] })
 
     const routes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -239,7 +239,7 @@ it.effect("admin uses handler-only codec context instead of its ambient context"
       Layer.provide(innerPrefix),
     )
 
-    const application = Application.make({ name: "codec", resources: [], commands: [{ group, handlers }] })
+    const application = Application.make({ name: "codec", parts: [{ group, handlers }] })
 
     const handlerOnlyRoutes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -273,7 +273,7 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const probe = Rpc.make("probe", { success: Schema.String }).middleware(AuthorizationRpc)
   const group = RpcGroup.make(probe)
   const handlers = group.toLayer({ probe: () => Effect.succeed("ok") })
-  const application = Application.make({ name: "probe", resources: [], commands: [{ group, handlers }] })
+  const application = Application.make({ name: "probe", parts: [{ group, handlers }] })
   const inspection = ApplicationInspect.describe(application)
   const middlewares = Array.fromIterable(probe.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))

@@ -18,7 +18,7 @@ const resourceOptions: ResourceOptions = {
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  operations: ["get"],
+  operations: { get: true },
   relations: {
     indexes: [{ name: "tenant_number", fields: ["tenantId", "number"] }],
     foreignKeys: [{ name: "tenant_parent", fields: ["tenantId"], references: { table: "tenants", fields: ["id"] } }],
@@ -36,7 +36,7 @@ const invalidResource: ResourceOptions = {
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  operations: [],
+  operations: {},
   // @ts-expect-error because resource relation fields are not arbitrary strings.
   relations: { indexes: [{ name: "bad_index", fields: ["missing"] }] },
 }

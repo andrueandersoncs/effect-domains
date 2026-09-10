@@ -19,10 +19,12 @@ export const ReminderReceiptResource = Resource.make({
   authorization,
   name: "reminder_receipts",
   schema: ReminderReceiptSchema,
-  operations: ["get", "list"] as const,
-  list: {
-    filter: ["recipient", "requestId"],
-    limit: 100,
-    order: [{ field: "id", direction: "asc" }],
+  operations: {
+    get: true,
+    list: {
+      filter: ["recipient", "requestId"],
+      limit: 100,
+      order: [{ field: "id", direction: "asc" }],
+    },
   },
 })

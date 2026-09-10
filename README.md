@@ -25,13 +25,13 @@ const Books = Resource.make({
   operations: Resource.crud,
 })
 
-export const Library = Application.make({
-  name: "library",
-  resources: [Books],
+export const Catalog = Application.make({
+  name: "catalog",
+  parts: [Books],
 })
 ```
 
-This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. `Application.make` groups optional `resources` and `commands`; omitted groups are empty. There is no second storage schema, CRUD query implementation, or transport model.
+An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
 `ApplicationBun.run(application, options)` returns the application Effect; execute it with native `BunRuntime.runMain`. A manifest may be a path or `URL`, and `filename`, `services`, and `initialize` are optional:
 
@@ -42,7 +42,7 @@ import { ApplicationBun } from "effect-domains/application-bun"
 
 const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
-pipe(ApplicationBun.run(Library, {
+pipe(ApplicationBun.run(Catalog, {
   database: { manifest },
   admin: true,
 }), BunRuntime.runMain)
@@ -52,7 +52,7 @@ Pass `database: { manifest, filename }` to choose a database file, `services` on
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
-## Resource and command boundaries
+## Resource and native RPC boundaries
 
 `Resource.make` supplies:
 
@@ -60,27 +60,35 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 - `repository`: `find`, `get`, `list`, `page`, `create`, `update`, `patch`, and `remove` Effects;
 - `group` and `handlers`: only the operations selected in `operations`.
 
+`Resource.crud` is the frozen `{ get: true, list: true, create: true, update: true, remove: true }` selection. Use `patch: true` to add patch. `false` disables an operation; a configured `create` or `list` object with `publish: false` retains its local repository policy but omits its RPC. `operations: {}` keeps every repository method local.
+
 `find` returns an `Option`; missing records use `ResourceNotFound`, and persistence/codec failures use `RepositoryError`. Creation applies declared defaults and runtime-generated fields. Update validates the complete row; patch preserves its identifier and validates the merged row transactionally. A declared list policy supplies bounded cursor pages.
 
 Published patch payloads are `{ key, changes }`, independent of the identifier's field name. The local repository remains `patch(key, changes)`. Exact filters use compiled physical field codecs; declared ordering rejects semantic codecs whose physical order is not proven equivalent.
 
-Use `operations: []` for an internal-only repository. Registering a resource does not publish every mutation. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit business commands.
-
-`Commands.make({ name, group })` takes a native Effect `RpcGroup` and supplies an injectable service and handler layer. `Commands.rpc(tag, { payload, success, error })` derives JSON codecs; native `Rpc.make` remains available. Install implementations through `descriptor.layer(handlers, catchTags)` and register descriptors in `Application.make({ name, resources, commands: [descriptor] })`. The optional mapper record handles matching tagged invocation errors after transactions and handler scopes unwind, not acquisition failures, defects, or interruption. Every mapper that may run must preserve the RPC success/error contract, including optional entries. Local calls retain middleware-provided service requirements and close their invocation scope before returning. Resource-only applications can omit `commands`; `Application.prepare(application)` prepares tables through the migration store.
-
-RPCs may share schemas without sharing business behavior: the [reservation RPCs](apps/reservations/contracts.ts) reuse transition options for `confirm` and `release`. The supplied group is retained, including its RPC definitions and annotations; there is no parallel command-contract format. Local service methods accept decoded payloads and return unary Effects; the runtime chooses HTTP transport separately.
-
-For example, an authored operation keeps its meaningful contract without wire-schema variables:
+Use native Effect RPCs for business operations:
 
 ```ts
-const createBook = Commands.rpc("books.create", {
-  payload: BookSchema,
-  success: BookResource.table.rowSchema,
-  error: BookPersistenceError,
+import { Effect, Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
+
+const health = Rpc.make("library.health", {
+  payload: Schema.Void,
+  success: Schema.String,
+  error: Schema.Never,
+})
+const LibraryRpcs = RpcGroup.make(health)
+const LibraryHandlers = LibraryRpcs.toLayer({
+  "library.health": () => Effect.succeed("ok"),
+})
+
+export const Library = Application.make({
+  name: "library",
+  parts: [Catalog, { group: LibraryRpcs, handlers: LibraryHandlers }],
 })
 ```
 
-Routine CRUD needs none of these declarations: select `Resource.crud` instead. The [authored SQL example](apps/README.md#authored-sql) deliberately keeps custom SQL, errors, and a remove operation returning the deleted row.
+`Rpc.make` and `RpcGroup.make` retain their native contracts and annotations; `RpcGroup.toLayer` installs handlers. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit native RPCs.
 
 ## Resource authorization
 
@@ -106,16 +114,19 @@ const Documents = Resource.make({
   name: "documents",
   schema: DocumentSchema,
   authorization,
-  create: {
-    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+  operations: {
+    ...Resource.crud,
+    patch: true,
+    create: {
+      fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+    },
   },
-  operations: [...Resource.crud, "patch"],
 })
 ```
 
 Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults, subject bindings, generation, or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
 
-`create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input; a supplied bound field is rejected before authorization, and the server injects trusted subject claims before checking the candidate policy.
+`operations.create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input; a supplied bound field is rejected before authorization, and the server injects trusted subject claims before checking the candidate policy.
 
 Repositories enforce policy even when invoked by authored code. Hidden rows behave as missing; lists filter in SQL before pagination. Create/update/patch require a readable candidate, and returned rows are checked again. Checks and writes share a transaction, so a denied mutation leaves no changes. Missing or invalid identity yields `Unauthenticated`; denied actions yield `Forbidden`.
 

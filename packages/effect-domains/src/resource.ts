@@ -30,6 +30,28 @@ const ListCursorJsonSchema = Schema.fromJsonString(ListCursor)
 const parseCursor = Schema.decodeUnknownEffect(ListCursorJsonSchema)
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch"
 
+type ResourceOperations<S extends Schema.Struct<Schema.Struct.Fields>, Auth> = Readonly<Partial<
+  Record<Exclude<ResourceOperation, "create" | "list">, boolean> & {
+    list: boolean | ListPolicy<S>
+    create: boolean | CreationPolicy<S, Auth>
+  }
+>>
+
+type CreationFrom<Operations> = Operations extends { readonly create: infer Value }
+  ? Value extends true | false ? {} : Value
+  : {}
+
+type ListFrom<Operations> = Operations extends { readonly list: infer Value }
+  ? Value extends true | false ? never : Value
+  : never
+
+type EnabledOperation<Operations> = Extract<keyof Operations, ResourceOperation>
+
+type PublishedOperation<Operations> = {
+  readonly [Operation in EnabledOperation<Operations>]:
+    Operations[Operation] extends false | { readonly publish: false } ? never : Operation
+}[EnabledOperation<Operations>]
+
 type CreationDefaultKeys<Creation> = Creation extends { readonly defaults: infer Defaults }
   ? Extract<keyof Defaults, string> : never
 
@@ -48,13 +70,14 @@ type CreationPolicy<S extends Schema.Struct<Schema.Struct.Fields>, Auth = Policy
   defaults: Partial<Pick<S["Type"], Extract<keyof S["fields"], string>>>
   generated: Partial<Record<Extract<keyof S["fields"], string>, "uuidV7" | "now">>
   fromSubject: SubjectBindings<S, Auth>
+  publish: false
 }>>
 
-type ListPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<{
-  order: ReadonlyArray<Readonly<{ field: Extract<keyof S["fields"], string> }> & Readonly<Partial<{ direction: "asc" | "desc" }>>>
-}> & Readonly<Partial<{
+type ListPolicy<S extends Schema.Struct<Schema.Struct.Fields>> = Readonly<Partial<{
   filter: ReadonlyArray<Extract<keyof S["fields"], string>>
   limit: number
+  order: ReadonlyArray<Readonly<{ field: Extract<keyof S["fields"], string> }> & Readonly<Partial<{ direction: "asc" | "desc" }>>>
+  publish: false
 }>>
 
 type CreateInput<S extends Schema.Struct<Schema.Struct.Fields>, Creation> =
@@ -68,6 +91,46 @@ type ListInput<S extends Schema.Struct<Schema.Struct.Fields>, Policy extends Lis
   limit: number
   cursor: string
 }>>
+
+const ListOrderSchema = Schema.Struct({
+  field: Schema.String,
+  direction: Schema.optionalKey(Schema.Literals(["asc", "desc"])),
+})
+
+interface ListOrder extends Schema.Schema.Type<typeof ListOrderSchema> {}
+
+const ListOperationSchema = Schema.Struct({
+  filter: Schema.optionalKey(Schema.Array(Schema.String)),
+  limit: Schema.optionalKey(PageLimitSchema),
+  order: Schema.optionalKey(Schema.Array(ListOrderSchema)),
+  publish: Schema.optionalKey(Schema.Literal(false)),
+})
+
+interface ListOperation extends Schema.Schema.Type<typeof ListOperationSchema> {}
+
+const CreateOperationSchema = Schema.Struct({
+  defaults: Schema.optionalKey(UnknownRecordSchema),
+  generated: Schema.optionalKey(Schema.Record(Schema.String, Schema.Literals(["uuidV7", "now"]))),
+  fromSubject: Schema.optionalKey(UnknownRecordSchema),
+  publish: Schema.optionalKey(Schema.Literal(false)),
+})
+
+interface CreateOperation extends Schema.Schema.Type<typeof CreateOperationSchema> {}
+const OptionalOperationSchema = Schema.optionalKey(Schema.Boolean)
+const OptionalListOperationSchema = Schema.optionalKey(Schema.Union([Schema.Boolean, ListOperationSchema]))
+const OptionalCreateOperationSchema = Schema.optionalKey(Schema.Union([Schema.Boolean, CreateOperationSchema]))
+
+const OperationsSchema = Schema.Struct({
+  get: OptionalOperationSchema,
+  list: OptionalListOperationSchema,
+  create: OptionalCreateOperationSchema,
+  update: OptionalOperationSchema,
+  remove: OptionalOperationSchema,
+  patch: OptionalOperationSchema,
+}).annotate({ parseOptions: { onExcessProperty: "error" } })
+
+interface Operations extends Schema.Schema.Type<typeof OperationsSchema> {}
+const decodeOperations = Schema.decodeUnknownEffect(OperationsSchema)
 
 type CompatibleStorage<Canonical extends Schema.Struct<Schema.Struct.Fields>, Storage extends Schema.Struct<Schema.Struct.Fields>> =
   Storage["Type"] extends Canonical["Type"] ? Canonical["Type"] extends Storage["Type"] ? unknown : never : never
@@ -127,26 +190,44 @@ export interface Resource extends RpcBundle {
 }
 
 export const Resource = {
-  crud: ["get", "list", "create", "update", "remove"] as const,
+  crud: Object.freeze({ get: true, list: true, create: true, update: true, remove: true }) as Readonly<Record<"get" | "list" | "create" | "update" | "remove", true>>,
 
   make<
     const Name extends string,
     const S extends Schema.Struct<Schema.Struct.Fields>,
     const Storage extends Schema.Struct<Schema.Struct.Fields> = S,
-    const Operations extends ReadonlyArray<ResourceOperation> = ReadonlyArray<ResourceOperation>,
     const Auth extends AuthorizationDefinition = AuthorizationDefinition,
-    const Creation extends CreationPolicy<S, Auth> = {},
-    const List extends ListPolicy<S> = never,
+    const Operations extends ResourceOperations<S, Auth> = ResourceOperations<S, Auth>,
   >(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
     storage: Storage
     relations: TableRelationsInput<TableFieldName<Storage>>
-    create: Creation
-    list: List
   }>> & CompatibleStorage<S, Storage>) {
+    type Creation = CreationFrom<Operations>
+    type List = Extract<ListFrom<Operations>, ListPolicy<S>>
     type CanonicalTable = ReturnType<typeof Table.make<Name, S>>
     type CanonicalRow = CanonicalTable["rowSchema"]["Type"]
     type CanonicalKey = CanonicalTable["identifier"]
     type CanonicalId = CanonicalTable["identifierSchema"]["Type"]
+    const definitionFailure = (reason: string) => ResourceDefinitionError.make({ resource: options.name, reason })
+    const inputFailure = (reason: string) => invalidInput(options.name, reason)
+    const operationFailure = flow(Struct.get<Schema.SchemaError, "message">("message"), definitionFailure)
+
+    const operationValues = pipe(
+      decodeOperations(options.operations),
+      Effect.mapError(operationFailure),
+      Effect.runSync,
+    )
+
+    const operations = pipe(operationValues, Struct.keys, Array.filter((operation: ResourceOperation): operation is PublishedOperation<Operations> => {
+      const value = options.operations[operation]
+      const publication = Predicate.isBoolean(value) ? value : value?.publish
+      return !equals(publication, false)
+    }))
+
+    const creation = pipe(Option.fromNullishOr(options.operations.create), Option.filter(Predicate.isObject)) as Option.Option<CreationPolicy<S, Auth>>
+    const listPolicy = pipe(Option.fromNullishOr(options.operations.list), Option.filter(Predicate.isObject)) as Option.Option<ListPolicy<S>>
+    const createPolicy = Option.getOrUndefined(creation)
+    const declaredListPolicy = Option.getOrUndefined(listPolicy)
     const storageSchema = options.storage ?? options.schema
 
     const table = Table.make<Name, S | Storage>({
@@ -155,19 +236,15 @@ export const Resource = {
       relations: options.relations as TableRelationsInput<TableFieldName<S | Storage>>,
     })
 
-    const creation = Option.fromNullishOr(options.create)
-    const listPolicy = Option.fromNullishOr(options.list)
-    const defaults: Readonly<Record<string, unknown>> = options.create?.defaults ?? Record.empty()
-    const declaredGenerated: Readonly<Record<string, "uuidV7" | "now">> = options.create?.generated ?? Record.empty()
-    const subjectBindings: Readonly<Record<string, SubjectOperand<unknown>>> = options.create?.fromSubject ?? Record.empty()
+    const defaults: Readonly<Record<string, unknown>> = createPolicy?.defaults ?? Record.empty()
+    const declaredGenerated: Readonly<Record<string, "uuidV7" | "now">> = createPolicy?.generated ?? Record.empty()
+    const subjectBindings: Readonly<Record<string, SubjectOperand<unknown>>> = createPolicy?.fromSubject ?? Record.empty()
     const presentSubjectBindings = pipe(subjectBindings, Record.map(Option.fromNullishOr), Record.getSomes)
     const canonicalNames = pipe(options.schema.fields, Record.keys, Array.sort(Order.String))
     const storageNames = pipe(storageSchema.fields, Record.keys, Array.sort(Order.String))
-    const filterFields: ReadonlyArray<string> = options.list?.filter ?? []
-    const declaredOrder = options.list?.order ?? []
-    const maximum = options.list?.limit ?? 50
-    const definitionFailure = (reason: string) => ResourceDefinitionError.make({ resource: options.name, reason })
-    const inputFailure = (reason: string) => invalidInput(options.name, reason)
+    const filterFields: ReadonlyArray<string> = declaredListPolicy?.filter ?? []
+    const declaredOrder = declaredListPolicy?.order ?? []
+    const maximum = declaredListPolicy?.limit ?? 50
 
     const validateDefinition = Effect.gen(function* () {
       const sameFields = Equivalence.Array(Equivalence.strictEqual<string>())(canonicalNames, storageNames)
@@ -613,25 +690,27 @@ export const Resource = {
       return yield* repository.patch(input.key, input.changes)
     })
 
-    const procedures = [getProcedure, listProcedure, createProcedure, updateProcedure, patchProcedure, removeProcedure]
-    const handlerByOperation = { get: getHandler, list: listHandler, create: repository.create, update: repository.update, patch: patchHandler, remove: removeHandler }
-    type SelectedRpc = Extract<typeof procedures[number], { readonly _tag: `${Name}.${Operations[number]}` }>
+    const procedureByOperation = Record.fromEntries([
+      ["get", getProcedure],
+      ["list", listProcedure],
+      ["create", createProcedure],
+      ["update", updateProcedure],
+      ["patch", patchProcedure],
+      ["remove", removeProcedure],
+    ] as const)
 
-    const selectProcedure = (operation: Operations[number]) => {
-      const tag = `${options.name}.${operation}`
-
-      const isSelected = (procedure: typeof procedures[number]): procedure is SelectedRpc =>
-        equals(procedure._tag, tag)
-
-      const selected = Array.findFirst(procedures, isSelected)
-
-      return Option.match(selected, {
-        onNone: () => definitionFailure(`declares unknown operation ${operation}`),
-        onSome: Effect.succeed,
-      })
+    const handlerByOperation = {
+      get: getHandler,
+      list: listHandler,
+      create: repository.create,
+      update: repository.update,
+      patch: patchHandler,
+      remove: removeHandler,
     }
 
-    const selected = pipe(options.operations, Effect.forEach(selectProcedure), Effect.runSync)
+    type Operation = PublishedOperation<Operations>
+    type SelectedRpc = Extract<typeof procedureByOperation[ResourceOperation], { readonly _tag: `${Name}.${Operation}` }>
+    const selected = Array.map(operations, (operation) => procedureByOperation[operation]) as Array<SelectedRpc>
     const selectedGroup = RpcGroup.make(...selected)
     type PublishedRpc = Auth extends PolicyAuthorization ? Rpc.AddMiddleware<SelectedRpc, typeof AuthorizationRpc> : SelectedRpc
     const isProtected = equals(options.authorization._tag, "Policy")
@@ -640,17 +719,20 @@ export const Resource = {
       ? selectedGroup.middleware(AuthorizationRpc)
       : selectedGroup) as RpcGroup.Any as RpcGroup.RpcGroup<PublishedRpc>
 
-    const handlerEntry = (operation: Operations[number]) => [`${options.name}.${operation}`, handlerByOperation[operation]] as const
-    const handlerRecord = pipe(options.operations, Array.map(handlerEntry), Record.fromEntries)
+    const handlerRecord = pipe(
+      operations,
+      Array.map((operation) => [`${options.name}.${operation}`, handlerByOperation[operation]] as const),
+      Record.fromEntries,
+    )
 
     const handlers = selectedGroup.toLayer(handlerRecord as typeof handlerRecord & RpcGroup.HandlersFrom<SelectedRpc>) as Layer.Layer<
       Rpc.ToHandler<SelectedRpc>,
       never,
-      Effect.Services<ReturnType<typeof handlerByOperation[Operations[number]]>>
+      Effect.Services<ReturnType<typeof handlerByOperation[Operation]>>
     >
 
     return Struct.assign(options, {
-      storage: storageSchema, table, create: creation, list: listPolicy, createInputSchema,
+      operations, storage: storageSchema, table, create: creation, list: listPolicy, createInputSchema,
       repository: repository as AuthorizedRepository<typeof repository, Auth>, group, handlers,
     })
   },

@@ -19,8 +19,10 @@ export const OrdersResource = Resource.make({
   authorization: ordersAuthorization,
   name: "orders",
   schema: OrderSchema,
-  operations: ["get", "list"] as const,
-  list: { filter: ["number", "status"], order: [{ field: "number" }], limit: 100 },
+  operations: {
+    get: true,
+    list: { filter: ["number", "status"], order: [{ field: "number" }], limit: 100 },
+  },
   relations: {
     unique: [
       { name: "orders_tenant_id_id_key", fields: ["tenantId", "id"] },
@@ -36,8 +38,10 @@ export const OrderLinesResource = Resource.make({
   authorization: linesAuthorization,
   name: "order_lines",
   schema: OrderLineSchema,
-  operations: ["get", "list"] as const,
-  list: { filter: ["orderId"], order: [{ field: "lineNumber" }], limit: 500 },
+  operations: {
+    get: true,
+    list: { filter: ["orderId"], order: [{ field: "lineNumber" }], limit: 500 },
+  },
   relations: {
     unique: [
       { name: "order_lines_tenant_order_line_key", fields: ["tenantId", "orderId", "lineNumber"] },
@@ -54,8 +58,10 @@ export const InvoicesResource = Resource.make({
   authorization: invoicesAuthorization,
   name: "invoices",
   schema: InvoiceSchema,
-  operations: ["get", "list"] as const,
-  list: { filter: ["orderId", "number", "status"], order: [{ field: "number" }], limit: 100 },
+  operations: {
+    get: true,
+    list: { filter: ["orderId", "number", "status"], order: [{ field: "number" }], limit: 100 },
+  },
   relations: {
     unique: [
       { name: "invoices_tenant_id_id_key", fields: ["tenantId", "id"] },

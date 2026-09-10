@@ -12,14 +12,13 @@ const owned = p.eq(p.row.ownerId, p.subject.userId)
 const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unchanged = p.unchanged("ownerId")
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
-Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: ["get"] })
+Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: { get: true } })
 
 const BoundDocument = Resource.make({
   name: "subject_bound_authorization",
   schema: ScoredDocumentSchema,
   authorization: policy,
-  create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
-  operations: ["create"],
+  operations: { create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } } },
 })
 
 const boundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1 }
@@ -29,9 +28,9 @@ void boundCreate
 const forgedBoundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1, ownerId: "forged" }
 void forgedBoundCreate
 // @ts-expect-error because subject bindings must have the destination field's type.
-Resource.make({ name: "invalid_subject_binding_type", schema: ScoredDocumentSchema, authorization: policy, create: { fromSubject: { score: p.subject.userId } }, operations: [] })
+Resource.make({ name: "invalid_subject_binding_type", schema: ScoredDocumentSchema, authorization: policy, operations: { create: { fromSubject: { score: p.subject.userId }, publish: false } } })
 // @ts-expect-error because public resources do not have a verified subject.
-Resource.make({ name: "public_subject_binding", schema: ScoredDocumentSchema, authorization: Authorization.public, create: { fromSubject: { ownerId: p.subject.userId } }, operations: [] })
+Resource.make({ name: "public_subject_binding", schema: ScoredDocumentSchema, authorization: Authorization.public, operations: { create: { fromSubject: { ownerId: p.subject.userId }, publish: false } } })
 
 const NullableOwnerDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.NullOr(Schema.String), score: Schema.Int })
 interface NullableOwnerDocument extends Schema.Schema.Type<typeof NullableOwnerDocumentSchema> {}
@@ -44,8 +43,7 @@ Resource.make({
   name: "nullable_subject_binding_target",
   schema: NullableOwnerDocumentSchema,
   authorization: nullableOwnerPolicy,
-  create: { fromSubject: { ownerId: nullableOwner.subject.userId } },
-  operations: [],
+  operations: { create: { fromSubject: { ownerId: nullableOwner.subject.userId }, publish: false } },
 })
 
 const NullableBindingIdentitySchema = Schema.Struct({ userId: Schema.NullOr(Schema.String) })
@@ -56,11 +54,11 @@ const nullableOwnerSubjectAll = nullableOwnerSubject.all()
 const nullableOwnerSubjectPolicy = nullableOwnerSubject.policy({ scope: nullableOwnerSubjectAll, allow: { create: nullableOwnerSubjectAll } })
 
 // @ts-expect-error because a nullable subject field cannot populate a required destination.
-Resource.make({ name: "nullable_subject_binding_source", schema: ScoredDocumentSchema, authorization: nullableOwnerSubjectPolicy, create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId } }, operations: [] })
+Resource.make({ name: "nullable_subject_binding_source", schema: ScoredDocumentSchema, authorization: nullableOwnerSubjectPolicy, operations: { create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId }, publish: false } } })
 
 // These probes are compile-only because rejected definitions intentionally fail at runtime.
 // @ts-expect-error Because authorization must be an explicit application choice.
-Resource.make({ name: "implicit_access", schema: ScoredDocumentSchema, operations: [] })
+Resource.make({ name: "implicit_access", schema: ScoredDocumentSchema, operations: {} })
 // @ts-expect-error Because unknown fields cannot become policy references.
 p.row.absent
 // @ts-expect-error Because equality cannot compare numeric resource values with subject strings.

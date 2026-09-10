@@ -29,12 +29,14 @@ const prefix = { prefix: "workflow." } as const
 const group = WorkflowProxy.toRpcGroup(workflows, prefix).middleware(Operator)
 const proxyHandlers = WorkflowProxyServer.layerRpcHandlers(workflows, prefix)
 
+const workflowModule = Application.make({
+  name: "exports",
+  parts: [{ group, handlers: proxyHandlers }],
+})
+
 const application = Application.make({
   name: "workflow-authorization",
-  commands: [{
-    group,
-    handlers: proxyHandlers,
-  }],
+  parts: [workflowModule],
 })
 
 it.effect("authorizes native workflow submissions and recovery before invoking the engine", Effect.fn("WorkflowApplication.test")(function* () {

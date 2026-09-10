@@ -30,6 +30,16 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-10: Declarative composition verification
+
+The clean-cutover declarative API was verified without compatibility adapters: resource publication/configuration used one `operations` record, `Resource.crud`, configured private create defaults, subject-bound CRUD, and explicit patch; a composed application used nested resources and a native command through `Application.make({ name, parts })`. The scenario confirmed local repository policy can remain private while selected RPC operations are published, tenant visibility hides rows, and authorization denials remain enforced. ([Resource](../../packages/effect-domains/src/resource.ts); [Application](../../packages/effect-domains/src/application.ts); [Authorization](../../packages/effect-domains/src/authorization.ts))
+
+All 58 Vitest tests across 16 files, typechecks, lint, the admin-assets build, and the documentation build passed. A live composed custom application CLI exercised the nested resource/native-command composition, private create defaults, subject-bound CRUD, patching, tenant hiding, and authorization denials. The generated browser admin created and listed data with a screenshot, and remained usable with native physical snapshots. The official MCP SDK created, got, updated, listed, and removed data. An approval-required durable workflow was submitted, its server killed with `SIGKILL`, restarted against the same SQLite database, approved, and observed succeeding; its exported records were exact, replay was idempotent, and a bad token was denied.
+
+Inspection reuses JSON-encoded `Table.snapshot` instead of a duplicate physical-table model and omits uninformative opaque runtime placeholders. Policy validation, snapshotting, freezing, and compilation are centralized in registered construction. Canonical schemas, frozen migration history, authored transactions, and native workflow/entity contracts remain unchanged.
+
+These observations establish the listed composed surfaces and authorization/durability behavior only. They do not establish another database, production identity issuance, multi-runner coordination, or general distributed guarantees.
+
 ### 2026-09-09: Declarative compiler compaction
 
 Framework source shrank from 7,189 to 7,057 lines (132 lines and 5,290 bytes removed across four modules), with package exports and public DSLs unchanged. Table checks use a compiler registry that decodes only the selected check payload; numeric literal and enum classification share an implementation. Authorization action metadata now supplies allowed phases and current/candidate requirements from one declaration. SQL expressions use private native `Data` rather than serialization schemas. Migration planning removes repeated intent classification and intermediates, while `plan` and `generate` share artifact construction and canonical serialization. Rebuild copies and incremental steps are still emitted only for the selected path. ([Table](../../packages/effect-domains/src/table.ts); [authorization](../../packages/effect-domains/src/authorization.ts); [SQL policy](../../packages/effect-domains/src/policy-sql.ts); [migrations](../../packages/effect-domains/src/sqlite-migrations.ts))

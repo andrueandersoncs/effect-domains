@@ -30,14 +30,17 @@ export const TodosResource = Resource.make({
   authorization,
   name: "todos",
   schema: TodoSchema,
-  create: {
-    defaults: { completed: false },
-    fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+  operations: {
+    ...Resource.crud,
+    patch: true,
+    create: {
+      defaults: { completed: false },
+      fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
+    },
+    list: {
+      filter: ["completed"],
+      order: [{ field: "title" }],
+      limit: 25,
+    },
   },
-  list: {
-    filter: ["completed"],
-    order: [{ field: "title" }],
-    limit: 25,
-  },
-  operations: [...Resource.crud, "patch"] as const,
 })

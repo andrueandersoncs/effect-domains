@@ -26,6 +26,10 @@ The application uses SQLite with frozen migration history. By default it listens
 The resource is intentionally small and public:
 
 ```ts
+import { Authorization } from "effect-domains/authorization"
+import { Resource } from "effect-domains/resource"
+import { BookSchema } from "@effect-domains/example-support/book"
+
 export const BookResource = Resource.make({
   authorization: Authorization.public,
   name: "books",

@@ -12,7 +12,12 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
 
 const emptyApplication = Application.make({ name: "empty" })
 
-const missing = ApplicationBun.run(NotesApplication, {
+const nestedNotes = Application.make({
+  name: "nested-notes",
+  parts: [emptyApplication, NotesApplication],
+})
+
+const missing = ApplicationBun.run(nestedNotes, {
   database: { migrations: [] },
 })
 
@@ -26,17 +31,14 @@ const storedTextRpc = Rpc.make("stored-text", {
 
 const storedTextGroup = RpcGroup.make(storedTextRpc)
 
-const storedTextApplication = Application.make({
-  name: "stored-text",
-  commands: [{ group: storedTextGroup, handlers: Layer.empty }],
-})
+const storedTextApplication = Application.make({ name: "stored-text", parts: [{ group: storedTextGroup, handlers: Layer.empty }] })
 
 const storedTextCli = ApplicationBun.run(storedTextApplication, {
   database: { migrations: [] },
   services: storedPrefix,
 })
 
-const complete = ApplicationBun.run(NotesApplication, {
+const complete = ApplicationBun.run(nestedNotes, {
   database: { migrations: [] },
   services: storedPrefix,
 })
@@ -88,13 +90,10 @@ const middlewareRpc = Rpc.make("middleware-requirement", {
 
 const middlewareGroup = RpcGroup.make(middlewareRpc).middleware(MiddlewareRequirement)
 
-const middlewareApplication = Application.make({
-  name: "middleware-requirement",
-  commands: [{
-    group: middlewareGroup,
-    handlers: Layer.empty,
-  }],
-})
+const middlewareApplication = Application.make({ name: "middleware-requirement", parts: [{
+  group: middlewareGroup,
+  handlers: Layer.empty,
+}] })
 
 const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
   database: { migrations: [] },

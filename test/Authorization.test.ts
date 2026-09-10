@@ -43,9 +43,12 @@ const policy = p.policy({ scope, allow: { read: ownerOrAdmin, create: ownedCandi
 
 const Documents = Resource.make({
   name: "authorized_documents", schema: OwnedDocumentSchema, authorization: policy,
-  create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
-  operations: [...Resource.crud, "patch"],
-  list: { filter: ["ownerId"], order: [{ field: "title" }], limit: 2 },
+  operations: {
+    ...Resource.crud,
+    patch: true,
+    create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
+    list: { filter: ["ownerId"], order: [{ field: "title" }], limit: 2 },
+  },
 })
 
 const alice = SubjectSchema.make({ userId: "alice", tenantId: "a", roles: [] })
@@ -155,17 +158,17 @@ it("rejects unsafe create subject binding definitions", () => {
     const definition = JSON.parse(encodedDefinition)
     const hasPolicyMarker = policyMarkerEquals(definition.authorization, "policy")
     const authorization = hasPolicyMarker ? policy : definition.authorization
-    return Resource.make({ ...definition, authorization, schema: OwnedDocumentSchema, operations: [] })
+    return Resource.make({ ...definition, authorization, schema: OwnedDocumentSchema })
   }
 
-  expect(() => make('{"name":"public_binding","authorization":{"_tag":"Public"},"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
-  expect(() => make('{"name":"deny_binding","authorization":{"_tag":"Deny"},"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
-  expect(() => make('{"name":"unknown_target_binding","authorization":"policy","create":{"fromSubject":{"absent":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
-  expect(() => make('{"name":"non_subject_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"RowField","field":"ownerId"}}}}')).toThrow()
-  expect(() => make('{"name":"unknown_subject_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"absent"}}}}')).toThrow()
-  expect(() => make('{"name":"incompatible_binding","authorization":"policy","create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"roles"}}}}')).toThrow()
-  expect(() => make('{"name":"defaulted_binding","authorization":"policy","create":{"defaults":{"ownerId":"owner"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
-  expect(() => make('{"name":"generated_binding","authorization":"policy","create":{"generated":{"ownerId":"uuidV7"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}')).toThrow()
+  expect(() => make('{"name":"public_binding","authorization":{"_tag":"Public"},"operations":{"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}}')).toThrow()
+  expect(() => make('{"name":"deny_binding","authorization":{"_tag":"Deny"},"operations":{"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}}')).toThrow()
+  expect(() => make('{"name":"unknown_target_binding","authorization":"policy","operations":{"create":{"fromSubject":{"absent":{"_tag":"SubjectField","field":"userId"}}}}}')).toThrow()
+  expect(() => make('{"name":"non_subject_binding","authorization":"policy","operations":{"create":{"fromSubject":{"ownerId":{"_tag":"RowField","field":"ownerId"}}}}}')).toThrow()
+  expect(() => make('{"name":"unknown_subject_binding","authorization":"policy","operations":{"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"absent"}}}}}')).toThrow()
+  expect(() => make('{"name":"incompatible_binding","authorization":"policy","operations":{"create":{"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"roles"}}}}}')).toThrow()
+  expect(() => make('{"name":"defaulted_binding","authorization":"policy","operations":{"create":{"defaults":{"ownerId":"owner"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}}')).toThrow()
+  expect(() => make('{"name":"generated_binding","authorization":"policy","operations":{"create":{"generated":{"ownerId":"uuidV7"},"fromSubject":{"ownerId":{"_tag":"SubjectField","field":"userId"}}}}}')).toThrow()
 })
 
 it.effect("populates nullable resource fields from required subject fields", () => pipe(
@@ -184,8 +187,7 @@ it.effect("populates nullable resource fields from required subject fields", () 
       name: "nullable_owner_subject_binding",
       schema: NullableOwnerSchema,
       authorization: policy,
-      create: { fromSubject: { ownerId: nullableOwner.subject.userId } },
-      operations: [],
+      operations: { create: { fromSubject: { ownerId: nullableOwner.subject.userId }, publish: false } },
     })
 
     yield* prepareTables([resource.table])
@@ -211,8 +213,7 @@ it("rejects nullable subject fields bound to required resource fields", () => {
     name: "required_owner_subject_binding",
     schema: OwnedDocumentSchema,
     authorization: policy,
-    create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId } as never },
-    operations: [],
+    operations: { create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId } as never, publish: false } },
   })).toThrow()
 })
 
@@ -249,7 +250,7 @@ it.effect("write permission cannot expose an unreadable candidate and missing ac
 const transferPolicy = p.policy({ scope, allow: { read: unrestricted, create: ownedCandidate, update: owned } })
 
 const Transfers = Resource.make({
-  name: "authorized_transfers", schema: OwnedDocumentSchema, operations: [], authorization: transferPolicy,
+  name: "authorized_transfers", schema: OwnedDocumentSchema, operations: {}, authorization: transferPolicy,
 })
 
 const failureTag = <A, E extends { readonly _tag: string }>(result: Result.Result<A, E>) =>
@@ -299,8 +300,7 @@ const FeaturePermissions = Resource.make({
   name: "feature_permissions",
   schema: FeaturePermissionSchema,
   authorization: featurePermission,
-  operations: ["list"],
-  list: { order: [{ field: "id" }], limit: 1 },
+  operations: { list: { order: [{ field: "id" }], limit: 1 } },
 })
 
 const enabledSubject = FeatureSubjectSchema.make({ enabled: true, enabledValues: [true] })

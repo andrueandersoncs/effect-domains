@@ -23,7 +23,7 @@ interface Title extends Schema.Schema.Type<typeof TitleSchema> {}
 
 const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAdditionsAndRenames")(function* () {
   const database = yield* SqlClient.SqlClient
-  const before = Resource.make({ authorization: Authorization.public, name: "documents", schema: TitleSchema, operations: [] })
+  const before = Resource.make({ authorization: Authorization.public, name: "documents", schema: TitleSchema, operations: {} })
   const NullableCommentSchema = Schema.NullOr(Schema.String)
 
   const NullableDocumentSchema = Schema.Struct({
@@ -32,7 +32,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   })
 
   interface NullableDocument extends Schema.Schema.Type<typeof NullableDocumentSchema> {}
-  const nullable = Resource.make({ authorization: Authorization.public, name: "documents", schema: NullableDocumentSchema, operations: [] })
+  const nullable = Resource.make({ authorization: Authorization.public, name: "documents", schema: NullableDocumentSchema, operations: {} })
   const isNonNegative = Schema.isGreaterThanOrEqualTo(0)
   const NonNegativeIntSchema = Schema.Int.check(isNonNegative)
 
@@ -43,7 +43,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   })
 
   interface RenamedDocument extends Schema.Schema.Type<typeof RenamedDocumentSchema> {}
-  const renamed = Resource.make({ authorization: Authorization.public, name: "documents", schema: RenamedDocumentSchema, operations: [] })
+  const renamed = Resource.make({ authorization: Authorization.public, name: "documents", schema: RenamedDocumentSchema, operations: {} })
   const source = SqliteMigrations.snapshot([before.table])
   const withComment = SqliteMigrations.snapshot([nullable.table])
   const target = SqliteMigrations.snapshot([renamed.table])
@@ -60,7 +60,7 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   })
 
   interface SummaryDocument extends Schema.Schema.Type<typeof SummaryDocumentSchema> {}
-  const summary = Resource.make({ authorization: Authorization.public, name: "documents", schema: SummaryDocumentSchema, operations: [] })
+  const summary = Resource.make({ authorization: Authorization.public, name: "documents", schema: SummaryDocumentSchema, operations: {} })
   const summaryTarget = SqliteMigrations.snapshot([summary.table])
 
   const impossibleRename = SqliteMigrations.plan({
@@ -121,14 +121,14 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
     authorization: Authorization.public,
     name: "rename_chain",
     schema: ChainSourceSchema,
-    operations: [],
+    operations: {},
   })
 
   const target = Resource.make({
     authorization: Authorization.public,
     name: "rename_chain",
     schema: ChainTargetSchema,
-    operations: [],
+    operations: {},
   })
 
   const sourceSnapshot = SqliteMigrations.snapshot([source.table])
@@ -163,7 +163,7 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
     authorization: Authorization.public,
     name: "rename_cycle",
     schema: CycleSchema,
-    operations: [],
+    operations: {},
   })
 
   const cycleSnapshot = SqliteMigrations.snapshot([target.table, cycle.table])
@@ -212,7 +212,7 @@ const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableId
     authorization: Authorization.public,
     name: "nullable_history_identifier",
     schema: TitleSchema,
-    operations: [],
+    operations: {},
   })
 
   const target = SqliteMigrations.snapshot([resource.table])
@@ -281,8 +281,8 @@ const repeatableIntentFlagsAction = Effect.fn("SqliteMigrations.repeatableIntent
   })
 
   interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
-  const source = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: SourceSchema, operations: [] })
-  const target = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: TargetSchema, operations: [] })
+  const source = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: SourceSchema, operations: {} })
+  const target = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: TargetSchema, operations: {} })
   const sourceSnapshot = SqliteMigrations.snapshot([source.table])
 
   const initial = SqliteMigrations.plan({
@@ -350,11 +350,11 @@ const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(functi
   const OriginalLabelSchema = Schema.Literal("two  spaces")
   const OriginalSchema = Schema.Struct({ label: OriginalLabelSchema })
   interface Original extends Schema.Schema.Type<typeof OriginalSchema> {}
-  const original = Resource.make({ authorization: Authorization.public, name: "labels", schema: OriginalSchema, operations: [] })
+  const original = Resource.make({ authorization: Authorization.public, name: "labels", schema: OriginalSchema, operations: {} })
   const ChangedLabelSchema = Schema.Literal("two spaces")
   const ChangedSchema = Schema.Struct({ label: ChangedLabelSchema })
   interface Changed extends Schema.Schema.Type<typeof ChangedSchema> {}
-  const changed = Resource.make({ authorization: Authorization.public, name: "labels", schema: ChangedSchema, operations: [] })
+  const changed = Resource.make({ authorization: Authorization.public, name: "labels", schema: ChangedSchema, operations: {} })
   const source = SqliteMigrations.snapshot([original.table])
   const initial = SqliteMigrations.plan({ id: "001_drift", from: empty, to: source })
   const store = makeMigrationStore(database, [initial])
@@ -380,7 +380,7 @@ it.effect("drift detection preserves whitespace inside SQL constraint literals",
 
 const missingInitialHistoryAction = Effect.fn("SqliteMigrations.missingInitialHistory")(function* () {
   const database = yield* SqlClient.SqlClient
-  const resource = Resource.make({ authorization: Authorization.public, name: "requires_initial_history", schema: TitleSchema, operations: [] })
+  const resource = Resource.make({ authorization: Authorization.public, name: "requires_initial_history", schema: TitleSchema, operations: {} })
   const target = SqliteMigrations.snapshot([resource.table])
   const emptyStore = makeMigrationStore(database, [])
   const prepareTarget = emptyStore.prepare(target.tables)
@@ -405,7 +405,7 @@ it.effect("nonempty schemas reject missing initial migration history instead of 
 
 const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransformsRollBack")(function* () {
   const database = yield* SqlClient.SqlClient
-  const before = Resource.make({ authorization: Authorization.public, name: "jobs", schema: TitleSchema, operations: [] })
+  const before = Resource.make({ authorization: Authorization.public, name: "jobs", schema: TitleSchema, operations: {} })
   const isPositive = Schema.isGreaterThan(0)
   const PositiveIntSchema = Schema.Int.check(isPositive)
 
@@ -415,7 +415,7 @@ const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransfo
   })
 
   interface Job extends Schema.Schema.Type<typeof JobSchema> {}
-  const after = Resource.make({ authorization: Authorization.public, name: "jobs", schema: JobSchema, operations: [] })
+  const after = Resource.make({ authorization: Authorization.public, name: "jobs", schema: JobSchema, operations: {} })
   const source = SqliteMigrations.snapshot([before.table])
   const target = SqliteMigrations.snapshot([after.table])
   const initial = SqliteMigrations.plan({ id: "001", from: empty, to: source })
@@ -477,8 +477,8 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   })
 
   interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
-  const initialResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: InitialSchema, operations: [] })
-  const targetResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: TargetSchema, operations: [] })
+  const initialResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: InitialSchema, operations: {} })
+  const targetResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: TargetSchema, operations: {} })
   const initialTarget = SqliteMigrations.snapshot([initialResource.table])
 
   const initial = SqliteMigrations.plan({

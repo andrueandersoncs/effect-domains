@@ -14,7 +14,7 @@ import { RpcTest } from "effect/unstable/rpc"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
-const GeneratedTodos = Resource.make({ authorization: Authorization.public, name: "generated_todo_policies", schema: GeneratedTodoSchema, create: { defaults: { completed: false } }, operations: [] })
+const GeneratedTodos = Resource.make({ authorization: Authorization.public, name: "generated_todo_policies", schema: GeneratedTodoSchema, operations: { create: { defaults: { completed: false }, publish: false } } })
 
 const PagedTodoSchema = Schema.Struct({
   id: identifier(Schema.String),
@@ -23,7 +23,7 @@ const PagedTodoSchema = Schema.Struct({
 })
 
 interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
-const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, list: { filter: ["completed"], order: [{ field: "title" }], limit: 1 }, operations: [] })
+const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, operations: { list: { filter: ["completed"], order: [{ field: "title" }], limit: 1, publish: false } } })
 
 const OrderedTodoFieldsSchema = Schema.Struct({
   lower: Schema.Int,
@@ -40,7 +40,7 @@ const OrderedTodos = Resource.make({
   authorization: Authorization.public,
   name: "ordered_todo_policies",
   schema: OrderedTodoSchema,
-  operations: [],
+  operations: {},
 })
 
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
@@ -172,8 +172,7 @@ const Timestamps = Resource.make({
   name: "timestamp_query_codec",
   schema: TimestampSchema,
   authorization: Authorization.public,
-  operations: [],
-  list: { filter: ["at"], order: [], limit: 1 },
+  operations: { list: { filter: ["at"], order: [], limit: 1, publish: false } },
 })
 
 it.effect("timestamp filters use the physical codec across cursor pages", () => pipe(
@@ -204,8 +203,7 @@ it("rejects inferred ordering through a semantic numeric codec", () => {
     name: "semantic_numeric_order",
     schema: EncodedNumberSchema,
     authorization: Authorization.public,
-    operations: [],
-    list: { order: [{ field: "quantity" }] },
+    operations: { list: { order: [{ field: "quantity" }], publish: false } },
   })).toThrow()
 })
 
@@ -221,7 +219,7 @@ const PatchNamedKeys = Resource.make({
   name: "patch_named_keys",
   schema: PatchNamedKeySchema,
   authorization: Authorization.public,
-  operations: ["patch"],
+  operations: { patch: true },
 })
 
 it.effect("generated patch envelopes cannot collide with canonical field names", () => pipe(
