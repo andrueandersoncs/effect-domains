@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 
 export type Scalar = string | number | boolean | null
 
@@ -31,14 +31,11 @@ const AnyPolicySchema = anyLayer(PolicySchema)
 
 export class PolicyEvaluationError extends Schema.TaggedError<PolicyEvaluationError>()("PolicyEvaluationError", { reason: Schema.String }) {}
 
-const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
-const OptionalRecordSchema = Schema.Option(UnknownRecordSchema)
-
-export class PolicyEnvironment extends Schema.Class<PolicyEnvironment>("PolicyEnvironment")({
-  subject: UnknownRecordSchema,
-  row: OptionalRecordSchema,
-  next: OptionalRecordSchema,
-}) {}
+export class PolicyEnvironment extends Data.Class<{
+  readonly subject: Readonly<Record<string, unknown>>
+  readonly row: Option.Option<Readonly<Record<string, unknown>>>
+  readonly next: Option.Option<Readonly<Record<string, unknown>>>
+}> {}
 
 type Algebra<A> = (layer: PolicyF<A>) => A
 type Evaluator = (environment: PolicyEnvironment) => Effect.Effect<boolean, PolicyEvaluationError>
@@ -68,8 +65,7 @@ const all = (...children: ReadonlyArray<Policy>) => AllPolicySchema.make({ child
 const any = (...children: ReadonlyArray<Policy>) => AnyPolicySchema.make({ children })
 
 export const policyFailure = Effect.fn("Policy.failure")(function* (reason: string) {
-  const error = PolicyEvaluationError.make({ reason })
-  return yield* Effect.fail(error)
+  return yield* pipe(PolicyEvaluationError.make({ reason }), Effect.fail)
 })
 
 const isScalar = Schema.is(ScalarSchema)
@@ -197,40 +193,26 @@ const renderLayer: Algebra<string> = (layer) =>
 
 const render = fold(renderLayer)
 
-const freezeOperand = (operand: Operand) =>
-  pipe(
-    Match.value(operand),
-    Match.tagsExhaustive({
-      Literal: ({ value }) => {
-        const frozenValue = isScalarCollection(value) ? Object.freeze([...value]) : value
-        const literalOperand = OperandSchema.make({ _tag: "Literal", value: frozenValue })
-        return Object.freeze(literalOperand)
-      },
-      SubjectField: ({ field }) => pipe(OperandSchema.make({ _tag: "SubjectField", field }), (value) => Object.freeze(value)),
-      RowField: ({ field }) => pipe(OperandSchema.make({ _tag: "RowField", field }), (value) => Object.freeze(value)),
-      NextField: ({ field }) => pipe(OperandSchema.make({ _tag: "NextField", field }), (value) => Object.freeze(value)),
-    }),
-  )
+const freezeOperand = (operand: Operand): Operand => {
+  if (!Predicate.isTagged(operand, "Literal")) {
+    return pipe(OperandSchema.make({ _tag: operand._tag, field: operand.field }), (snapshot) => Object.freeze(snapshot))
+  }
 
-const snapshotLayer: Algebra<Policy> = (layer) =>
-  pipe(
-    Match.value(layer),
-    Match.tagsExhaustive({
-      Constant: ({ value }) => pipe(PolicySchema.make({ _tag: "Constant", value }), (policy) => Object.freeze(policy)),
-      Equal: ({ left, right }) => pipe(PolicySchema.make({ _tag: "Equal", left: freezeOperand(left), right: freezeOperand(right) }), (policy) => Object.freeze(policy)),
-      Includes: ({ collection, value }) => pipe(PolicySchema.make({ _tag: "Includes", collection: freezeOperand(collection), value: freezeOperand(value) }), (policy) => Object.freeze(policy)),
-      All: ({ children }) => {
-        const frozenChildren = Object.freeze(children)
-        const policy = PolicySchema.make({ _tag: "All", children: frozenChildren })
-        return Object.freeze(policy)
-      },
-      Any: ({ children }) => {
-        const frozenChildren = Object.freeze(children)
-        const policy = PolicySchema.make({ _tag: "Any", children: frozenChildren })
-        return Object.freeze(policy)
-      },
-    }),
-  )
+  const value = isScalarCollection(operand.value) ? Object.freeze([...operand.value]) : operand.value
+  return pipe(LiteralSchema.make({ value }), (snapshot) => Object.freeze(snapshot))
+}
+
+const snapshotLayer: Algebra<Policy> = (layer) => pipe(
+  Match.value(layer),
+  Match.tagsExhaustive({
+    Constant: ({ value }) => ConstantSchema.make({ value }),
+    Equal: ({ left, right }) => EqualSchema.make({ left: freezeOperand(left), right: freezeOperand(right) }),
+    Includes: ({ collection, value }) => IncludesSchema.make({ collection: freezeOperand(collection), value: freezeOperand(value) }),
+    All: ({ children }) => AllPolicySchema.make({ children: Object.freeze(children) }),
+    Any: ({ children }) => AnyPolicySchema.make({ children: Object.freeze(children) }),
+  }),
+  (policy) => Object.freeze(policy),
+)
 
 const snapshot = fold(snapshotLayer)
 

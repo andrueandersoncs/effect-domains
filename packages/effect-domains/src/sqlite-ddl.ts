@@ -32,76 +32,23 @@ const typeCheck = (field: TableField) => {
   return field.nullable ? `CHECK (${column} IS NULL OR ${expression})` : `CHECK (${expression})`
 }
 
-const comparisonCheck = (operator: string) => (field: TableField) => (value: number) => {
+// Retain length checks because historical migration artifacts still contain them.
+const renderCheck = (field: TableField) => (check: TableCheck) => {
   const column = quoteIdentifier(field.name)
-  const literal = quoteLiteral(value)
-  return `CHECK (${column} ${operator} ${literal})`
-}
 
-const oneOfCheck = (field: TableField) => (values: ReadonlyArray<string | number>) => {
-  const column = quoteIdentifier(field.name)
-  const literals = Array.map(values, quoteLiteral)
-  const list = Array.join(literals, ", ")
-  return `CHECK (${column} IN (${list}))`
+  return pipe(Match.value(check), Match.tagsExhaustive({
+    OneOf: ({ values }) => {
+      const literals = pipe(values, Array.map(quoteLiteral), Array.join(", "))
+      return `CHECK (${column} IN (${literals}))`
+    },
+    GreaterThan: ({ value }) => `CHECK (${column} > ${quoteLiteral(value)})`,
+    GreaterThanOrEqualTo: ({ value }) => `CHECK (${column} >= ${quoteLiteral(value)})`,
+    LessThan: ({ value }) => `CHECK (${column} < ${quoteLiteral(value)})`,
+    LessThanOrEqualTo: ({ value }) => `CHECK (${column} <= ${quoteLiteral(value)})`,
+    MinLength: ({ value }) => `CHECK (length(${column}) >= ${quoteLiteral(value)})`,
+    MaxLength: ({ value }) => `CHECK (length(${column}) <= ${quoteLiteral(value)})`,
+  }))
 }
-
-const lengthCheck = (operator: string) => (field: TableField) => (value: number) => {
-  const column = quoteIdentifier(field.name)
-  const literal = quoteLiteral(value)
-  return `CHECK (length(${column}) ${operator} ${literal})`
-}
-
-const renderGreaterThan = (field: TableField) => (check: Extract<TableCheck, { _tag: "GreaterThan" }>) => {
-  const compare = comparisonCheck(">")
-  const render = compare(field)
-  return render(check.value)
-}
-
-const renderGreaterThanOrEqualTo = (field: TableField) => (check: Extract<TableCheck, { _tag: "GreaterThanOrEqualTo" }>) => {
-  const compare = comparisonCheck(">=")
-  const render = compare(field)
-  return render(check.value)
-}
-
-const renderLessThan = (field: TableField) => (check: Extract<TableCheck, { _tag: "LessThan" }>) => {
-  const compare = comparisonCheck("<")
-  const render = compare(field)
-  return render(check.value)
-}
-
-const renderLessThanOrEqualTo = (field: TableField) => (check: Extract<TableCheck, { _tag: "LessThanOrEqualTo" }>) => {
-  const compare = comparisonCheck("<=")
-  const render = compare(field)
-  return render(check.value)
-}
-
-const renderOneOf = (field: TableField) => (check: Extract<TableCheck, { _tag: "OneOf" }>) => {
-  const render = oneOfCheck(field)
-  return render(check.values)
-}
-
-const renderMinLength = (field: TableField) => (check: Extract<TableCheck, { _tag: "MinLength" }>) => {
-  const length = lengthCheck(">=")
-  const render = length(field)
-  return render(check.value)
-}
-
-const renderMaxLength = (field: TableField) => (check: Extract<TableCheck, { _tag: "MaxLength" }>) => {
-  const length = lengthCheck("<=")
-  const render = length(field)
-  return render(check.value)
-}
-
-const renderCheck = (field: TableField) => (check: TableCheck) => pipe(
-  Match.value(check),
-  Match.when({ _tag: "GreaterThan" }, renderGreaterThan(field)),
-  Match.when({ _tag: "GreaterThanOrEqualTo" }, renderGreaterThanOrEqualTo(field)),
-  Match.when({ _tag: "LessThan" }, renderLessThan(field)),
-  Match.when({ _tag: "LessThanOrEqualTo" }, renderLessThanOrEqualTo(field)),
-  Match.when({ _tag: "OneOf" }, renderOneOf(field)),
-  Match.when({ _tag: "MinLength" }, renderMinLength(field)),
-  Match.orElse(renderMaxLength(field)),
-)
 
 const uuidV7Default = `DEFAULT (lower(
   substr(printf('%012x', cast(unixepoch('subsec') * 1000 as integer)), 1, 8) || '-' ||

@@ -48,7 +48,6 @@ const TodosResource = Resource.make({
     },
     list: {
       filter: ["completed"],
-      order: [{ field: "title" }],
       limit: 25,
     },
   },
@@ -86,7 +85,7 @@ bun run resource-crud todos.create --title "Ship applications"
 bun run resource-crud todos.list --filter-completed false --limit 10
 ```
 
-The list policy accepts only `filter.completed`, `limit`, and an opaque `cursor`. It applies authorization before filtering and pagination, orders by physical scalar `title` ascending with the generated id as a deterministic tie-breaker, and returns `{ "items": [...], "nextCursor": string | null }`. Pass a non-null cursor back unchanged with the same filter to fetch the next page. `limit` is from 1 through 25.
+The list policy accepts only `filter.completed`, `limit`, and an opaque `cursor`. It applies authorization before filtering and pagination, orders by generated identifier ascending only, and returns `{ "items": [...], "nextCursor": string | null }`. Pass a non-null cursor back unchanged with the same filter to fetch the next page. `limit` is from 1 through 25.
 
 Switching to Bob hides Alice's todo; switching to the outsider hides all Acme data:
 
@@ -142,16 +141,15 @@ Startup applies the checked-in, frozen migration chain and preserves existing ro
 
 [`003_schema_string_checks`](migrations/003_schema_string_checks.json) preserves the rows while removing the old SQLite title-length constraint. Canonical non-empty validation remains authoritative because JavaScript and SQLite string lengths are not equivalent.
 
-List ordering is deliberately restricted to declared, non-nullable fields with the same canonical and storage schema and a supported physical scalar representation (`string`, `integer`, or `number`). This resource orders by its physical string `title`. Custom codecs whose storage differs from their canonical field and nullable fields cannot be declared as list-order fields; arbitrary codec ordering is not inferred.
+List order is always identifier ascending. There is no arbitrary order declaration, separate repository `page` method, or unbounded generated list. This resource sets its page limit to 25; resources without list configuration default to 50.
 
-Schema commands run locally, without a server. For later resource-schema changes, generate against the manifest at [`migrations/manifest.json`](migrations/manifest.json), the runtime registry:
+Inspection runs locally without a server or token:
 
 ```bash
-bun run resource-crud schema generate add-field
 bun run resource-crud inspect todos.patch
 ```
 
-`generate` writes the next valid artifact and atomically registers it in the manifest. `inspect` describes the selected operation and the resource's schemas, storage, creation/list configuration, subject schema, and rendered authorization policy. Neither local command requires a token. Do not regenerate migration artifacts that have already been applied.
+`inspect` describes the selected operation and the resource's schemas, storage, creation/list configuration, subject schema, and rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate migration artifacts that have already been applied.
 
 ## Code map
 
@@ -159,6 +157,6 @@ bun run resource-crud inspect todos.patch
 - [`resources.ts`](resources.ts): authorization policy, defaults, page/list policy, and selected generated operations.
 - [`application.ts`](application.ts): application registration with no authored commands.
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime migration registry and history.
-- [`main.ts`](main.ts): the server, generated CLI, schema-command, and inspection runner with demo authentication.
+- [`main.ts`](main.ts): the server, generated CLI, and inspection runner with demo authentication.
 
 See the [examples overview](../README.md), [authored book CRUD](../README.md#authored-sql), and [service-dependent storage codec](../service-codec/).

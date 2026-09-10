@@ -3,21 +3,23 @@ import { Effect, Function, Schema, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Table } from "effect-domains/table"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+
 import { makeMigrationStore, SqliteMigrations } from "effect-domains/sqlite-migrations"
+
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
 const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(function* () {
   const sql = yield* SqlClient.SqlClient
-  const ParentSchema = Schema.Struct({ code: Schema.String })
-  interface Parent extends Schema.Schema.Type<typeof ParentSchema> {}
+  const RelationalParentSchema = Schema.Struct({ code: Schema.String })
+  interface RelationalParent extends Schema.Schema.Type<typeof RelationalParentSchema> {}
   const ChildSchema = Schema.Struct({ parentId: Schema.String, label: Schema.String })
   interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
-  const sourceParent = Table.make({ name: "relational_parents", schema: ParentSchema })
+  const sourceParent = Table.make({ name: "relational_parents", schema: RelationalParentSchema })
   const sourceChild = Table.make({ name: "relational_children", schema: ChildSchema })
 
   const constrainedParent = Table.make({
     name: "relational_parents",
-    schema: ParentSchema,
+    schema: RelationalParentSchema,
     relations: { unique: [{ name: "relational_parent_code", fields: ["code"] }] },
   })
 
@@ -46,22 +48,46 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
     },
   })
 
-  const empty = SqliteMigrations.snapshot([])
   const source = SqliteMigrations.snapshot([sourceParent, sourceChild])
   const constrained = SqliteMigrations.snapshot([constrainedParent, constrainedChild])
   const indexed = SqliteMigrations.snapshot([constrainedParent, indexedChild])
-  const initial = SqliteMigrations.plan({ id: "relational_001", from: empty, to: source })
+  const initial = SqliteMigrations.initial({ id: "relational_001", tables: [sourceParent, sourceChild] })
 
-  const addConstraints = SqliteMigrations.plan({
-    id: "relational_002",
-    from: source,
-    to: constrained,
+  const addConstraintsSteps = [
+    SqliteMigrations.steps.RebuildTable.make({
+      table: Table.snapshot(constrainedParent),
+      copies: [
+        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+        SqliteMigrations.copies.Source.make({ column: "code", source: "code" }),
+      ],
+    }),
+    SqliteMigrations.steps.RebuildTable.make({
+      table: Table.snapshot(constrainedChild),
+      copies: [
+        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+        SqliteMigrations.copies.Source.make({ column: "parentId", source: "parentId" }),
+        SqliteMigrations.copies.Source.make({ column: "label", source: "label" }),
+      ],
+    }),
+  ]
+
+  const addConstraints = SqliteMigrations.make({
+    id: "relational_002", from: source, to: constrained,
+    steps: addConstraintsSteps,
   })
 
-  const addIndex = SqliteMigrations.plan({
-    id: "relational_003",
-    from: constrained,
-    to: indexed,
+  const addIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: "relational_children", name: "relational_child_parent_idx", fields: ["parentId"] })]
+
+  const addIndex = SqliteMigrations.make({
+    id: "relational_003", from: constrained, to: indexed,
+    steps: addIndexSteps,
+  })
+
+  const dropIndexSteps = [SqliteMigrations.steps.DropIndex.make({ name: "relational_child_parent_idx" })]
+
+  const dropIndex = SqliteMigrations.make({
+    id: "relational_004", from: indexed, to: constrained,
+    steps: dropIndexSteps,
   })
 
   yield* makeMigrationStore(sql, [initial]).prepare(source.tables)
@@ -96,6 +122,13 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
   yield* sql`CREATE INDEX relational_child_parent_idx ON relational_children (label)`
   const forgedIndex = yield* pipe(indexedStore.prepare(indexed.tables), Effect.result)
   expect(forgedIndex._tag).toBe("Failure")
+  yield* sql`DROP INDEX relational_child_parent_idx`
+  yield* sql`CREATE INDEX "relational_child_parent_idx" ON "relational_children" ("parentId")`
+  const droppedStore = makeMigrationStore(sql, [initial, addConstraints, addIndex, dropIndex])
+  yield* droppedStore.prepare(constrained.tables)
+  yield* droppedStore.prepare(constrained.tables)
+  const indexes = yield* sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'relational_child_parent_idx'`
+  expect(indexes).toEqual([])
 })
 
 it.effect(
@@ -105,12 +138,11 @@ it.effect(
 
 const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebuild")(function* () {
   const sql = yield* SqlClient.SqlClient
-  const ParentSchema = Schema.Struct({ code: Schema.String })
-  interface Parent extends Schema.Schema.Type<typeof ParentSchema> {}
+  const RelationalParentSchema = Schema.Struct({ code: Schema.String })
+  interface RelationalParent extends Schema.Schema.Type<typeof RelationalParentSchema> {}
   const ChildSchema = Schema.Struct({ parentId: Schema.String })
   interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
-  const sourceParent = Table.make({ name: "rebuild_parents", schema: ParentSchema })
-
+  const sourceParent = Table.make({ name: "rebuild_parents", schema: RelationalParentSchema })
 
   const sourceChild = Table.make({
     name: "rebuild_children",
@@ -126,16 +158,26 @@ const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebu
 
   const targetParent = Table.make({
     name: "rebuild_parents",
-    schema: ParentSchema,
+    schema: RelationalParentSchema,
     relations: { unique: [{ name: "rebuild_parent_code", fields: ["code"] }] },
   })
 
-
-  const empty = SqliteMigrations.snapshot([])
   const source = SqliteMigrations.snapshot([sourceParent, sourceChild])
   const target = SqliteMigrations.snapshot([targetParent, sourceChild])
-  const initial = SqliteMigrations.plan({ id: "rebuild_001", from: empty, to: source })
-  const rebuild = SqliteMigrations.plan({ id: "rebuild_002", from: source, to: target })
+  const initial = SqliteMigrations.initial({ id: "rebuild_001", tables: [sourceParent, sourceChild] })
+
+  const rebuildSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(targetParent),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "code", source: "code" }),
+    ],
+  })]
+
+  const rebuild = SqliteMigrations.make({
+    id: "rebuild_002", from: source, to: target,
+    steps: rebuildSteps,
+  })
 
   yield* makeMigrationStore(sql, [initial]).prepare(source.tables)
   yield* sql`INSERT INTO rebuild_parents (id, code) VALUES ('rebuild-parent', 'one')`
@@ -151,3 +193,30 @@ it.effect(
   "rebuilds a referenced parent without dropping child rows",
   pipe(referencedParentRebuild(), Effect.provide(sqlite), Function.constant),
 )
+
+const initialIndexes = Effect.fn("SqliteMigrations.initialIndexes")(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const IndexedSchema = Schema.Struct({ label: Schema.String })
+  interface Indexed extends Schema.Schema.Type<typeof IndexedSchema> {}
+
+  const table = Table.make({
+    name: "initial_indexes", schema: IndexedSchema,
+    relations: { indexes: [{ name: "initial_label_idx", fields: ["label"] }] },
+  })
+
+  const initial = SqliteMigrations.initial({ id: "001", tables: [table] })
+
+  expect(initial.steps).toMatchObject([
+    { _tag: "SqliteCreateTable", table: { name: "initial_indexes" } },
+    { _tag: "SqliteCreateIndex", table: "initial_indexes", name: "initial_label_idx", fields: ["label"] },
+  ])
+
+  const store = makeMigrationStore(sql, [initial])
+  yield* store.prepare(initial.to.tables)
+  yield* store.prepare(initial.to.tables)
+  yield* sql`INSERT INTO initial_indexes (id, label) VALUES ('indexed', 'kept')`
+  const rows = yield* sql`SELECT id FROM initial_indexes INDEXED BY initial_label_idx WHERE label = 'kept'`
+  expect(rows).toEqual([{ id: "indexed" }])
+})
+
+it.effect("initial derives table and index instructions from an empty snapshot", () => pipe(initialIndexes(), Effect.provide(sqlite)))

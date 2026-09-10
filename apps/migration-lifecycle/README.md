@@ -2,7 +2,7 @@
 
 This example explains how a frozen SQLite migration history carries data from a legacy document shape to a current generated CRUD application. It keeps historical intent separate from the current model: version one stored `title`; version two renames it to `heading`, adds nullable `summary`, and backfills required `priority` with `0`.
 
-For common runtime and schema-command conventions, see the [examples overview](../README.md). Compare the generated CRUD here with [authored book queries](../README.md#authored-sql) and the migration transform in [reservations](../reservations/).
+For common runtime and explicit-migration conventions, see the [examples overview](../README.md). Compare the generated CRUD here with [authored book queries](../README.md#authored-sql) and the migration transform in [reservations](../reservations/).
 
 ## Run the historical upgrade
 
@@ -48,33 +48,19 @@ The migration story is authored and reviewed instead. [`legacy.ts`](legacy.ts) d
 
 [`003_schema_string_checks`](migrations/003_schema_string_checks.json) then rebuilds without the misderived SQLite heading-length constraint, copying existing values unchanged. The first two artifacts retain their historical meaning; canonical non-empty validation remains in the schema.
 
-The current schema requires a non-empty `heading`, allows `summary` to be `null`, and requires an integer `priority` of at least zero. Generated identifiers are UUIDv7 values.
+The current schema requires a non-empty `heading`, allows `summary` to be `null`, and requires an integer `priority` of at least zero. Generated identifiers are UUIDv7 values. List returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending.
 
-## Review a migration plan
+## Author the next migration
 
-Schema commands run locally; no server is required. The runtime uses the ordered registry at [`migrations/manifest.json`](migrations/manifest.json), not a source-imported history. After adding a required `status` field to the current document schema, generate the next manifest artifact:
+The runtime uses the ordered registry at [`migrations/manifest.json`](migrations/manifest.json). There is no schema CLI, inferred migration planner, or rename/backfill/transform intent language. Use `SqliteMigrations.make({ id, from, to, steps })` and the schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies`. The [shared authoring walkthrough](../README.md#review-schema-changes) demonstrates a document rebuild that explicitly copies `title` to `heading` and fills `priority` with `0`.
+
+For a new required `status` field, author a target table snapshot and a rebuild with complete original-column copies plus `SqliteMigrations.copies.Value.make({ column: "status", value: "draft" })`. Use the final frozen artifact's `to` as the new `from`. Review and test replay against representative old rows, then append the new artifact and manifest entry. Do not rerun the illustrative draft against this already-evolved history.
+
+Inspect current contracts locally without a server:
 
 ```bash
-bun run migration-lifecycle schema generate add-status \
-  --backfill 'documents:status:"draft"'
 bun run migration-lifecycle inspect documents.create
 ```
-
-`generate` chooses the next numeric prefix, validates the complete history, writes the new artifact, and atomically replaces the manifest. If it finds unresolved changes, it reports their reasons and leaves the registry untouched.
-
-Use `schema plan` to review a prospective artifact without registering it. These commands compare the version-one artifact with the current schema:
-
-```bash
-bun run migration-lifecycle schema plan --id 002_document_metadata \
-  --from apps/migration-lifecycle/migrations/001_initial.json \
-  --out unresolved.json
-bun run migration-lifecycle schema plan --id 002_document_metadata \
-  --from apps/migration-lifecycle/migrations/001_initial.json \
-  --rename documents:title:heading --backfill documents:priority:0 \
-  --out reviewed.json
-```
-
-The first command writes a plan containing blocked changes and exits nonzero: the planner will not guess a column rename or a value for a new required field. The second records those explicit decisions and succeeds. Neither scratch file is used at runtime; the server uses the checked-in reviewed artifact registered in the manifest.
 
 Applied artifacts are immutable history. Do not regenerate or edit an artifact that has been applied to a database: startup validates manifest history and the database schema, applies the frozen chain without resetting data, and rejects untracked database objects rather than silently adopting them.
 
@@ -84,5 +70,5 @@ Applied artifacts are immutable history. Do not regenerate or edit an artifact t
 - [`resources.ts`](resources.ts) and [`application.ts`](application.ts): generated document CRUD registration.
 - [`legacy.ts`](legacy.ts) and [`seed-v1.ts`](seed-v1.ts): the isolated version-one schema and seed path.
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime registry and historical migration chain.
-- [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.
-- [`SqliteMigrations`](../../packages/effect-domains/src/sqlite-migrations.ts): planning, artifact validation, and SQLite application machinery.
+- [`main.ts`](main.ts): the sole server, generated CLI, and inspection runner.
+- [`SqliteMigrations`](../../packages/effect-domains/src/sqlite-migrations.ts): explicit artifacts, history validation, and transactional SQLite replay.

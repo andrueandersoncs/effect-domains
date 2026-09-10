@@ -44,7 +44,7 @@ Domain schemas and operation contracts
     └── Documentation interpreter
 ```
 
-This arrangement aims for deep modules with clear escape hatches rather than annotation-heavy thin wrappers. Caching and concurrency policy remain application concerns; migration generation requires explicit intent for semantic changes; transactions remain authored handler concerns. Operational diagnostics use native Effect services in the application rather than a framework wrapper. ([Authored SQL](../../apps/authored-sql/sqlite.ts); [Migrations](../../packages/effect-domains/src/sqlite-migrations.ts); [Workflow diagnostics](../../apps/durable-workflows/workflow.ts))
+This arrangement aims for deep modules with clear escape hatches rather than annotation-heavy thin wrappers. Caching and concurrency policy remain application concerns; migration steps and copy semantics are explicit authored artifacts, not inferred plans; transactions remain authored handler concerns. Operational diagnostics use native Effect services in the application rather than a framework wrapper. ([Authored SQL](../../apps/authored-sql/sqlite.ts); [Migrations](../../packages/effect-domains/src/sqlite-migrations.ts); [Workflow diagnostics](../../apps/durable-workflows/workflow.ts))
 
 ## Constraints on Generalization
 

@@ -44,7 +44,7 @@ bun run basic-crud books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A
 bun run basic-crud books.remove --id "$BOOK_ID"
 ```
 
-Create accepts `title` and `pageCount`; the runtime generates `id`. Update accepts the complete row. List returns an array without pagination because no list policy is declared. Remove returns `void`, not the deleted row. Missing rows report `ResourceNotFound`; persistence and codec failures report `RepositoryError`.
+Create accepts `title` and `pageCount`; the runtime generates `id`. Update accepts the complete row. List always returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending. Pass a non-null cursor back unchanged with `--cursor` to continue. Remove returns `void`, not the deleted row. Missing rows report `ResourceNotFound`; persistence and codec failures report `RepositoryError`.
 
 ## Runtime and persistence
 
@@ -60,10 +60,9 @@ Local commands do not require a server:
 
 ```bash
 bun run basic-crud inspect books.create
-bun run basic-crud schema generate add-field
 ```
 
-Review migrations; do not regenerate already-applied artifacts from current models.
+There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes), then review the artifact and manifest together. Do not regenerate already-applied history from current models.
 
 ## Code map
 

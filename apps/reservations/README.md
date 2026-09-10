@@ -2,7 +2,7 @@
 
 This example separates generated read access from authored stock policy. It reserves a finite inventory item through transactions, so a reservation is more than a row: it has a lifecycle and changes available stock.
 
-For common runtime and schema-command conventions, see the [examples overview](../README.md). Compare the unrestricted generated CRUD in [resource-crud](../resource-crud/) and the historical rename/backfill workflow in [migration-lifecycle](../migration-lifecycle/).
+For common runtime and explicit-migration conventions, see the [examples overview](../README.md). Compare the policy-protected generated CRUD in [resource-crud](../resource-crud/) and the historical rename/backfill workflow in [migration-lifecycle](../migration-lifecycle/).
 
 ## Run it
 
@@ -72,22 +72,13 @@ The frozen [`002_timestamp`](migrations/002_timestamp.json) artifact rebuilds `r
 
 [`003_schema_string_checks`](migrations/003_schema_string_checks.json) preserves stock and reservation rows while removing the misderived SQLite SKU-length constraints. Non-empty SKU validation remains in the canonical schemas; the earlier artifacts are unchanged.
 
-Schema commands run locally; no server is required. After changing a resource schema, generate against the ordered frozen history in [`migrations/manifest.json`](migrations/manifest.json):
+Inspection runs locally without a server:
 
 ```bash
-bun run reservations schema generate change
 bun run reservations inspect reserve
 ```
 
-`generate` writes the next valid artifact and atomically updates the manifest; blocked plans report their reasons and leave the registry untouched. Use `schema plan` when reviewing an unregistered prospective change:
-
-```bash
-bun run reservations schema plan --id 004_change \
-  --from apps/reservations/migrations/003_schema_string_checks.json \
-  --out 004_change.json
-```
-
-Do not regenerate previously applied artifacts from current schemas: the runtime validates recorded history and actual table definitions before applying migrations.
+There is no schema CLI or migration planner. [Author explicit steps](../README.md#review-schema-changes), including `SqliteMigrations.copies.Expression` for stored timestamp conversions, and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate previously applied artifacts from current schemas: runtime validates recorded history and exact table definitions before applying pending migrations.
 
 ## Code map
 
@@ -97,4 +88,4 @@ Do not regenerate previously applied artifacts from current schemas: the runtime
 - [`sqlite.ts`](sqlite.ts): `InventoryRpcs.toLayer` handlers, transactional guarded stock updates, transitions, and idempotent startup seed.
 - [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry, including the timestamp conversion.
 - [`application.ts`](application.ts): resource registration plus the native RPC group and handler layer.
-- [`main.ts`](main.ts): the sole server, generated CLI, schema-command, and inspection runner.
+- [`main.ts`](main.ts): the sole server, generated CLI, and inspection runner.

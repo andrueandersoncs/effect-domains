@@ -57,14 +57,14 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 `Resource.make` supplies:
 
 - `table`: the derived table definition and row codecs;
-- `repository`: `find`, `get`, `list`, `page`, `create`, `update`, `patch`, and `remove` Effects;
+- `repository`: `find`, `get`, `list`, `create`, `update`, `patch`, and `remove` Effects;
 - `group` and `handlers`: only the operations selected in `operations`.
 
 `Resource.crud` is the frozen `{ get: true, list: true, create: true, update: true, remove: true }` selection. Use `patch: true` to add patch. `false` disables an operation; a configured `create` or `list` object with `publish: false` retains its local repository policy but omits its RPC. `operations: {}` keeps every repository method local.
 
-`find` returns an `Option`; missing records use `ResourceNotFound`, and persistence/codec failures use `RepositoryError`. Creation applies declared defaults and runtime-generated fields. Update validates the complete row; patch preserves its identifier and validates the merged row transactionally. A declared list policy supplies bounded cursor pages.
+`find` returns an `Option`; missing records use `ResourceNotFound`, and persistence/codec failures use `RepositoryError`. Creation applies declared defaults and runtime-generated fields. Update validates the complete row; patch preserves its identifier and validates the merged row transactionally. Every generated list returns bounded `{ items, nextCursor }`, including local repository `list`. The default limit is 50; declared list configuration can set a limit and equality filters. Order is identifier ascending only. There is no separate `page` method or unbounded generated list.
 
-Published patch payloads are `{ key, changes }`, independent of the identifier's field name. The local repository remains `patch(key, changes)`. Exact filters use compiled physical field codecs; declared ordering rejects semantic codecs whose physical order is not proven equivalent.
+Published patch payloads are `{ key, changes }`, independent of the identifier's field name. The local repository remains `patch(key, changes)`. Declared equality filters use compiled physical field codecs. Arbitrary ordering is not supported.
 
 Use native Effect RPCs for business operations:
 
@@ -146,15 +146,17 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 
 ## Migrations
 
-`SqliteMigrations.snapshot` captures a physical schema. `SqliteMigrations.plan` compares frozen snapshots and emits a reviewable JSON artifact. Its native CLI can generate snapshots and plans from an application without a running server.
+`SqliteMigrations.make({ id, from, to, steps })` constructs an explicit frozen artifact. `initial({ id, tables })` derives fresh creation, and `snapshot(tables)` captures physical metadata. Schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies` express changes and source/value/expression rebuild mappings with `.make(...)`. There is no inferred `plan`, `generate`, migration intent DSL, or schema CLI.
 
-`SqliteMigrations.decodeHistory(raw)` validates raw artifacts as an Effect; `SqliteMigrations.load(manifest)` reads an ordered manifest. Direct schema-command configuration accepts `manifest: Option<string>` as its only history source. Runtime configuration still accepts either a manifest or decoded history. Intent flags are repeatable; multiple backfills do not require substituting SQL transforms.
+`SqliteMigrations.decodeHistory(raw)` validates raw JSON history as an Effect; `SqliteMigrations.load(manifest)` reads ordered artifacts. Runtime accepts a manifest or decoded history. Authors review and append new artifacts and manifest entries; already-applied history is never regenerated from current models.
 
-Fresh tables and nullable additions are mechanical. Renames, required-field backfills, and storage transformations require explicit intent. Historical artifacts contain frozen metadata, not imports of the latest domain schema. One migration ledger records applied history; the runtime checks artifact contents and actual schema drift, refuses untracked objects, and applies rebuilds transactionally.
+The applied-artifact ledger remains the sole migration state. Runtime checks immutable artifact contents and exact schema/index drift, rejects untracked objects, and verifies the target schema and foreign keys before committing each migration and ledger entry together. Inconsistent steps or invalid rows roll back. Existing artifact JSON histories retain their format and bytes.
 
-Interacting rename chains and cycles rebuild from original source columns. Frozen historical string-length constraints keep their original meaning; the affected examples append explicit `003_schema_string_checks` rebuild migrations rather than rewriting history.
+See the [explicit authoring walkthrough](apps/README.md#review-schema-changes) for a runnable draft and the supported steps.
 
-See the [migration workflow](apps/README.md#review-schema-changes) for commands and supported boundaries.
+## Native execution composition
+
+Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [durable runbooks](apps/README.md#durable-workflows).
 
 ## Run the reservation application
 
@@ -176,7 +178,7 @@ The example is loopback-only and unauthenticated. Its [guide](apps/README.md#res
 
 The authenticated [orders/invoices walkthrough](apps/README.md#orders-and-invoices) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Run `bun run orders-invoices:server`, then use `ORDERS_INVOICES_TOKEN=alice-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'` in another terminal. Mutations remain authored transactions; generated reads stay tenant-scoped.
 
-The [example applications](apps/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local schema commands. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
+The [example applications](apps/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local inspection. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
 
 ## Escape hatches and documentation
 

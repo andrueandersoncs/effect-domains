@@ -667,7 +667,6 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
       const value = yield* call(entry.value.name, payload)
 
       const page = pipe(Match.value(value),
-        Match.when(isJsonArray, (items) => PageSchema.make({ items, nextCursor: Option.none() })),
         Match.when(isRecords, (record) => {
           const items = pipe(fieldValue(record, "items"), Option.filter(isJsonArray), Option.getOrElse(emptyUnknownArray))
           const nextCursor = pipe(fieldValue(record, "nextCursor"), Option.filter(isString))

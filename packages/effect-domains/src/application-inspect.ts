@@ -102,7 +102,7 @@ const resource = (definition: Resource) => {
     operations: definition.operations,
     schema,
     creation,
-    list: Option.getOrNull(definition.list),
+    list: definition.list,
     authorization,
     storage,
   })
@@ -132,7 +132,7 @@ const sameName = Equivalence.strictEqual<string>()
 const describe = <App extends InspectableApplication>(
   application: App,
   selected: Option.Option<string> = Option.none(),
-  localCommands: ReadonlyArray<string> = ["serve", "schema", "inspect"],
+  localCommands: ReadonlyArray<string> = ["serve", "inspect"],
 ) => {
   const operations = pipe(application.group.requests.values(), Array.fromIterable, Array.map(operation))
 

@@ -67,11 +67,10 @@ const route = Effect.gen(function* () {
 })
 
 const routes = HttpRouter.add("GET", "/probe", route)
-const services = Layer.effectDiscard(executionOutput)
+const services = pipe(Layer.effectDiscard(executionOutput), Layer.provideMerge(execution))
 
 const nativeRuntime = ApplicationBun.run(emptyApplication, {
   database: { migrations: [] },
-  execution: { database: "execution.sqlite", layer: execution },
   services,
   initialize: executionOutput,
   background,

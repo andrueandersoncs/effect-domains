@@ -4,9 +4,7 @@ import { makeMigrationStore, SqliteMigrations } from "effect-domains/sqlite-migr
 import type { Table } from "effect-domains/table"
 
 export const prepareTables = Effect.fn("test.prepareTables")(function* (tables: ReadonlyArray<Table>) {
-  const to = SqliteMigrations.snapshot(tables)
-  const empty = SqliteMigrations.snapshot([])
-  const initial = SqliteMigrations.plan({ id: "initial", from: empty, to })
+  const initial = SqliteMigrations.initial({ id: "initial", tables })
   const sql = yield* SqlClient.SqlClient
-  yield* makeMigrationStore(sql, [initial]).prepare(to.tables)
+  yield* makeMigrationStore(sql, [initial]).prepare(initial.to.tables)
 })

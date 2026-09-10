@@ -24,7 +24,6 @@ export const ReminderReceiptResource = Resource.make({
     list: {
       filter: ["recipient", "requestId"],
       limit: 100,
-      order: [{ field: "id", direction: "asc" }],
     },
   },
 })

@@ -1,49 +1,18 @@
-import { Context, Effect, Option, Schema } from "effect"
+import { Context, Data, Effect, Option, Schema } from "effect"
 import { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
 
-const RepositoryListDirectionSchema = Schema.Literals(["asc", "desc"])
-const RepositoryListCursorValuesSchema = Schema.Array(Schema.Unknown)
-const RepositoryListQueryFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
-const RepositoryAccessSubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
+/** Physical, already encoded values. This is a privileged storage boundary. */
+export class RepositorySelect extends Data.Class<{
+  readonly filter: Readonly<Record<string, unknown>>
+  readonly after: Option.Option<unknown>
+  readonly limit: number
+}> {}
 
-export class RepositoryListOrder extends Schema.Class<RepositoryListOrder>(
-  "RepositoryListOrder",
-)({
-  field: Schema.String,
-  direction: RepositoryListDirectionSchema,
-}) {}
-
-export class RepositoryListCursor extends Schema.Class<RepositoryListCursor>(
-  "RepositoryListCursor",
-)({
-  values: RepositoryListCursorValuesSchema,
-  identifier: Schema.Unknown,
-}) {}
-
-const RepositoryListQueryOrdersSchema = Schema.Array(RepositoryListOrder)
-const RepositoryListQueryCursorSchema = Schema.Option(RepositoryListCursor)
-
-export class RepositoryListQuery extends Schema.Class<RepositoryListQuery>(
-  "RepositoryListQuery",
-)({
-  filter: RepositoryListQueryFilterSchema,
-  order: RepositoryListQueryOrdersSchema,
-  cursor: RepositoryListQueryCursorSchema,
-  limit: Schema.Number,
-}) {}
-
-export class RepositoryAccess extends Schema.Class<RepositoryAccess>(
-  "RepositoryAccess",
-)({
-  policy: Policy.Schema,
-  subject: RepositoryAccessSubjectSchema,
-}) {}
-
-interface RepositoryListPage {
-  readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>
-  readonly hasMore: boolean
-}
+export class RepositoryAccess extends Data.Class<{
+  readonly policy: Policy
+  readonly subject: Readonly<Record<string, unknown>>
+}> {}
 
 const RepositoryErrorCauseSchema = Schema.Defect()
 
@@ -66,20 +35,11 @@ export class ResourceNotFound extends Schema.TaggedError<ResourceNotFound>()(
 }
 
 export class RepositoryStore extends Context.Service<RepositoryStore, {
-  readonly find: (
+  readonly select: (
     table: Table,
-    key: unknown,
+    query: RepositorySelect,
     access: RepositoryAccess,
-  ) => Effect.Effect<Option.Option<unknown>, RepositoryError>
-  readonly list: (
-    table: Table,
-    access: RepositoryAccess,
-  ) => Effect.Effect<ReadonlyArray<unknown>, RepositoryError>
-  readonly query: (
-    table: Table,
-    query: RepositoryListQuery,
-    access: RepositoryAccess,
-  ) => Effect.Effect<RepositoryListPage, RepositoryError>
+  ) => Effect.Effect<ReadonlyArray<Readonly<Record<string, unknown>>>, RepositoryError>
   readonly insert: (table: Table, value: Readonly<Record<string, unknown>>) => Effect.Effect<unknown, RepositoryError>
   readonly update: (
     table: Table,

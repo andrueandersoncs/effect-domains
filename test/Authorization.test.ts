@@ -47,7 +47,7 @@ const Documents = Resource.make({
     ...Resource.crud,
     patch: true,
     create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } },
-    list: { filter: ["ownerId"], order: [{ field: "title" }], limit: 2 },
+    list: { filter: ["ownerId"], limit: 2 },
   },
 })
 
@@ -88,25 +88,25 @@ it.effect("repository visibility scopes identifiers and pagination before comput
     expect(forbidden).toBe("ResourceNotFound")
     const tenantBoundary = yield* pipe(Documents.repository.get("3"), asAdmin, rejectedTag)
     expect(tenantBoundary).toBe("ResourceNotFound")
-    const visible = yield* pipe(Documents.repository.list(), asAlice, Effect.map(documentIds), Effect.map(Array.sort(Order.String)))
+    const visible = yield* pipe(Documents.repository.list(), asAlice, Effect.map(Struct.get("items")), Effect.map(documentIds), Effect.map(Array.sort(Order.String)))
     expect(visible).toEqual(["1", "4"])
-    const first = yield* pipe(Documents.repository.page({ limit: 1 }), asAlice)
+    const first = yield* pipe(Documents.repository.list({ limit: 1 }), asAlice)
     const firstIds = documentIds(first.items)
     expect(firstIds).toEqual(["1"])
     const cursor = yield* Effect.fromNullishOr(first.nextCursor)
-    const second = yield* pipe(Documents.repository.page({ limit: 1, cursor }), asAlice)
+    const second = yield* pipe(Documents.repository.list({ limit: 1, cursor }), asAlice)
     const secondIds = documentIds(second.items)
     expect(secondIds).toEqual(["4"])
     expect(second.nextCursor).toBeNull()
-    const replay = yield* pipe(Documents.repository.page({ limit: 2, cursor }), asBob)
+    const replay = yield* pipe(Documents.repository.list({ limit: 2, cursor }), asBob)
     const replayIds = documentIds(replay.items)
     expect(replayIds).toEqual(["2"])
     expect(replay.nextCursor).toBeNull()
-    const filtered = yield* pipe(Documents.repository.page({ filter: { ownerId: "bob" } }), asAlice)
+    const filtered = yield* pipe(Documents.repository.list({ filter: { ownerId: "bob" } }), asAlice)
     expect(filtered).toEqual({ items: [], nextCursor: null })
-    const privileged = yield* pipe(Documents.repository.page({ limit: 1 }), asAdmin)
+    const privileged = yield* pipe(Documents.repository.list({ limit: 1 }), asAdmin)
     const privilegedCursor = yield* Effect.fromNullishOr(privileged.nextCursor)
-    const revoked = yield* pipe(Documents.repository.page({ cursor: privilegedCursor }), Effect.provideService(AuthorizationSubject, { ...admin, roles: [] }))
+    const revoked = yield* pipe(Documents.repository.list({ cursor: privilegedCursor }), Effect.provideService(AuthorizationSubject, { ...admin, roles: [] }))
     expect(revoked).toEqual({ items: [], nextCursor: null })
   }), Effect.provide(sqlite),
 ))
@@ -264,7 +264,7 @@ it.effect("concurrent transfers cannot both authorize against the previous owner
 
     const interleavedStore = RepositoryStore.of({
       ...store,
-      find: (table, key, access) => pipe(store.find(table, key, access), Effect.tap(() => Effect.yieldNow)),
+      select: (table, selection, access) => pipe(store.select(table, selection, access), Effect.tap(() => Effect.yieldNow)),
     })
 
     const bobTransfer = pipe(Transfers.repository.update({ ...initial, ownerId: "bob" }), Effect.result)
@@ -300,32 +300,26 @@ const FeaturePermissions = Resource.make({
   name: "feature_permissions",
   schema: FeaturePermissionSchema,
   authorization: featurePermission,
-  operations: { list: { order: [{ field: "id" }], limit: 1 } },
+  operations: { list: { limit: 1 } },
 })
 
 const enabledSubject = FeatureSubjectSchema.make({ enabled: true, enabledValues: [true] })
 const nullSubject = FeatureSubjectSchema.make({ enabled: null, enabledValues: [null] })
 const asEnabled = Effect.provideService(AuthorizationSubject, enabledSubject)
 const asNull = Effect.provideService(AuthorizationSubject, nullSubject)
+const absent = Option.none()
 
 it.effect("native Boolean storage preserves equality, membership, subject, and null semantics before pagination", () => pipe(
   Effect.gen(function* () {
     const permittedRow = FeaturePermissionSchema.make({ id: "feature", enabled: true })
-
-    const permitted = AuthorizationValues.make({
-      row: Option.some(permittedRow),
-      next: Option.none(),
-    })
+    const permittedPresent = Option.some(permittedRow)
+    const permitted = new AuthorizationValues({ row: permittedPresent, next: absent })
 
     yield* pipe(Authorization.require(featurePermission, "read", permitted), asEnabled)
 
     const withheldRow = FeaturePermissionSchema.make({ id: "feature", enabled: false })
-
-    const withheld = AuthorizationValues.make({
-      row: Option.some(withheldRow),
-      next: Option.none(),
-    })
-
+    const withheldPresent = Option.some(withheldRow)
+    const withheld = new AuthorizationValues({ row: withheldPresent, next: absent })
     const denied = yield* pipe(Authorization.require(featurePermission, "read", withheld), asEnabled, rejectedTag)
     expect(denied).toBe("Forbidden")
 
@@ -333,11 +327,11 @@ it.effect("native Boolean storage preserves equality, membership, subject, and n
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO feature_permissions (id, enabled) VALUES ('disabled', 0), ('enabled', 1), ('unset', NULL)`
     const visible = yield* pipe(FeaturePermissions.repository.list(), asEnabled)
-    expect(visible).toEqual([{ id: "enabled", enabled: true }])
-    const page = yield* pipe(FeaturePermissions.repository.page({ limit: 1 }), asEnabled)
+    expect(visible).toEqual({ items: [{ id: "enabled", enabled: true }], nextCursor: null })
+    const page = yield* pipe(FeaturePermissions.repository.list({ limit: 1 }), asEnabled)
     expect(page).toEqual({ items: [{ id: "enabled", enabled: true }], nextCursor: null })
     const nullVisible = yield* pipe(FeaturePermissions.repository.list(), asNull)
-    expect(nullVisible).toEqual([{ id: "unset", enabled: null }])
+    expect(nullVisible).toEqual({ items: [{ id: "unset", enabled: null }], nextCursor: null })
   }),
   Effect.provide(sqlite),
 ))
@@ -352,13 +346,13 @@ it.effect("policy construction snapshots compiled rules and rejects fabricated p
     const rules = FabricatedPolicyShapeSchema.fields.allow.make({ read: rule })
     const compiled = p.policy({ scope: policyScope, allow: rules })
     const compiledRow = OwnedDocumentSchema.make({ id: "owned", tenantId: "a", ownerId: "alice", title: "private" })
-
-    const compiledValues = AuthorizationValues.make({
-      row: Option.some(compiledRow),
-      next: Option.none(),
-    })
+    const compiledValuesPresent = Option.some(compiledRow)
+    const compiledValues = new AuthorizationValues({ row: compiledValuesPresent, next: absent })
 
     yield* pipe(Authorization.require(compiled, "read", compiledValues), asAlice)
+    const clone = Struct.assign(compiled, {})
+    const cloneDenied = yield* pipe(Authorization.require(clone, "read", compiledValues), asAlice, rejectedTag)
+    expect(cloneDenied).toBe("AuthorizationDefinitionError")
     const alwaysAllowed = Policy.constant(true)
     yield* Effect.sync(() => Reflect.set(rules, "read", alwaysAllowed))
     const stillDenied = yield* pipe(Authorization.require(compiled, "read", compiledValues), asBob, rejectedTag)
@@ -377,12 +371,8 @@ it.effect("policy construction snapshots compiled rules and rejects fabricated p
     })
 
     const fabricatedRow = OwnedDocumentSchema.make({ id: "owned", tenantId: "a", ownerId: "alice", title: "private" })
-
-    const fabricatedValues = AuthorizationValues.make({
-      row: Option.some(fabricatedRow),
-      next: Option.none(),
-    })
-
+    const fabricatedValuesPresent = Option.some(fabricatedRow)
+    const fabricatedValues = new AuthorizationValues({ row: fabricatedValuesPresent, next: absent })
     const rejected = yield* pipe(Authorization.require(fabricated, "read", fabricatedValues), asAlice, rejectedTag)
     expect(rejected).toBe("AuthorizationDefinitionError")
   }),

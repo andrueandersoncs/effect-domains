@@ -1,5 +1,5 @@
 import { Authorization } from "effect-domains/authorization"
-import { Schema } from "effect"
+import { type Effect, Schema } from "effect"
 import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
@@ -16,7 +16,7 @@ const TypeProbe = Resource.make({
     remove: false,
     patch: true,
     create: { defaults: { completed: false }, publish: false },
-    list: { filter: ["completed"], order: [{ field: "title" }], publish: false },
+    list: { filter: ["completed"], publish: false },
   },
 })
 
@@ -30,19 +30,32 @@ const noPolicyCreate: Parameters<typeof NoPolicyProbe.repository.create>[0] = {
 }
 
 const createInput: Parameters<typeof TypeProbe.repository.create>[0] = { title: "required" }
-const pageInput: Parameters<typeof TypeProbe.repository.page>[0] = { filter: { completed: false }, limit: 1 }
+const listInput: Parameters<typeof TypeProbe.repository.list>[0] = { filter: { completed: false }, limit: 1 }
 const patchInput: Parameters<typeof TypeProbe.repository.patch>[1] = { title: "changed" }
 
 void createInput
-void pageInput
+void listInput
 void patchInput
+
+undefined satisfies Parameters<typeof TypeProbe.repository.list>[0]
+const defaultListInput: Parameters<typeof NoPolicyProbe.repository.list>[0] = { limit: 1, cursor: "continuation" }
+const listPage: Effect.Success<ReturnType<typeof TypeProbe.repository.list>> = { items: [], nextCursor: null }
+const defaultListPage: Effect.Success<ReturnType<typeof NoPolicyProbe.repository.list>> = { items: [], nextCursor: "continuation" }
+// @ts-expect-error because generated lists never return bare arrays.
+const bareList: Effect.Success<ReturnType<typeof NoPolicyProbe.repository.list>> = []
+void defaultListInput
+void listPage
+void defaultListPage
+void bareList
 
 void noPolicyCreate
 
 // @ts-expect-error because defaults do not make unrelated canonical fields optional.
 const missingTitle: Parameters<typeof TypeProbe.repository.create>[0] = {}
 // @ts-expect-error because filters must be explicitly selected in the list declaration.
-const undeclaredFilter: Parameters<typeof TypeProbe.repository.page>[0] = { filter: { title: "hidden" } }
+const undeclaredFilter: Parameters<typeof TypeProbe.repository.list>[0] = { filter: { title: "hidden" } }
+// @ts-expect-error because default lists do not declare any filters.
+const undeclaredDefaultFilter: Parameters<typeof NoPolicyProbe.repository.list>[0] = { filter: { value: 1 } }
 // @ts-expect-error because the identifier is not a mutable patch field.
 const redirectedPatch: Parameters<typeof TypeProbe.repository.patch>[1] = { id: "other" }
 
@@ -59,6 +72,7 @@ const generatedInput: Parameters<typeof GeneratedProbe.repository.create>[0] = {
 const generatedOverride: Parameters<typeof GeneratedProbe.repository.create>[0] = { id: "override", title: "bad" }
 void missingTitle
 void undeclaredFilter
+void undeclaredDefaultFilter
 void redirectedPatch
 void generatedInput
 void generatedOverride

@@ -16,7 +16,7 @@ const rowIds = Array.map(rowId)
 const hostile = "x' OR 1=1 --"
 const subject = { allowed: [null, "one", hostile], minimum: 1, role: "reader" }
 const absent = Option.none()
-const environment = PolicyEnvironment.make({ subject, row: absent, next: absent })
+const environment = new PolicyEnvironment({ subject, row: absent, next: absent })
 const label = rowField("label")
 const amount = rowField("amount")
 const minimum = subjectField("minimum")
@@ -61,7 +61,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 
       const visible = (row: Readonly<Record<string, unknown>>) => {
         const present = Option.some(row)
-        return pipe(PolicyEnvironment.make({ subject, row: present, next: absent }), evaluate)
+        return pipe(new PolicyEnvironment({ subject, row: present, next: absent }), evaluate)
       }
 
       const expected = yield* pipe(Effect.filter(rows, visible), Effect.map(rowIds))
@@ -73,8 +73,8 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 
     yield* Effect.forEach(policies, verifyPolicy)
     const binder = PolicySql.compile(minimumAmount)
-    const firstEnvironment = PolicyEnvironment.make({ subject: { minimum: 1 }, row: absent, next: absent })
-    const secondEnvironment = PolicyEnvironment.make({ subject: { minimum: 3 }, row: absent, next: absent })
+    const firstEnvironment = new PolicyEnvironment({ subject: { minimum: 1 }, row: absent, next: absent })
+    const secondEnvironment = new PolicyEnvironment({ subject: { minimum: 3 }, row: absent, next: absent })
     const first = yield* binder(sql, firstEnvironment)
     const second = yield* binder(sql, secondEnvironment)
     const firstRows = yield* sql`SELECT id FROM policy_rows WHERE ${first} ORDER BY id`

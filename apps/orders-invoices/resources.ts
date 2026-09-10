@@ -21,7 +21,7 @@ export const OrdersResource = Resource.make({
   schema: OrderSchema,
   operations: {
     get: true,
-    list: { filter: ["number", "status"], order: [{ field: "number" }], limit: 100 },
+    list: { filter: ["number", "status"], limit: 100 },
   },
   relations: {
     unique: [
@@ -40,7 +40,7 @@ export const OrderLinesResource = Resource.make({
   schema: OrderLineSchema,
   operations: {
     get: true,
-    list: { filter: ["orderId"], order: [{ field: "lineNumber" }], limit: 500 },
+    list: { filter: ["orderId"], limit: 500 },
   },
   relations: {
     unique: [
@@ -60,7 +60,7 @@ export const InvoicesResource = Resource.make({
   schema: InvoiceSchema,
   operations: {
     get: true,
-    list: { filter: ["orderId", "number", "status"], order: [{ field: "number" }], limit: 100 },
+    list: { filter: ["orderId", "number", "status"], limit: 100 },
   },
   relations: {
     unique: [

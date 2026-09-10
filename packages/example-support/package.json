@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./authentication": "./src/authentication.ts",
-    "./book": "./src/book.ts"
+    "./book": "./src/book.ts",
+    "./databases": "./src/databases.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

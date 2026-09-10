@@ -1,6 +1,6 @@
 # Applications
 
-Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local schema commands. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
+Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local inspection. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
 
 ## Choose an application
 
@@ -73,7 +73,7 @@ Todo policies combine tenant scope, ownership, current completion state, immutab
 
 Notes instead form one global shared collection: readers can read, editors can create/update, and admins can also remove. Tenant claims do not partition this collection. The storage codec remains independent of authorization. Follow each guide for successful and denied operations.
 
-Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `operations.create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` and `schema` commands are local and need no token; native SQL remains privileged.
+Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `operations.create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` is local and needs no token; native SQL remains privileged.
 
 ### Shared structure
 
@@ -83,9 +83,13 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 - `application.ts`: `Application.make({ name, parts })`, which accepts resources, native `{ group, handlers }` bundles, and nested applications.
 - `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
 - `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
-- `main.ts`: the sole runner for `serve`, schema commands, `inspect`, generated remote commands, and `worker` when background layers are configured.
+- `main.ts`: the sole runner for `serve`, `inspect`, generated remote commands, and `worker` when background layers are configured.
 
-`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, private `execution: { database, layer }`, native `background`, HTTP `routes`, and admin are explicit options. The runner supplies loopback RPC, CLI, schema commands, inspection, MCP, and opted-in admin. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
+`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, native `background`, HTTP `routes`, and admin are explicit options. Native execution layers compose in application `services` with explicit `Layer.provide` of private SQLite; there is no `execution` option. The runner supplies loopback RPC, CLI, inspection, MCP, and opted-in admin. There are no schema CLI commands. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
+
+## Generated lists
+
+Every generated resource list returns `{ items, nextCursor }`, including resources using `Resource.crud` without list configuration. Pages default to 50 items and order by identifier ascending only. Configured lists can declare equality filters and a limit. Pass a non-null cursor back unchanged with the same filters. There is no arbitrary ordering, unbounded generated array list, or separate repository `page` method. Authored SQL contracts can intentionally differ, as the book query example does.
 
 ## Generated admin
 
@@ -141,7 +145,7 @@ bun run authored-sql books.remove --id "$BOOK_ID"
 bun run authored-sql inspect books.create
 ```
 
-`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration manifest](authored-sql/migrations/manifest.json) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Review later changes with `bun run authored-sql schema generate <name>`.
+`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration manifest](authored-sql/migrations/manifest.json) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Author later changes with [explicit migration steps](#review-schema-changes).
 
 ## Reservation application
 
@@ -249,7 +253,7 @@ To exercise restart recovery, schedule a future message, stop the server, and st
 
 ### Durable execution boundaries
 
-Both examples use native `SingleRunner`: run either `serve` or `worker` against an execution store, never both concurrently. Multi-runner topology requires an explicitly different native composition. Preserve both databases across restarts and back them up according to application recovery requirements; the runner rejects filename aliases, dangling symlinks, and ambiguous SQLite URI filenames before opening an execution-enabled runtime.
+Both examples use native `SingleRunner`: run either `serve` or `worker` against an execution store, never both concurrently. Multi-runner topology requires an explicitly different native composition. Preserve both databases across restarts and back them up according to application recovery requirements; the applications use the [shared database helper](../packages/example-support/src/databases.ts) to compare opened database paths and inodes before native execution tables initialize. This is not a framework pre-open filename/URL or dangling-symlink guarantee.
 
 Application and execution transactions are separate. No cross-database transaction or automatic outbox is supplied. Retried external effects need explicit idempotency: the export writes the same execution-ID artifact through an atomic rename, while reminders deduplicate application receipt writes. Neither establishes exactly-once delivery to an arbitrary external service. Native Entity/Cron work explicitly captures application SQL during registration because Sharding supplies private execution SQL in its invocation context. ([Runtime contract](../docs/wiki/tables-and-queries.md#native-durable-execution); [verification and limits](../docs/wiki/validation-strategy.md#2026-09-09-native-durable-execution))
 
@@ -341,37 +345,72 @@ For a second server, set `PORT=3003` on the server and `MCP_SERVER_MCP_URL=http:
 
 ## Review schema changes
 
-Schema commands run locally without a server. After changing a resource schema, `schema generate <name>` plans the next artifact from the registered manifest, writes that artifact, then atomically replaces the manifest registry only if the plan is valid:
+There is no schema CLI or inferred migration planner. Author a frozen artifact with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` only for fresh table/index creation. `snapshot(tables)` captures the target, `decodeHistory(raw)` validates JSON history, and `load(manifest)` reads the ordered registry. Runtime configuration accepts that registry or a decoded history.
 
-```bash
-bun run migration-lifecycle schema generate add-status \
-  --backfill 'documents:status:"draft"'
+The following standalone authoring example creates a fresh history, then explicitly renames stored `title` to `heading` and supplies `priority: 0` through a rebuild. Save it as `author-migration.ts` at the repository root. It prints JSON only; it does not touch an application database or manifest:
+
+```ts
+import { BunRuntime } from "@effect/platform-bun"
+import { Console, Effect, Schema, pipe } from "effect"
+import { SqliteMigration, SqliteMigrations } from "effect-domains/sqlite-migrations"
+import { Table } from "effect-domains/table"
+
+const before = Table.make({
+  name: "documents",
+  schema: Schema.Struct({ title: Schema.String }),
+})
+const after = Table.make({
+  name: "documents",
+  schema: Schema.Struct({ heading: Schema.String, priority: Schema.Int }),
+})
+const first = SqliteMigrations.initial({ id: "001_initial", tables: [before] })
+const target = SqliteMigrations.snapshot([after])
+const next = SqliteMigrations.make({
+  id: "002_metadata",
+  from: first.to,
+  to: target,
+  steps: [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(after),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "heading", source: "title" }),
+      SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
+    ],
+  })],
+})
+const json = Schema.Array(Schema.toCodecJson(SqliteMigration))
+const program = Effect.gen(function* () {
+  const encoded = yield* Schema.encodeEffect(json)([first, next])
+  yield* SqliteMigrations.decodeHistory(encoded)
+  yield* Console.log(JSON.stringify(encoded, null, 2))
+})
+pipe(program, BunRuntime.runMain)
 ```
 
-Use `schema snapshot` or `schema plan` to inspect a prospective artifact without registering it:
+Run it and inspect the draft:
 
 ```bash
-bun run reservations schema snapshot --out current-schema.json
-bun run reservations schema plan --id 004_change \
-  --from apps/reservations/migrations/003_schema_string_checks.json \
-  --out 004_change.json
+bun run author-migration.ts > migration-history-draft.json
+bun run migration-lifecycle inspect documents.create
 ```
 
-`generate` numbers the new artifact after the final registered migration; it requires a manifest and leaves the registry unchanged when a plan is blocked. Review the generated artifact and its manifest update as one change. Do not regenerate previously applied artifacts from current models.
+The draft array is suitable for `decodeHistory`. For a manifest, save each artifact as a separate JSON object and append its relative filename to the ordered `migrations` array. For an existing application, use the last frozen artifact's `to` as `from`, not a reconstructed historical schema. Review the new artifact and manifest together. Replay the complete history on a disposable database, including representative old rows, before registering it for normal startup. Construction and decoding validate structure, snapshots, and expression syntax; only replay checks that authored steps actually produce the target. File writing and manifest registration are authored tooling, not a framework atomic-write guarantee. Remove the draft files after review; never regenerate already-applied artifacts from current models.
 
-Intent flags use physical table and column names. Each flag is repeatable; JSON values and SQL expressions retain embedded colons. Rename sources must exist in the physical `from` snapshot:
+`SqliteMigrations.steps` exposes actual schema constructors; call each with `.make(...)`:
 
-| Flag | Meaning |
+| Step | Authored change |
 | --- | --- |
-| `--rename table:old:new` | Explicit column rename |
-| `--backfill 'table:column:JSON'` | Constant stored value for a new required field |
-| `--transform 'table:column:SQL-expression'` | Explicit stored-value transformation |
+| `CreateTable` | Create a frozen table definition |
+| `AddColumn` | Add an explicit physical column |
+| `RenameColumn` | Rename one physical column |
+| `RebuildTable` | Supply the complete target table and explicit copy mappings |
+| `CreateIndex` / `DropIndex` | Create or remove a declared secondary index |
 
-A transform runs in the `SELECT` over the physical **from** table, before renames or rebuilding. The checked-in [timestamp artifact](reservations/migrations/002_timestamp.json) converts historical epoch seconds to ISO text. Its snapshot does not import the latest reservation schema.
+Rebuild mappings use `SqliteMigrations.copies.Source` for original columns, `.Value` for stored scalar constants, or `.Expression` for a single SQL expression. Expressions run in the `SELECT` over the physical **from** table. The frozen [timestamp artifact](reservations/migrations/002_timestamp.json) converts historical epoch seconds to ISO text. Interacting renames can copy original columns in a rebuild rather than rely on sequential renames.
 
-Rename chains and cycles also copy original source columns through a transactional rebuild. The todo, document, and reservation manifests append `003_schema_string_checks` to remove previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas; historical artifacts are not rewritten.
+The todo, document, and reservation manifests retain `003_schema_string_checks`, which removes previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas. Existing artifact JSON histories are unchanged.
 
-The planner emits blocked changes with their reasons instead of guessing drops, renames, or required values. The runtime checks manifest history and actual table definitions, applies rebuilds transactionally, and refuses untracked tables, indexes, and triggers. Declared unique/foreign-key changes rebuild tables; declared secondary indexes have explicit create/drop steps. Existing data must satisfy the target constraints or the migration rolls back. Destructive table/column drops, arbitrary custom objects, cascade policy, and inferred joins remain outside the current model. ([Relational contract](../docs/wiki/tables-and-queries.md#relational-storage-declarations))
+Runtime checks immutable ledger contents and exact table/index definitions, rejects untracked tables, indexes, and triggers, and applies each artifact transactionally. Authors use explicit rebuilds for unique/foreign-key changes and explicit create/drop steps for index changes. The final schema and `foreign_key_check` must pass before the artifact is recorded and committed; invalid rows or inconsistent steps roll back the migration and its ledger entry. No rename/backfill/transform intent language, inferred joins, cascades, or general custom-object migration system is provided. ([Relational contract](../docs/wiki/tables-and-queries.md#relational-storage-declarations))
 
 ## Framework code map
 
@@ -381,4 +420,4 @@ The planner emits blocked changes with their reasons instead of guessing drops, 
 - [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
 - [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
-- [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, migration planning, and execution.
+- [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, explicit migration steps, and verified transactional replay.

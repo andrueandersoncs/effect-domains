@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
-import { Table } from "effect-domains/table"
+import { Table, TableField, GreaterThan, GreaterThanOrEqualTo, LessThan, LessThanOrEqualTo, OneOf, MinLength, MaxLength } from "effect-domains/table"
+import { SqlClient } from "effect/unstable/sql"
+import { renderColumn } from "../packages/effect-domains/src/sqlite-ddl.ts"
 import { Resource } from "effect-domains/resource"
 import { Authorization } from "effect-domains/authorization"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -250,6 +252,84 @@ describe("Table", () => {
       const created = yield* UnicodeLabels.repository.create({ label: "😀" })
       const loaded = yield* UnicodeLabels.repository.get(created.id)
       expect(loaded.label).toBe("😀")
+    }),
+    Effect.provide(sqlite),
+  ))
+
+  it.effect("compiles nullable enums, numeric unions, templates, and authored codecs", () => Effect.sync(() => {
+    enum AlgebraState { first = "first", second = "second" }
+
+    const AlgebraSchema = Schema.Struct({
+      enumeration: Schema.NullOr(Schema.Enum(AlgebraState)),
+      numeric: Schema.suspend(() => Schema.Literals([1, 2.5])),
+      template: Schema.TemplateLiteral([Schema.String, "-", Schema.Number]),
+      native: Schema.Boolean,
+      authored: Schema.NumberFromString,
+      nullable: Schema.NullOr(Schema.Int),
+    })
+
+    interface Algebra extends Schema.Schema.Type<typeof AlgebraSchema> {}
+    const compiled = Table.make({ name: "algebra", schema: AlgebraSchema })
+    const fields = Array.drop(compiled.fields, 1)
+
+    expect(fields).toMatchObject([
+      { scalar: "string", nullable: true, checks: [{ _tag: "OneOf", values: ["first", "second"] }] },
+      { scalar: "number", checks: [{ _tag: "OneOf", values: [1, 2.5] }] },
+      { scalar: "string" },
+      { scalar: "integer", checks: [{ _tag: "OneOf", values: [0, 1] }] },
+      { scalar: "string" },
+      { scalar: "integer", nullable: true },
+    ])
+
+    expect(compiled.columns.enumeration.orderable).toBe(false)
+    expect(compiled.columns.numeric.orderable).toBe(true)
+    expect(compiled.columns.template.orderable).toBe(true)
+    expect(compiled.columns.native.orderable).toBe(true)
+    expect(compiled.columns.authored.orderable).toBe(false)
+    expect(compiled.columns.nullable.orderable).toBe(false)
+  }))
+
+  it.effect("retains every historical check in SQLite DDL", () => Effect.sync(() => {
+    const field = TableField.make({
+      name: "value",
+      scalar: "number",
+      nullable: false,
+      generation: Option.none(),
+      checks: [
+        GreaterThan.make({ value: 0 }), GreaterThanOrEqualTo.make({ value: 1 }),
+        LessThan.make({ value: 10 }), LessThanOrEqualTo.make({ value: 9 }),
+        OneOf.make({ values: [1, "a'b"] }), MinLength.make({ value: 1 }), MaxLength.make({ value: 9 }),
+      ],
+    })
+
+    const rendered = renderColumn(field, false)
+    expect(rendered).toBe(`"value" REAL NOT NULL CHECK (typeof("value") IN ('integer', 'real')) CHECK ("value" > 0) CHECK ("value" >= 1) CHECK ("value" < 10) CHECK ("value" <= 9) CHECK ("value" IN (1, 'a''b')) CHECK (length("value") >= 1) CHECK (length("value") <= 9)`)
+  }))
+
+  it.effect("enforces numeric and enum checks and generates UUIDs in the database", () => pipe(
+    Effect.gen(function* () {
+      const BoundsSchema = Schema.Struct({
+        value: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThan(3)),
+        state: Schema.Literals(["queued", "confirmed"]),
+      })
+
+      interface Bounds extends Schema.Schema.Type<typeof BoundsSchema> {}
+      const bounds = Table.make({ name: "bounds", schema: BoundsSchema })
+      yield* prepareTables([bounds])
+      const sql = yield* SqlClient.SqlClient
+      const created = yield* sql`INSERT INTO bounds (value, state) VALUES (1, 'queued') RETURNING *`
+      const row = Array.head(created)
+      const stored = Option.getOrThrow(row)
+      const decoded = yield* Schema.decodeUnknownEffect(bounds.storageSchema)(stored)
+      expect(decoded.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+      const lower = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (0, 'queued')`)
+      const upper = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (3, 'queued')`)
+      const integer = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (1.5, 'queued')`)
+      const enumeration = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (1, 'invalid')`)
+      expect(lower._tag).toBe("Failure")
+      expect(upper._tag).toBe("Failure")
+      expect(integer._tag).toBe("Failure")
+      expect(enumeration._tag).toBe("Failure")
     }),
     Effect.provide(sqlite),
   ))

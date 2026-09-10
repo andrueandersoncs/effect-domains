@@ -39,7 +39,6 @@ export const TodosResource = Resource.make({
     },
     list: {
       filter: ["completed"],
-      order: [{ field: "title" }],
       limit: 25,
     },
   },

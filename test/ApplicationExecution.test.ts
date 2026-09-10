@@ -4,22 +4,42 @@ import { Effect, FileSystem, Path, Stream, pipe } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 const source = `
-  import { Effect, Layer } from "effect"
-  import { SingleRunner } from "effect/unstable/cluster"
+  import { Context, Effect, Layer } from "effect"
+  import { SqliteClient } from "@effect/sql-sqlite-bun"
+  import { SqlClient } from "effect/unstable/sql"
+  import { assertDistinctDatabases } from "@effect-domains/example-support/databases"
   import { Application } from "effect-domains/application"
   import { ApplicationBun } from "effect-domains/application-bun"
+  class PrivateSql extends Context.Service()("test/PrivateSql") {}
   process.argv = [process.execPath, "execution-isolation", "worker"]
   const app = Application.make({ name: "execution-isolation" })
+  const services = Layer.unwrap(Effect.gen(function* () {
+    const application = yield* SqlClient.SqlClient
+    const privateDatabase = SqliteClient.layer({ filename: process.env.EXECUTION_DB }).pipe(
+      Layer.tap((context) => assertDistinctDatabases(application, Context.get(context, SqlClient.SqlClient))),
+    )
+    return Layer.effect(PrivateSql, SqlClient.SqlClient).pipe(Layer.provide(privateDatabase))
+  }))
+  const initialize = Effect.gen(function* () {
+    const application = yield* SqlClient.SqlClient
+    const execution = yield* PrivateSql
+    yield* application\`CREATE TABLE application_marker(value TEXT)\`
+    yield* execution\`CREATE TABLE execution_marker(value TEXT)\`
+    const applicationTables = yield* application\`SELECT name FROM sqlite_master WHERE name LIKE '%_marker'\`
+    const executionTables = yield* execution\`SELECT name FROM sqlite_master WHERE name LIKE '%_marker'\`
+    console.log(JSON.stringify({ applicationTables, executionTables }))
+  })
   const program = ApplicationBun.run(app, {
     database: { filename: process.env.APPLICATION_DB, migrations: [] },
-    execution: { database: process.env.EXECUTION_DB, layer: SingleRunner.layer() },
+    services,
+    initialize,
     background: Layer.empty,
   })
-  const result = await Effect.runPromise(program.pipe(Effect.timeout("2 seconds"), Effect.result))
+  const result = await Effect.runPromise(program.pipe(Effect.timeout("500 millis"), Effect.result))
   console.log(JSON.stringify(result))
 `
 
-const runAliasProbe = Effect.fn("ApplicationExecution.runAliasProbe")(function* (database: string, execution: string) {
+const runProbe = Effect.fn("ApplicationExecution.runProbe")(function* (database: string, execution: string) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const root = new URL("..", import.meta.url)
 
@@ -33,11 +53,26 @@ const runAliasProbe = Effect.fn("ApplicationExecution.runAliasProbe")(function* 
   const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
   const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
   const result = yield* Effect.all({ stdout, stderr, exitCode: child.exitCode }, { concurrency: "unbounded" })
-  expect(result.exitCode).toBe(0)
-  return JSON.parse(result.stdout)
+  expect(result.exitCode, result.stderr).toBe(0)
+  return result.stdout
 })
 
-it.effect("rejects symlink URLs and hardlink database aliases before either database is opened", Effect.fn(
+const isolatedTables = JSON.stringify({
+  applicationTables: [{ name: "application_marker" }],
+  executionTables: [{ name: "execution_marker" }],
+})
+
+it.effect("native private layers do not replace application SQL", Effect.fn("ApplicationExecution.nativeLayers")(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const directory = yield* fs.makeTempDirectoryScoped()
+  const application = path.join(directory, "application.sqlite")
+  const execution = path.join(directory, "execution.sqlite")
+  const output = yield* runProbe(application, execution)
+  expect(output).toContain(isolatedTables)
+}, Effect.scoped, Effect.provide(BunServices.layer)))
+
+it.effect("example-owned checks reject symlink and hardlink aliases before execution initialization", Effect.fn(
   "ApplicationExecution.rejectAliases",
 )(function* () {
   const fs = yield* FileSystem.FileSystem
@@ -49,37 +84,16 @@ it.effect("rejects symlink URLs and hardlink database aliases before either data
   yield* fs.writeFileString(database, "")
   yield* fs.symlink(database, symbolic)
   yield* fs.link(database, hardlink)
-  const symbolicUrl = yield* path.toFileUrl(symbolic)
 
-  yield* Effect.forEach([symbolicUrl.href, hardlink], Effect.fn("ApplicationExecution.checkAlias")(function* (execution) {
-    const result = yield* runAliasProbe(database, execution)
-
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { _tag: "ApplicationBunExecutionDatabaseConflictError" },
-    })
-
-    const contents = yield* fs.readFileString(database)
-    expect(contents).toBe("")
+  yield* Effect.forEach([symbolic, hardlink], Effect.fn("ApplicationExecution.checkAlias")(function* (execution) {
+    const output = yield* runProbe(database, execution)
+    expect(output).toContain('"_tag":"ExampleDatabaseConflict"')
+    const assertion = expect(output)
+    assertion.not.toContain('"applicationTables"')
   }))
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
-it.effect("rejects dangling database symlinks before creating their target", Effect.fn(
-  "ApplicationExecution.rejectDanglingAlias",
-)(function* () {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const directory = yield* fs.makeTempDirectoryScoped()
-  const database = path.join(directory, "new.sqlite")
-  const symbolic = path.join(directory, "symbolic.sqlite")
-  yield* fs.symlink(database, symbolic)
-  const result = yield* runAliasProbe(database, symbolic)
-
-  expect(result).toMatchObject({
-    _tag: "Failure",
-    failure: { _tag: "ApplicationBunExecutionDatabaseError" },
-  })
-
-  const exists = yield* fs.exists(database)
-  expect(exists).toBe(false)
+it.effect("distinct in-memory native connections remain isolated", Effect.fn("ApplicationExecution.memory")(function* () {
+  const output = yield* runProbe(":memory:", ":memory:")
+  expect(output).toContain(isolatedTables)
 }, Effect.scoped, Effect.provide(BunServices.layer)))

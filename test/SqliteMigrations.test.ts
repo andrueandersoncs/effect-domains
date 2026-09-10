@@ -1,17 +1,16 @@
 import { Authorization } from "effect-domains/authorization"
 import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { existsSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Array, Effect, Equivalence, FileSystem, Function, Option, pipe, Record, Result, Schema, Struct } from "effect"
-import { Command } from "effect/unstable/cli"
+import { Array, Effect, Equivalence, Function, Option, pipe, Result, Schema } from "effect"
 import { Table, TableField, TableSnapshot } from "effect-domains/table"
 import { renderCreateTable } from "../packages/effect-domains/src/sqlite-ddl.ts"
 import { SqlClient } from "effect/unstable/sql"
-import { SchemaStore } from "effect-domains/migrations"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+
 import { makeMigrationStore, SqliteMigrations, SqliteMigration } from "effect-domains/sqlite-migrations"
 
 const empty = SqliteMigrations.snapshot([])
@@ -47,40 +46,41 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   const source = SqliteMigrations.snapshot([before.table])
   const withComment = SqliteMigrations.snapshot([nullable.table])
   const target = SqliteMigrations.snapshot([renamed.table])
-  const initial = SqliteMigrations.plan({ id: "001", from: empty, to: source })
-  const addition = SqliteMigrations.plan({ id: "002", from: source, to: withComment })
-  const unresolved = SqliteMigrations.plan({ id: "003", from: withComment, to: target })
-  const blockedChange = expect.objectContaining({ _tag: "SqliteBlockedChange" })
+  const initial = SqliteMigrations.initial({ id: "001", tables: [before.table] })
+  const nullableTable = Table.snapshot(nullable.table)
+  const isComment = (field: TableField) => Equivalence.strictEqual<string>()(field.name, "comment")
+  const comment = pipe(nullableTable.fields, Array.findFirst(isComment), Option.getOrThrow)
+  const additionSteps = [SqliteMigrations.steps.AddColumn.make({ table: "documents", column: comment })]
 
-  expect(unresolved.steps).toContainEqual(blockedChange)
-
-  const SummaryDocumentSchema = Schema.Struct({
-    ...before.schema.fields,
-    summary: NullableCommentSchema,
+  const addition = SqliteMigrations.make({
+    id: "002", from: source, to: withComment,
+    steps: additionSteps,
   })
 
-  interface SummaryDocument extends Schema.Schema.Type<typeof SummaryDocumentSchema> {}
-  const summary = Resource.make({ authorization: Authorization.public, name: "documents", schema: SummaryDocumentSchema, operations: {} })
-  const summaryTarget = SqliteMigrations.snapshot([summary.table])
+  const HeadingSchema = Schema.Struct({ heading: Schema.NonEmptyString, comment: NullableCommentSchema })
+  interface Heading extends Schema.Schema.Type<typeof HeadingSchema> {}
+  const heading = Table.make({ name: "documents", schema: HeadingSchema })
+  const withHeading = SqliteMigrations.snapshot([heading])
+  const renameSteps = [SqliteMigrations.steps.RenameColumn.make({ table: "documents", from: "title", to: "heading" })]
 
-  const impossibleRename = SqliteMigrations.plan({
-    id: "invalid_rename",
-    from: source,
-    to: summaryTarget,
-    renames: [{ table: "documents", from: "titel", to: "summary" }],
+  const rename = SqliteMigrations.make({
+    id: "003", from: withComment, to: withHeading,
+    steps: renameSteps,
   })
 
-  expect(impossibleRename.steps).toContainEqual(blockedChange)
-  const isAddColumn = (step: (typeof impossibleRename.steps)[number]) => Equivalence.strictEqual<string>()(step._tag, "SqliteAddColumn")
-  const hasAddColumn = Array.some(impossibleRename.steps, isAddColumn)
-  expect(hasAddColumn).toBe(false)
+  const changeSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(renamed.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "heading", source: "heading" }),
+      SqliteMigrations.copies.Source.make({ column: "comment", source: "comment" }),
+      SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
+    ],
+  })]
 
-  const change = SqliteMigrations.plan({
-    id: "003",
-    from: withComment,
-    to: target,
-    renames: [{ table: "documents", from: "title", to: "heading" }],
-    backfills: [{ table: "documents", column: "priority", value: 0 }],
+  const change = SqliteMigrations.make({
+    id: "004", from: withHeading, to: target,
+    steps: changeSteps,
   })
 
   const initialStore = makeMigrationStore(database, [initial])
@@ -89,11 +89,10 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   const additionStore = makeMigrationStore(database, [initial, addition])
   yield* additionStore.prepare(withComment.tables)
   const nullableDocument = yield* nullable.repository.get(document.id)
-  const store = makeMigrationStore(database, [initial, addition, change])
+  const store = makeMigrationStore(database, [initial, addition, rename, change])
   yield* store.prepare(target.tables)
   yield* store.prepare(target.tables)
   const renamedDocument = yield* renamed.repository.get(document.id)
-
 
   expect(nullableDocument).toEqual({ ...document, comment: null })
 
@@ -133,16 +132,20 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
 
   const sourceSnapshot = SqliteMigrations.snapshot([source.table])
   const targetSnapshot = SqliteMigrations.snapshot([target.table])
-  const initial = SqliteMigrations.plan({ id: "001_rename_chain", from: empty, to: sourceSnapshot })
+  const initial = SqliteMigrations.initial({ id: "001_rename_chain", tables: [source.table] })
 
-  const chain = SqliteMigrations.plan({
-    id: "002_rename_chain",
-    from: sourceSnapshot,
-    to: targetSnapshot,
-    renames: [
-      { table: "rename_chain", from: "a", to: "b" },
-      { table: "rename_chain", from: "b", to: "c" },
+  const chainSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(target.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
+      SqliteMigrations.copies.Source.make({ column: "c", source: "b" }),
     ],
+  })]
+
+  const chain = SqliteMigrations.make({
+    id: "002_rename_chain", from: sourceSnapshot, to: targetSnapshot,
+    steps: chainSteps,
   })
 
   const initialStore = makeMigrationStore(database, [initial])
@@ -167,21 +170,25 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
   })
 
   const cycleSnapshot = SqliteMigrations.snapshot([target.table, cycle.table])
+  const addCycleSteps = [SqliteMigrations.steps.CreateTable.make({ table: Table.snapshot(cycle.table) })]
 
-  const addCycle = SqliteMigrations.plan({
-    id: "003_rename_cycle",
-    from: targetSnapshot,
-    to: cycleSnapshot,
+  const addCycle = SqliteMigrations.make({
+    id: "003_rename_cycle", from: targetSnapshot, to: cycleSnapshot,
+    steps: addCycleSteps,
   })
 
-  const swap = SqliteMigrations.plan({
-    id: "004_rename_cycle",
-    from: cycleSnapshot,
-    to: cycleSnapshot,
-    renames: [
-      { table: "rename_cycle", from: "a", to: "b" },
-      { table: "rename_cycle", from: "b", to: "a" },
+  const swapSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(cycle.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "a", source: "b" }),
+      SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
     ],
+  })]
+
+  const swap = SqliteMigrations.make({
+    id: "004_rename_cycle", from: cycleSnapshot, to: cycleSnapshot,
+    steps: swapSteps,
   })
 
   const cycleStore = makeMigrationStore(database, [initial, chain, addCycle])
@@ -202,12 +209,6 @@ const interactingRenamesTest = Function.constant(interactingRenames)
 it.effect("interacting column renames rebuild from original source values", interactingRenamesTest)
 
 const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableIdentifierSnapshots")(function* () {
-  const temporaryRoot = tmpdir()
-  const temporaryPrefix = join(temporaryRoot, "effect-domains-nullable-identifiers-")
-  const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
-  const removeDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) => Effect.sync(() => directory.remove())
-  const directory = yield* Effect.acquireRelease(createDirectory, removeDirectory)
-
   const resource = Resource.make({
     authorization: Authorization.public,
     name: "nullable_history_identifier",
@@ -215,8 +216,7 @@ const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableId
     operations: {},
   })
 
-  const target = SqliteMigrations.snapshot([resource.table])
-  const initial = SqliteMigrations.plan({ id: "nullable_identifier", from: empty, to: target })
+  const initial = SqliteMigrations.initial({ id: "nullable_identifier", tables: [resource.table] })
 
   const nullableField = (identifier: string) =>
     (field: TableField) =>
@@ -238,112 +238,48 @@ const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableId
 
   expect(decodedHistory).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
 
-  const snapshotPath = join(directory.path, "nullable-snapshot.json")
-  const jsonArtifact = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(encodedArtifact)
-  const encodedTarget = yield* pipe(Record.get(jsonArtifact, "to"), Effect.fromOption)
-  const encodedSnapshot = JSON.stringify(encodedTarget)
-  writeFileSync(snapshotPath, encodedSnapshot)
-  const manifest = Option.none<string>()
-
-  const command = SqliteMigrations.command({
-    name: "schema",
-    tables: [resource.table],
-    manifest,
-  })
-
-  const run = Command.runWith(command, { version: "test", renderErrors: false })
-  const snapshotPlanning = run(["plan", "--from", snapshotPath, "--id", "invalid_snapshot"])
-  const decodedSnapshot = yield* Effect.result(snapshotPlanning)
-
-  expect(decodedSnapshot).toMatchObject({ _tag: "Failure" })
+  const makeInvalid = () => SqliteMigrations.make({ ...nullableArtifact })
+  expect(makeInvalid).toThrow()
 })()
 
-it.effect(
-  "nullable identifiers in migration history and snapshots fail validation",
-  () => pipe(nullableIdentifierSnapshotsAction, Effect.provide(BunServices.layer)),
-)
+it.effect("nullable identifiers fail history decoding and synchronous construction", Function.constant(nullableIdentifierSnapshotsAction))
 
-const repeatableIntentFlagsAction = Effect.fn("SqliteMigrations.repeatableIntentFlags")(function* () {
-  const temporaryRoot = tmpdir()
-  const temporaryPrefix = join(temporaryRoot, "effect-domains-repeatable-intents-")
-  const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
-  const removeDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) => Effect.sync(() => directory.remove())
-  const directory = yield* Effect.acquireRelease(createDirectory, removeDirectory)
-  const sourcePath = join(directory.path, "001_initial.json")
-  const artifactPath = join(directory.path, "002_backfills.json")
-  const SourceSchema = Schema.Struct({ title: Schema.String })
-  interface Source extends Schema.Schema.Type<typeof SourceSchema> {}
-
-  const TargetSchema = Schema.Struct({
-    ...SourceSchema.fields,
-    label: Schema.String,
-    priority: Schema.Int,
-  })
-
+const explicitExpressions = Effect.fn("SqliteMigrations.explicitExpressions")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const source = Resource.make({ authorization: Authorization.public, name: "expressions", schema: TitleSchema, operations: {} })
+  const TargetSchema = Schema.Struct({ title: Schema.String, label: Schema.String, priority: Schema.Int })
   interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
-  const source = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: SourceSchema, operations: {} })
-  const target = Resource.make({ authorization: Authorization.public, name: "repeatable_intents", schema: TargetSchema, operations: {} })
-  const sourceSnapshot = SqliteMigrations.snapshot([source.table])
+  const target = Resource.make({ authorization: Authorization.public, name: "expressions", schema: TargetSchema, operations: {} })
+  const from = SqliteMigrations.snapshot([source.table])
+  const to = SqliteMigrations.snapshot([target.table])
+  const initial = SqliteMigrations.initial({ id: "001", tables: [source.table] })
 
-  const initial = SqliteMigrations.plan({
-    id: "001_initial",
-    from: empty,
-    to: sourceSnapshot,
+  const migrationSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(target.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Expression.make({ column: "title", expression: `replace("title", ':', '-')` }),
+      SqliteMigrations.copies.Value.make({ column: "label", value: "json:colon" }),
+      SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
+    ],
+  })]
+
+  const migration = SqliteMigrations.make({
+    id: "002", from, to,
+    steps: migrationSteps,
   })
 
+  yield* makeMigrationStore(database, [initial]).prepare(from.tables)
+  const record = yield* source.repository.create({ title: "before:after" })
   const encodedInitial = encodeMigration(initial)
-  const initialText = JSON.stringify(encodedInitial, null, 2)
-  writeFileSync(sourcePath, initialText)
-
-  const noManifest = Option.none()
-
-  const command = SqliteMigrations.command({
-    name: "schema",
-    tables: [target.table],
-    manifest: noManifest,
-  })
-
-  const run = Command.runWith(command, { version: "test", renderErrors: false })
-
-  yield* run([
-    "plan",
-    "--from",
-    sourcePath,
-    "--id",
-    "002_backfills",
-    "--backfill",
-    'repeatable_intents:label:"json:colon"',
-    "--backfill",
-    "repeatable_intents:priority:0",
-    "--transform",
-    `repeatable_intents:title:replace("title", ':', '-')`,
-    "--out",
-    artifactPath,
-  ])
-
-  const sourceText = readFileSync(sourcePath, "utf8")
-  const artifactText = readFileSync(artifactPath, "utf8")
-  const sourceJson = JSON.parse(sourceText)
-  const artifactJson = JSON.parse(artifactText)
-  const [, artifact] = yield* SqliteMigrations.decodeHistory([sourceJson, artifactJson])
-  const labelCopy = expect.objectContaining({ _tag: "SqliteColumnValue", column: "label", value: "json:colon" })
-  const priorityCopy = expect.objectContaining({ _tag: "SqliteColumnValue", column: "priority", value: 0 })
-
-  const titleCopy = expect.objectContaining({
-    _tag: "SqliteColumnExpression",
-    column: "title",
-    expression: `replace("title", ':', '-')`,
-  })
-
-  const copies = expect.arrayContaining([labelCopy, priorityCopy, titleCopy])
-  const rebuild = expect.objectContaining({ _tag: "SqliteRebuildTable", copies })
-  expect(artifact?.steps).toEqual([rebuild])
+  const encodedMigration = encodeMigration(migration)
+  const history = yield* SqliteMigrations.decodeHistory([encodedInitial, encodedMigration])
+  yield* makeMigrationStore(database, history).prepare(to.tables)
+  const transformed = yield* target.repository.get(record.id)
+  expect(transformed).toEqual({ id: record.id, title: "before-after", label: "json:colon", priority: 0 })
 })
 
-it.effect(
-  "repeatable migration intent flags retain JSON and SQL colons",
-  () => pipe(repeatableIntentFlagsAction(), Effect.provide(BunServices.layer)),
-)
+it.effect("explicit rebuild expressions and backfills survive JSON round trips and preserve colons", () => pipe(explicitExpressions(), Effect.provide(sqliteClient)))
 
 const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(function* () {
   const database = yield* SqlClient.SqlClient
@@ -356,7 +292,7 @@ const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(functi
   interface Changed extends Schema.Schema.Type<typeof ChangedSchema> {}
   const changed = Resource.make({ authorization: Authorization.public, name: "labels", schema: ChangedSchema, operations: {} })
   const source = SqliteMigrations.snapshot([original.table])
-  const initial = SqliteMigrations.plan({ id: "001_drift", from: empty, to: source })
+  const initial = SqliteMigrations.initial({ id: "001_drift", tables: [original.table] })
   const store = makeMigrationStore(database, [initial])
   yield* store.prepare(source.tables)
   yield* database`DROP TABLE labels`
@@ -418,13 +354,20 @@ const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransfo
   const after = Resource.make({ authorization: Authorization.public, name: "jobs", schema: JobSchema, operations: {} })
   const source = SqliteMigrations.snapshot([before.table])
   const target = SqliteMigrations.snapshot([after.table])
-  const initial = SqliteMigrations.plan({ id: "001", from: empty, to: source })
+  const initial = SqliteMigrations.initial({ id: "001", tables: [before.table] })
 
-  const invalid = SqliteMigrations.plan({
-    id: "002",
-    from: source,
-    to: target,
-    transforms: [{ table: "jobs", column: "priority", expression: "-1" }],
+  const invalidSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(after.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "title", source: "title" }),
+      SqliteMigrations.copies.Expression.make({ column: "priority", expression: "-1" }),
+    ],
+  })]
+
+  const invalid = SqliteMigrations.make({
+    id: "002", from: source, to: target,
+    steps: invalidSteps,
   })
 
   const initialStore = makeMigrationStore(database, [initial])
@@ -441,11 +384,18 @@ const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransfo
   expect(failed).toBe(true)
   expect(restoredJob).toEqual(job)
 
-  const corrected = SqliteMigrations.plan({
-    id: "002",
-    from: source,
-    to: target,
-    backfills: [{ table: "jobs", column: "priority", value: 1 }],
+  const correctedSteps = [SqliteMigrations.steps.RebuildTable.make({
+    table: Table.snapshot(after.table),
+    copies: [
+      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+      SqliteMigrations.copies.Source.make({ column: "title", source: "title" }),
+      SqliteMigrations.copies.Value.make({ column: "priority", value: 1 }),
+    ],
+  })]
+
+  const corrected = SqliteMigrations.make({
+    id: "002", from: source, to: target,
+    steps: correctedSteps,
   })
 
   const correctedStore = makeMigrationStore(database, [initial, corrected])
@@ -460,7 +410,7 @@ const failedTransformsRollBackTest = Function.constant(failedTransformsRollBack)
 
 it.effect("failed transforms roll back table data and migration history before a corrected retry", failedTransformsRollBackTest)
 
-const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.generatedHistoryIsNeverRegisteredOnFailure")(function* () {
+const manifestValidation = Effect.fn("SqliteMigrations.manifestValidation")(function* () {
   const temporaryRoot = tmpdir()
   const temporaryPrefix = join(temporaryRoot, "effect-domains-migrations-")
   const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
@@ -468,145 +418,123 @@ const generatedHistoryIsNeverRegisteredOnFailure = Effect.fn("SqliteMigrations.g
   const directory = yield* Effect.acquireRelease(createDirectory, releaseDirectory)
   const manifest = join(directory.path, "manifest.json")
   const initialPath = join(directory.path, "001_initial.json")
-  const InitialSchema = Schema.Struct({ title: Schema.String })
-  interface Initial extends Schema.Schema.Type<typeof InitialSchema> {}
-
-  const TargetSchema = Schema.Struct({
-    title: Schema.String,
-    required: Schema.Number,
-  })
-
-  interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
-  const initialResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: InitialSchema, operations: {} })
-  const targetResource = Resource.make({ authorization: Authorization.public, name: "generated_history", schema: TargetSchema, operations: {} })
-  const initialTarget = SqliteMigrations.snapshot([initialResource.table])
-
-  const initial = SqliteMigrations.plan({
-    id: "001_initial",
-    from: empty,
-    to: initialTarget,
-  })
-
+  const table = Table.make({ name: "manifest_history", schema: TitleSchema })
+  const initial = SqliteMigrations.initial({ id: "001_initial", tables: [table] })
   const encodedInitial = encodeMigration(initial)
   const initialText = JSON.stringify(encodedInitial, null, 2)
   writeFileSync(initialPath, initialText)
-  const initialManifest = JSON.stringify({ migrations: ["001_initial.json"] }, null, 2)
-  writeFileSync(manifest, initialManifest)
-  const initialBytes = readFileSync(initialPath, "utf8")
-  const manifestOption = Option.some(manifest)
+  const manifestText = JSON.stringify({ migrations: ["001_initial.json"] })
+  writeFileSync(manifest, manifestText)
+  const history = yield* SqliteMigrations.load(manifest)
+  expect(history).toEqual([initial])
+  const loaded = pipe(history, Array.head, Option.getOrThrow)
+  const loadedTable = pipe(loaded.to.tables, Array.head, Option.getOrThrow)
 
-  const accepted = SqliteMigrations.command({
-    name: "schema",
-    tables: [initialResource.table],
-    manifest: manifestOption,
+  const frozen = [
+    Object.isFrozen(initial), Object.isFrozen(initial.steps), Object.isFrozen(initial.to.tables),
+    Object.isFrozen(history), Object.isFrozen(loaded), Object.isFrozen(loadedTable.fields),
+  ]
+
+  expect(frozen).toEqual([true, true, true, true, true, true])
+
+  const invalidManifests = [
+    { migrations: ["001_initial.json", "001_initial.json"] },
+    { migrations: ["../001_initial.json"] },
+    { migrations: ["/001_initial.json"] },
+    { migrations: ["missing.json"] },
+    { migrations: [42] },
+  ]
+
+  const rejectManifest = Effect.fn("SqliteMigrations.rejectManifest")(function* (invalid: unknown) {
+    const text = JSON.stringify(invalid)
+    writeFileSync(manifest, text)
+    const outcome = yield* pipe(SqliteMigrations.load(manifest), Effect.result)
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
   })
 
-  const acceptedRun = Command.runWith(accepted, { version: "test", renderErrors: false })
-  const reviewedGeneration = acceptedRun(["generate", "reviewed"])
-  const generated = yield* Effect.exit(reviewedGeneration)
-  const reviewedPath = join(directory.path, "002_reviewed.json")
-  const reviewedExists = existsSync(reviewedPath)
-  expect(generated._tag).toBe("Success")
-  expect(reviewedExists).toBe(true)
-
-  const generatedHistory = yield* SqliteMigrations.load(manifest)
-  const generatedHistoryFrozen = Object.isFrozen(generatedHistory)
-  expect(generatedHistory).toHaveLength(2)
-  expect(generatedHistoryFrozen).toBe(true)
-
-  const before = readFileSync(manifest, "utf8")
-  const fileSystem = yield* FileSystem.FileSystem
-
-  const renameWithFailure = (from: string, to: string) => {
-    const targetsManifest = Equivalence.strictEqual<string>()(to, manifest)
-    return targetsManifest ? Effect.die("simulated manifest rename failure") : fileSystem.rename(from, to)
-  }
-
-  const bookkeepingFailureFileSystem = {
-    ...fileSystem,
-    rename: renameWithFailure,
-  }
-
-  const bookkeeping = SqliteMigrations.command({
-    name: "schema",
-    tables: [initialResource.table],
-    manifest: manifestOption,
-  })
-
-  const bookkeepingRun = Command.runWith(bookkeeping, { version: "test", renderErrors: false })
-  const bookkeepingGeneration = bookkeepingRun(["generate", "bookkeeping"])
-  const bookkeepingWithFailure = pipe(bookkeepingGeneration, Effect.provideService(FileSystem.FileSystem, bookkeepingFailureFileSystem))
-  const bookkeepingFailure = yield* Effect.exit(bookkeepingWithFailure)
-  const manifestAfterBookkeepingFailure = readFileSync(manifest, "utf8")
-  const initialAfterBookkeepingFailure = readFileSync(initialPath, "utf8")
-  const bookkeepingPath = join(directory.path, "003_bookkeeping.json")
-  const bookkeepingArtifactExists = existsSync(bookkeepingPath)
-  expect(bookkeepingFailure._tag).toBe("Failure")
-  expect(manifestAfterBookkeepingFailure).toBe(before)
-  expect(initialAfterBookkeepingFailure).toBe(initialBytes)
-  expect(bookkeepingArtifactExists).toBe(true)
-
-  const historyAfterBookkeepingFailure = yield* SqliteMigrations.load(manifest)
-  expect(historyAfterBookkeepingFailure).toHaveLength(2)
-
-  const command = SqliteMigrations.command({
-    name: "schema",
-    tables: [targetResource.table],
-    manifest: manifestOption,
-  })
-
-  const commandRun = Command.runWith(command, { version: "test", renderErrors: false })
-  const requiredGeneration = commandRun(["generate", "required"])
-  const blocked = yield* Effect.exit(requiredGeneration)
-  const manifestAfterBlockedGeneration = readFileSync(manifest, "utf8")
-  const requiredPath = join(directory.path, "003_required.json")
-  const requiredArtifactExists = existsSync(requiredPath)
-  expect(blocked._tag).toBe("Failure")
-  expect(manifestAfterBlockedGeneration).toBe(before)
-  expect(requiredArtifactExists).toBe(false)
-
-  const repeat = SqliteMigrations.plan({
-    id: "002_repeat",
-    from: initial.to,
-    to: initial.to,
-  })
-
-  const final = SqliteMigrations.plan({
-    id: "001_final",
-    from: repeat.to,
-    to: repeat.to,
-  })
-
-  const encodedRepeat = encodeMigration(repeat)
-  const encodedFinal = encodeMigration(final)
-  const seedPath = join(directory.path, "seed.json")
-  const finalPath = join(directory.path, "final.json")
-  const seedText = JSON.stringify(encodedRepeat, null, 2)
-  const finalText = JSON.stringify(encodedFinal, null, 2)
-  writeFileSync(seedPath, seedText)
-  writeFileSync(finalPath, finalText)
-
-  const duplicateManifest = JSON.stringify({ migrations: ["001_initial.json", "seed.json", "final.json"] }, null, 2)
-
-  writeFileSync(manifest, duplicateManifest)
-
-  const duplicateBefore = readFileSync(manifest, "utf8")
-
-  const duplicateId = SqliteMigrations.command({
-    name: "schema",
-    tables: [initialResource.table],
-    manifest: manifestOption,
-  })
-
-  const duplicateRun = Command.runWith(duplicateId, { version: "test", renderErrors: false })
-  const duplicateGeneration = duplicateRun(["generate", "repeat"])
-  const duplicateIdFailure = yield* Effect.exit(duplicateGeneration)
-  const manifestAfterDuplicateFailure = readFileSync(manifest, "utf8")
-  const repeatPath = join(directory.path, "002_repeat.json")
-  const repeatArtifactExists = existsSync(repeatPath)
-  expect(duplicateIdFailure._tag).toBe("Failure")
-  expect(manifestAfterDuplicateFailure).toBe(duplicateBefore)
-  expect(repeatArtifactExists).toBe(false)
+  yield* Effect.forEach(invalidManifests, rejectManifest)
+  writeFileSync(manifest, manifestText)
+  writeFileSync(initialPath, "not JSON")
+  const malformedArtifact = yield* pipe(SqliteMigrations.load(manifest), Effect.result)
+  expect(malformedArtifact).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  const untouchedManifest = readFileSync(manifest, "utf8")
+  expect(untouchedManifest).toBe(manifestText)
 })
 
-it.effect("generate leaves the manifest unchanged for blocked and duplicate histories", () => pipe(generatedHistoryIsNeverRegisteredOnFailure(), Effect.provide(BunServices.layer)))
+it.effect("manifest loading validates paths, duplicate entries and artifacts, and freezes history", () => pipe(manifestValidation(), Effect.provide(BunServices.layer)))
+
+const invalidHistories = Effect.fn("SqliteMigrations.invalidHistories")(function* () {
+  const table = Table.make({ name: "invalid_history", schema: TitleSchema })
+  const initial = SqliteMigrations.initial({ id: "001", tables: [table] })
+  const encodedInitial = encodeMigration(initial)
+  const duplicate = SqliteMigration.make({ ...initial, from: initial.to, steps: [] })
+  const blank = SqliteMigration.make({ ...initial, id: "" })
+  const disconnected = SqliteMigration.make({ id: "002", from: empty, to: empty, steps: [] })
+
+  const invalid = [
+    [encodedInitial, encodeMigration(duplicate)],
+    [encodeMigration(blank)],
+    [encodedInitial, encodeMigration(disconnected)],
+  ]
+
+  const rejectHistory = Effect.fn("SqliteMigrations.rejectHistory")(function* (history: unknown) {
+    const outcome = yield* pipe(SqliteMigrations.decodeHistory(history), Effect.result)
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  })
+
+  yield* Effect.forEach(invalid, rejectHistory)
+})
+
+it.effect("history rejects empty or duplicate ids and disconnected snapshots", invalidHistories)
+
+const tamperedHistory = Effect.fn("SqliteMigrations.tamperedHistory")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const resource = Resource.make({ authorization: Authorization.public, name: "tampered_history", schema: TitleSchema, operations: {} })
+  const target = SqliteMigrations.snapshot([resource.table])
+  const initial = SqliteMigrations.initial({ id: "001", tables: [resource.table] })
+  const second = SqliteMigrations.make({ id: "002", from: target, to: target, steps: [] })
+  const third = SqliteMigrations.make({ id: "003", from: target, to: target, steps: [] })
+  const store = makeMigrationStore(database, [initial, second, third])
+  yield* store.prepare(target.tables)
+  const record = yield* resource.repository.create({ title: "preserved" })
+  const changed = SqliteMigrations.make({ ...initial, steps: [] })
+  const changedStore = makeMigrationStore(database, [changed, second, third])
+  const changedArtifact = yield* pipe(changedStore.prepare(target.tables), Effect.result)
+  expect(changedArtifact).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+
+  yield* database`UPDATE _effect_schema_migrations SET artifact = '{}' WHERE id = '003'`
+  const forgedLedger = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(forgedLedger).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  yield* database`DELETE FROM _effect_schema_migrations WHERE id = '003'`
+  yield* store.prepare(target.tables)
+  yield* database`DELETE FROM _effect_schema_migrations WHERE id = '002'`
+  const gap = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(gap).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  const preserved = yield* resource.repository.get(record.id)
+  expect(preserved).toEqual(record)
+})
+
+it.effect("changed artifacts, forged ledger entries and history gaps fail without changing records", () => pipe(tamperedHistory(), Effect.provide(sqliteClient)))
+
+const untrackedObjects = Effect.fn("SqliteMigrations.untrackedObjects")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const resource = Resource.make({ authorization: Authorization.public, name: "untracked_objects", schema: TitleSchema, operations: {} })
+  const target = SqliteMigrations.snapshot([resource.table])
+  const initial = SqliteMigrations.initial({ id: "001", tables: [resource.table] })
+  const store = makeMigrationStore(database, [initial])
+  yield* store.prepare(target.tables)
+  const record = yield* resource.repository.create({ title: "preserved" })
+  yield* database`CREATE INDEX untracked_title ON untracked_objects (title)`
+  const index = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(index).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  yield* database`DROP INDEX untracked_title`
+  yield* database`CREATE TRIGGER untracked_trigger AFTER INSERT ON untracked_objects BEGIN SELECT 1; END`
+  const trigger = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(trigger).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  yield* database`DROP TRIGGER untracked_trigger`
+  yield* store.prepare(target.tables)
+  const preserved = yield* resource.repository.get(record.id)
+  expect(preserved).toEqual(record)
+})
+
+it.effect("untracked indexes and triggers are rejected as drift without changing records", () => pipe(untrackedObjects(), Effect.provide(sqliteClient)))

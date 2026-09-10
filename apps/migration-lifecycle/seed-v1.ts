@@ -6,10 +6,10 @@ import {
   Effect,
   Option,
   Schema,
-  Struct,
   pipe,
 } from "effect"
 
+import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "effect-domains/migrations"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { LegacyDocumentsResource } from "./legacy.ts"
@@ -37,13 +37,13 @@ const seedVersionOneDocument = Effect.gen(function* () {
     const schemaStore = yield* SchemaStore
     yield* schemaStore.prepare(initialMigration.to.tables)
 
-    const documents = yield* LegacyDocumentsResource.repository.list()
+    const sql = yield* SqlClient.SqlClient
 
-    const alreadySeeded = pipe(
-      documents,
-      Array.map(Struct.get("title")),
-      Array.contains(seedTitle),
-    )
+    const documents = yield* sql`
+      SELECT title FROM ${sql(LegacyDocumentsResource.table.name)} WHERE title = ${seedTitle} LIMIT 1
+    `
+
+    const alreadySeeded = Array.isReadonlyArrayNonEmpty(documents)
 
     if (!alreadySeeded) {
       yield* LegacyDocumentsResource.repository.create({ title: seedTitle })

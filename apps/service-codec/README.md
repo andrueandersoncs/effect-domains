@@ -66,16 +66,15 @@ SERVICE_CODEC_URL=http://127.0.0.1:3001/rpc/v1 SERVICE_CODEC_TOKEN=bob-demo bun 
 
 Startup applies frozen migrations and keeps existing data. It does not reset the database, and the SQLite runtime rejects an untracked database instead of adopting it. The current prefix is hard-coded to `stored:` in `main.ts`. `StoredTextSchema` removes a prefix-length slice when it decodes; it does not validate that stored text begins with that prefix. Do not alter rows manually or change the installed prefix without migrating existing values, or decoded text can be corrupted.
 
-Generated missing-row and persistence failures use `ResourceNotFound` and `RepositoryError`; denied operations use `Forbidden`, and `remove` returns `void`. The generated list is the ordinary unpaginated CRUD list because this resource declares no list policy.
+Generated missing-row and persistence failures use `ResourceNotFound` and `RepositoryError`; denied operations use `Forbidden`, and `remove` returns `void`. The generated list always returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending, even without list configuration.
 
-Schema commands run locally without a server. After changing a resource schema, generate against the runtime registry at [`migrations/manifest.json`](migrations/manifest.json):
+Inspection runs locally without a server or token:
 
 ```bash
-bun run service-codec schema generate add-field
 bun run service-codec inspect notes.create
 ```
 
-`generate` writes and atomically registers only a valid next artifact; a blocked plan leaves the manifest untouched. `inspect` exposes canonical and storage schemas, the physical stored schema, and the rendered authorization policy. Do not regenerate artifacts that may already be applied.
+`inspect` exposes canonical and storage schemas, the physical stored schema, and the rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate artifacts that may already be applied.
 
 ## Code map
 

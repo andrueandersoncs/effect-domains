@@ -49,7 +49,7 @@ bun run basic-crud books.create --title "A Field Guide" --page-count 120
 bun run basic-crud books.list
 ```
 
-The runtime generates the book identifier. To retrieve a created row, copy that UUIDv7 value into `BOOK_ID`:
+The runtime generates the book identifier. List returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending. Pass a non-null cursor unchanged to request the next page. To retrieve a created row, copy that UUIDv7 value into `BOOK_ID`:
 
 ```bash
 bun run basic-crud books.get --id "$BOOK_ID"
@@ -61,16 +61,15 @@ The [basic CRUD README](../apps/basic-crud/README.md) documents complete-row upd
 
 With the server running, open [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). This opt-in administrative interface uses the same published RPC operations; it is not a separate application contract. The entrypoint explicitly enables it with `admin: true`.
 
-## Inspect contracts and migrations
+## Inspect contracts and author migrations
 
-Inspection and schema commands run locally; they do not require the server:
+Inspection runs locally without the server:
 
 ```bash
 bun run basic-crud inspect books.create
-bun run basic-crud schema generate add-field
 ```
 
-Review generated migration artifacts before applying them. Do not regenerate history that is already applied from the current model.
+There are no schema CLI commands. Author changes with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` for fresh creation. Review and append frozen artifacts and manifest entries explicitly. Do not regenerate already-applied history from current models. The [migration authoring walkthrough](../apps/README.md#review-schema-changes) includes a runnable draft.
 
 ## Continue in the wiki
 

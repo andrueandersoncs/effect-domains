@@ -45,6 +45,7 @@
       "name": "@effect-domains/example-durable-reminders",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
+        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
@@ -52,7 +53,9 @@
     "apps/durable-workflows": {
       "name": "@effect-domains/example-durable-workflows",
       "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
+        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
