@@ -23,7 +23,7 @@ const PagedTodoSchema = Schema.Struct({
 })
 
 interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
-const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, operations: { list: { filter: ["completed"], order: [{ field: "title" }], limit: 1, publish: false } } })
+const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, operations: { list: { filter: ["completed"], order: [{ field: "completed" }, { field: "title" }], limit: 1, publish: false } } })
 
 const OrderedTodoFieldsSchema = Schema.Struct({
   lower: Schema.Int,
@@ -132,7 +132,7 @@ const pagedCrudProgram = Effect.gen(function* () {
   expect(todo).toMatchObject({ id: "1", title: "alpha" })
 })
 
-it.effect("declared list cursors preserve page boundaries and patch keeps keys immutable and rows valid", () => pipe(pagedCrudProgram, Effect.provide(sqlite)))
+it.effect("mixed Boolean/string cursors preserve page boundaries and patch keeps keys immutable and rows valid", () => pipe(pagedCrudProgram, Effect.provide(sqlite)))
 
 const orderedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([OrderedTodos.table])

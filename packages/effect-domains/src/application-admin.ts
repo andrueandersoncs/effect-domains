@@ -74,17 +74,17 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
       () => AdminDefinitionError.make({ reason: `Admin operations must be unary: ${procedure._tag}` }),
     )
 
-    const decode = Schema.decodeUnknownEffect(contract.payload)
-    const encodeResult = pipe(Schema.Struct({ result: contract.success }), Schema.encodeUnknownEffect)
-    const encodeError = pipe(Schema.Struct({ error: contract.error }), Schema.encodeUnknownEffect)
+    const decode = Schema.decodeUnknownEffect(contract.payloadSchema)
+    const encodeResult = pipe(Schema.Struct({ result: contract.successSchema }), Schema.encodeUnknownEffect)
+    const encodeError = pipe(Schema.Struct({ error: contract.errorSchema }), Schema.encodeUnknownEffect)
     const withCodecContext = withHandlerContext(procedure as UnaryRpc)
 
     const invoke = Effect.fn("ApplicationAdmin.invoke")(function* (input: unknown, request: HttpServerRequest.HttpServerRequest) {
       const decoded = yield* pipe(decode(input), withCodecContext, Effect.result)
-      if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${contract.tag}: ${decoded.failure.message}`)
+      if (Result.isFailure(decoded)) return yield* failure(400, `Invalid input for ${contract._tag}: ${decoded.failure.message}`)
 
       return yield* pipe(
-        client(contract.tag, decoded.success, { headers: request.headers }),
+        client(contract._tag, decoded.success, { headers: request.headers }),
         Effect.matchEffect({
           onFailure: (error) => pipe(encodeError({ error }), withCodecContext, Effect.flatMap(declaredErrorResponse), Effect.catch(internalFailure)),
           onSuccess: (result) => pipe(encodeResult({ result }), withCodecContext, Effect.flatMap(successResponse), Effect.catch(internalFailure)),
@@ -97,7 +97,7 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
       Effect.catchDefect(internalFailure),
     )
 
-    return [contract.tag, execute] as const
+    return [contract._tag, execute] as const
   }))
 
 

@@ -1,33 +1,31 @@
-import { Array, Data, Effect, Equivalence, Function, Match, Predicate, pipe } from "effect"
-import { SqlClient, type Statement } from "effect/unstable/sql"
+import { Array, Effect, Equivalence, Function, Match, Predicate, Schema, flow, pipe } from "effect"
+import { SqlClient, Statement } from "effect/unstable/sql"
 
 import {
   Policy,
-  PolicyEvaluationError,
+  policyFailure,
   resolveScalarCollectionLiteralOrSubject,
   resolveScalarLiteralOrSubject,
   type Operand,
   type PolicyEnvironment,
+  type PolicyEvaluationError,
   type PolicyF,
   type Scalar,
 } from "./policy.ts"
 
-type Binder = (
-  sql: SqlClient.SqlClient,
-  environment: PolicyEnvironment,
-) => Effect.Effect<Statement.Fragment, PolicyEvaluationError>
+type Binder = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) => Effect.Effect<Statement.Fragment, PolicyEvaluationError>
+type ScalarKind = Exclude<Expression["kind"], "row">
 
-type ScalarKind = "boolean" | "null" | "number" | "string"
-type ExpressionKind = ScalarKind | "row"
+const FragmentSchema: Schema.declare<Statement.Fragment> = Schema.declare(Statement.isFragment)
+const ExpressionKindSchema = Schema.Literals(["boolean", "null", "number", "string", "row"])
+const ExpressionSchema = Schema.Struct({ fragment: FragmentSchema, kind: ExpressionKindSchema })
 
-class ScalarExpression extends Data.Class<{
-  readonly fragment: Statement.Fragment
-  readonly kind: ExpressionKind
-}> {}
+interface Expression extends Schema.Schema.Type<typeof ExpressionSchema> {}
 
-const expressionKindEquals = Equivalence.strictEqual<ExpressionKind>()
+const scalarKindEquals = Equivalence.strictEqual<Expression["kind"]>()
+const nativeFragment = (statement: Statement.Fragment) => Statement.fragment(statement.segments)
 
-const scalarKind = (value: Scalar): ScalarKind =>
+const scalarKind = (value: Scalar) =>
   pipe(
     Match.value(value),
     Match.when(Predicate.isNull, Function.constant("null" as const)),
@@ -36,191 +34,173 @@ const scalarKind = (value: Scalar): ScalarKind =>
     Match.orElse(Function.constant("string" as const)),
   )
 
-const scalarExpression = (sql: SqlClient.SqlClient) => (value: Scalar): ScalarExpression => {
-  const fragment = sql`${Predicate.isBoolean(value) ? Number(value) : value}`
+const scalarSqlValue = (value: Scalar) =>
+  pipe(
+    Match.value(value),
+    Match.when(Predicate.isBoolean, Number),
+    Match.orElse(Function.identity),
+  )
+
+const makeScalarExpression = (sql: SqlClient.SqlClient, value: Scalar): Expression => {
+  const scalar = scalarSqlValue(value)
+  const statement = sql`${scalar}`
+  const fragment = nativeFragment(statement)
   const kind = scalarKind(value)
-  return new ScalarExpression({ fragment, kind })
+  return ExpressionSchema.make({ fragment, kind })
 }
 
-const rowExpression = (sql: SqlClient.SqlClient) => (field: string): ScalarExpression => {
-  const fragment = sql`${sql(field)}`
-  return new ScalarExpression({ fragment, kind: "row" })
+const makeRowExpression = (sql: SqlClient.SqlClient, field: string): Expression => {
+  const statement = sql`${sql(field)}`
+  const fragment = nativeFragment(statement)
+  return ExpressionSchema.make({ fragment, kind: "row" })
 }
-
-const numericType = (sql: SqlClient.SqlClient, expression: Statement.Fragment): Statement.Fragment =>
-  sql`typeof(${expression}) IN ${sql.in(["integer", "real"])}`
-
-const typeMatches = (
-  sql: SqlClient.SqlClient,
-  expression: Statement.Fragment,
-  kind: "null" | "number" | "string",
-) =>
-  pipe(
-    Match.value(kind),
-    Match.when("null", () => sql`typeof(${expression}) = ${"null"}`),
-    Match.when("number", () => numericType(sql, expression)),
-    Match.orElse(() => sql`typeof(${expression}) = ${"text"}`),
-  )
-
-const storageKind = (kind: ScalarKind) =>
-  pipe(
-    Match.value(kind),
-    Match.when("boolean", Function.constant("number" as const)),
-    Match.when("null", Function.constant("null" as const)),
-    Match.when("number", Function.constant("number" as const)),
-    Match.when("string", Function.constant("string" as const)),
-    Match.exhaustive,
-  )
-
-const rowEquality = (
-  sql: SqlClient.SqlClient,
-  left: Statement.Fragment,
-  right: Statement.Fragment,
-): Statement.Fragment => sql`(
-  (${numericType(sql, left)} AND ${numericType(sql, right)})
-  OR typeof(${left}) = typeof(${right})
-) AND ${left} IS ${right}`
 
 const falseExpression = (sql: SqlClient.SqlClient) => sql.literal("0=1")
 const trueExpression = (sql: SqlClient.SqlClient) => sql.literal("1=1")
 
-const rowScalarEquality = (
-  sql: SqlClient.SqlClient,
-  row: Statement.Fragment,
-  scalar: Statement.Fragment,
-  kind: ScalarKind,
-): Statement.Fragment => {
-  const expectedKind = storageKind(kind)
-  const matchingType = typeMatches(sql, row, expectedKind)
-  return sql`${matchingType} AND ${row} IS ${scalar}`
+const numericType = (sql: SqlClient.SqlClient, expression: Statement.Fragment) =>
+  pipe(sql`typeof(${expression}) IN ${sql.in(["integer", "real"])} `, nativeFragment)
+
+const typeMatches = (sql: SqlClient.SqlClient, expression: Statement.Fragment, kind: ScalarKind) =>
+  pipe(
+    Match.value(kind),
+    Match.when("number", () => numericType(sql, expression)),
+    Match.orElse((storageKind) => {
+      const isNull = scalarKindEquals(storageKind, "null")
+      const storage = isNull ? "null" : "text"
+      const statement = sql`typeof(${expression}) = ${storage}`
+      return nativeFragment(statement)
+    }),
+  )
+
+const storageKind = (kind: Expression["kind"]) =>
+  pipe(
+    Match.value(kind),
+    Match.when("null", Function.constant("null" as const)),
+    Match.when("string", Function.constant("string" as const)),
+    Match.when("row", Function.constant("string" as const)),
+    Match.orElse(Function.constant("number" as const)),
+  )
+
+const rowEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
+  const leftNumeric = numericType(sql, left.fragment)
+  const rightNumeric = numericType(sql, right.fragment)
+  const bothNumbersStatement = sql`${leftNumeric} AND ${rightNumeric}`
+  const bothNumbers = nativeFragment(bothNumbersStatement)
+  const sameStorageKindStatement = sql`typeof(${left.fragment}) = typeof(${right.fragment})`
+  const sameStorageKind = nativeFragment(sameStorageKindStatement)
+  const equalityStatement = sql`(${bothNumbers} OR ${sameStorageKind}) AND ${left.fragment} IS ${right.fragment}`
+  return nativeFragment(equalityStatement)
 }
 
-const totalEquality = (
-  sql: SqlClient.SqlClient,
-  { fragment: left, kind: leftKind }: ScalarExpression,
-  { fragment: right, kind: rightKind }: ScalarExpression,
-) =>
+const rowLeftEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) =>
   pipe(
-    Match.value([leftKind, rightKind] as const),
-    Match.when(["row", "row"], () => rowEquality(sql, left, right)),
-    Match.when(["row", Match.any], () => rowScalarEquality(sql, left, right, rightKind as ScalarKind)),
-    Match.when([Match.any, "row"], () => rowScalarEquality(sql, right, left, leftKind as ScalarKind)),
-    Match.when([Match.any, Match.any], ([leftKind, rightKind]) => {
-      const matchingKind = expressionKindEquals(leftKind, rightKind)
-      return matchingKind ? sql`${left} IS ${right}` : falseExpression(sql)
-    }),
-    Match.exhaustive,
-  )
-
-const sqlEvaluationFailure = (reason: string) =>
-  pipe(PolicyEvaluationError.make({ reason }), Effect.fail)
-
-const nextFieldUnavailable = sqlEvaluationFailure("next fields are unavailable to SQL predicates")
-const collectionRequired = sqlEvaluationFailure("policy collection must resolve to finite scalar values")
-
-const scalarOperand = (
-  sql: SqlClient.SqlClient,
-  environment: PolicyEnvironment,
-  operand: Operand,
-) =>
-  pipe(
-    Match.value(operand),
-    Match.tagsExhaustive({
-      Literal: (value) => pipe(resolveScalarLiteralOrSubject(value, environment), Effect.map(scalarExpression(sql))),
-      SubjectField: (value) => pipe(resolveScalarLiteralOrSubject(value, environment), Effect.map(scalarExpression(sql))),
-      RowField: ({ field }) => {
-        const expression = rowExpression(sql)
-        const row = expression(field)
-        return Effect.succeed(row)
-      },
-      NextField: Function.constant(nextFieldUnavailable),
+    Match.value(right.kind),
+    Match.when("row", () => rowEquality(sql, left, right)),
+    Match.orElse((kind) => {
+      const storage = storageKind(kind)
+      const matches = typeMatches(sql, left.fragment, storage)
+      const equalityStatement = sql`${matches} AND ${left.fragment} IS ${right.fragment}`
+      return nativeFragment(equalityStatement)
     }),
   )
 
-const collectionValues = (
-  environment: PolicyEnvironment,
-  operand: Operand,
-) =>
+const scalarLeftEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) =>
+  pipe(
+    Match.value(right.kind),
+    Match.when("row", () => {
+      const storage = storageKind(left.kind)
+      const matches = typeMatches(sql, right.fragment, storage)
+      const equalityStatement = sql`${matches} AND ${right.fragment} IS ${left.fragment}`
+      return nativeFragment(equalityStatement)
+    }),
+    Match.orElse((kind) => {
+      const sameKind = scalarKindEquals(left.kind, kind)
+      if (!sameKind) return falseExpression(sql)
+      const equalityStatement = sql`${left.fragment} IS ${right.fragment}`
+      return nativeFragment(equalityStatement)
+    }),
+  )
+
+const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) =>
+  pipe(
+    Match.value(left.kind),
+    Match.when("row", () => rowLeftEquality(sql, left, right)),
+    Match.orElse(() => scalarLeftEquality(sql, left, right)),
+  )
+
+const scalarExpressionFor = (sql: SqlClient.SqlClient) => (value: Scalar) => makeScalarExpression(sql, value)
+
+const scalarOperand = (sql: SqlClient.SqlClient, environment: PolicyEnvironment, operand: Operand) =>
   pipe(
     Match.value(operand),
     Match.tagsExhaustive({
-      Literal: (value) => resolveScalarCollectionLiteralOrSubject(value, environment),
-      SubjectField: (value) => resolveScalarCollectionLiteralOrSubject(value, environment),
-      RowField: Function.constant(collectionRequired),
-      NextField: Function.constant(nextFieldUnavailable),
+      Literal: (literal) => pipe(resolveScalarLiteralOrSubject(literal, environment), Effect.map(scalarExpressionFor(sql))),
+      SubjectField: (subject) => pipe(resolveScalarLiteralOrSubject(subject, environment), Effect.map(scalarExpressionFor(sql))),
+      RowField: ({ field }) => pipe(makeRowExpression(sql, field), Effect.succeed),
+      NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
     }),
   )
 
-const constantCondition = (sql: SqlClient.SqlClient) => (value: boolean) =>
-  value ? trueExpression(sql) : falseExpression(sql)
+const collectionValues = (environment: PolicyEnvironment, operand: Operand) =>
+  pipe(
+    Match.value(operand),
+    Match.tagsExhaustive({
+      Literal: (literal) => resolveScalarCollectionLiteralOrSubject(literal, environment),
+      SubjectField: (subject) => resolveScalarCollectionLiteralOrSubject(subject, environment),
+      RowField: () => policyFailure("policy collection must resolve to finite scalar values"),
+      NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
+    }),
+  )
 
-const constantBinding = ({ value }: Extract<PolicyF<Binder>, { readonly _tag: "Constant" }>): Binder =>
-  (sql, _environment) =>
-    pipe(value, constantCondition(sql), Effect.succeed)
+const bindConstant = ({ value }: Extract<PolicyF<Binder>, { readonly _tag: "Constant" }>): Binder =>
+  flow(value ? trueExpression : falseExpression, Effect.succeed)
 
-const bindEquality = ({
-  left,
-  right,
-}: Extract<PolicyF<Binder>, { readonly _tag: "Equal" }>): Binder =>
+const bindEqual = ({ left, right }: Extract<PolicyF<Binder>, { readonly _tag: "Equal" }>): Binder =>
   Effect.fn("PolicySql.equal")(function* (sql, environment) {
-    const leftValue = yield* scalarOperand(sql, environment, left)
-    const rightValue = yield* scalarOperand(sql, environment, right)
-    return totalEquality(sql, leftValue, rightValue)
+    const leftExpression = yield* scalarOperand(sql, environment, left)
+    const rightExpression = yield* scalarOperand(sql, environment, right)
+    return totalEquality(sql, leftExpression, rightExpression)
   })
 
-const bindMembership = ({
-  collection,
-  value,
-}: Extract<PolicyF<Binder>, { readonly _tag: "Includes" }>): Binder =>
+const entryEquality = (sql: SqlClient.SqlClient, member: Expression) => (entry: Scalar) => {
+  const expression = makeScalarExpression(sql, entry)
+  return totalEquality(sql, member, expression)
+}
+
+const bindIncludes = ({ collection, value }: Extract<PolicyF<Binder>, { readonly _tag: "Includes" }>): Binder =>
   Effect.fn("PolicySql.includes")(function* (sql, environment) {
     const entries = yield* collectionValues(environment, collection)
-    const valueExpression = yield* scalarOperand(sql, environment, value)
-    const expression = scalarExpression(sql)
-
-    if (!Array.isReadonlyArrayNonEmpty(entries)) return falseExpression(sql)
-
-    const comparison = (entry: Scalar) => {
-      const entryExpression = expression(entry)
-      return totalEquality(sql, valueExpression, entryExpression)
-    }
-
-    const comparisons = Array.map(entries, comparison)
-    return sql.or(comparisons)
+    if (Array.isReadonlyArrayEmpty(entries)) return falseExpression(sql)
+    const member = yield* scalarOperand(sql, environment, value)
+    const equalities = Array.map(entries, entryEquality(sql, member))
+    const statement = sql.or(equalities)
+    return nativeFragment(statement)
   })
 
-type Junction = Extract<PolicyF<Binder>, { readonly _tag: "All" | "Any" }>
+const joinFragments = (sql: SqlClient.SqlClient, all: boolean, fragments: ReadonlyArray<Statement.Fragment>) => {
+  if (Array.isReadonlyArrayEmpty(fragments)) return all ? trueExpression(sql) : falseExpression(sql)
+  const statement = all ? sql.and(fragments) : sql.or(fragments)
+  return nativeFragment(statement)
+}
 
-const allFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) =>
-  Array.isReadonlyArrayNonEmpty(fragments) ? sql.and(fragments) : trueExpression(sql)
-
-const anyFragments = (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) =>
-  Array.isReadonlyArrayNonEmpty(fragments) ? sql.or(fragments) : falseExpression(sql)
-
-const junctionBinding =
-  (combine: (sql: SqlClient.SqlClient) => (fragments: ReadonlyArray<Statement.Fragment>) => Statement.Fragment) =>
-  ({ children }: Junction): Binder =>
-  (sql, environment) =>
-    pipe(
-      children,
-      Array.map((child) => child(sql, environment)),
-      Effect.all,
-      Effect.map(combine(sql)),
-    )
-
-const allBinding = junctionBinding(allFragments)
-const anyBinding = junctionBinding(anyFragments)
+const bindJunction = (children: ReadonlyArray<Binder>, all: boolean): Binder =>
+  Effect.fn("PolicySql.junction")(function* (sql, environment) {
+    const effects = Array.map(children, (child) => child(sql, environment))
+    const fragments = yield* Effect.all(effects)
+    return joinFragments(sql, all, fragments)
+  })
 
 const compileLayer = (layer: PolicyF<Binder>) =>
   pipe(
     Match.value(layer),
     Match.tagsExhaustive({
-      Constant: constantBinding,
-      Equal: bindEquality,
-      Includes: bindMembership,
-      All: allBinding,
-      Any: anyBinding,
+      Constant: bindConstant,
+      Equal: bindEqual,
+      Includes: bindIncludes,
+      All: ({ children }) => bindJunction(children, true),
+      Any: ({ children }) => bindJunction(children, false),
     }),
   )
 
-const compile = Policy.fold<Binder>(compileLayer)
-export const PolicySql = { compile }
+export const PolicySql = { compile: Policy.fold<Binder>(compileLayer) }

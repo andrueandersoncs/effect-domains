@@ -2,14 +2,14 @@ import { Array, Effect, Equivalence, flow, Function, Option, Record, Schema, Str
 import { Table, TableSnapshot } from "./table.ts"
 import type { Resource } from "./resource.ts"
 import { Policy, type Operand } from "./policy.ts"
-import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
+import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 
 type InspectableApplication = Readonly<{
   name: string
   resources: ReadonlyArray<Resource>
   group: Readonly<{
     requests: Readonly<{
-      values: () => Iterable<UnaryRpcProcedure>
+      values: () => Iterable<RpcProcedure>
     }>
   }>
 }>
@@ -112,7 +112,7 @@ class InspectionError extends Schema.TaggedError<InspectionError>()("Application
   reason: Schema.String,
 }) {}
 
-const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: UnaryRpcProcedure) {
+const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: RpcProcedure) {
   const compiled = compileUnaryRpc(procedure)
 
   const contract = yield* Effect.fromOption(
@@ -120,10 +120,10 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
     () => InspectionError.make({ reason: `Application inspection supports only unary RPC procedures: ${procedure._tag}` }),
   )
 
-  const input = schemaDocument(contract.payload)
-  const output = schemaDocument(contract.success)
-  const error = schemaDocument(contract.error)
-  return OperationInspectionSchema.make({ name: contract.tag, input, output, error })
+  const input = schemaDocument(contract.payloadSchema)
+  const output = schemaDocument(contract.successSchema)
+  const error = schemaDocument(contract.errorSchema)
+  return OperationInspectionSchema.make({ name: contract._tag, input, output, error })
 })
 
 const operation = flow(inspectOperation, Effect.runSync)

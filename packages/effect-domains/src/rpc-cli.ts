@@ -22,7 +22,7 @@ import {
 import * as Stdio from "effect/Stdio"
 import { CliError, Command, Flag } from "effect/unstable/cli"
 import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc"
-import { compileUnaryRpc, type UnaryRpcProcedure } from "./rpc-contract.ts"
+import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 
 class RpcCliDefinitionError extends Schema.TaggedError<RpcCliDefinitionError>()(
   "RpcCliDefinitionError",
@@ -234,7 +234,7 @@ const makeInputJsonFlag = () => {
 }
 
 const makeRpcCli = <
-  Group extends RpcGroup.Any & Pick<RpcGroup.RpcGroup<Rpc.Any & UnaryRpcProcedure>, "requests">,
+  Group extends RpcGroup.Any & Pick<RpcGroup.RpcGroup<RpcProcedure>, "requests">,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
   ProtocolError = never,
   ProtocolRequirements = never,
@@ -257,12 +257,12 @@ const makeRpcCli = <
         () => RpcCliDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" }),
       )
 
-      const inputJsonSchema = Schema.fromJsonString(contract.payload)
-      const outputSchema = Schema.fromJsonString(contract.success)
-      const errorSchema = Schema.fromJsonString(contract.error)
-      const encodedPayloadSchema = Schema.toEncoded(contract.payload)
+      const inputJsonSchema = Schema.fromJsonString(contract.payloadSchema)
+      const outputSchema = Schema.fromJsonString(contract.successSchema)
+      const errorSchema = Schema.fromJsonString(contract.errorSchema)
+      const encodedPayloadSchema = Schema.toEncoded(contract.payloadSchema)
       const encodedFields = payloadFields(encodedPayloadSchema.ast)
-      const decodedPayloadSchema = Schema.toType(contract.payload)
+      const decodedPayloadSchema = Schema.toType(contract.payloadSchema)
       const decodedPayloadFields = payloadFields(decodedPayloadSchema.ast)
 
       const toDecodedFieldEntry = (field: PayloadField) =>
@@ -273,7 +273,7 @@ const makeRpcCli = <
 
       const compileField = Effect.fn("RpcCli.compileField")(function* ({ property, path }: PayloadField) {
         if (!Predicate.isString(property.name)) {
-          return yield* RpcCliDefinitionError.make({ procedure: contract.tag, reason: "payload field names must be strings" })
+          return yield* RpcCliDefinitionError.make({ procedure: contract._tag, reason: "payload field names must be strings" })
         }
 
         const serializedPath = JSON.stringify(path)
@@ -285,7 +285,7 @@ const makeRpcCli = <
         const configKey = Array.join(flagNames, "-")
 
         if (HashSet.has(ReservedFlagNames, configKey)) {
-          return yield* RpcCliDefinitionError.make({ procedure: contract.tag, reason: `payload field ${property.name} collides with reserved flag --${configKey}` })
+          return yield* RpcCliDefinitionError.make({ procedure: contract._tag, reason: `payload field ${property.name} collides with reserved flag --${configKey}` })
         }
 
         const description = descriptionFor(property)
@@ -304,7 +304,7 @@ const makeRpcCli = <
         const key = pipe(collidingFields.value, Array.headNonEmpty, Tuple.get(1))
 
         return yield* RpcCliDefinitionError.make({
-          procedure: contract.tag,
+          procedure: contract._tag,
           reason: `payload fields collide with native flag --${key}`,
         })
       }
@@ -337,7 +337,7 @@ const makeRpcCli = <
         }
 
         const decodeInputJson = Schema.decodeUnknownEffect(inputJsonSchema)
-        const decodeNative = Schema.decodeUnknownEffect(contract.payload)
+        const decodeNative = Schema.decodeUnknownEffect(contract.payloadSchema)
 
         const decodeNativeInput = Effect.fn("RpcCli.decodeNativeInput")(function* () {
           const noNativeInput = !hasNativeInput
@@ -345,7 +345,7 @@ const makeRpcCli = <
           const initialPayload = emptyPayloads()
 
           const encoded = emptyVoid
-            ? yield* Schema.encodeUnknownEffect(contract.payload)(undefined)
+            ? yield* Schema.encodeUnknownEffect(contract.payloadSchema)(undefined)
             : Array.reduce(nativeInputEntries, initialPayload, (payload, [path, value]) => setPayloadFields(payload, path, value))
 
           return yield* decodeNative(encoded)
@@ -361,7 +361,7 @@ const makeRpcCli = <
           { flatten: true },
         )
 
-        const success = yield* (client as (tag: string, payload: unknown) => Effect.Effect<unknown, unknown, unknown>)(contract.tag, payload)
+        const success = yield* (client as (tag: string, payload: unknown) => Effect.Effect<unknown, unknown, unknown>)(contract._tag, payload)
         const encoded = yield* Schema.encodeUnknownEffect(outputSchema)(success)
         const stdio = yield* Stdio.Stdio
         const output = Stream.make(`${encoded}\n`)
@@ -379,7 +379,7 @@ const makeRpcCli = <
       const provideProtocol = (arguments_: Record<string, Option.Option<unknown>>) =>
         pipe(execute(arguments_), Effect.provide(options.protocol))
 
-      return Command.make(contract.tag, config, provideProtocol)
+      return Command.make(contract._tag, config, provideProtocol)
     }))
 
     const verifyNoSubcommandCollision = Effect.fn("RpcCli.verifyNoSubcommandCollision")(function* (command: Subcommands[number]) {

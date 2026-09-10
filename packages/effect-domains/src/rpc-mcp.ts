@@ -43,19 +43,19 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
       () => RpcMcpDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" }),
     )
 
-    if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract.tag)) {
-      return yield* RpcMcpDefinitionError.make({ procedure: contract.tag, reason: "MCP tool names must contain 1–128 letters, digits, underscores, dots, or hyphens" })
+    if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract._tag)) {
+      return yield* RpcMcpDefinitionError.make({ procedure: contract._tag, reason: "MCP tool names must contain 1–128 letters, digits, underscores, dots, or hyphens" })
     }
 
-    const InputSchema = Schema.Struct({ input: contract.payload })
+    const InputSchema = Schema.Struct({ input: contract.payloadSchema })
     interface Input extends Schema.Schema.Type<typeof InputSchema> {}
-    const OutputSchema = Schema.Struct({ result: contract.success })
+    const OutputSchema = Schema.Struct({ result: contract.successSchema })
     interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
-    const ErrorSchema = Schema.fromJsonString(contract.error)
-    const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: contract.tag, reason: String(cause) })
+    const ErrorSchema = Schema.fromJsonString(contract.errorSchema)
+    const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: contract._tag, reason: String(cause) })
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
-    const tool = McpSchema.Tool.make({ name: contract.tag, inputSchema, outputSchema })
+    const tool = McpSchema.Tool.make({ name: contract._tag, inputSchema, outputSchema })
     const withCodecContext = withHandlerContext(procedure as UnaryRpc)
 
     const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown, headers: Headers.Headers) {
@@ -64,7 +64,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
       const payload: Input = yield* pipe(
         decodeInput(arguments_),
         withCodecContext,
-        Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${contract.tag}` })),
+        Effect.mapError(() => McpSchema.InvalidParams.make({ message: `Invalid arguments for ${contract._tag}` })),
       )
 
       const failureResponse = (cause: unknown) => pipe(
@@ -77,7 +77,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
       const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
 
       return yield* pipe(
-        client(contract.tag, payload.input, { headers }),
+        client(contract._tag, payload.input, { headers }),
         Effect.matchEffect({
           onFailure: failureResponse,
           onSuccess: (result) => pipe(

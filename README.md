@@ -126,7 +126,7 @@ const Documents = Resource.make({
 
 Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults, subject bindings, generation, or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
 
-`operations.create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input; a supplied bound field is rejected before authorization, and the server injects trusted subject claims before checking the candidate policy.
+`operations.create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input and cannot be supplied by callers. The server injects trusted subject claims before checking the candidate policy.
 
 Repositories enforce policy even when invoked by authored code. Hidden rows behave as missing; lists filter in SQL before pagination. Create/update/patch require a readable candidate, and returned rows are checked again. Checks and writes share a transaction, so a denied mutation leaves no changes. Missing or invalid identity yields `Unauthenticated`; denied actions yield `Forbidden`.
 
