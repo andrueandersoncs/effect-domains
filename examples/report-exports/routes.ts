@@ -1,20 +1,14 @@
-import { Effect, pipe } from "effect"
+import { Effect, flow, pipe } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { PrometheusMetrics } from "effect/unstable/observability"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
+import { ReportExportOperatorAuthorization } from "./authorization.ts"
 
 const metrics = Effect.fn("ReportExports.metrics")(function* (request: HttpServerRequest.HttpServerRequest) {
   const authenticator = yield* AuthorizationRpc.Authenticator
-
-  const authenticated = yield* pipe(
-    authenticator.authenticate(request.headers),
-    Effect.as(true),
-    Effect.catchTag("Unauthenticated", () => Effect.succeed(false)),
-  )
-
-  if (!authenticated) {
-    return HttpServerResponse.empty({ status: 401 })
-  }
+  const subject = yield* authenticator.authenticate(request.headers)
+  yield* pipe(Authorization.requireSubject(ReportExportOperatorAuthorization), Effect.provideService(AuthorizationSubject, subject))
 
   const body = yield* PrometheusMetrics.format({ prefix: "report_exports" })
 
@@ -23,4 +17,9 @@ const metrics = Effect.fn("ReportExports.metrics")(function* (request: HttpServe
   })
 })
 
-export const ReportExportRoutes = HttpRouter.add("GET", "/operator/metrics", metrics)
+const metricsHandler = flow(metrics, Effect.catchTags({
+  Unauthenticated: () => Effect.sync(() => HttpServerResponse.empty({ status: 401 })),
+  Forbidden: () => Effect.sync(() => HttpServerResponse.empty({ status: 403 })),
+}))
+
+export const ReportExportRoutes = HttpRouter.add("GET", "/operator/metrics", metricsHandler)

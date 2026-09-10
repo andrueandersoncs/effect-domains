@@ -1,0 +1,17 @@
+{
+  "name": "@effect-domains/example-purchased-guides",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "@effect-domains/example-support": "workspace:*",
+    "@effect/platform-bun": "catalog:",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

@@ -74,6 +74,15 @@
         "effect-domains": "workspace:*",
       },
     },
+    "examples/purchased-guides": {
+      "name": "@effect-domains/example-purchased-guides",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "@effect/platform-bun": "catalog:",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
     "examples/reading-list": {
       "name": "@effect-domains/example-reading-list",
       "dependencies": {
@@ -207,6 +216,8 @@
     "@effect-domains/example-field-notes": ["@effect-domains/example-field-notes@workspace:examples/field-notes"],
 
     "@effect-domains/example-orders-invoices": ["@effect-domains/example-orders-invoices@workspace:examples/orders-invoices"],
+
+    "@effect-domains/example-purchased-guides": ["@effect-domains/example-purchased-guides@workspace:examples/purchased-guides"],
 
     "@effect-domains/example-reading-list": ["@effect-domains/example-reading-list@workspace:examples/reading-list"],
 

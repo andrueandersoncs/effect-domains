@@ -10,6 +10,7 @@
     "./authorization": "./src/authorization.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",
     "./domain": "./src/domain.ts",
+    "./entitlements": "./src/entitlements.ts",
     "./migrations": "./src/migrations.ts",
     "./policy": "./src/policy.ts",
     "./policy-sql": "./src/policy-sql.ts",

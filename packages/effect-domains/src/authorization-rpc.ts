@@ -2,13 +2,14 @@ import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
 import type { Headers } from "effect/unstable/http"
 import { RpcMiddleware } from "effect/unstable/rpc"
 import { Authorization, AuthorizationSubject, Forbidden, Unauthenticated, type SubjectPolicy } from "./authorization.ts"
+import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 
 class Authenticator extends Context.Service<Authenticator, {
   readonly authenticate: (headers: Headers.Headers) => Effect.Effect<Readonly<Record<string, unknown>>, Unauthenticated>
 }>()("@effect-domains/Authenticator") {}
 
 class RpcSubjectPolicy extends Context.Service<RpcSubjectPolicy, SubjectPolicy>()("@effect-domains/RpcSubjectPolicy") {}
-const authenticationErrorsSchema = Schema.Union([Unauthenticated, Forbidden])
+const authenticationErrorsSchema = Schema.Union([Unauthenticated, Forbidden, EntitlementRequired, EntitlementUnavailable])
 
 export class AuthorizationRpc extends RpcMiddleware.Service<AuthorizationRpc, {
   provides: AuthorizationSubject

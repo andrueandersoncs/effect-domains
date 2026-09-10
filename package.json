@@ -24,6 +24,8 @@
     "test": "bun --bun vitest run",
     "orders-invoices": "bun run examples/orders-invoices/main.ts",
     "orders-invoices:server": "bun run examples/orders-invoices/main.ts serve",
+    "purchased-guides": "bun run examples/purchased-guides/main.ts",
+    "purchased-guides:server": "bun run examples/purchased-guides/main.ts serve",
     "equipment-register": "bun run examples/equipment-register/main.ts",
     "equipment-register:server": "bun run examples/equipment-register/main.ts serve",
     "equipment-register:client": "bun run examples/equipment-register/client.ts",

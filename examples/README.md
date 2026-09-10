@@ -14,7 +14,8 @@ Each example solves a concrete record-keeping or operational problem. Small does
 | [equipment-register](#equipment-register) | Register, relocate, and inspect equipment through MCP tools | Unique asset tags and generated tool contracts |
 | [reservations](reservations/README.md) | Hold stock, confirm it, or release it | Explicit transitions and transactional inventory |
 | [orders-invoices](#orders-and-invoices) | Build an order, issue an invoice, and record payment | Tenant relations, transactions, optimistic versions |
-| [report-exports](#report-exports) | Approve and publish a financial JSON report | Durable approval and queue-backed artifact writing |
+| [purchased-guides](#purchased-guides) | Read a guide unlocked by a one-time purchase | Tenant visibility and current per-resource entitlements |
+| [report-exports](#report-exports) | Approve and publish a financial JSON report | Account subscription gating and durable artifact writing |
 | [appointment-reminders](#appointment-reminders) | Schedule an appointment notification in an application inbox | Durable scheduling, deduplication, and retention |
 
 ## Shared runtime
@@ -181,14 +182,35 @@ Amounts are checked safe-integer minor units. Empty orders cannot be invoiced; d
 
 `ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial history](orders-invoices/migrations.ts), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
 
+## Purchased guides
+
+The [purchased-guides application](purchased-guides/resources.ts) exposes read-only `guides.get` and bounded `guides.list`. Ordinary role and tenant policies apply first; `guides.read` additionally requires a persisted purchase matching the trusted subject's tenant, user, and guide. The private purchase resource publishes no grant-writing operations. Start it:
+
+```bash
+PORT=3003 bun run purchased-guides:server
+```
+
+In another terminal:
+
+```bash
+export PURCHASED_GUIDES_URL=http://127.0.0.1:3003/rpc/v1
+export PURCHASED_GUIDES_TOKEN=bob-demo
+bun run purchased-guides guides.get --input-json '{"id":"guide-sql-basics"}'
+bun run purchased-guides guides.get --input-json '{"id":"guide-audit-trails"}'
+bun run purchased-guides guides.get --input-json '{"id":"guide-other-tenant"}'
+bun run purchased-guides guides.list --input-json '{}'
+bun run purchased-guides inspect
+```
+
+The first guide succeeds; the second fails with `EntitlementRequired`; the third remains `ResourceNotFound`. The list fails because it includes a visible locked guide: entitlement checks do not silently filter pages. `PURCHASED_GUIDES_DB` defaults to `purchased-guides.sqlite`. Initial guide/purchase facts are inserted once; the [resolver](purchased-guides/entitlements.ts) reads current status on every check, so setting a purchase to `refunded` or `revoked` denies access and restart preserves that decision. These are application-owned facts, not a payment-provider simulation or checkout implementation.
+
 ## Report exports
 
 [Report exports](report-exports/workflow.ts) publish a concrete financial JSON artifact from explicitly supplied account lines and a reporting period. Inputs identify a report, currency (AUD, CAD, EUR, GBP, JPY, or USD), debit/credit amounts, and release policy. This does not query an imaginary accounting system or claim balanced books; the supplied lines are the source data.
 
-Start the server with a private local operator token and output directory:
+Start the server with an output directory. It uses the public demo sessions from [example authentication](../packages/example-support/src/authentication.ts), not production credentials:
 
 ```bash
-export REPORT_EXPORTS_TOKEN=local-operator-secret
 export REPORT_EXPORTS_OUTPUT_DIR="$PWD/report-artifacts"
 PORT=3001 bun run report-exports:server
 ```
@@ -196,14 +218,15 @@ PORT=3001 bun run report-exports:server
 In another terminal:
 
 ```bash
-export REPORT_EXPORTS_TOKEN=local-operator-secret
+export REPORT_EXPORTS_TOKEN=alice-demo
 export REPORT_EXPORTS_URL=http://127.0.0.1:3001/rpc/v1
 bun run report-exports ReportExport.GenerateDiscard --input-json '{"report":{"reportId":"september-ledger-1","reportingPeriod":{"startsAt":"2026-09-01T00:00:00.000Z","endsAt":"2026-10-01T00:00:00.000Z"},"currency":"USD","releasePolicy":"operatorApproval"},"lines":[{"accountCode":"4000","description":"September consulting revenue","direction":"credit","amountMinor":125000},{"accountCode":"6100","description":"September office supplies","direction":"debit","amountMinor":8500}]}'
 ```
 
-Copy the returned execution ID into `EXECUTION_ID`:
+Copy the returned execution ID into `EXECUTION_ID`. Switch to the global admin operator to poll and release:
 
 ```bash
+export REPORT_EXPORTS_TOKEN=admin-demo
 bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
 bun run report-exports ReportExport.Release --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
 bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
@@ -212,9 +235,11 @@ bun run report-exports ReportExport.Status
 
 A native durable clock waits five seconds; operatorApproval reports then wait for explicit release. The automatic policy skips that approval barrier. An Activity prepares JSON and a durable queue worker atomically publishes the artifact. Poll until `Succeeded`, then open the returned `artifactPath`; it contains the report, lines, and currency-local debit/credit totals. `PendingOrUnknown` does not distinguish suspended work from an unknown ID. `Generate` waits for completion, `GenerateDiscard` acknowledges the stable execution ID, and `GenerateResume` explicitly resumes an execution.
 
-Reuse a report ID only to address the same execution; use a fresh ID for different source data. Do not treat repeat submission as replacement. Invalid period ordering, line amounts, and currency syntax fail input validation; unsafe total arithmetic fails the workflow. Release, submission, resume, polling, and status require the configured token; `/operator/metrics` independently requires it too.
+Reuse a report ID within an account only to address the same execution; use a fresh ID for different source data. Handlers derive account identity from the authenticated subject, not input, and account/report pairs determine execution identity. Do not treat repeat submission as replacement. Invalid period ordering, line amounts, and currency syntax fail input validation; unsafe total arithmetic fails the workflow.
 
-Application storage defaults to `report-exports.sqlite` (`REPORT_EXPORTS_DB`); native execution storage defaults to `report-exports-execution.sqlite` (`REPORT_EXPORTS_EXECUTION_DB`). Stop the server and run `bun run report-exports:worker` with the same token, databases, and output directory to continue accepted work without HTTP. Switch back to serve for remote release or polling.
+Generation requires an editor role and the `reports.generate` entitlement. Acme receives a persisted 30-day subscription on first startup, so `alice-demo` can generate; `outsider-demo` is initially unpaid, while `bob-demo` lacks the editor role. The [subscription resolver](report-exports/subscriptions.ts) reads the database and Effect clock on every check. Cancellation preserves access until the paid term ends; an explicit `graceUntilEpochSeconds` can extend canceled access. Expiry/grace endpoints are exclusive. Restart never renews a subscription. Global admins retain release, resume, polling, status, and `/operator/metrics` access regardless of payment; already accepted work continues without per-step entitlement checks.
+
+Application storage defaults to `report-exports.sqlite` (`REPORT_EXPORTS_DB`); native execution storage defaults to `report-exports-execution.sqlite` (`REPORT_EXPORTS_EXECUTION_DB`). Stop the server and run `bun run report-exports:worker` with the same databases and output directory to continue accepted work without HTTP. Switch back to serve for remote release or polling. Use fresh execution storage for this account-bound workflow contract; old unscoped workflow payloads are not migrated. No provider, webhook, checkout, or credit-consumption integration is included.
 
 ## Appointment reminders
 

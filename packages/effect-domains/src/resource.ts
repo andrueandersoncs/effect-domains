@@ -6,6 +6,7 @@ import { Creation, type CreationInspection } from "./resource-creation.ts"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier, type StructSchema } from "./domain.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
+import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 const PageLimitSchema = Schema.Int.check(Schema.isGreaterThan(0))
 const OptionalLimitSchema = Schema.optionalKey(PageLimitSchema)
@@ -113,13 +114,13 @@ const decodeOperations = Schema.decodeUnknownEffect(OperationsSchema)
 type CompatibleStorage<Canonical extends StructSchema, Storage extends StructSchema> =
   Storage["Type"] extends Canonical["Type"] ? Canonical["Type"] extends Storage["Type"] ? unknown : never : never
 
-const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, Unauthenticated, Forbidden])
+const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, Unauthenticated, Forbidden, EntitlementRequired, EntitlementUnavailable])
 const PublicResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound])
 type ResourceErrors<Auth> = Auth extends typeof Authorization.public ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema
 
 type AuthorizedRepository<Repository, Auth> = {
   readonly [Key in keyof Repository]: Repository[Key] extends (...args: infer Args) => Effect.Effect<infer Value, infer Error, infer Services>
-    ? (...args: Args) => Effect.Effect<Value, Auth extends typeof Authorization.public ? Exclude<Error, Forbidden | Unauthenticated> : Error, Services>
+    ? (...args: Args) => Effect.Effect<Value, Auth extends typeof Authorization.public ? Exclude<Error, Forbidden | Unauthenticated | EntitlementRequired | EntitlementUnavailable> : Error, Services>
     : never
 }
 
@@ -302,14 +303,6 @@ export const Resource = {
     const encodeStorage = flow(Schema.encodeUnknownEffect(table.storageSchema), Effect.mapError(repositoryFailure))
     const encodeRow = flow(validateCanonical, Effect.flatMap(encodeStorage))
     const decodeRow = flow(Schema.decodeUnknownEffect(table.storageSchema), Effect.mapError(repositoryFailure), Effect.flatMap(validateCanonical))
-    const storageRowsSchema = Schema.Array(table.storageSchema)
-
-    const decodeRows = flow(
-      Schema.decodeUnknownEffect(storageRowsSchema),
-      Effect.mapError(repositoryFailure),
-      Effect.flatMap(Effect.forEach(validateCanonical)),
-    )
-
     const missing = (key: unknown) => ResourceNotFound.make({ resource: table.name, key: String(key) })
     const withAccess = withAuthorization(authorization, table)
 
@@ -351,7 +344,7 @@ export const Resource = {
       const encoded = yield* encodeKey(key)
       const stored = yield* selectKey(store, permission, encoded)
       if (Option.isNone(stored)) return Option.none<CanonicalRow>()
-      return yield* pipe(decodeRow(stored.value), Effect.map(Option.some))
+      return yield* pipe(readable(permission.subject, stored.value), Effect.map(Option.some))
     })
 
     const getAuthorized = Effect.fn("Repository.get")(function* (
@@ -479,7 +472,7 @@ export const Resource = {
       const query = new RepositorySelect({ filter, after: cursor, limit: limit + 1 })
       const rows = yield* store.select(table, query, permission)
       const stored = Array.take(rows, limit)
-      const items = yield* decodeRows(stored)
+      const items = yield* Effect.forEach(stored, (row) => readable(permission.subject, row))
       const last = rows.length > limit ? Array.last(stored) : Option.none<Readonly<Record<string, unknown>>>()
 
       const nextCursor = yield* Option.match(last, {

@@ -5,7 +5,7 @@ import { Policy } from "./policy.ts"
 import { CreationInspectionSchema } from "./resource-creation.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
-import type { SubjectPolicy } from "./authorization.ts"
+import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
 
 type InspectableApplication = Readonly<{
   name: string
@@ -33,7 +33,7 @@ const StorageSchema = Schema.Struct({
 interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
 const OperationNamesSchema = Schema.Array(Schema.String)
 const PolicyRulesSchema = Schema.Record(Schema.String, Schema.String)
-const PolicyInspectionSchema = Schema.TaggedStruct("Policy", { subject: Schema.Unknown, scope: Schema.String, allow: PolicyRulesSchema })
+const PolicyInspectionSchema = Schema.TaggedStruct("Policy", { subject: Schema.Unknown, scope: Schema.String, allow: PolicyRulesSchema, require: Schema.optionalKey(EntitlementRequirementsSchema) })
 const AuthorizationInspectionSchema = Schema.Union([Schema.TaggedStruct("Public", {}), Schema.TaggedStruct("Deny", {}), PolicyInspectionSchema])
 
 const ResourceInspectionSchema = Schema.Struct({
@@ -47,7 +47,7 @@ const ResourceInspectionSchema = Schema.Struct({
 })
 
 interface ResourceInspection extends Schema.Schema.Type<typeof ResourceInspectionSchema> {}
-const SubjectPolicyInspectionSchema = Schema.Struct({ subject: Schema.Unknown, rule: Schema.String })
+const SubjectPolicyInspectionSchema = Schema.Struct({ subject: Schema.Unknown, rule: Schema.String, require: Schema.Array(EntitlementRequirementSchema) })
 
 const OperationInspectionSchema = Schema.Struct({
   name: Schema.String,
@@ -80,7 +80,7 @@ const inspectAuthorization = (authorization: Resource["authorization"]) => {
   const subject = schemaDocument(authorization.subject)
   const scope = Policy.render(authorization.scope)
   const allow = renderPolicies(authorization.allow)
-  return PolicyInspectionSchema.make({ subject, scope, allow })
+  return PolicyInspectionSchema.make({ subject, scope, allow, require: authorization.require })
 }
 
 const resource = (definition: Resource) => {
@@ -111,7 +111,7 @@ class InspectionError extends Schema.TaggedError<InspectionError>()("Application
 const inspectSubjectPolicy = (policy: SubjectPolicy) => {
   const subject = schemaDocument(policy.subject)
   const rule = Policy.render(policy.expression)
-  return SubjectPolicyInspectionSchema.make({ subject, rule })
+  return SubjectPolicyInspectionSchema.make({ subject, rule, require: policy.require })
 }
 
 const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: RpcProcedure) {

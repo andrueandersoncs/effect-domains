@@ -121,7 +121,10 @@ export const resolveScalarCollectionLiteralOrSubject = Effect.fn("Policy.resolve
   return yield* resolveAs(operand, environment, collection)
 })
 
-const scalarOperand = (operand: Operand, environment: PolicyEnvironment) => resolveAs(operand, environment, scalar)
+export const resolveScalarOperand = Effect.fn("Policy.resolveScalarOperand")(function* (operand: Operand, environment: PolicyEnvironment) {
+  return yield* resolveAs(operand, environment, scalar)
+})
+
 const collectionOperand = (operand: Operand, environment: PolicyEnvironment) => resolveAs(operand, environment, collection)
 const scalarEquals = Equivalence.strictEqual<Scalar>()
 const containsScalar = Array.containsWith(scalarEquals)
@@ -132,13 +135,13 @@ const evaluateLayer: Algebra<Evaluator> = (layer) =>
     Match.tagsExhaustive({
       Constant: ({ value }) => pipe(Effect.succeed(value), Function.constant),
       Equal: ({ left, right }) => Effect.fn("Policy.equal")(function* (environment: PolicyEnvironment) {
-        const leftValue = yield* scalarOperand(left, environment)
-        const rightValue = yield* scalarOperand(right, environment)
+        const leftValue = yield* resolveScalarOperand(left, environment)
+        const rightValue = yield* resolveScalarOperand(right, environment)
         return scalarEquals(leftValue, rightValue)
       }),
       Includes: ({ collection, value }) => Effect.fn("Policy.includes")(function* (environment: PolicyEnvironment) {
         const values = yield* collectionOperand(collection, environment)
-        const member = yield* scalarOperand(value, environment)
+        const member = yield* resolveScalarOperand(value, environment)
         return containsScalar(values, member)
       }),
       All: ({ children }) => Effect.fn("Policy.all")(function* (environment: PolicyEnvironment) {

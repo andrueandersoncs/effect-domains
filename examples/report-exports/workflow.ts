@@ -1,8 +1,9 @@
 import { Array, Cause, DateTime, Effect, Equivalence, Exit, Layer, Match, Option, Schema, Struct, pipe } from "effect"
 import { ClusterError, RunnerStorage, Sharding } from "effect/unstable/cluster"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { Activity, DurableClock, DurableDeferred, DurableQueue, Workflow, WorkflowProxy, WorkflowProxyServer } from "effect/unstable/workflow"
-import { AuthorizationSubject } from "effect-domains/authorization"
+import { Activity, DurableClock, DurableDeferred, DurableQueue, Workflow } from "effect/unstable/workflow"
+import { Authorization, AuthorizationSubject, Forbidden } from "effect-domains/authorization"
+import { EntitlementRequired, EntitlementUnavailable } from "effect-domains/entitlements"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 
 import {
@@ -16,7 +17,8 @@ import {
   type ReportExportRequest,
 } from "./contracts.ts"
 
-const workflowProxyPrefix = "ReportExport."
+import { ReportExportGenerationAuthorization, ReportExportOperatorAuthorization } from "./authorization.ts"
+
 const groupsSchema = Schema.Array(Schema.String)
 
 class ReportExportRunnerStatus extends Schema.Class<ReportExportRunnerStatus>("ReportExportRunnerStatus")({
@@ -46,10 +48,12 @@ const ReportReleaseApproval = DurableDeferred.make("ReportExports.ReleaseApprova
   success: ReportReleaseSchema,
 })
 
+const WorkflowRequestSchema = Schema.Struct({ ...ReportExportRequestSchema.fields, accountId: Schema.String })
+
 export const FinancialReportExport = Workflow.make("Generate", {
-  payload: ReportExportRequestSchema,
+  payload: WorkflowRequestSchema,
   success: ReportArtifactSchema,
-  idempotencyKey: ({ report }) => report.reportId,
+  idempotencyKey: ({ accountId, report }) => JSON.stringify([accountId, report.reportId]),
 })
 
 
@@ -108,6 +112,7 @@ export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.ex
   },
 )
 
+
 const ReleaseReport = Rpc.make("ReportExport.Release", {
   payload: ReleaseReportSchema,
   success: Schema.Void,
@@ -123,13 +128,42 @@ const ReportExportClusterStatus = Rpc.make("ReportExport.Status", {
   error: ClusterError.PersistenceError,
 })
 
-const nativeProxyGroup = WorkflowProxy.toRpcGroup([FinancialReportExport], {
-  prefix: workflowProxyPrefix,
-}).middleware(AuthorizationRpc)
+const reportPayloadSchema = Schema.toCodecJson(ReportExportRequestSchema)
+const artifactPayloadSchema = Schema.toCodecJson(ReportArtifactSchema)
+const generationErrorsSchema = Schema.Union([Forbidden, EntitlementRequired, EntitlementUnavailable])
+const generate = Rpc.make("ReportExport.Generate", { payload: reportPayloadSchema, success: artifactPayloadSchema, error: generationErrorsSchema })
+const generateDiscard = Rpc.make("ReportExport.GenerateDiscard", { payload: reportPayloadSchema, success: Schema.String, error: generationErrorsSchema })
+const resume = Rpc.make("ReportExport.GenerateResume", { payload: PollReportExportSchema, success: Schema.Void, error: Forbidden })
 
-const operatorGroup = RpcGroup.make(ReleaseReport, PollReportExport, ReportExportClusterStatus).middleware(AuthorizationRpc)
+const generationGroup = RpcGroup.make(generate, generateDiscard)
+  .middleware(AuthorizationRpc)
+  .annotateRpcs(AuthorizationRpc.policy, ReportExportGenerationAuthorization)
+
+const operatorGroup = RpcGroup.make(resume, ReleaseReport, PollReportExport, ReportExportClusterStatus)
+  .middleware(AuthorizationRpc)
+  .annotateRpcs(AuthorizationRpc.policy, ReportExportOperatorAuthorization)
+
+const authorizedRequest = Effect.fn("ReportExports.authorizedRequest")(function* (request: ReportExportRequest) {
+  const subject = yield* Authorization.requireSubject(ReportExportGenerationAuthorization)
+  return WorkflowRequestSchema.make({ ...request, accountId: subject.tenantId })
+})
+
+const generationHandlers = generationGroup.toLayer({
+  "ReportExport.Generate": Effect.fn("ReportExports.generate")(function* (request) {
+    const payload = yield* authorizedRequest(request)
+    return yield* FinancialReportExport.execute(payload)
+  }),
+  "ReportExport.GenerateDiscard": Effect.fn("ReportExports.generateDiscard")(function* (request) {
+    const payload = yield* authorizedRequest(request)
+    return yield* FinancialReportExport.execute(payload, { discard: true })
+  }),
+})
 
 const operatorHandlers = operatorGroup.toLayer({
+  "ReportExport.GenerateResume": Effect.fn("ReportExports.resume")(function* ({ executionId }) {
+    yield* Authorization.requireSubject(ReportExportOperatorAuthorization)
+    yield* FinancialReportExport.resume(executionId)
+  }),
   "ReportExport.Release": Effect.fn("ReportExports.Release")(function* ({ executionId }) {
     const subject = yield* AuthorizationSubject
     const releasedBy = yield* pipe(Schema.decodeUnknownEffect(Schema.NonEmptyString)(subject["userId"]), Effect.orDie)
@@ -176,9 +210,7 @@ const operatorHandlers = operatorGroup.toLayer({
   }),
 })
 
-const proxyHandlers = WorkflowProxyServer.layerRpcHandlers([FinancialReportExport], { prefix: workflowProxyPrefix })
-
 export const ReportExportCommands = {
-  group: nativeProxyGroup.merge(operatorGroup),
-  handlers: Layer.merge(proxyHandlers, operatorHandlers),
+  group: generationGroup.merge(operatorGroup),
+  handlers: Layer.merge(generationHandlers, operatorHandlers),
 }
