@@ -1,6 +1,6 @@
 # Applications
 
-Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local inspection. Table-bearing applications use frozen migration manifests; the durable examples additionally isolate native execution storage from application data.
+Each application is a runnable Bun workspace package. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local inspection. Table-bearing applications use ordered imported migration artifacts; the durable examples additionally isolate native execution storage from application data.
 
 ## Choose an application
 
@@ -62,9 +62,8 @@ These are deliberately public credentials. Anyone who knows a token can imperson
 Set the token on the **client**, not the server:
 
 ```bash
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.create \
-  --title "Ship authorization examples"
-SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --id example-note --text "Shared notes"
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.create --input-json '{"title":"Ship authorization examples"}'
+SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --input-json '{"id":"example-note","text":"Shared notes"}'
 ```
 
 Todo creation binds `tenantId` and `ownerId` from the authenticated subject. They are deliberately absent from the generated create input; sending either field is rejected by the server. Full-row updates still include both ownership fields, while the todo guide retains forbidden ownership-patch examples.
@@ -81,11 +80,10 @@ Policy is declared in `resources.ts`, not in canonical schemas or per-operation 
 - `resources.ts`: storage registration and selected generated operations.
 - `contracts.ts`: native `Rpc.make` contracts grouped with `RpcGroup.make`; use explicit `Schema.toCodecJson` for non-JSON-native representations such as dates. Absent for generated-only applications.
 - `application.ts`: `Application.make({ name, parts })`, which accepts resources, native `{ group, handlers }` bundles, and nested applications.
-- `migrations/manifest.json`: ordered registry of frozen migration artifacts used at runtime.
-- `migrations.ts`: decoded fixture/history data only where a seed or other local code needs it.
+- `migrations.ts`: ordered JSON artifact imports decoded with `SqliteMigrations.decodeHistory` for runtime use.
 - `main.ts`: the sole runner for `serve`, `inspect`, generated remote commands, and `worker` when background layers are configured.
 
-`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples resolve `new URL("./migrations/manifest.json", import.meta.url)`; callers with decoded history may pass `{ migrations, filename? }`, and the workflow-only application uses empty history. Services, initialization, native `background`, HTTP `routes`, and admin are explicit options. Native execution layers compose in application `services` with explicit `Layer.provide` of private SQLite; there is no `execution` option. The runner supplies loopback RPC, CLI, inspection, MCP, and opted-in admin. There are no schema CLI commands. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
+`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples decode ordered JSON imports in `migrations.ts` and pass `database: { migrations, filename? }`; the workflow-only application uses empty history. There is no manifest loader or `database.manifest` option. Services, initialization, native `background`, HTTP `routes`, and admin are explicit options. Native execution layers compose in application `services` with explicit `Layer.provide` of private SQLite; there is no `execution` option. The runner supplies loopback RPC, CLI, inspection, MCP, and opted-in admin. There are no schema CLI commands. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
 
 ## Generated lists
 
@@ -132,20 +130,20 @@ bun run authored-sql:server
 In another terminal:
 
 ```bash
-bun run authored-sql books.create --title "A Field Guide" --page-count 120
+bun run authored-sql books.create --input-json '{"title":"A Field Guide","pageCount":120}'
 bun run authored-sql books.list
 ```
 
 Copy the returned UUIDv7 into `BOOK_ID`:
 
 ```bash
-bun run authored-sql books.get --id "$BOOK_ID"
+bun run authored-sql books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 bun run authored-sql books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Revised Field Guide\",\"pageCount\":144}"
-bun run authored-sql books.remove --id "$BOOK_ID"
+bun run authored-sql books.remove --input-json "{\"id\":\"$BOOK_ID\"}"
 bun run authored-sql inspect books.create
 ```
 
-`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration manifest](authored-sql/migrations/manifest.json) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Author later changes with [explicit migration steps](#review-schema-changes).
+`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration history](authored-sql/migrations.ts) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Author later changes with [explicit migration steps](#review-schema-changes).
 
 ## Reservation application
 
@@ -180,7 +178,7 @@ The line advances the order to version 2 and total 2500. Issuing the invoice ato
 ```bash
 bun run orders-invoices billing.payInvoice --input-json "{\"invoiceId\":\"$INVOICE_ID\",\"expectedVersion\":1}"
 bun run orders-invoices billing.getOrder --input-json "{\"orderId\":\"$ORDER_ID\"}"
-ORDERS_INVOICES_TOKEN=bob-demo bun run orders-invoices orders.get --id "$ORDER_ID"
+ORDERS_INVOICES_TOKEN=bob-demo bun run orders-invoices orders.get --input-json "{\"id\":\"$ORDER_ID\"}"
 bun run orders-invoices inspect
 ```
 
@@ -188,7 +186,7 @@ The paid invoice has version 2. Repeating a mutation with its old version return
 
 Amounts are checked safe-integer minor units. Empty orders cannot be invoiced; duplicate numbers, duplicate line numbers, arithmetic overflow, invalid transitions, and stale writes have declared errors. Payment records a local transition, not a payment-provider call. Taxes, currencies, credit notes, production identity, and request-idempotent retries are not implemented; fetch the current summary and make an explicit decision after a conflict.
 
-`ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial manifest](orders-invoices/migrations/manifest.json), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
+`ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial history](orders-invoices/migrations.ts), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
 
 ## Durable workflows
 
@@ -242,7 +240,7 @@ export DURABLE_REMINDERS_TOKEN=admin-demo
 REQUEST_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
 DELIVER_AT=$(bun -e 'console.log(new Date(Date.now() + 30000).toISOString())')
 bun run durable-reminders ReminderRecipient.ScheduleDiscard --input-json "{\"entityId\":\"alice\",\"payload\":{\"recipient\":\"alice\",\"requestId\":\"$REQUEST_ID\",\"message\":\"Review the export\",\"deliverAt\":\"$DELIVER_AT\"}}"
-bun run durable-reminders reminder_receipts.list --filter-recipient alice
+bun run durable-reminders reminder_receipts.list --input-json '{"filter":{"recipient":"alice"}}'
 ```
 
 `ScheduleDiscard` acknowledges acceptance without waiting for delivery. `Schedule` takes the same envelope and waits for the receipt. Repeat a request with the same recipient, request ID, and payload to retrieve the existing result rather than deliver again. The handler rejects an `entityId` that differs from the payload recipient. Missing credentials fail authentication; valid non-admin demo sessions cannot schedule or read receipts.
@@ -259,15 +257,15 @@ Application and execution transactions are separate. No cross-database transacti
 
 ## CLI conventions
 
-Scalar payload fields become kebab-case flags. Nested paths produce flags such as `--filter-completed` and `--changes-title`; patch identity is supplied as `--key`. Explicit false booleans are accepted as `--enabled false`; finite numeric fields have native flags, and use `--amount=-1` for negative numeric arguments. `--input-json` accepts the canonical JSON payload, including shapes that cannot be represented by native flags, and cannot be mixed with field flags. No-payload procedures require no input flags; empty struct payloads still decode as `{}`.
+Operation input uses only `--input-json` with the canonical JSON payload; generated field flags are removed. Keep canonical camelCase keys and nested objects. Encode numbers and booleans as JSON values, not strings; negative numbers need no special flag syntax. Timestamp codecs use their declared JSON representation, such as UTC ISO strings for `DateTime.Utc`; storage-only encodings such as the note's `stored:` prefix never belong in CLI input. No-payload procedures require no input; empty structs and payloads with only optional fields default to `{}`. Native application subcommands, `--help`, and `inspect [operation]` remain.
 
 ```bash
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list --filter-completed false --limit 10
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Ship docs"
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list --input-json '{"filter":{"completed":false},"limit":10}'
+RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --input-json "{\"key\":\"$TODO_ID\",\"changes\":{\"title\":\"Ship docs\"}}"
 bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
 ```
 
-The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, a JSON-encoded physical `Table.snapshot` (including its native `generation` key), creation/list policies, local and remote commands, and selected operation contracts. It does not invent opaque runtime fields: handler services and transaction boundaries remain uninspectable.
+The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, a JSON-encoded physical `Table.snapshot` (including its native `generation` key), creation/list policies (including implicit UUID generation), local and remote commands, and selected operation contracts. It does not invent opaque runtime fields: handler services and transaction boundaries remain uninspectable.
 
 ## MCP server
 
@@ -325,7 +323,7 @@ await client.callTool({
 })
 ```
 
-Success includes `structuredContent.result` and equivalent JSON text; the client decodes the created row with its Effect Schema to obtain the generated UUID. List takes `{ input: {} }` and returns an array under `result`; removal returns `{ result: null }`. A declared domain error is returned as tool content, not thrown as a transport exception.
+Success includes `structuredContent.result` and equivalent JSON text; the client decodes the created row with its Effect Schema to obtain the generated UUID. List takes `{ input: {} }` and returns `{ items, nextCursor }` under `result`; removal returns `{ result: null }`. A declared domain error is returned as tool content, not thrown as a transport exception.
 
 To use a coding agent or another MCP client instead, configure **Streamable HTTP** with URL `http://127.0.0.1:3000/mcp`. No token is required for this explicitly public example. The generated CLI remains available separately:
 
@@ -341,13 +339,13 @@ bun run mcp-server inspect books.create
 | `MCP_SERVER_MCP_URL` | `http://127.0.0.1:3000/mcp` | Walkthrough client endpoint |
 | `MCP_SERVER_URL` | `http://127.0.0.1:3000/rpc/v1` | Generated CLI endpoint, not MCP |
 
-For a second server, set `PORT=3003` on the server and `MCP_SERVER_MCP_URL=http://127.0.0.1:3003/mcp` on the walkthrough client. Startup applies its own frozen [migration manifest](mcp-server/migrations/manifest.json); it does not reset existing rows. Keep this unauthenticated example on loopback. For protected MCP operations, use the tenant/owner or role-policy applications described above.
+For a second server, set `PORT=3003` on the server and `MCP_SERVER_MCP_URL=http://127.0.0.1:3003/mcp` on the walkthrough client. Startup applies its own frozen [migration history](mcp-server/migrations.ts); it does not reset existing rows. Keep this unauthenticated example on loopback. For protected MCP operations, use the tenant/owner or role-policy applications described above.
 
 ## Review schema changes
 
-There is no schema CLI or inferred migration planner. Author a frozen artifact with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` only for fresh table/index creation. `snapshot(tables)` captures the target, `decodeHistory(raw)` validates JSON history, and `load(manifest)` reads the ordered registry. Runtime configuration accepts that registry or a decoded history.
+There is no schema CLI or inferred migration planner. Author a frozen artifact with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` only for fresh table/index creation. `snapshot(tables)` captures the target, and `decodeHistory(raw)` validates an ordered array of imported artifact JSONs as an Effect. Runtime configuration is `database: { migrations, filename? }`, where `migrations` is the decoded history. There is no manifest file or loader.
 
-The following standalone authoring example creates a fresh history, then explicitly renames stored `title` to `heading` and supplies `priority: 0` through a rebuild. Save it as `author-migration.ts` at the repository root. It prints JSON only; it does not touch an application database or manifest:
+The following standalone authoring example creates a fresh history, then explicitly renames stored `title` to `heading` and supplies `priority: 0` through a rebuild. Save it as `author-migration.ts` at the repository root. It prints JSON only; it does not touch an application database or runtime history module:
 
 ```ts
 import { BunRuntime } from "@effect/platform-bun"
@@ -394,7 +392,7 @@ bun run author-migration.ts > migration-history-draft.json
 bun run migration-lifecycle inspect documents.create
 ```
 
-The draft array is suitable for `decodeHistory`. For a manifest, save each artifact as a separate JSON object and append its relative filename to the ordered `migrations` array. For an existing application, use the last frozen artifact's `to` as `from`, not a reconstructed historical schema. Review the new artifact and manifest together. Replay the complete history on a disposable database, including representative old rows, before registering it for normal startup. Construction and decoding validate structure, snapshots, and expression syntax; only replay checks that authored steps actually produce the target. File writing and manifest registration are authored tooling, not a framework atomic-write guarantee. Remove the draft files after review; never regenerate already-applied artifacts from current models.
+The draft array is suitable for `decodeHistory`. Save each artifact as a separate JSON object, import it in the application's `migrations.ts`, and append it to the ordered array passed to `SqliteMigrations.decodeHistory`. For an existing application, use the last frozen artifact's `to` as `from`, not a reconstructed historical schema. Review the new artifact and history module together. Replay the complete history on a disposable database, including representative old rows, before using it for normal startup. Construction and decoding validate structure, snapshots, and expression syntax; only replay checks that authored steps actually produce the target. File writing and history registration are authored tooling, not a framework atomic-write guarantee. Remove the draft files after review; never regenerate already-applied artifacts from current models.
 
 `SqliteMigrations.steps` exposes actual schema constructors; call each with `.make(...)`:
 
@@ -408,7 +406,7 @@ The draft array is suitable for `decodeHistory`. For a manifest, save each artif
 
 Rebuild mappings use `SqliteMigrations.copies.Source` for original columns, `.Value` for stored scalar constants, or `.Expression` for a single SQL expression. Expressions run in the `SELECT` over the physical **from** table. The frozen [timestamp artifact](reservations/migrations/002_timestamp.json) converts historical epoch seconds to ISO text. Interacting renames can copy original columns in a rebuild rather than rely on sequential renames.
 
-The todo, document, and reservation manifests retain `003_schema_string_checks`, which removes previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas. Existing artifact JSON histories are unchanged.
+The todo, document, and reservation histories retain `003_schema_string_checks`, which removes previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas. Existing artifact JSON histories are unchanged.
 
 Runtime checks immutable ledger contents and exact table/index definitions, rejects untracked tables, indexes, and triggers, and applies each artifact transactionally. Authors use explicit rebuilds for unique/foreign-key changes and explicit create/drop steps for index changes. The final schema and `foreign_key_check` must pass before the artifact is recorded and committed; invalid rows or inconsistent steps roll back the migration and its ledger entry. No rename/backfill/transform intent language, inferred joins, cascades, or general custom-object migration system is provided. ([Relational contract](../docs/wiki/tables-and-queries.md#relational-storage-declarations))
 
@@ -419,5 +417,5 @@ Runtime checks immutable ledger contents and exact table/index definitions, reje
 - [`Authorization`](../packages/effect-domains/src/authorization.ts): typed resource policy declarations and evaluator.
 - [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
 - [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
-- [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): schema-derived CLI flags and JSON fallback.
+- [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): native operation subcommands with canonical JSON input.
 - [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, explicit migration steps, and verified transactional replay.

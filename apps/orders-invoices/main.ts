@@ -3,12 +3,12 @@ import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
 import { BillingApplication } from "./application.ts"
+import { BillingMigrations } from "./migrations.ts"
 
-const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
 pipe(
   ApplicationBun.run(BillingApplication, {
-    database: { manifest },
+    database: { migrations: BillingMigrations },
     services: ExampleAuthentication,
     admin: true,
   }),

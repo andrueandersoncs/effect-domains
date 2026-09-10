@@ -11,7 +11,7 @@ import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RpcCli } from "./rpc-cli.ts"
 import { RpcMcp } from "./rpc-mcp.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
-import { SqliteMigrations, type SqliteMigration } from "./sqlite-migrations.ts"
+import { type SqliteMigration } from "./sqlite-migrations.ts"
 import type { MigrationError } from "./migrations.ts"
 
 type RuntimeLayer = Layer.Layer<never, any, any>
@@ -23,9 +23,7 @@ type RunOptions<
   Background extends RuntimeLayer = Layer.Layer<never, never, never>,
   Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
 > = Readonly<{
-  database:
-    | Readonly<{ manifest: string | URL } & Partial<{ filename: string }>>
-    | Readonly<{ migrations: ReadonlyArray<SqliteMigration> } & Partial<{ filename: string }>>
+  database: Readonly<{ migrations: ReadonlyArray<SqliteMigration> } & Partial<{ filename: string }>>
 }> & Readonly<Partial<{
   services: Services
   initialize: Initialize
@@ -85,7 +83,6 @@ type RunErrors<
   | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background> | Layer.Error<Routes>
 
 const environmentPrefix = (name: string) => name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")
-const manifestPath = (manifest: string | URL) => manifest instanceof URL ? Bun.fileURLToPath(manifest) : manifest
 
 const databaseFilename = (name: string, configured: Option.Option<string>) => {
   const environment = environmentPrefix(name)
@@ -122,12 +119,7 @@ const withApplicationRuntime = Effect.fn("ApplicationBun.runtime")(function* <
 ) {
   const configuredFilename = Option.fromNullishOr(options.database.filename)
   const filename = yield* databaseFilename(application.name, configuredFilename)
-
-  const migrations = yield* ("migrations" in options.database
-    ? Effect.succeed(options.database.migrations)
-    : pipe(manifestPath(options.database.manifest), SqliteMigrations.load))
-
-  const database = SqliteBunRuntime.sqlClient(filename, { migrations })
+  const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
   const databaseContext = yield* Layer.build(database)
   yield* pipe(Application.prepare(application), Effect.provideContext(databaseContext))
 

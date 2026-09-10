@@ -1,9 +1,5 @@
 import { Authorization } from "effect-domains/authorization"
-import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { Array, Effect, Equivalence, Function, Option, pipe, Result, Schema } from "effect"
 import { Table, TableField, TableSnapshot } from "effect-domains/table"
 import { renderCreateTable } from "../packages/effect-domains/src/sqlite-ddl.ts"
@@ -259,7 +255,7 @@ const explicitExpressions = Effect.fn("SqliteMigrations.explicitExpressions")(fu
     copies: [
       SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
       SqliteMigrations.copies.Expression.make({ column: "title", expression: `replace("title", ':', '-')` }),
-      SqliteMigrations.copies.Value.make({ column: "label", value: "json:colon" }),
+      SqliteMigrations.copies.Value.make({ column: "label", value: "json:colon' ); DROP TABLE expressions; --" }),
       SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
     ],
   })]
@@ -276,7 +272,7 @@ const explicitExpressions = Effect.fn("SqliteMigrations.explicitExpressions")(fu
   const history = yield* SqliteMigrations.decodeHistory([encodedInitial, encodedMigration])
   yield* makeMigrationStore(database, history).prepare(to.tables)
   const transformed = yield* target.repository.get(record.id)
-  expect(transformed).toEqual({ id: record.id, title: "before-after", label: "json:colon", priority: 0 })
+  expect(transformed).toEqual({ id: record.id, title: "before-after", label: "json:colon' ); DROP TABLE expressions; --", priority: 0 })
 })
 
 it.effect("explicit rebuild expressions and backfills survive JSON round trips and preserve colons", () => pipe(explicitExpressions(), Effect.provide(sqliteClient)))
@@ -410,22 +406,11 @@ const failedTransformsRollBackTest = Function.constant(failedTransformsRollBack)
 
 it.effect("failed transforms roll back table data and migration history before a corrected retry", failedTransformsRollBackTest)
 
-const manifestValidation = Effect.fn("SqliteMigrations.manifestValidation")(function* () {
-  const temporaryRoot = tmpdir()
-  const temporaryPrefix = join(temporaryRoot, "effect-domains-migrations-")
-  const createDirectory = Effect.sync(() => mkdtempDisposableSync(temporaryPrefix))
-  const releaseDirectory = (directory: ReturnType<typeof mkdtempDisposableSync>) => Effect.sync(() => directory.remove())
-  const directory = yield* Effect.acquireRelease(createDirectory, releaseDirectory)
-  const manifest = join(directory.path, "manifest.json")
-  const initialPath = join(directory.path, "001_initial.json")
-  const table = Table.make({ name: "manifest_history", schema: TitleSchema })
+const decodedHistoryValidation = Effect.fn("SqliteMigrations.decodedHistoryValidation")(function* () {
+  const table = Table.make({ name: "imported_history", schema: TitleSchema })
   const initial = SqliteMigrations.initial({ id: "001_initial", tables: [table] })
-  const encodedInitial = encodeMigration(initial)
-  const initialText = JSON.stringify(encodedInitial, null, 2)
-  writeFileSync(initialPath, initialText)
-  const manifestText = JSON.stringify({ migrations: ["001_initial.json"] })
-  writeFileSync(manifest, manifestText)
-  const history = yield* SqliteMigrations.load(manifest)
+  const encoded = encodeMigration(initial)
+  const history = yield* SqliteMigrations.decodeHistory([encoded])
   expect(history).toEqual([initial])
   const loaded = pipe(history, Array.head, Option.getOrThrow)
   const loadedTable = pipe(loaded.to.tables, Array.head, Option.getOrThrow)
@@ -436,32 +421,11 @@ const manifestValidation = Effect.fn("SqliteMigrations.manifestValidation")(func
   ]
 
   expect(frozen).toEqual([true, true, true, true, true, true])
-
-  const invalidManifests = [
-    { migrations: ["001_initial.json", "001_initial.json"] },
-    { migrations: ["../001_initial.json"] },
-    { migrations: ["/001_initial.json"] },
-    { migrations: ["missing.json"] },
-    { migrations: [42] },
-  ]
-
-  const rejectManifest = Effect.fn("SqliteMigrations.rejectManifest")(function* (invalid: unknown) {
-    const text = JSON.stringify(invalid)
-    writeFileSync(manifest, text)
-    const outcome = yield* pipe(SqliteMigrations.load(manifest), Effect.result)
-    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
-  })
-
-  yield* Effect.forEach(invalidManifests, rejectManifest)
-  writeFileSync(manifest, manifestText)
-  writeFileSync(initialPath, "not JSON")
-  const malformedArtifact = yield* pipe(SqliteMigrations.load(manifest), Effect.result)
-  expect(malformedArtifact).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
-  const untouchedManifest = readFileSync(manifest, "utf8")
-  expect(untouchedManifest).toBe(manifestText)
+  const malformed = yield* pipe(SqliteMigrations.decodeHistory([{ id: 42 }]), Effect.result)
+  expect(malformed).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
 })
 
-it.effect("manifest loading validates paths, duplicate entries and artifacts, and freezes history", () => pipe(manifestValidation(), Effect.provide(BunServices.layer)))
+it.effect("imported history validates artifacts and freezes nested snapshots", decodedHistoryValidation)
 
 const invalidHistories = Effect.fn("SqliteMigrations.invalidHistories")(function* () {
   const table = Table.make({ name: "invalid_history", schema: TitleSchema })
@@ -538,3 +502,116 @@ const untrackedObjects = Effect.fn("SqliteMigrations.untrackedObjects")(function
 })
 
 it.effect("untracked indexes and triggers are rejected as drift without changing records", () => pipe(untrackedObjects(), Effect.provide(sqliteClient)))
+
+const catalogIdentity = Effect.fn("SqliteMigrations.catalogIdentity")(function* () {
+  const database = yield* SqlClient.SqlClient
+
+  const resource = Resource.make({
+    authorization: Authorization.public,
+    name: "catalog_identity",
+    schema: TitleSchema,
+    operations: {},
+    relations: { indexes: [{ name: "catalog_title", fields: ["title"] }] },
+  })
+
+  const initial = SqliteMigrations.initial({ id: "001", tables: [resource.table] })
+  const store = makeMigrationStore(database, [initial])
+  const target = SqliteMigrations.snapshot([resource.table])
+  yield* store.prepare(target.tables)
+  const record = yield* resource.repository.create({ title: "preserved" })
+  yield* database`DROP INDEX catalog_title`
+  const missing = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(missing).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  yield* database`CREATE TRIGGER catalog_title AFTER INSERT ON catalog_identity BEGIN SELECT 1; END`
+  const replaced = yield* pipe(store.prepare(target.tables), Effect.result)
+  expect(replaced).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  yield* database`DROP TRIGGER catalog_title`
+  yield* database`CREATE INDEX "catalog_title" ON "catalog_identity" ("title")`
+  yield* store.prepare(target.tables)
+  const preserved = yield* resource.repository.get(record.id)
+  expect(preserved).toEqual(record)
+})
+
+it.effect("catalog verification rejects missing indexes and same-name triggers", () => pipe(catalogIdentity(), Effect.provide(sqliteClient)))
+
+const dottedIdentifiers = Effect.fn("SqliteMigrations.dottedIdentifiers")(function* () {
+  const database = yield* SqlClient.SqlClient
+  const BeforeSchema = Schema.Struct({ "old.field": Schema.String })
+  interface Before extends Schema.Schema.Type<typeof BeforeSchema> {}
+  const RenamedSchema = Schema.Struct({ "new.field": Schema.String })
+  interface Renamed extends Schema.Schema.Type<typeof RenamedSchema> {}
+  const AddedSchema = Schema.Struct({ "new.field": Schema.String, "note.field": Schema.NullOr(Schema.String) })
+  interface Added extends Schema.Schema.Type<typeof AddedSchema> {}
+  const FinalSchema = Schema.Struct({ "final.field": Schema.String, "note.field": Schema.NullOr(Schema.String) })
+  interface Final extends Schema.Schema.Type<typeof FinalSchema> {}
+  const before = Table.make({ name: "dotted.table", schema: BeforeSchema })
+  const renamed = Table.make({ name: "dotted.table", schema: RenamedSchema })
+  const added = Table.make({ name: "dotted.table", schema: AddedSchema })
+  const final = Table.make({ name: "dotted.table", schema: FinalSchema })
+
+  const indexed = Table.make({
+    name: "dotted.table", schema: FinalSchema,
+    relations: { indexes: [{ name: "dotted.index", fields: ["final.field"] }] },
+  })
+
+  const initial = SqliteMigrations.initial({ id: "001", tables: [before] })
+  const from = SqliteMigrations.snapshot([before])
+  yield* makeMigrationStore(database, [initial]).prepare(from.tables)
+  yield* database`INSERT INTO "dotted.table" ("id", "old.field") VALUES ('one', 'preserved')`
+  const renamedSnapshot = SqliteMigrations.snapshot([renamed])
+  const renameSteps = [SqliteMigrations.steps.RenameColumn.make({ table: before.name, from: "old.field", to: "new.field" })]
+
+  const rename = SqliteMigrations.make({
+    id: "002", from, to: renamedSnapshot,
+    steps: renameSteps,
+  })
+
+  const addedSnapshot = SqliteMigrations.snapshot([added])
+  const physicalAdded = Table.snapshot(added)
+  const isNote = (field: TableField) => Equivalence.strictEqual<string>()(field.name, "note.field")
+  const note = pipe(physicalAdded.fields, Array.findFirst(isNote), Option.getOrThrow)
+  const additionSteps = [SqliteMigrations.steps.AddColumn.make({ table: added.name, column: note })]
+
+  const addition = SqliteMigrations.make({
+    id: "003", from: renamedSnapshot, to: addedSnapshot,
+    steps: additionSteps,
+  })
+
+  const finalSnapshot = SqliteMigrations.snapshot([final])
+  const finalTable = Table.snapshot(final)
+
+  const rebuildSteps = [SqliteMigrations.steps.RebuildTable.make({
+      table: finalTable,
+      copies: [
+        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
+        SqliteMigrations.copies.Source.make({ column: "final.field", source: "new.field" }),
+        SqliteMigrations.copies.Value.make({ column: "note.field", value: "copied" }),
+      ],
+    })]
+
+  const rebuild = SqliteMigrations.make({
+    id: "004", from: addedSnapshot, to: finalSnapshot,
+    steps: rebuildSteps,
+  })
+
+  const indexedSnapshot = SqliteMigrations.snapshot([indexed])
+  const createIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: final.name, name: "dotted.index", fields: ["final.field"] })]
+
+  const createIndex = SqliteMigrations.make({
+    id: "005", from: finalSnapshot, to: indexedSnapshot,
+    steps: createIndexSteps,
+  })
+
+  const dropIndexSteps = [SqliteMigrations.steps.DropIndex.make({ name: "dotted.index" })]
+
+  const dropIndex = SqliteMigrations.make({
+    id: "006", from: indexedSnapshot, to: finalSnapshot,
+    steps: dropIndexSteps,
+  })
+
+  yield* makeMigrationStore(database, [initial, rename, addition, rebuild, createIndex, dropIndex]).prepare(finalSnapshot.tables)
+  const rows = yield* database`SELECT * FROM "dotted.table"`
+  expect(rows).toEqual([{ id: "one", "final.field": "preserved", "note.field": "copied" }])
+})
+
+it.effect("migration instructions quote dotted identifiers as whole names", () => pipe(dottedIdentifiers(), Effect.provide(sqliteClient)))

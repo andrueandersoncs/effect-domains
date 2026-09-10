@@ -25,9 +25,9 @@ MIGRATION_LIFECYCLE_URL=http://127.0.0.1:3000/rpc/v1 bun run migration-lifecycle
 The seeded `Migration guide` keeps its UUIDv7 identifier and title value as `heading`; it receives `summary: null` and `priority: 0`. Set `DOCUMENT_ID` to a returned identifier to use the remaining generated operations:
 
 ```bash
-bun run migration-lifecycle documents.get --id "$DOCUMENT_ID"
+bun run migration-lifecycle documents.get --input-json "{\"id\":\"$DOCUMENT_ID\"}"
 bun run migration-lifecycle documents.update --input-json "{\"id\":\"$DOCUMENT_ID\",\"heading\":\"Reviewed document\",\"summary\":null,\"priority\":2}"
-bun run migration-lifecycle documents.remove --id "$DOCUMENT_ID"
+bun run migration-lifecycle documents.remove --input-json "{\"id\":\"$DOCUMENT_ID\"}"
 ```
 
 Historical seeding is optional: starting the current server against a fresh database applies the frozen chain to produce the current schema, without inserting the legacy seed row. The seed command refuses an already upgraded database instead of attempting to insert legacy rows into it.
@@ -52,9 +52,9 @@ The current schema requires a non-empty `heading`, allows `summary` to be `null`
 
 ## Author the next migration
 
-The runtime uses the ordered registry at [`migrations/manifest.json`](migrations/manifest.json). There is no schema CLI, inferred migration planner, or rename/backfill/transform intent language. Use `SqliteMigrations.make({ id, from, to, steps })` and the schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies`. The [shared authoring walkthrough](../README.md#review-schema-changes) demonstrates a document rebuild that explicitly copies `title` to `heading` and fills `priority` with `0`.
+The runtime uses ordered artifact imports decoded with `SqliteMigrations.decodeHistory` in [`migrations.ts`](migrations.ts). There is no schema CLI, inferred migration planner, or rename/backfill/transform intent language. Use `SqliteMigrations.make({ id, from, to, steps })` and the schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies`. The [shared authoring walkthrough](../README.md#review-schema-changes) demonstrates a document rebuild that explicitly copies `title` to `heading` and fills `priority` with `0`.
 
-For a new required `status` field, author a target table snapshot and a rebuild with complete original-column copies plus `SqliteMigrations.copies.Value.make({ column: "status", value: "draft" })`. Use the final frozen artifact's `to` as the new `from`. Review and test replay against representative old rows, then append the new artifact and manifest entry. Do not rerun the illustrative draft against this already-evolved history.
+For a new required `status` field, author a target table snapshot and a rebuild with complete original-column copies plus `SqliteMigrations.copies.Value.make({ column: "status", value: "draft" })`. Use the final frozen artifact's `to` as the new `from`. Review and test replay against representative old rows, then append the new artifact import to the decoded history array. Do not rerun the illustrative draft against this already-evolved history.
 
 Inspect current contracts locally without a server:
 
@@ -62,13 +62,13 @@ Inspect current contracts locally without a server:
 bun run migration-lifecycle inspect documents.create
 ```
 
-Applied artifacts are immutable history. Do not regenerate or edit an artifact that has been applied to a database: startup validates manifest history and the database schema, applies the frozen chain without resetting data, and rejects untracked database objects rather than silently adopting them.
+Applied artifacts are immutable history. Do not regenerate or edit an artifact that has been applied to a database: startup validates decoded history and the database schema, applies the frozen chain without resetting data, and rejects untracked database objects rather than silently adopting them.
 
 ## Code map
 
 - [`domain.ts`](domain.ts): the current document schema and priority invariant.
 - [`resources.ts`](resources.ts) and [`application.ts`](application.ts): generated document CRUD registration.
 - [`legacy.ts`](legacy.ts) and [`seed-v1.ts`](seed-v1.ts): the isolated version-one schema and seed path.
-- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime registry and historical migration chain.
+- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): ordered imports and decoded historical migration chain.
 - [`main.ts`](main.ts): the sole server, generated CLI, and inspection runner.
 - [`SqliteMigrations`](../../packages/effect-domains/src/sqlite-migrations.ts): explicit artifacts, history validation, and transactional SQLite replay.

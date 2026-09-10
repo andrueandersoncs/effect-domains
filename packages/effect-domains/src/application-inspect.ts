@@ -1,7 +1,8 @@
 import { Array, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, pipe } from "effect"
 import { Table, TableSnapshot } from "./table.ts"
 import type { Resource } from "./resource.ts"
-import { Policy, type Operand } from "./policy.ts"
+import { Policy } from "./policy.ts"
+import { CreationInspectionSchema } from "./resource-creation.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 
 type InspectableApplication = Readonly<{
@@ -18,9 +19,6 @@ const schemaDocument = flow(Schema.toCodecJson, Schema.toJsonSchemaDocument)
 const PhysicalTableJsonSchema = Schema.toCodecJson(TableSnapshot)
 const PhysicalTableSchema = Schema.toEncoded(PhysicalTableJsonSchema)
 const encodePhysicalTable = Schema.encodeSync(PhysicalTableJsonSchema)
-const SubjectBindingsSchema = Schema.Record(Schema.String, Schema.String)
-const CreationSchema = Schema.Struct({ defaults: Schema.Unknown, generated: Schema.Unknown, fromSubject: SubjectBindingsSchema })
-interface Creation extends Schema.Schema.Type<typeof CreationSchema> {}
 
 const StorageSchema = Schema.Struct({
   schema: Schema.Unknown,
@@ -40,7 +38,7 @@ const ResourceInspectionSchema = Schema.Struct({
   name: Schema.String,
   operations: OperationNamesSchema,
   schema: Schema.Unknown,
-  creation: CreationSchema,
+  creation: CreationInspectionSchema,
   list: Schema.Unknown,
   authorization: AuthorizationInspectionSchema,
   storage: StorageSchema,
@@ -82,26 +80,13 @@ const resource = (definition: Resource) => {
   const row = schemaDocument(definition.table.rowSchema)
   const stored = schemaDocument(definition.table.storageSchema)
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
-  const policy = Option.getOrUndefined(definition.create)
-  const defaults = policy?.defaults ?? {}
-  const generated = policy?.generated ?? {}
-
-  const fromSubject = Option.match(definition.create, {
-    onNone: Record.empty,
-    onSome: (creation) => {
-      const subjectBindings = (creation.fromSubject ?? Record.empty()) as Readonly<Record<string, Extract<Operand, { readonly _tag: "SubjectField" }>>>
-      return Record.map(subjectBindings, (binding) => `subject.${binding.field}`)
-    },
-  })
-
-  const creation = CreationSchema.make({ defaults, generated, fromSubject })
   const authorization = inspectAuthorization(definition.authorization)
 
   return ResourceInspectionSchema.make({
     name: definition.name,
     operations: definition.operations,
     schema,
-    creation,
+    creation: definition.creation,
     list: definition.list,
     authorization,
     storage,

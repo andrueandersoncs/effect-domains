@@ -2,7 +2,7 @@ import { Array, Data, Effect, Equivalence, flow, Function, Layer, Option, Order,
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RepositoryAccess, RepositoryError, RepositorySelect, RepositoryStore, ResourceNotFound } from "./repository-store.ts"
 import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
-import { Creation } from "./resource-creation.ts"
+import { Creation, type CreationInspection } from "./resource-creation.ts"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier, type StructSchema } from "./domain.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
@@ -168,7 +168,7 @@ export interface Resource extends RpcBundle {
   readonly table: Table
   readonly operations: ReadonlyArray<ResourceOperation>
   readonly authorization: AuthorizationDefinition
-  readonly create: Option.Option<CreationPolicy<StructSchema>>
+  readonly creation: CreationInspection
   readonly list: ListPolicy<StructSchema>
 }
 
@@ -239,20 +239,6 @@ export const Resource = {
         return equal ? Effect.void : definitionFailure(`storage must preserve canonical identity on ${field}`)
       }, { discard: true })
 
-      const creationSources = [defaults, declaredGenerated, subjectBindings]
-      const creationFields = pipe(creationSources, Array.flatMap(Record.keys), Array.dedupe)
-
-      yield* Effect.forEach(creationFields, (field) => {
-        const accumulatePresence = (count: number, source: Readonly<Record<string, unknown>>) =>
-          Record.has(source, field) ? count + 1 : count
-
-        const count = Array.reduce(creationSources, 0, accumulatePresence)
-        const canonical = Record.has(options.schema.fields, field)
-        const exclusive = equals(count, 1)
-        const valid = canonical && exclusive
-        return valid ? Effect.void : definitionFailure(`declares unknown or multiply configured create field ${field}`)
-      }, { discard: true })
-
       yield* pipe(
         Authorization.validateSubjectBindings(options.authorization, options.schema, subjectBindings),
         Effect.mapError(({ reason }) => definitionFailure(reason)),
@@ -271,10 +257,6 @@ export const Resource = {
 
     Effect.runSync(validateDefinition)
     const implicitIdentifier = !Record.has(options.schema.fields, table.identifier)
-
-    const generated = implicitIdentifier
-      ? Record.set(declaredGenerated, table.identifier, "uuidV7" as const)
-      : declaredGenerated
 
     const canonicalRowSchema = (
       implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
@@ -339,12 +321,13 @@ export const Resource = {
     })
 
     const creationSchema = implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
-    const creationPlan = Creation.compile(creationSchema.fields, defaults, generated, subjectBindings)
+    const generatedIdentifier = implicitIdentifier ? Option.some(table.identifier) : Option.none<string>()
+    const creationPlan = pipe(Creation.compile(creationSchema.fields, defaults, declaredGenerated, subjectBindings, definitionFailure, inputFailure, generatedIdentifier), Effect.runSync)
 
     const createAuthorized = Effect.fn("Repository.create")(function* (
       store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceDraft<S, Creation>,
     ) {
-      const complete = yield* Creation.materialize(creationPlan, input, permission.subject, inputFailure)
+      const complete = yield* creationPlan.materialize(input, permission.subject)
       const encoded = yield* encodeRow(complete)
       const next = Option.some(complete)
       yield* authorize("create", permission.subject, absentAuthorizationValue, next)
@@ -515,8 +498,7 @@ export const Resource = {
     const patch = withAccess("patch", patchAuthorized)
     const remove = withAccess("remove", removeAuthorized)
     const repository = { find, get, list, create, update, patch, remove }
-    const createFields = Creation.inputFields(creationPlan)
-    const CreateShapeSchema = Schema.Struct(createFields)
+    const CreateShapeSchema = Schema.Struct(creationPlan.inputFields)
     interface CreateShape extends Schema.Schema.Type<typeof CreateShapeSchema> {}
     const createInputSchema = Schema.make<Schema.Codec<ResourceDraft<S, Creation>, unknown, S["DecodingServices"], S["EncodingServices"]>>(CreateShapeSchema.ast)
     const IdentifierKeySchema = Schema.Literal(table.identifier)
@@ -596,7 +578,7 @@ export const Resource = {
     >
 
     return Struct.assign(options, {
-      operations, storage: storageSchema, table, create: creation, list: listPolicy, createInputSchema,
+      operations, storage: storageSchema, table, creation: creationPlan.inspection, list: listPolicy, createInputSchema,
       repository: repository as AuthorizedRepository<typeof repository, Auth>, group, handlers,
     })
   },

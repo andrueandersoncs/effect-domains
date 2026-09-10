@@ -2,9 +2,9 @@ import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { McpServerApplication } from "./application.ts"
+import { McpMigrations } from "./migrations.ts"
 
-const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
 pipe(ApplicationBun.run(McpServerApplication, {
-  database: { manifest },
+  database: { migrations: McpMigrations },
 }), BunRuntime.runMain)

@@ -27,21 +27,21 @@ The runner also enables the generated admin at [http://127.0.0.1:3000/admin](htt
 In another terminal, Alice's editor token can create and update a shared note:
 
 ```bash
-SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --id note-1 --text "Visible domain text"
-SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.update --id note-1 --text "Revised domain text"
+SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --input-json '{"id":"note-1","text":"Visible domain text"}'
+SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.update --input-json '{"id":"note-1","text":"Revised domain text"}'
 ```
 
 Bob's reader token can read that same shared note but cannot write it:
 
 ```bash
-SERVICE_CODEC_TOKEN=bob-demo bun run service-codec notes.get --id note-1
-SERVICE_CODEC_TOKEN=bob-demo bun run service-codec notes.create --id note-2 --text "Denied write"
+SERVICE_CODEC_TOKEN=bob-demo bun run service-codec notes.get --input-json '{"id":"note-1"}'
+SERVICE_CODEC_TOKEN=bob-demo bun run service-codec notes.create --input-json '{"id":"note-2","text":"Denied write"}'
 ```
 
 The second Bob command exits nonzero with `Forbidden`. An administrator can remove the shared note:
 
 ```bash
-SERVICE_CODEC_TOKEN=admin-demo bun run service-codec notes.remove --id note-1
+SERVICE_CODEC_TOKEN=admin-demo bun run service-codec notes.remove --input-json '{"id":"note-1"}'
 ```
 
 The client-facing values remain `"Visible domain text"` and `"Revised domain text"`; with the server's installed service, SQLite stores their text as `stored:Visible domain text` and `stored:Revised domain text`. `StoredTextSchema` reversibly decodes the storage encoding before returning a canonical note.
@@ -74,7 +74,7 @@ Inspection runs locally without a server or token:
 bun run service-codec inspect notes.create
 ```
 
-`inspect` exposes canonical and storage schemas, the physical stored schema, and the rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate artifacts that may already be applied.
+`inspect` exposes canonical and storage schemas, the physical stored schema, and the rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifact imports to the ordered history in [`migrations.ts`](migrations.ts). Do not regenerate artifacts that may already be applied.
 
 ## Code map
 
@@ -82,7 +82,7 @@ bun run service-codec inspect notes.create
 - [`storage.ts`](storage.ts): `StoragePrefix`, the service-dependent text codec, and physical stored-note schema.
 - [`resources.ts`](resources.ts): generated canonical/storage CRUD declaration and shared-note role policy.
 - [`application.ts`](application.ts): application registration.
-- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): decoded runtime registry and history.
+- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): ordered imports and decoded runtime history.
 - [`main.ts`](main.ts): the sole runner and composed authentication and prefix services.
 
 See the [examples overview](../README.md), [tenant/owner todo CRUD](../resource-crud/), and [authored book CRUD](../README.md#authored-sql).

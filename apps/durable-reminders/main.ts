@@ -9,8 +9,8 @@ import { ExampleAuthentication } from "@effect-domains/example-support/authentic
 import { OperatorAuthorization } from "./operator-authorization.ts"
 import { DurableRemindersApplication } from "./application.ts"
 import { ReminderBackground } from "./background.ts"
+import { ReminderMigrations } from "./migrations.ts"
 
-const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
 const executionDatabase =
   process.env.DURABLE_REMINDERS_EXECUTION_DB
@@ -37,7 +37,7 @@ const services = Layer.mergeAll(authentication, execution)
 
 pipe(
   ApplicationBun.run(DurableRemindersApplication, {
-    database: { manifest },
+    database: { migrations: ReminderMigrations },
     services,
     background: ReminderBackground,
   }),

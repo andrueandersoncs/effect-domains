@@ -81,8 +81,8 @@ Create an Alice-owned todo without supplying ownership:
 
 ```bash
 export RESOURCE_CRUD_TOKEN=alice-demo
-bun run resource-crud todos.create --title "Ship applications"
-bun run resource-crud todos.list --filter-completed false --limit 10
+bun run resource-crud todos.create --input-json '{"title":"Ship applications"}'
+bun run resource-crud todos.list --input-json '{"filter":{"completed":false},"limit":10}'
 ```
 
 The list policy accepts only `filter.completed`, `limit`, and an opaque `cursor`. It applies authorization before filtering and pagination, orders by generated identifier ascending only, and returns `{ "items": [...], "nextCursor": string | null }`. Pass a non-null cursor back unchanged with the same filter to fetch the next page. `limit` is from 1 through 25.
@@ -90,34 +90,34 @@ The list policy accepts only `filter.completed`, `limit`, and an opaque `cursor`
 Switching to Bob hides Alice's todo; switching to the outsider hides all Acme data:
 
 ```bash
-RESOURCE_CRUD_TOKEN=bob-demo bun run resource-crud todos.list --limit 10
-RESOURCE_CRUD_TOKEN=outsider-demo bun run resource-crud todos.list --limit 10
+RESOURCE_CRUD_TOKEN=bob-demo bun run resource-crud todos.list --input-json '{"limit":10}'
+RESOURCE_CRUD_TOKEN=outsider-demo bun run resource-crud todos.list --input-json '{"limit":10}'
 ```
 
 Set `TODO_ID` to the identifier returned by Alice's create command. Alice can patch or fully update her incomplete todo, but cannot transfer it:
 
 ```bash
 export RESOURCE_CRUD_TOKEN=alice-demo
-bun run resource-crud todos.get --id "$TODO_ID"
-bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Ship released applications"
-bun run resource-crud todos.patch --key "$TODO_ID" --changes-owner-id bob
+bun run resource-crud todos.get --input-json "{\"id\":\"$TODO_ID\"}"
+bun run resource-crud todos.patch --input-json "{\"key\":\"$TODO_ID\",\"changes\":{\"title\":\"Ship released applications\"}}"
+bun run resource-crud todos.patch --input-json "{\"key\":\"$TODO_ID\",\"changes\":{\"ownerId\":\"bob\"}}"
 ```
 
 The last command exits nonzero with `Forbidden`: ownership fields are immutable even while the todo is incomplete. Alice can complete the todo, but cannot edit or reopen it afterward:
 
 ```bash
-bun run resource-crud todos.update --id "$TODO_ID" --title "Ship released applications" --completed true --tenant-id acme --owner-id alice
-bun run resource-crud todos.patch --key "$TODO_ID" --changes-title "Blocked edit"
+bun run resource-crud todos.update --input-json "{\"id\":\"$TODO_ID\",\"title\":\"Ship released applications\",\"completed\":true,\"tenantId\":\"acme\",\"ownerId\":\"alice\"}"
+bun run resource-crud todos.patch --input-json "{\"key\":\"$TODO_ID\",\"changes\":{\"title\":\"Blocked edit\"}}"
 ```
 
 The last command fails with `Forbidden` and leaves the completed todo unchanged. An Acme administrator can reopen it and delete it:
 
 ```bash
-RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.update --id "$TODO_ID" --title "Ship released applications" --completed false --tenant-id acme --owner-id alice
-RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.remove --id "$TODO_ID"
+RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.update --input-json "{\"id\":\"$TODO_ID\",\"title\":\"Ship released applications\",\"completed\":false,\"tenantId\":\"acme\",\"ownerId\":\"alice\"}"
+RESOURCE_CRUD_TOKEN=admin-demo bun run resource-crud todos.remove --input-json "{\"id\":\"$TODO_ID\"}"
 ```
 
-`patch` accepts `{ key, changes }` and need not repeat unchanged fields; `update` requires the complete row. `title` must be non-empty. Native flags include `--key`, `--changes-title`, and `--filter-completed`; `--input-json` remains available for the complete request shape.
+`patch` accepts `{ key, changes }` and need not repeat unchanged fields; `update` requires the complete row. `title` must be non-empty. Use `--input-json` for the complete canonical request shape, including nested `changes` and `filter` objects. Generated field flags are not supported.
 
 ## Runtime and persistence
 
@@ -149,14 +149,14 @@ Inspection runs locally without a server or token:
 bun run resource-crud inspect todos.patch
 ```
 
-`inspect` describes the selected operation and the resource's schemas, storage, creation/list configuration, subject schema, and rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate migration artifacts that have already been applied.
+`inspect` describes the selected operation and the resource's schemas, storage, creation/list configuration, subject schema, and rendered authorization policy. There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes) and append reviewed artifact imports to the ordered history in [`migrations.ts`](migrations.ts). Do not regenerate migration artifacts that have already been applied.
 
 ## Code map
 
 - [`domain.ts`](domain.ts): canonical todo and ownership fields.
 - [`resources.ts`](resources.ts): authorization policy, defaults, page/list policy, and selected generated operations.
 - [`application.ts`](application.ts): application registration with no authored commands.
-- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): the runtime migration registry and history.
+- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): ordered imports and decoded runtime history.
 - [`main.ts`](main.ts): the server, generated CLI, and inspection runner with demo authentication.
 
 See the [examples overview](../README.md), [authored book CRUD](../README.md#authored-sql), and [service-dependent storage codec](../service-codec/).

@@ -18,6 +18,7 @@ import {
 } from "effect"
 
 import { DomainIdentifier, type StructSchema } from "./domain.ts"
+import { ScalarSchema, ownValue, scalarChecks, type ScalarF } from "./schema-algebra.ts"
 
 const isTrue = (value: boolean) => value
 
@@ -125,12 +126,9 @@ class TableRelations extends Schema.Class<TableRelations>("TableRelations")({
 type TableRelationFields<Fields extends string> = readonly Fields[]
 
 export type TableRelationsInput<Fields extends string = string> = Readonly<Partial<{
-  unique: readonly Readonly<Pick<TableUnique, "name"> & { fields: TableRelationFields<Fields> }>[]
-  foreignKeys: readonly Readonly<Pick<TableForeignKey, "name"> & {
-    fields: TableRelationFields<Fields>
-    references: Readonly<Pick<TableForeignKey["references"], "table"> & { fields: readonly string[] }>
-  }>[]
-  indexes: readonly Readonly<Pick<TableIndex, "name"> & { fields: TableRelationFields<Fields> }>[]
+  [Kind in keyof TableRelations]: ReadonlyArray<
+    Omit<Required<TableRelations>[Kind][number], "fields"> & { readonly fields: TableRelationFields<Fields> }
+  >
 }>>
 
 const TableFieldsSchema = Schema.Array(TableField)
@@ -183,16 +181,6 @@ const relationConstraints = (relations: TableRelations): ReadonlyArray<RelationC
   const local = Array.appendAll(unique, foreignKeys)
   return Array.appendAll(local, indexes)
 }
-
-const foreignKeysFor = (relations: Option.Option<TableRelations>) => pipe(
-  relations,
-  Option.match({ onNone: Function.constant([]), onSome: (value) => value.foreignKeys ?? [] }),
-)
-
-const indexesFor = (relations: Option.Option<TableRelations>) => pipe(
-  relations,
-  Option.match({ onNone: Function.constant([]), onSome: (value) => value.indexes ?? [] }),
-)
 
 type RelationConstraint = TableUnique | TableForeignKey | TableIndex
 
@@ -279,22 +267,9 @@ const validateLocalRelations = (
   }),
 )
 
-// Read data properties because check metadata must not invoke authored getters.
-const ownValue = (value: unknown, key: string): unknown => {
-  const descriptor = Predicate.isObject(value) ? Object.getOwnPropertyDescriptor(value, key) : null
-  return descriptor?.value
-}
-
 const representationId = (value: unknown) => ownValue(value, "id")
 const DateTimeUtcId = "effect/schema/DateTimeUtc"
 const IntegerId = "effect/schema/isInt"
-type AstCheck = SchemaAST.Filter<unknown> | SchemaAST.FilterGroup<unknown>
-
-const flattenChecks = (check: AstCheck): ReadonlyArray<SchemaAST.Filter<unknown>> =>
-  pipe(Match.value(check), Match.tagsExhaustive({
-    FilterGroup: (group) => Array.flatMap(group.checks, flattenChecks),
-    Filter: (filter) => [filter],
-  }))
 
 const comparisonChecks = (representation: unknown): ReadonlyArray<TableCheck> => {
   const payload = ownValue(representation, "payload")
@@ -334,23 +309,10 @@ class ScalarCompilation extends Data.Class<{
   readonly storageCodec: Option.Option<Schema.Constraint>
 }> {}
 
-const compileScalar = Effect.fn("Table.compileScalar")(function* (
-  table: string,
-  field: string,
-  ast: SchemaAST.AST,
-  seen: HashSet.HashSet<SchemaAST.AST> = HashSet.empty(),
-): Effect.fn.Return<ScalarCompilation, TableDefinitionError> {
-  const circular = HashSet.has(seen, ast)
-  if (circular) return yield* unsupportedTableScalar(table, field)
-  const next = HashSet.add(seen, ast)
-
-  if (ast.encoding) {
-    const encodedAst = SchemaAST.toEncoded(ast)
-    const encoded = yield* compileScalar(table, field, encodedAst, next)
-    return new ScalarCompilation({ ...encoded, orderable: false })
-  }
-
-  const filters = Array.flatMap(ast.checks ?? [], flattenChecks)
+const scalarAlgebra = (table: string, field: string) => (
+  layer: ScalarF<Effect.Effect<ScalarCompilation, TableDefinitionError>>,
+): Effect.Effect<ScalarCompilation, TableDefinitionError> => {
+  const filters = scalarChecks(layer.ast)
   const checksForFilter = (filter: SchemaAST.Filter<unknown>) => comparisonChecks(filter.annotations?.representation)
   const checks = Array.flatMap(filters, checksForFilter)
   const scalar = Option.none<TableField["scalar"]>()
@@ -372,12 +334,7 @@ const compileScalar = Effect.fn("Table.compileScalar")(function* (
     return Effect.succeed(result)
   }
 
-  return yield* pipe(Match.value(ast),
-    Match.tag("Suspend", Effect.fn("Table.suspend")(function* (suspended: SchemaAST.Suspend) {
-      const resolved = suspended.thunk()
-      const inner = yield* compileScalar(table, field, resolved, next)
-      return new ScalarCompilation({ ...inner, checks: [...checks, ...inner.checks] })
-    })),
+  const leaf = (ast: SchemaAST.AST) => pipe(Match.value(ast),
     Match.tag("Null", () => pipe(new ScalarCompilation({ ...base, nullable: true, orderable: false }), Effect.succeed)),
     Match.tag("String", "TemplateLiteral", () => {
       const scalar = Option.some("string" as const)
@@ -415,8 +372,17 @@ const compileScalar = Effect.fn("Table.compileScalar")(function* (
       return supported ? literals([literal]) : unsupportedTableScalar(table, field)
     }),
     Match.tag("Enum", flow(Struct.get<SchemaAST.Enum, "enums">("enums"), Array.map(([, value]) => value), literals)),
-    Match.tag("Union", Effect.fn("Table.union")(function* (union: SchemaAST.Union) {
-      const members = yield* Effect.forEach(union.types, (member) => compileScalar(table, field, member, next))
+    Match.orElse(() => unsupportedTableScalar(table, field)),
+  )
+
+  return pipe(Match.value(layer), Match.tagsExhaustive({
+    Leaf: ({ ast }) => leaf(ast),
+    Unsupported: () => unsupportedTableScalar(table, field),
+    Collection: () => unsupportedTableScalar(table, field),
+    Encoding: ({ value }) => pipe(value, Effect.map((encoded) => new ScalarCompilation({ ...encoded, orderable: false }))),
+    Suspend: ({ value }) => pipe(value, Effect.map((inner) => new ScalarCompilation({ ...inner, checks: [...checks, ...inner.checks] }))),
+    Union: Effect.fn("Table.union")(function* ({ members: children }: Extract<ScalarF<Effect.Effect<ScalarCompilation, TableDefinitionError>>, { readonly _tag: "Union" }>) {
+      const members = yield* Effect.all(children)
       const hasScalar = (member: ScalarCompilation) => Option.isSome(member.scalar)
       const physical = Array.filter(members, hasScalar)
       const head = Array.head(physical)
@@ -443,10 +409,12 @@ const compileScalar = Effect.fn("Table.compileScalar")(function* (
       const scalar = uniform ? first.scalar : Option.some("number" as const)
       const storageCodec = single ? first.storageCodec : Option.none<Schema.Constraint>()
       return new ScalarCompilation({ scalar, nullable, checks: [...checks, ...unionChecks], orderable, storageCodec })
-    })),
-    Match.orElse(() => unsupportedTableScalar(table, field)),
-  )
-})
+    }),
+  }))
+}
+
+const compileScalar = (table: string, field: string, ast: SchemaAST.AST) =>
+  ScalarSchema.fold("storage", scalarAlgebra(table, field))(ast)
 
 interface TableColumn {
   readonly storageSchema: Schema.Constraint
@@ -633,32 +601,7 @@ export interface Table<
 
 export type TableFieldName<S extends StructSchema> = Extract<keyof RowSchema<S>["fields"], string>
 
-const cloneUnique = (value: TableUnique) =>
-  TableUnique.make({ name: value.name, fields: Array.fromIterable(value.fields) })
-
-const cloneForeignKey = (value: TableForeignKey) => {
-  const reference = TableForeignKeyReference.make({
-    table: value.references.table,
-    fields: Array.fromIterable(value.references.fields),
-  })
-
-  return TableForeignKey.make({
-    name: value.name,
-    fields: Array.fromIterable(value.fields),
-    references: reference,
-  })
-}
-
-const cloneIndex = (value: TableIndex) =>
-  TableIndex.make({ name: value.name, fields: Array.fromIterable(value.fields) })
-
-const cloneRelations = (input: TableRelationsInput): TableRelations => {
-  const unique = pipe(Option.fromNullishOr(input.unique), Option.map(Array.map(cloneUnique)))
-  const foreignKeys = pipe(Option.fromNullishOr(input.foreignKeys), Option.map(Array.map(cloneForeignKey)))
-  const indexes = pipe(Option.fromNullishOr(input.indexes), Option.map(Array.map(cloneIndex)))
-  const relations = Record.getSomes({ unique, foreignKeys, indexes })
-  return TableRelations.make(relations)
-}
+const cloneRelations = flow(Schema.decodeUnknownEffect(TableRelations), Effect.runSync)
 
 const make = <const Name extends string, const S extends StructSchema>(
   options: Readonly<{ name: Name; schema: S }> & Readonly<Partial<{ relations: TableRelationsInput<TableFieldName<S>> }>>,
@@ -687,33 +630,13 @@ const make = <const Name extends string, const S extends StructSchema>(
 const isOneOfCheck = (check: TableCheck): check is OneOf =>
   Equivalence.strictEqual<TableCheck["_tag"]>()(check._tag, "OneOf")
 
-const snapshotCheck = (check: TableCheck) =>
-  isOneOfCheck(check)
-    ? OneOf.make({ values: Array.fromIterable(check.values) })
-    : check
-
-const snapshotField = (field: TableField) => {
-  const checks = Array.map(field.checks, snapshotCheck)
-
-  return TableField.make({
-    name: field.name,
-    scalar: field.scalar,
-    nullable: field.nullable,
-    generation: field.generation,
-    checks,
-  })
-}
-
-const snapshot = (table: Table) => {
-  const fields = Array.map(table.fields, snapshotField)
-  const relations = Option.fromNullishOr(table.relations)
-  const withoutRelations = TableSnapshot.make({ name: table.name, identifier: table.identifier, fields })
-
-  return pipe(relations, Option.match({
-    onNone: Function.constant(withoutRelations),
-    onSome: (value) => TableSnapshot.make({ name: table.name, identifier: table.identifier, fields, relations: cloneRelations(value) }),
-  }))
-}
+// Decode the physical model because native Schema traversal copies nested arrays and classes.
+const snapshot = (table: Table) => pipe(
+  table,
+  Struct.pick(["name", "identifier", "fields", "relations"]),
+  Schema.decodeUnknownEffect(TableSnapshot),
+  Effect.runSync,
+)
 
 const fieldsEqual = Equivalence.Array(Equivalence.strictEqual<string>())
 
@@ -726,11 +649,8 @@ const compatibleForeignKeyScalars = (source: TableField["scalar"], target: Table
 const tableEntry = (table: TableSnapshot) => [table.name, table] as const
 const tableIndexPair = (table: TableSnapshot) => (index: TableIndex) => [table.name, index] as const
 
-const tableIndexPairs = (table: TableSnapshot) => pipe(
-  Option.fromNullishOr(table.relations),
-  indexesFor,
-  Array.map(tableIndexPair(table)),
-)
+const tableIndexPairs = (table: TableSnapshot) =>
+  Array.map(table.relations?.indexes ?? [], tableIndexPair(table))
 
 const fieldEntry = (field: TableField) => [field.name, field] as const
 
@@ -843,18 +763,8 @@ const validateForeignKey = (
   yield* Effect.forEach(pairs, validateForeignKeyPair(table, foreignKey, sourceFields, target, targetFields))
 })
 
-const validateTableForeignKeys = (
-  tables: HashMap.HashMap<string, TableSnapshot>,
-  table: TableSnapshot,
-) => (foreignKeys: ReadonlyArray<TableForeignKey>) =>
-  Effect.forEach(foreignKeys, validateForeignKey(tables, table))
-
 const validateForeignKeys = (tables: HashMap.HashMap<string, TableSnapshot>) => (table: TableSnapshot) =>
-  pipe(
-    Option.fromNullishOr(table.relations),
-    foreignKeysFor,
-    validateTableForeignKeys(tables, table),
-  )
+  Effect.forEach(table.relations?.foreignKeys ?? [], validateForeignKey(tables, table))
 
 const validateRelations = Effect.fn("Table.validateRelations")(function* (
   tables: ReadonlyArray<TableSnapshot>,

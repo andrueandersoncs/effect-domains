@@ -1,6 +1,6 @@
 # Effect Domains
 
-Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and CLI flags from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
+Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and JSON CLI inputs from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
 
 The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and `BookSchema`, and `apps/` contains the runnable examples. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
 
@@ -33,24 +33,28 @@ export const Catalog = Application.make({
 
 An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.run(application, options)` returns the application Effect; execute it with native `BunRuntime.runMain`. A manifest may be a path or `URL`, and `filename`, `services`, and `initialize` are optional:
+`ApplicationBun.run(application, options)` returns the application Effect; execute it with native `BunRuntime.runMain`. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
 
 ```ts
 import { BunRuntime } from "@effect/platform-bun"
-import { pipe } from "effect"
+import { Effect, pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
+import { SqliteMigrations } from "effect-domains/sqlite-migrations"
+import initial from "./migrations/001_initial.json" with { type: "json" }
 
-const manifest = new URL("./migrations/manifest.json", import.meta.url)
-
-pipe(ApplicationBun.run(Catalog, {
-  database: { manifest },
-  admin: true,
-}), BunRuntime.runMain)
+const program = Effect.gen(function* () {
+  const migrations = yield* SqliteMigrations.decodeHistory([initial])
+  yield* ApplicationBun.run(Catalog, {
+    database: { migrations },
+    admin: true,
+  })
+})
+pipe(program, BunRuntime.runMain)
 ```
 
-Pass `database: { manifest, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. Callers that already own decoded history can instead pass `database: { migrations }`. `admin: true` is opt-in; the [applications' shared admin guide](apps/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](apps/basic-crud/README.md); the [reservation application](apps/reservations/application.ts) adds explicit business commands.
+Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](apps/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](apps/basic-crud/README.md); the [reservation application](apps/reservations/application.ts) adds explicit business commands.
 
-Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and CLI flags without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
+Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and JSON CLI inputs without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
 ## Resource and native RPC boundaries
 
@@ -148,7 +152,7 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 
 `SqliteMigrations.make({ id, from, to, steps })` constructs an explicit frozen artifact. `initial({ id, tables })` derives fresh creation, and `snapshot(tables)` captures physical metadata. Schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies` express changes and source/value/expression rebuild mappings with `.make(...)`. There is no inferred `plan`, `generate`, migration intent DSL, or schema CLI.
 
-`SqliteMigrations.decodeHistory(raw)` validates raw JSON history as an Effect; `SqliteMigrations.load(manifest)` reads ordered artifacts. Runtime accepts a manifest or decoded history. Authors review and append new artifacts and manifest entries; already-applied history is never regenerated from current models.
+`SqliteMigrations.decodeHistory(raw)` validates an ordered array of imported artifact JSONs as an Effect. Runtime accepts `database: { migrations, filename? }` with the decoded history. There is no manifest file, `load`, or `database.manifest` option. Authors review and append new artifacts and imports; already-applied history is never regenerated from current models.
 
 The applied-artifact ledger remains the sole migration state. Runtime checks immutable artifact contents and exact schema/index drift, rejects untracked objects, and verifies the target schema and foreign keys before committing each migration and ledger entry together. Inconsistent steps or invalid rows roll back. Existing artifact JSON histories retain their format and bytes.
 
@@ -169,8 +173,8 @@ bun run reservations:server
 In another terminal:
 
 ```bash
-bun run reservations stock.get --sku book
-bun run reservations reserve --sku book --quantity 2
+bun run reservations stock.get --input-json '{"sku":"book"}'
+bun run reservations reserve --input-json '{"sku":"book","quantity":2}'
 bun run reservations reservations.get --help
 ```
 

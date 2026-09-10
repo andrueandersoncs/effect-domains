@@ -1,7 +1,0 @@
-{
-  "migrations": [
-    "001_initial.json",
-    "002_timestamp.json",
-    "003_schema_string_checks.json"
-  ]
-}

@@ -3,11 +3,11 @@ import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
 import { ResourceCrudApplication } from "./application.ts"
+import { TodoMigrations } from "./migrations.ts"
 
-const manifest = new URL("./migrations/manifest.json", import.meta.url)
 
 pipe(ApplicationBun.run(ResourceCrudApplication, {
-  database: { manifest },
+  database: { migrations: TodoMigrations },
   services: ExampleAuthentication,
   admin: true,
 }), BunRuntime.runMain)

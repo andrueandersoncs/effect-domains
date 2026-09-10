@@ -17,22 +17,22 @@ The runner also enables the generated admin at [http://127.0.0.1:3000/admin](htt
 In another terminal, inspect stock, create a hold, then release it:
 
 ```bash
-bun run reservations stock.get --sku book
-bun run reservations reserve --sku book --quantity 2
+bun run reservations stock.get --input-json '{"sku":"book"}'
+bun run reservations reserve --input-json '{"sku":"book","quantity":2}'
 ```
 
 Set `RESERVATION_ID` to the UUIDv7 `id` returned by `reserve`. The new reservation has `held` status and an ISO `createdAt` timestamp. Then read and release it:
 
 ```bash
-bun run reservations reservations.get --id "$RESERVATION_ID"
-bun run reservations release --id "$RESERVATION_ID"
-bun run reservations stock.get --sku book
+bun run reservations reservations.get --input-json "{\"id\":\"$RESERVATION_ID\"}"
+bun run reservations release --input-json "{\"id\":\"$RESERVATION_ID\"}"
+bun run reservations stock.get --input-json '{"sku":"book"}'
 ```
 
 `release` restores the reservation's quantity to stock. For a separate newly created hold, use `confirm` **instead of** `release` to consume the held stock permanently. Set `RESERVATION_ID` to that new hold's identifier before running:
 
 ```bash
-bun run reservations confirm --id "$RESERVATION_ID"
+bun run reservations confirm --input-json "{\"id\":\"$RESERVATION_ID\"}"
 ```
 
 | Setting | Default | Meaning |
@@ -45,7 +45,7 @@ For example, use a separate database and matching endpoint when another example 
 
 ```bash
 PORT=3001 RESERVATIONS_DB=reservations-demo.sqlite bun run reservations:server
-RESERVATIONS_URL=http://127.0.0.1:3001/rpc/v1 bun run reservations stock.get --sku book
+RESERVATIONS_URL=http://127.0.0.1:3001/rpc/v1 bun run reservations stock.get --input-json '{"sku":"book"}'
 ```
 
 The server is loopback-only and unauthenticated, using Effect's JSON RPC protocol rather than REST.
@@ -78,7 +78,7 @@ Inspection runs locally without a server:
 bun run reservations inspect reserve
 ```
 
-There is no schema CLI or migration planner. [Author explicit steps](../README.md#review-schema-changes), including `SqliteMigrations.copies.Expression` for stored timestamp conversions, and append reviewed artifacts to [`migrations/manifest.json`](migrations/manifest.json). Do not regenerate previously applied artifacts from current schemas: runtime validates recorded history and exact table definitions before applying pending migrations.
+There is no schema CLI or migration planner. [Author explicit steps](../README.md#review-schema-changes), including `SqliteMigrations.copies.Expression` for stored timestamp conversions, and append reviewed artifact imports to the ordered history in [`migrations.ts`](migrations.ts). Do not regenerate previously applied artifacts from current schemas: runtime validates recorded history and exact table definitions before applying pending migrations.
 
 ## Code map
 
@@ -86,6 +86,6 @@ There is no schema CLI or migration planner. [Author explicit steps](../README.m
 - [`resources.ts`](resources.ts): the two permitted generated read operations.
 - [`contracts.ts`](contracts.ts): transport-independent native RPC contracts in `InventoryRpcs`.
 - [`sqlite.ts`](sqlite.ts): `InventoryRpcs.toLayer` handlers, transactional guarded stock updates, transitions, and idempotent startup seed.
-- [`migrations/manifest.json`](migrations/manifest.json) and [frozen artifacts](migrations/): runtime migration registry, including the timestamp conversion.
+- [`migrations.ts`](migrations.ts) and [frozen artifacts](migrations/): ordered decoded history, including the timestamp conversion.
 - [`application.ts`](application.ts): resource registration plus the native RPC group and handler layer.
 - [`main.ts`](main.ts): the sole server, generated CLI, and inspection runner.

@@ -2,6 +2,7 @@ import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Match, Op
 import { type StructSchema } from "./domain.ts"
 import { OperandSchema, Policy, PolicyEnvironment, type Operand, type Policy as PolicySyntax, type PolicyF, PolicyEvaluationError, type Scalar } from "./policy.ts"
 import type { Table } from "./table.ts"
+import { ScalarSchema, ownValue, scalarChecks, type ScalarF } from "./schema-algebra.ts"
 
 export class AuthorizationSubject extends Context.Service<AuthorizationSubject, Readonly<Record<string, unknown>>>()("@effect-domains/AuthorizationSubject") {}
 export class Unauthenticated extends Schema.TaggedError<Unauthenticated>()("Unauthenticated", {}) {}
@@ -172,24 +173,10 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   return { subject, row, next, eq, includes: membership, all, any, unchanged, policy, literal: literalOperand }
 }
 
-const checkId = (check: SchemaAST.Check<unknown>, id: string): boolean => {
-  const representation = Option.fromNullishOr(check.annotations?.representation?.id)
-  const direct = Option.exists(representation, equals(id))
-
-  return direct || pipe(
-    Match.value(check),
-    Match.tag("FilterGroup", flow(Struct.get<SchemaAST.FilterGroup<unknown>, "checks">("checks"), Array.some((child: SchemaAST.Check<unknown>) => checkId(child, id)))),
-    Match.orElse(Function.constFalse),
-  )
-}
-
-const finiteNumber = (ast: SchemaAST.Number) => {
-  const optionalChecks = Option.fromNullishOr(ast.checks)
-  const checks = Option.getOrElse(optionalChecks, Function.constant([]))
-  const finite = Array.some(checks, (check) => checkId(check, "effect/schema/isFinite"))
-  const integer = Array.some(checks, (check) => checkId(check, "effect/schema/isInt"))
-  return finite || integer
-}
+const finiteNumber = (ast: SchemaAST.Number) => pipe(scalarChecks(ast), Array.some((check) => {
+  const id = ownValue(check.annotations?.representation, "id")
+  return equals(id, "effect/schema/isFinite") || equals(id, "effect/schema/isInt")
+}))
 
 const describe = (category: Option.Option<ScalarCategory>, nullable = false, collection = false) =>
   new FieldDescription({ category, nullable, collection })
@@ -213,41 +200,31 @@ const scalarLiteral = (value: unknown) => pipe(
 
 const asCollection = (description: FieldDescription) => new FieldDescription({ ...description, collection: true })
 
-const scalarDescription = (ast: SchemaAST.AST, seen: HashSet.HashSet<SchemaAST.Suspend> = HashSet.empty()): Option.Option<FieldDescription> => {
-  const classify = (member: SchemaAST.AST) => scalarDescription(member, seen)
+const scalarAlgebra = (layer: ScalarF<Option.Option<FieldDescription>>): Option.Option<FieldDescription> => {
   const classifyNumber = (number: SchemaAST.Number) => finiteNumber(number) ? optionalNumber : Option.none<FieldDescription>()
 
-  return pipe(
+  const leaf = (ast: SchemaAST.AST) => pipe(
     Match.value(ast),
-    Match.tag("Suspend", (suspended) => {
-      if (HashSet.has(seen, suspended)) return Option.none()
-      const visited = HashSet.add(seen, suspended)
-      const resolved = suspended.thunk()
-      return scalarDescription(resolved, visited)
-    }),
     Match.tag("String", "TemplateLiteral", Function.constant(optionalString)),
     Match.tag("Number", classifyNumber),
     Match.tag("Boolean", Function.constant(optionalBoolean)),
     Match.tag("Null", Function.constant(optionalNull)),
     Match.tag("Literal", flow(Struct.get<SchemaAST.Literal, "literal">("literal"), scalarLiteral)),
     Match.tag("Enum", flow(Struct.get<SchemaAST.Enum, "enums">("enums"), Array.map(flow(Tuple.get<readonly [string, string | number], 1>(1), scalarLiteral)), combineDescriptions)),
-    Match.tag("Union", flow(Struct.get<SchemaAST.Union, "types">("types"), Array.map(classify), combineDescriptions)),
-    Match.tag("Arrays", (array) => {
-      const unfixed = Array.isReadonlyArrayEmpty(array.elements)
-      const single = equals(array.rest.length, 1)
-      const homogeneous = unfixed && single
-      if (!homogeneous) return Option.none()
-
-      return pipe(
-        Array.head(array.rest),
-        Option.flatMap(classify),
-        Option.filter(Predicate.not(Struct.get("collection"))),
-        Option.map(asCollection),
-      )
-    }),
     Match.orElse(Option.none<FieldDescription>),
   )
+
+  return pipe(Match.value(layer), Match.tagsExhaustive({
+    Leaf: ({ ast }) => leaf(ast),
+    Unsupported: Option.none<FieldDescription>,
+    Encoding: Option.none<FieldDescription>,
+    Suspend: ({ value }) => value,
+    Union: ({ members }) => combineDescriptions(members),
+    Collection: ({ value }) => pipe(value, Option.filter(Predicate.not(Struct.get("collection"))), Option.map(asCollection)),
+  }))
 }
+
+const scalarDescription = ScalarSchema.fold("canonical", scalarAlgebra)
 
 const combineDescriptions = (descriptions: ReadonlyArray<Option.Option<FieldDescription>>) => {
   const merge = (left: FieldDescription, right: FieldDescription) => {

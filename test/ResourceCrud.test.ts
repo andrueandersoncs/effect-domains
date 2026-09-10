@@ -1,8 +1,11 @@
 import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
 import { expect, it } from "@effect/vitest"
-import { Array, DateTime, Effect, Option, Result, Schema, Struct, pipe } from "effect"
+import { Array, DateTime, Effect, Option, Ref, Result, Schema, Struct, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Application } from "effect-domains/application"
+import { ApplicationInspect } from "effect-domains/application-inspect"
+import { Value } from "effect-domains/value"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
@@ -307,4 +310,66 @@ it.effect("generated patch envelopes cannot collide with canonical field names",
   Effect.provide(PatchNamedKeys.handlers),
   Effect.provide(sqlite),
   Effect.scoped,
+))
+
+it("compiled creation inspection and input agree on implicit generation and defaults", () => {
+  const application = Application.make({ name: "creation-product", parts: [GeneratedTodos] })
+  const inspection = ApplicationInspect.describe(application)
+  expect(inspection.resources).toMatchObject([{ creation: { defaults: { completed: false }, generated: { id: "uuidV7" }, fromSubject: {} } }])
+  const valid = Schema.is(GeneratedTodos.createInputSchema)
+  const absentDefault = valid({ title: "draft" })
+  const suppliedDefault = valid({ title: "draft", completed: true })
+  const suppliedGeneration = valid({ id: "forbidden", title: "draft" })
+  expect(absentDefault).toBe(true)
+  expect(suppliedDefault).toBe(true)
+  expect(suppliedGeneration).toBe(false)
+})
+
+it("creation configuration cannot redeclare an implicit identifier", () => {
+  expect(() => Resource.make({
+    name: "implicit-generation-override",
+    schema: GeneratedTodoSchema,
+    authorization: Authorization.public,
+    operations: { create: { generated: { id: "uuidV7" } } } as never,
+  })).toThrow()
+})
+
+const GeneratedRecordSchema = Schema.Struct({ id: identifier(Schema.String), at: Schema.DateTimeUtc, summary: Schema.NullOr(Schema.String) })
+interface GeneratedRecord extends Schema.Schema.Type<typeof GeneratedRecordSchema> {}
+
+const GeneratedRecords = Resource.make({
+  name: "creation_runtime_product",
+  schema: GeneratedRecordSchema,
+  authorization: Authorization.public,
+  operations: { create: { defaults: { summary: null }, generated: { id: "uuidV7", at: "now" } } },
+})
+
+it.effect("creation plans evaluate runtime generators per call and default only absent inputs", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([GeneratedRecords.table])
+    const counter = yield* Ref.make(0)
+    const at = yield* pipe(DateTime.make("2026-09-10T00:00:00.000Z"), Effect.fromOption)
+
+    const values = Value.of({
+      uuidV7: Effect.fn("Test.uuidV7")(function* () {
+        const value = yield* Ref.updateAndGet(counter, (value) => value + 1)
+        return `generated-${value}`
+      }),
+      now: Effect.fn("Test.now")(function* () { return at }),
+    })
+
+    const create = (input: Parameters<typeof GeneratedRecords.repository.create>[0]) =>
+      pipe(GeneratedRecords.repository.create(input), Effect.provideService(Value, values))
+
+    const first = yield* create({})
+    const second = yield* create({ summary: "authored" })
+    expect(first).toEqual({ id: "generated-1", at, summary: null })
+    expect(second).toEqual({ id: "generated-2", at, summary: "authored" })
+    const override = yield* pipe(create(first), Effect.result)
+    const rejected = Result.isFailure(override)
+    expect(rejected).toBe(true)
+    const calls = yield* Ref.get(counter)
+    expect(calls).toBe(2)
+  }),
+  Effect.provide(sqlite),
 ))

@@ -98,10 +98,8 @@ const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
   database: { migrations: [] },
 })
 
-const manifest = new URL("../apps/service-codec/migrations/manifest.json", import.meta.url)
-
 const minimal = ApplicationBun.run(emptyApplication, {
-  database: { manifest },
+  database: { migrations: [] },
   admin: true,
 })
 

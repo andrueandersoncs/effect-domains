@@ -32,19 +32,19 @@ The runner also enables the generated admin at [http://127.0.0.1:3000/admin](htt
 In another terminal:
 
 ```bash
-bun run basic-crud books.create --title "A Field Guide" --page-count 120
+bun run basic-crud books.create --input-json '{"title":"A Field Guide","pageCount":120}'
 bun run basic-crud books.list
 ```
 
 Copy the returned UUIDv7 identifier into `BOOK_ID`:
 
 ```bash
-bun run basic-crud books.get --id "$BOOK_ID"
+bun run basic-crud books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 bun run basic-crud books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Revised Field Guide\",\"pageCount\":144}"
-bun run basic-crud books.remove --id "$BOOK_ID"
+bun run basic-crud books.remove --input-json "{\"id\":\"$BOOK_ID\"}"
 ```
 
-Create accepts `title` and `pageCount`; the runtime generates `id`. Update accepts the complete row. List always returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending. Pass a non-null cursor back unchanged with `--cursor` to continue. Remove returns `void`, not the deleted row. Missing rows report `ResourceNotFound`; persistence and codec failures report `RepositoryError`.
+Create accepts `title` and `pageCount`; the runtime generates `id`. Update accepts the complete row. List always returns `{ items, nextCursor }`, defaults to 50 items, and orders by identifier ascending. Pass a non-null cursor back unchanged in `--input-json '{"cursor":"RETURNED_CURSOR"}'` to continue. Remove returns `void`, not the deleted row. Missing rows report `ResourceNotFound`; persistence and codec failures report `RepositoryError`.
 
 ## Runtime and persistence
 
@@ -62,12 +62,12 @@ Local commands do not require a server:
 bun run basic-crud inspect books.create
 ```
 
-There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes), then review the artifact and manifest together. Do not regenerate already-applied history from current models.
+There is no schema CLI. [Author explicit migration steps](../README.md#review-schema-changes), then review the artifact and ordered imports in `migrations.ts` together. Do not regenerate already-applied history from current models.
 
 ## Code map
 
 - [`BookSchema`](../../packages/example-support/src/book.ts): canonical book schema shared with authored SQL.
 - [`resources.ts`](resources.ts): one generated CRUD declaration.
 - [`application.ts`](application.ts): resource registration, with no authored commands.
-- [`main.ts`](main.ts): `ApplicationBun.run` executed by native `BunRuntime.runMain`, with a URL manifest.
-- [`migrations/manifest.json`](migrations/manifest.json) and [artifacts](migrations/): frozen runtime history.
+- [`main.ts`](main.ts): `ApplicationBun.run` executed by native `BunRuntime.runMain`, with decoded imported migration history.
+- [`migrations.ts`](migrations.ts) and [artifacts](migrations/): frozen runtime history.

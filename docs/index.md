@@ -31,7 +31,7 @@ features:
 
 Effect Domains treats an Effect Schema as a runtime domain description that multiple interpreters can consume. The goal is to remove duplicate declarations that must stay mechanically equivalent—not to make business decisions disappear.
 
-What derives is deliberately bounded: routine columns and codecs, repository operations, selected RPCs, CLI flags, and inspection data. What changes the meaning of an application remains visible in authored code: authorization, commands, transactions, migrations, indexes, retry and idempotency policy, and semantic storage transforms.
+What derives is deliberately bounded: routine columns and codecs, repository operations, selected RPCs, JSON CLI inputs, and inspection data. What changes the meaning of an application remains visible in authored code: authorization, commands, transactions, migrations, indexes, retry and idempotency policy, and semantic storage transforms.
 
 [Start with the minimal runnable application](/getting-started) or read the maintained [thesis](/wiki/thesis) and [resource contract](/wiki/tables-and-queries).
 
