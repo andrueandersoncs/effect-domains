@@ -30,6 +30,20 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-10: Shared example abstractions
+
+The implementation extracts a canonical Gregorian date-only schema and subject-only policies over the existing authorization AST. Expense CRUD reuses its resource repository while preserving authored names/errors and deleted-row removal; native SQL fragments and schema JSON codecs remove repeated expense and billing machinery. Durable examples share private SQLite composition and scoped atomic file replacement without a framework execution facade. The user explicitly approved retiring `schema-record-interface`, which required the unused interfaces being removed; the other lint rules remain enabled through one shared root configuration. ([Domain values](../../packages/effect-domains/src/domain.ts); [authorization](../../packages/effect-domains/src/authorization.ts); [expense handlers](../../examples/expense-ledger/sqlite.ts); [billing handlers](../../examples/orders-invoices/sqlite.ts); [support](../../packages/example-support/src/); [lint configuration](../../better-typescript.json))
+
+- `bun run check`, `bun run lint`, and all **84 tests in 17 files** passed. Added regressions exercise a shared policy across generated reads and authored writes, request-local authentication, no cross-RPC policy leakage, frozen allow-list semantics, malformed claims, and rejection of row-dependent subject policies. Existing execution regressions now exercise `privateSqlite` directly, including symlink/hardlink rejection and in-memory separation. ([RPC regressions](../../test/AuthorizationRpc.test.ts); [policy regressions](../../test/Authorization.test.ts); [type boundaries](../../test/Authorization.types.ts); [execution isolation](../../test/ApplicationExecution.test.ts))
+- Real expense CLI-over-HTTP calls exercised create/get/update, deleted-row removal, missing get/update errors, both optional-category branches, separate currency totals unaffected by the query limit, reversed ranges, and invalid calendar dates.
+- Real billing CLI calls exercised reader mutation denial, empty/populated line projections, nullable/populated invoice projections, invoice issuance/payment, stale-version rejection, and tenant isolation.
+- The reminder server rejected editor and anonymous proxy submissions before acceptance. Repeated admin submission delivered one inbox row; the same policy hid inbox rows from editors. Local inspection exposed the proxy's subject schema and rendered admin rule.
+- A native report workflow and queue completed and published a real JSON artifact. The reminder singleton published its notification projection through the same atomic replacement helper. A separate filesystem probe replaced an existing file and verified temporary-file cleanup after a rename failure.
+- `bun run docs:build` passed. Owned smoke servers were stopped and their temporary databases and output files removed.
+
+These checks establish the listed local contracts, not new browser interaction, live MCP client behavior, forced-restart durable recovery, multi-runner execution, crash-durable file flushing, or cross-database transactions. Existing migration artifacts and business transition logic were intentionally unchanged.
+
+
 ### 2026-09-10: Domain-first example applications
 
 Eight feature fixtures were replaced with reading lists, an expense ledger, team tasks, encrypted field notes, an editorial calendar, an equipment register, financial report exports, and appointment reminders. Reservations and orders/invoices retain their business behavior. Each application owns its canonical model; the unused shared book fixture was removed. Task and editorial migrations retain their historical physical table names because the current migration API does not rename tables. ([Application guide](../../examples/README.md); [task history](../../examples/team-tasks/migrations.ts); [editorial history](../../examples/editorial-calendar/migrations.ts))

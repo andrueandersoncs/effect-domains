@@ -46,6 +46,8 @@ Team tasks, field notes, and orders/invoices use these sessions; appointment rem
 
 Task ownership comes from verified subject claims, not caller-supplied owner/tenant fields. Field notes form a shared global collection: tenant claims do not partition it. Their encryption key is separate from the bearer token. Policy belongs in resource configuration, not canonical schemas.
 
+Appointment scheduling and inbox reads reuse one [subject-only admin policy](appointment-reminders/operator-authorization.ts). Native proxy RPCs install `AuthorizationRpc` and annotate the published group with `AuthorizationRpc.policy`; the middleware checks verified claims before invoking handlers. Billing's authored handlers use `Authorization.requireSubject` for typed read/editor policies. Neither declaration makes persisted execution an authenticated request.
+
 ### Shared structure
 
 - `domain.ts`: canonical values and domain errors.
@@ -56,6 +58,8 @@ Task ownership comes from verified subject claims, not caller-supplied owner/ten
 - `main.ts`: shared `serve`, `inspect`, remote CLI, and optional `worker` runner.
 
 Services, initialization, native background layers, routes, and admin opt-in are explicit. There is no extra command wrapper, migration manifest loader, inferred migration planner, or framework jobs registry.
+
+Task due dates and expense dates share `CalendarDateSchema` from `effect-domains/domain`, preserving Gregorian date-only strings. Expense create/get/update use resource repositories beneath their authored RPCs; range totals and deleted-row removal remain authored SQL. Billing uses native schema JSON codecs for aggregate projections. Example support supplies `privateSqlite(filename)` and `replaceFileAtomically({ path, contents })`; applications still own execution layers, output contents, destinations, and error policy.
 
 ## Generated lists
 
