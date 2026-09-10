@@ -9,7 +9,7 @@ const isOperator = (subject: Readonly<Record<string, unknown>>) =>
 const operatorErrorSchema = Schema.Union([Unauthenticated, Forbidden])
 
 export class OperatorAuthorization extends RpcMiddleware.Service<OperatorAuthorization>()(
-  "apps/durable-reminders/OperatorAuthorization",
+  "examples/durable-reminders/OperatorAuthorization",
   { error: operatorErrorSchema },
 ) {
   static readonly make = Effect.gen(function* () {

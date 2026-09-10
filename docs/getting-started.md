@@ -38,7 +38,7 @@ export const BookResource = Resource.make({
 })
 ```
 
-Read the complete [resource declaration](../apps/basic-crud/resources.ts), [application registration](../apps/basic-crud/application.ts), and [Bun entrypoint](../apps/basic-crud/main.ts). `Resource.crud` selects the generated `get`, `list`, `create`, `update`, and `remove` operations; it does not author a separate query layer.
+Read the complete [resource declaration](../examples/basic-crud/resources.ts), [application registration](../examples/basic-crud/application.ts), and [Bun entrypoint](../examples/basic-crud/main.ts). `Resource.crud` selects the generated `get`, `list`, `create`, `update`, and `remove` operations; it does not author a separate query layer.
 
 ## Create and list books
 
@@ -55,7 +55,7 @@ The runtime generates the book identifier. List returns `{ items, nextCursor }`,
 bun run basic-crud books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 ```
 
-The [basic CRUD README](../apps/basic-crud/README.md) documents complete-row updates, removal, database and endpoint environment variables, and the expected domain errors.
+The [basic CRUD README](../examples/basic-crud/README.md) documents complete-row updates, removal, database and endpoint environment variables, and the expected domain errors.
 
 ## Open the admin surface
 
@@ -69,7 +69,7 @@ Inspection runs locally without the server:
 bun run basic-crud inspect books.create
 ```
 
-There are no schema CLI commands. Author changes with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` for fresh creation. Review and append frozen artifacts and ordered imports decoded with `SqliteMigrations.decodeHistory` explicitly. Do not regenerate already-applied history from current models. The [migration authoring walkthrough](../apps/README.md#review-schema-changes) includes a runnable draft.
+There are no schema CLI commands. Author changes with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` for fresh creation. Review and append frozen artifacts and ordered imports decoded with `SqliteMigrations.decodeHistory` explicitly. Do not regenerate already-applied history from current models. The [migration authoring walkthrough](../examples/README.md#review-schema-changes) includes a runnable draft.
 
 ## Continue in the wiki
 

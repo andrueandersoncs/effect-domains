@@ -6,9 +6,9 @@ import { Application } from "effect-domains/application"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
-import { BillingApplication } from "../apps/orders-invoices/application.ts"
-import { BillingMigrations } from "../apps/orders-invoices/migrations.ts"
-import { InvoiceNumberSchema, OrderNumberSchema } from "../apps/orders-invoices/domain.ts"
+import { BillingApplication } from "../examples/orders-invoices/application.ts"
+import { BillingMigrations } from "../examples/orders-invoices/migrations.ts"
+import { InvoiceNumberSchema, OrderNumberSchema } from "../examples/orders-invoices/domain.ts"
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: BillingMigrations })
 const alice = { authorization: "Bearer alice-demo" }
 const reader = { authorization: "Bearer bob-demo" }

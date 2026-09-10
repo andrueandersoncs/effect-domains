@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
-import { ReservationApplication } from "../apps/reservations/application.ts"
+import { ReservationApplication } from "../examples/reservations/application.ts"
 
 import {
   InsufficientStock,
@@ -13,11 +13,11 @@ import {
   ReserveStockInputSchema,
   SkuSchema,
   StockSchema,
-} from "../apps/reservations/domain.ts"
+} from "../examples/reservations/domain.ts"
 
-import { InventoryMigrations } from "../apps/reservations/migrations.ts"
-import { ReservationResource, StockResource } from "../apps/reservations/resources.ts"
-import { seedStock } from "../apps/reservations/sqlite.ts"
+import { InventoryMigrations } from "../examples/reservations/migrations.ts"
+import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
+import { seedStock } from "../examples/reservations/sqlite.ts"
 import { Application } from "effect-domains/application"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"

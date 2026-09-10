@@ -12,7 +12,7 @@ import {
 } from "./domain.ts"
 
 export class ReminderDelivery extends Schema.Class<ReminderDelivery>(
-  "apps/durable-reminders/ReminderDelivery",
+  "examples/durable-reminders/ReminderDelivery",
 )({
   recipient: RecipientSchema,
   requestId: ReminderRequestIdSchema,

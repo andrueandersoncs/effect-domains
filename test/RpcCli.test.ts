@@ -23,7 +23,7 @@ it.effect(
   "invalid CLI payloads fail on stderr without contaminating JSON stdout",
   Effect.fn("RpcCli.testFailure")(function* () {
     const result = yield* runBun([
-      "run", "apps/reservations/main.ts", "reserve",
+      "run", "examples/reservations/main.ts", "reserve",
       "--input-json", '{"sku":"book","quantity":0}',
     ])
 
@@ -146,7 +146,7 @@ it.effect(
     ]
 
     yield* Effect.forEach(argumentsList, Effect.fn("RpcCli.testRejectedArguments")(function* (arguments_) {
-      const result = yield* runBun(["run", "apps/reservations/main.ts", "reserve", ...arguments_])
+      const result = yield* runBun(["run", "examples/reservations/main.ts", "reserve", ...arguments_])
       expect(result.exitCode).toBe(1)
       expect(result.stdout).toBe("")
       expect(result.stderr.length).toBeGreaterThan(0)
@@ -157,17 +157,17 @@ it.effect(
 it.effect(
   "help exposes JSON input and application subcommands retain inspection schemas",
   Effect.fn("RpcCli.testHelpAndInspect")(function* () {
-    const help = yield* runBun(["run", "apps/reservations/main.ts", "reserve", "--help"])
+    const help = yield* runBun(["run", "examples/reservations/main.ts", "reserve", "--help"])
     expect(help.exitCode).toBe(0)
     expect(help.stdout).toContain("--input-json")
     const helpOutput = expect(help.stdout)
     helpOutput.not.toContain("--sku")
     helpOutput.not.toContain("--quantity")
-    const rootHelp = yield* runBun(["run", "apps/reservations/main.ts", "--help"])
+    const rootHelp = yield* runBun(["run", "examples/reservations/main.ts", "--help"])
     expect(rootHelp.exitCode).toBe(0)
     expect(rootHelp.stdout).toContain("serve")
     expect(rootHelp.stdout).toContain("inspect")
-    const inspection = yield* runBun(["run", "apps/reservations/main.ts", "inspect", "reserve"])
+    const inspection = yield* runBun(["run", "examples/reservations/main.ts", "inspect", "reserve"])
     expect(inspection.exitCode).toBe(0)
     expect(inspection.stderr).toBe("")
     const metadata = JSON.parse(inspection.stdout)
@@ -186,7 +186,7 @@ it.effect(
     ]
 
     yield* Effect.forEach(argumentsList, Effect.fn("RpcCli.testNativeFlag")(function* (arguments_) {
-      const result = yield* runBun(["run", "apps/reservations/main.ts", "reserve", ...arguments_])
+      const result = yield* runBun(["run", "examples/reservations/main.ts", "reserve", ...arguments_])
       expect(result.exitCode).toBe(1)
       expect(result.stderr).toContain("sku")
       expect(result.stdout).toContain("USAGE")

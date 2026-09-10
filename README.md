@@ -2,7 +2,7 @@
 
 Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and JSON CLI inputs from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
 
-The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and `BookSchema`, and `apps/` contains the runnable examples. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
+The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and `BookSchema`, and `examples/` contains the runnable examples. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
 
 ## Declare an application
 
@@ -52,7 +52,7 @@ const program = Effect.gen(function* () {
 pipe(program, BunRuntime.runMain)
 ```
 
-Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](apps/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](apps/basic-crud/README.md); the [reservation application](apps/reservations/application.ts) adds explicit business commands.
+Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and JSON CLI inputs without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -156,11 +156,11 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 
 The applied-artifact ledger remains the sole migration state. Runtime checks immutable artifact contents and exact schema/index drift, rejects untracked objects, and verifies the target schema and foreign keys before committing each migration and ledger entry together. Inconsistent steps or invalid rows roll back. Existing artifact JSON histories retain their format and bytes.
 
-See the [explicit authoring walkthrough](apps/README.md#review-schema-changes) for a runnable draft and the supported steps.
+See the [explicit authoring walkthrough](examples/README.md#review-schema-changes) for a runnable draft and the supported steps.
 
 ## Native execution composition
 
-Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [durable runbooks](apps/README.md#durable-workflows).
+Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [durable runbooks](examples/README.md#durable-workflows).
 
 ## Run the reservation application
 
@@ -178,17 +178,17 @@ bun run reservations reserve --input-json '{"sku":"book","quantity":2}'
 bun run reservations reservations.get --help
 ```
 
-The example is loopback-only and unauthenticated. Its [guide](apps/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
+The example is loopback-only and unauthenticated. Its [guide](examples/README.md#reservation-application) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
-The authenticated [orders/invoices walkthrough](apps/README.md#orders-and-invoices) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Run `bun run orders-invoices:server`, then use `ORDERS_INVOICES_TOKEN=alice-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'` in another terminal. Mutations remain authored transactions; generated reads stay tenant-scoped.
+The authenticated [orders/invoices walkthrough](examples/README.md#orders-and-invoices) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Run `bun run orders-invoices:server`, then use `ORDERS_INVOICES_TOKEN=alice-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'` in another terminal. Mutations remain authored transactions; generated reads stay tenant-scoped.
 
-The [example applications](apps/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local inspection. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](apps/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](apps/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](apps/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
+The [example applications](examples/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local inspection. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](examples/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](examples/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](examples/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
 
 ## Escape hatches and documentation
 
-Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper, database-service alias, or persistent-reference cache. Authorization, transactions, caching, concurrency, and recovery policy remain application concerns. Workflow diagnostics use native Effect services directly in the [workflow application](apps/durable-workflows/workflow.ts).
+Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper, database-service alias, or persistent-reference cache. Authorization, transactions, caching, concurrency, and recovery policy remain application concerns. Workflow diagnostics use native Effect services directly in the [workflow application](examples/durable-workflows/workflow.ts).
 
-- [Runnable applications](apps/README.md)
+- [Runnable applications](examples/README.md)
 - [Project wiki](docs/wiki/README.md)
 - [Tables and queries](docs/wiki/tables-and-queries.md)
 

@@ -4,7 +4,7 @@ import { NoteSchema } from "./domain.ts"
 export class StoragePrefix extends Context.Service<
   StoragePrefix,
   { readonly value: string }
->()("apps/service-codec/StoragePrefix") {}
+>()("examples/service-codec/StoragePrefix") {}
 
 const decodeStoredText = SchemaGetter.transformOrFail<
   string,
