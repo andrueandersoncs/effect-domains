@@ -26,6 +26,8 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
+The [2026-09-10 schema-native interpreter refactor](validation-strategy.md#2026-09-10-schema-native-interpreter-refactor) consolidates field compilation, policy interpretation, repository invocation, and migration reconciliation; adapters consume native RPC schemas rather than a parallel procedure DTO. All existing lint rules, workspace type contracts, and 58 tests pass. Live CLI, browser admin, MCP CRUD, and migration-data restart checks passed. This is a structural simplification, not a source-size reduction: the final framework has 115 more lines than the starting snapshot.
+
 The [2026-09-10 declarative-composition verification](validation-strategy.md#2026-09-10-declarative-composition-verification) records the clean-cutover API: one `operations` record selects and configures resource publication, and `Application.make({ name, parts })` recursively composes resources, native RPC bundles, and nested applications. It exercised composed CLI, browser admin, official MCP SDK, and durable workflow surfaces; this is bounded implementation evidence, not a generalization claim.
 
 The [declarative-compaction record](validation-strategy.md#2026-09-09-declarative-compiler-compaction) records another 132 source lines removed through shared compiler metadata, migration planning, and runtime-only SQL data. Public DSLs remain unchanged; workspace checks, all 57 regressions, byte-identical differential comparisons, and live CLI authorization boundaries passed.
