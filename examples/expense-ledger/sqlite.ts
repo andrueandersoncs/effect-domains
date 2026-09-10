@@ -10,7 +10,6 @@ import {
   ExpenseLedgerUnavailable,
   ExpenseNotFound,
   ExpenseQueryInputSchema,
-  ExpenseSchema,
   ExpenseTotalSchema,
   InvalidExpenseDateRange,
 } from "./domain.ts"
@@ -28,32 +27,23 @@ const persistenceFailures = {
   SchemaError: persistenceFailure,
 }
 
-const recordExpense = SqlSchema.findOne({
-  Request: ExpenseSchema,
-  Result: ExpensesResource.table.rowSchema,
-  execute: Effect.fn("ExpenseLedger.record.implementation")(function* (expense) {
-    const database = yield* SqlClient.SqlClient
+const expenseDateRange = (database: SqlClient.SqlClient, input: ExpenseQueryInput) =>
+  database`${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}`
 
-    return yield* database<SqliteRow>`
-      INSERT INTO ${database(ExpensesResource.table.name)} ${database.insert(expense)}
-      RETURNING *
-    `
-  }),
-})
+const expenseConditions = (database: SqlClient.SqlClient, input: ExpenseQueryInput) => {
+  const dateRange = expenseDateRange(database, input)
 
-const findExpense = SqlSchema.findOneOption({
-  Request: ExpenseIdentifierInputSchema,
-  Result: ExpensesResource.table.rowSchema,
-  execute: Effect.fn("ExpenseLedger.get.implementation")(function* (input) {
-    const database = yield* SqlClient.SqlClient
-
-    return yield* database<SqliteRow>`
-      SELECT * FROM ${database(ExpensesResource.table.name)}
-      WHERE ${database(ExpensesResource.table.identifier)} = ${input.id}
-      LIMIT 1
-    `
-  }),
-})
+  return pipe(
+    Option.fromNullishOr(input.category),
+    Option.match({
+      onNone: () => [dateRange],
+      onSome: (category) => [
+        dateRange,
+        database`${database("category")} = ${category}`,
+      ],
+    }),
+  )
+}
 
 const queryExpenses = SqlSchema.findAll({
   Request: ExpenseQueryInputSchema,
@@ -61,21 +51,11 @@ const queryExpenses = SqlSchema.findAll({
   execute: Effect.fn("ExpenseLedger.query.implementation")(function* (input) {
     const database = yield* SqlClient.SqlClient
     const limit = input.limit ?? 50
-    const category = Option.fromNullishOr(input.category)
-
-    if (Option.isNone(category)) {
-      return yield* database<SqliteRow>`
-        SELECT * FROM ${database(ExpensesResource.table.name)}
-        WHERE ${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}
-        ORDER BY ${database("date")} ASC, ${database(ExpensesResource.table.identifier)} ASC
-        LIMIT ${limit}
-      `
-    }
+    const conditions = expenseConditions(database, input)
 
     return yield* database<SqliteRow>`
       SELECT * FROM ${database(ExpensesResource.table.name)}
-      WHERE ${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}
-        AND ${database("category")} = ${input.category}
+      WHERE ${database.and(conditions)}
       ORDER BY ${database("date")} ASC, ${database(ExpensesResource.table.identifier)} ASC
       LIMIT ${limit}
     `
@@ -87,43 +67,15 @@ const calculateTotals = SqlSchema.findAll({
   Result: ExpenseTotalSchema,
   execute: Effect.fn("ExpenseLedger.totals.implementation")(function* (input) {
     const database = yield* SqlClient.SqlClient
-    const category = Option.fromNullishOr(input.category)
-
-    if (Option.isNone(category)) {
-      return yield* database<SqliteRow>`
-        SELECT ${database("category")}, ${database("currency")},
-          SUM(${database("amountMinor")}) AS ${database("totalMinor")}
-        FROM ${database(ExpensesResource.table.name)}
-        WHERE ${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}
-        GROUP BY ${database("category")}, ${database("currency")}
-        ORDER BY ${database("category")} ASC, ${database("currency")} ASC
-      `
-    }
+    const conditions = expenseConditions(database, input)
 
     return yield* database<SqliteRow>`
       SELECT ${database("category")}, ${database("currency")},
         SUM(${database("amountMinor")}) AS ${database("totalMinor")}
       FROM ${database(ExpensesResource.table.name)}
-      WHERE ${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}
-        AND ${database("category")} = ${input.category}
+      WHERE ${database.and(conditions)}
       GROUP BY ${database("category")}, ${database("currency")}
       ORDER BY ${database("category")} ASC, ${database("currency")} ASC
-    `
-  }),
-})
-
-const updateExpense = SqlSchema.findOneOption({
-  Request: ExpensesResource.table.rowSchema,
-  Result: ExpensesResource.table.rowSchema,
-  execute: Effect.fn("ExpenseLedger.update.implementation")(function* (input) {
-    const database = yield* SqlClient.SqlClient
-    const changes = database.update(input, [ExpensesResource.table.identifier])
-
-    return yield* database<SqliteRow>`
-      UPDATE ${database(ExpensesResource.table.name)}
-      SET ${changes}
-      WHERE ${database(ExpensesResource.table.identifier)} = ${input.id}
-      RETURNING *
     `
   }),
 })
@@ -165,10 +117,10 @@ const validateDateRange = Effect.fn("ExpenseLedger.validateDateRange")(function*
 })
 
 const record = Effect.fn("ExpenseLedger.record")(function* (input: Expense) {
-  return yield* pipe(recordExpense(input), Effect.catchTags({
-    ...persistenceFailures,
-    NoSuchElementError: persistenceFailure,
-  }))
+  return yield* pipe(
+    ExpensesResource.repository.create(input),
+    Effect.catchTag("RepositoryError", persistenceFailure),
+  )
 })
 
 const query = Effect.fn("ExpenseLedger.query")(function* (input: ExpenseQueryInput) {
@@ -182,15 +134,25 @@ const totals = Effect.fn("ExpenseLedger.totals")(function* (input: ExpenseQueryI
 })
 
 const get = Effect.fn("ExpenseLedger.get")(function* (input: ExpenseIdentifierInput) {
-  const found = yield* pipe(findExpense(input), Effect.catchTags(persistenceFailures))
+
+  const found = yield* pipe(
+    ExpensesResource.repository.find(input.id),
+    Effect.catchTag("RepositoryError", persistenceFailure),
+  )
+
   return yield* requireExpense(input.id, found)
 })
 
 const update = Effect.fn("ExpenseLedger.update")(function* (
   input: typeof ExpensesResource.table.rowSchema.Type,
 ) {
-  const found = yield* pipe(updateExpense(input), Effect.catchTags(persistenceFailures))
-  return yield* requireExpense(input.id, found)
+  return yield* pipe(
+    ExpensesResource.repository.update(input),
+    Effect.catchTags({
+      RepositoryError: persistenceFailure,
+      ResourceNotFound: () => ExpenseNotFound.make({ id: input.id }),
+    }),
+  )
 })
 
 const remove = Effect.fn("ExpenseLedger.remove")(function* (input: ExpenseIdentifierInput) {

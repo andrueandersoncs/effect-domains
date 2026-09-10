@@ -71,3 +71,14 @@ p.policy({ scope, allow: { read: candidateOwned } })
 p.policy({ scope, allow: { create: owned } })
 // @ts-expect-error Because scope must apply independently to current and candidate state.
 p.policy({ scope: unchanged, allow: { read: owned } })
+
+const subject = Authorization.subject(PolicyAuthorSchema)
+const editorRole = subject.includes(subject.subject.roles, "editor")
+const canEdit = subject.policy(editorRole)
+p.policy({ scope, allow: { read: canEdit.expression } })
+// @ts-expect-error Because a subject policy cannot depend on a current resource row.
+subject.policy(owned)
+// @ts-expect-error Because a subject policy cannot depend on a candidate resource row.
+subject.policy(candidateOwned)
+// @ts-expect-error Because a subject policy retains scalar membership checking.
+subject.includes(subject.subject.roles, 1)

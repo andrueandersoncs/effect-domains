@@ -12,4 +12,3 @@ export const AssetSchema = Schema.Struct({
   condition: AssetConditionSchema,
 })
 
-interface Asset extends Schema.Schema.Type<typeof AssetSchema> {}

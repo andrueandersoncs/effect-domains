@@ -1,6 +1,6 @@
 # better-typescript feedback from the schema/RPC refactor
 
-Status: final refactor evidence, 2026-09-10; no feedback submitted. All existing lint rules remain enabled, with no suppressions. Workspace/root lint and typechecks pass; all 58 behavior tests pass.
+Status: submitted as [better-typescript#8](https://github.com/andrueandersoncs/better-typescript/issues/8) on 2026-09-10. All existing lint rules remain enabled, with no suppressions. Workspace/root lint and typechecks pass; all 58 behavior tests pass.
 
 Environment: better-typescript 0.4.14, TypeScript ^7, Effect 4.0.0-rc.112, Bun workspace on macOS arm64.
 

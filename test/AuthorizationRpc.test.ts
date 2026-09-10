@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Option, Record, Result, Schema, Struct, pipe } from "effect"
+import { Effect, Layer, Option, Record, Result, Schema, Struct, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
-import { RpcTest } from "effect/unstable/rpc"
+import { Rpc, RpcGroup, RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
 import { Authorization, AuthorizationSubject, Unauthenticated } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
@@ -89,6 +89,67 @@ it.effect("missing RPC authentication provider cannot fall back to a captured su
   }),
   Effect.provide(Notes.handlers),
   Effect.provide(AuthorizationRpc.layer),
+  Effect.provideService(AuthorizationSubject, { userId: "alice" }),
+  Effect.provide(sqlite),
+))
+
+const operator = Authorization.subject(NoteReaderSchema)
+const allowedOperator = operator.eq(operator.subject.userId, "alice")
+const operatorPolicy = operator.policy(allowedOperator)
+const unrestrictedRead = p.all()
+const protectedNotesPolicy = p.policy({ scope: operatorPolicy.expression, allow: { read: unrestrictedRead } })
+
+const OperatorNotes = Resource.make({
+  name: "operator_notes",
+  schema: PrivateNoteSchema,
+  authorization: protectedNotesPolicy,
+  operations: { get: true },
+})
+
+const changeNote = Rpc.make("operator.change", { payload: { text: Schema.String }, success: Schema.Void })
+  .middleware(AuthorizationRpc)
+  .annotate(AuthorizationRpc.policy, operatorPolicy)
+
+const identifyOperator = Rpc.make("operator.identity", { success: Schema.String }).middleware(AuthorizationRpc)
+const operatorCommands = RpcGroup.make(changeNote, identifyOperator)
+const operatorGroup = OperatorNotes.group.merge(operatorCommands)
+
+const operatorHandlers = operatorCommands.toLayer({
+  "operator.change": Effect.fn("AuthorizationRpc.changeNote")(function* ({ text }) {
+    const sql = yield* SqlClient.SqlClient
+    yield* pipe(sql`UPDATE operator_notes SET text = ${text} WHERE id = 'one'`, Effect.orDie)
+  }),
+  "operator.identity": Effect.fn("AuthorizationRpc.identifyOperator")(function* () {
+    const subject = yield* AuthorizationSubject
+    return yield* pipe(Schema.decodeUnknownEffect(Schema.String)(subject["userId"]), Effect.orDie)
+  }),
+})
+
+const protectedHandlers = Layer.merge(OperatorNotes.handlers, operatorHandlers)
+
+it.effect("a shared subject policy protects resource reads and authored writes without leaking between RPCs", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([OperatorNotes.table])
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO operator_notes (id, ownerId, text) VALUES ('one', 'alice', 'original')`
+    const client = yield* RpcTest.makeClient(operatorGroup)
+    const anonymous = yield* pipe(client["operator.change"]({ text: "anonymous" }), Effect.flip)
+    expect(anonymous._tag).toBe("Unauthenticated")
+    const denied = yield* pipe(client["operator.change"]({ text: "bob" }, { headers: bobHeaders }), Effect.flip)
+    expect(denied._tag).toBe("Forbidden")
+    const hidden = yield* pipe(client["operator_notes.get"]({ id: "one" }, { headers: bobHeaders }), Effect.flip)
+    expect(hidden._tag).toBe("ResourceNotFound")
+    const original = yield* client["operator_notes.get"]({ id: "one" }, { headers: aliceHeaders })
+    expect(original.text).toBe("original")
+    const identity = yield* client["operator.identity"](undefined, { headers: bobHeaders })
+    expect(identity).toBe("bob")
+    yield* client["operator.change"]({ text: "approved" }, { headers: aliceHeaders })
+    const changed = yield* client["operator_notes.get"]({ id: "one" }, { headers: aliceHeaders })
+    expect(changed.text).toBe("approved")
+  }),
+  Effect.provide(protectedHandlers),
+  Effect.provide(AuthorizationRpc.layer),
+  Effect.provideService(AuthorizationRpc.Authenticator, authenticator),
   Effect.provideService(AuthorizationSubject, { userId: "alice" }),
   Effect.provide(sqlite),
 ))

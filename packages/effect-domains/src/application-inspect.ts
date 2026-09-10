@@ -1,9 +1,11 @@
-import { Array, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, pipe } from "effect"
+import { Array, Context, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, pipe } from "effect"
 import { Table, TableSnapshot } from "./table.ts"
 import type { Resource } from "./resource.ts"
 import { Policy } from "./policy.ts"
 import { CreationInspectionSchema } from "./resource-creation.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
+import { AuthorizationRpc } from "./authorization-rpc.ts"
+import type { SubjectPolicy } from "./authorization.ts"
 
 type InspectableApplication = Readonly<{
   name: string
@@ -45,7 +47,16 @@ const ResourceInspectionSchema = Schema.Struct({
 })
 
 interface ResourceInspection extends Schema.Schema.Type<typeof ResourceInspectionSchema> {}
-const OperationInspectionSchema = Schema.Struct({ name: Schema.String, input: Schema.Unknown, output: Schema.Unknown, error: Schema.Unknown })
+const SubjectPolicyInspectionSchema = Schema.Struct({ subject: Schema.Unknown, rule: Schema.String })
+
+const OperationInspectionSchema = Schema.Struct({
+  name: Schema.String,
+  input: Schema.Unknown,
+  output: Schema.Unknown,
+  error: Schema.Unknown,
+  subjectPolicy: Schema.optionalKey(SubjectPolicyInspectionSchema),
+})
+
 interface OperationInspection extends Schema.Schema.Type<typeof OperationInspectionSchema> {}
 const OperationsSchema = Schema.Array(OperationInspectionSchema)
 const ResourcesSchema = Schema.Array(ResourceInspectionSchema)
@@ -97,6 +108,12 @@ class InspectionError extends Schema.TaggedError<InspectionError>()("Application
   reason: Schema.String,
 }) {}
 
+const inspectSubjectPolicy = (policy: SubjectPolicy) => {
+  const subject = schemaDocument(policy.subject)
+  const rule = Policy.render(policy.expression)
+  return SubjectPolicyInspectionSchema.make({ subject, rule })
+}
+
 const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: RpcProcedure) {
   const compiled = compileUnaryRpc(procedure)
 
@@ -108,7 +125,13 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
   const input = schemaDocument(contract.payloadSchema)
   const output = schemaDocument(contract.successSchema)
   const error = schemaDocument(contract.errorSchema)
-  return OperationInspectionSchema.make({ name: contract._tag, input, output, error })
+  const policy = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
+  const subjectPolicy = Option.map(policy, inspectSubjectPolicy)
+
+  return OperationInspectionSchema.make({
+    name: contract._tag, input, output, error,
+    ...Option.match(subjectPolicy, { onNone: () => ({}), onSome: (subjectPolicy) => ({ subjectPolicy }) }),
+  })
 })
 
 const operation = flow(inspectOperation, Effect.runSync)

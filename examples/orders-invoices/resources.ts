@@ -1,7 +1,17 @@
 import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { InvoiceSchema, OrderLineSchema, OrderSchema } from "./domain.ts"
+import { Schema } from "effect"
+import { InvoiceSchema, OrderLineSchema, OrderSchema, TenantIdSchema } from "./domain.ts"
+
+const BillingSubjectSchema = Schema.Struct({ ...ExampleSubjectSchema.fields, tenantId: TenantIdSchema })
+const subjectPolicy = Authorization.subject(BillingSubjectSchema)
+const authenticated = subjectPolicy.all()
+const editor = subjectPolicy.includes(subjectPolicy.subject.roles, "editor")
+const administrator = subjectPolicy.includes(subjectPolicy.subject.roles, "admin")
+const canEdit = subjectPolicy.any(editor, administrator)
+export const BillingReadAuthorization = subjectPolicy.policy(authenticated)
+export const BillingWriteAuthorization = subjectPolicy.policy(canEdit)
 
 const ordersPolicy = Authorization.for({ resource: OrderSchema, subject: ExampleSubjectSchema })
 const orderTenant = ordersPolicy.eq(ordersPolicy.row.tenantId, ordersPolicy.subject.tenantId)

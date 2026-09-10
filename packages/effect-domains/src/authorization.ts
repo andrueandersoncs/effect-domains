@@ -86,6 +86,11 @@ export interface PolicyAuthorization<Resource extends StructSchema = StructSchem
   readonly subject: Subject
 }
 
+export interface SubjectPolicy<Subject extends StructSchema = StructSchema> {
+  readonly subject: Subject
+  readonly expression: PolicyExpression<"subject">
+}
+
 export type AuthorizationDefinition = Schema.Schema.Type<typeof PublicAuthorizationSchema> | Schema.Schema.Type<typeof DenyAuthorizationSchema> | PolicyAuthorization
 
 export interface AuthorizationRuntime {
@@ -134,27 +139,26 @@ const policyField = <Value, Tag extends "SubjectField" | "RowField" | "NextField
 const policyFields = <S extends StructSchema, Tag extends "SubjectField" | "RowField" | "NextField", Phases extends PolicyPhase>(schema: S, tag: Tag) =>
   Record.map(schema.fields, (_, field) => policyField(tag, field)) as FieldReferences<S, Tag, Phases>
 
+const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => pipe(
+  Policy.Schema.make({ _tag: "Equal", left: operand(left), right: operand(right) }),
+  expression<OperandPhases<Left> | OperandPhases<Right>>,
+)
+
+const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>>) => pipe(
+  Policy.Schema.make({ _tag: "Includes", collection: collectionOperand(collection), value: operand(value) }),
+  expression<OperandPhases<Collection> | OperandPhases<Value>>,
+)
+
+const all = <const Expressions extends ReadonlyArray<PolicyExpression>>(...children: Expressions) =>
+  pipe(Policy.all(...children), expression<ExpressionPhase<Expressions[number]>>)
+
+const any = <const Expressions extends ReadonlyArray<PolicyExpression>>(...children: Expressions) =>
+  pipe(Policy.any(...children), expression<ExpressionPhase<Expressions[number]>>)
+
 const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(schemas: Readonly<{ readonly resource: Resource; readonly subject: Subject }>) => {
   const subject = policyFields<Subject, "SubjectField", "subject">(schemas.subject, "SubjectField")
   const row = policyFields<Resource, "RowField", "row">(schemas.resource, "RowField")
   const next = policyFields<Resource, "NextField", "next">(schemas.resource, "NextField")
-
-  const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => pipe(
-    Policy.Schema.make({ _tag: "Equal", left: operand(left), right: operand(right) }),
-    expression<OperandPhases<Left> | OperandPhases<Right>>,
-  )
-
-  const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>>) => pipe(
-    Policy.Schema.make({ _tag: "Includes", collection: collectionOperand(collection), value: operand(value) }),
-    expression<OperandPhases<Collection> | OperandPhases<Value>>,
-  )
-
-  const all = <const Expressions extends ReadonlyArray<PolicyExpression>>(...children: Expressions) =>
-    pipe(Policy.all(...children), expression<ExpressionPhase<Expressions[number]>>)
-
-  const any = <const Expressions extends ReadonlyArray<PolicyExpression>>(...children: Expressions) =>
-    pipe(Policy.any(...children), expression<ExpressionPhase<Expressions[number]>>)
-
   const unchangedField = (field: ScalarOnlyFieldName<Resource>) => Policy.Schema.make({ _tag: "Equal", left: row[field] as Operand, right: next[field] as Operand })
 
   const unchanged = (...fields: ReadonlyArray<ScalarOnlyFieldName<Resource>>) => {
@@ -171,6 +175,11 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   }>>(definition: Readonly<{ readonly scope: PolicyExpression<"row" | "subject">; readonly allow: Allow }>) => constructPolicy(schemas.resource, schemas.subject, definition)
 
   return { subject, row, next, eq, includes: membership, all, any, unchanged, policy, literal: literalOperand }
+}
+
+const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
+  const policy = (condition: PolicyExpression<"subject">) => constructSubjectPolicy(subject, condition)
+  return { subject: policyFields<Subject, "SubjectField", "subject">(subject, "SubjectField"), eq, includes: membership, all, any, literal: literalOperand, policy }
 }
 
 const finiteNumber = (ast: SchemaAST.Number) => pipe(scalarChecks(ast), Array.some((check) => {
@@ -323,6 +332,47 @@ const checkPolicy = (policy: PolicySyntax, fields: PolicyFields, allowed: HashSe
 
   return Policy.fold<Effect.Effect<void, AuthorizationDefinitionError>>(validate)(policy)
 }
+
+const RegisteredSubjectPolicy = Symbol("RegisteredSubjectPolicy")
+
+type RegisteredSubjectPolicy<Subject extends StructSchema> = SubjectPolicy<Subject> & Readonly<Record<
+  typeof RegisteredSubjectPolicy,
+  (candidate: SubjectPolicy<Subject>) => Effect.Effect<Subject["Type"], Forbidden, AuthorizationSubject>
+>>
+
+const isRegisteredSubjectPolicy = <Subject extends StructSchema>(policy: SubjectPolicy<Subject>): policy is RegisteredSubjectPolicy<Subject> =>
+  Predicate.hasProperty(policy, RegisteredSubjectPolicy)
+
+const subjectPhases = HashSet.fromIterable<PolicyPhase>(["subject"])
+const absentPolicyRow = Option.none<Readonly<Record<string, unknown>>>()
+
+const constructSubjectPolicy = <Subject extends StructSchema>(subject: Subject, condition: PolicyExpression<"subject">): SubjectPolicy<Subject> => {
+  const subjectFields = describeFields(subject)
+  const fields = new PolicyFields({ resource: {}, subject: subjectFields })
+  pipe(checkPolicy(condition, fields, subjectPhases, "subject policy"), Effect.runSync)
+  const snapshot = pipe(condition, Policy.snapshot, expression<"subject">)
+  const evaluate = Policy.evaluate(snapshot)
+  const isSubject = Schema.is(subject)
+
+  const require = Effect.gen(function* () {
+    const claims = yield* AuthorizationSubject
+    if (!isSubject(claims)) return yield* forbidden()
+    const environment = new PolicyEnvironment({ subject: claims, row: absentPolicyRow, next: absentPolicyRow })
+    const allowed = yield* pipe(evaluate(environment), Effect.catchTag("PolicyEvaluationError", forbidden))
+    if (!allowed) return yield* forbidden()
+    return claims
+  })
+
+  const invalidRegistration = pipe(definitionError("subject policy registration does not match its definition"), Effect.die)
+  const registration = (candidate: SubjectPolicy<Subject>) => equals(candidate, registered) ? require : invalidRegistration
+  const registered = Object.freeze({ subject, expression: snapshot, [RegisteredSubjectPolicy]: registration })
+  return registered
+}
+
+const requireSubject = <Subject extends StructSchema>(policy: SubjectPolicy<Subject>) =>
+  isRegisteredSubjectPolicy(policy)
+    ? policy[RegisteredSubjectPolicy](policy)
+    : pipe(definitionError("subject policy must be constructed by Authorization.subject"), Effect.die)
 
 const policyFor = (authorization: PolicyAuthorization, action: AuthorizationAction) => Option.fromNullishOr(authorization.allow[action])
 
@@ -578,6 +628,8 @@ export const Authorization = {
   public: publicAuthorization,
   deny: denyAuthorization,
   for: policyDsl,
+  subject: subjectPolicyDsl,
+  requireSubject,
   validateSubjectBindings,
   compile: Effect.fn("Authorization.compile")(function* (options: Readonly<{ readonly authorization: AuthorizationDefinition; readonly resource: StructSchema; readonly storage: StructSchema; readonly table: Table }>) {
     if (!isPolicyAuthorization(options.authorization)) return yield* standalone(options.authorization)

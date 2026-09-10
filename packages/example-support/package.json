@@ -4,13 +4,15 @@
   "type": "module",
   "exports": {
     "./authentication": "./src/authentication.ts",
-    "./databases": "./src/databases.ts"
+    "./databases": "./src/databases.ts",
+    "./files": "./src/files.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript"
   },
   "dependencies": {
+    "@effect/sql-sqlite-bun": "catalog:",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
   }

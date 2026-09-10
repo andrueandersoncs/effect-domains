@@ -7,11 +7,8 @@ export const AssetsResource = Resource.make({
   name: "assets",
   schema: AssetSchema,
   operations: {
-    get: true,
+    ...Resource.crud,
     list: { filter: ["assetTag", "location", "condition"], limit: 100 },
-    create: true,
-    update: true,
-    remove: true,
   },
   relations: {
     unique: [{ name: "assets_asset_tag_key", fields: ["assetTag"] }],

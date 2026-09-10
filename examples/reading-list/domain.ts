@@ -27,4 +27,3 @@ export const ReadingListBookSchema = Schema.Struct({
   notes: Schema.NullOr(Schema.NonEmptyString),
 })
 
-interface ReadingListBook extends Schema.Schema.Type<typeof ReadingListBookSchema> {}

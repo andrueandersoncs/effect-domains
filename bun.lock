@@ -30,7 +30,6 @@
       "name": "@effect-domains/example-appointment-reminders",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
@@ -87,7 +86,6 @@
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
-        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
@@ -123,6 +121,7 @@
     "packages/example-support": {
       "name": "@effect-domains/example-support",
       "dependencies": {
+        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },

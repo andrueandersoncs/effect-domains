@@ -1,13 +1,13 @@
-import { Array, Effect, Equivalence, Option, Schema, pipe } from "effect"
+import { Array, Effect, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { AuthorizationSubject, Forbidden } from "effect-domains/authorization"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { Authorization } from "effect-domains/authorization"
 import { BillingRpcs, OrderSummary } from "./contracts.ts"
 
 import {
   type AddLineInput,
   AddLineInputSchema,
   type CreateOrderInput,
+  CreateOrderInputSchema,
   type GetOrderInput,
   type IssueInvoiceInput,
   IssueInvoiceInputSchema,
@@ -20,14 +20,14 @@ import {
   InvalidOrderTransition,
   InvoiceNotFound,
   InvoiceRequiresLines,
+  MinorUnitsSchema,
   OrderNotFound,
-  OrderSchema,
   TenantIdSchema,
   TotalOverflow,
   VersionConflict,
 } from "./domain.ts"
 
-import { InvoicesResource, OrderLinesResource, OrdersResource } from "./resources.ts"
+import { BillingReadAuthorization, BillingWriteAuthorization, InvoicesResource, OrderLinesResource, OrdersResource } from "./resources.ts"
 type SqliteRow = Readonly<Record<string, unknown>>
 
 const ScopedOrderInputSchema = Schema.Struct({
@@ -35,64 +35,57 @@ const ScopedOrderInputSchema = Schema.Struct({
   tenantId: TenantIdSchema,
 })
 
-interface ScopedOrderInput extends Schema.Schema.Type<typeof ScopedOrderInputSchema> {}
-
-const CreateOrderRecordSchema = Schema.Struct({
+const ScopedInvoiceInputSchema = Schema.Struct({
+  invoiceId: Schema.String,
   tenantId: TenantIdSchema,
-  number: Schema.String,
-  customer: Schema.NonEmptyString,
 })
 
-interface CreateOrderRecord extends Schema.Schema.Type<typeof CreateOrderRecordSchema> {}
+const CreateOrderRecordSchema = Schema.Struct({
+  ...CreateOrderInputSchema.fields,
+  tenantId: TenantIdSchema,
+})
+
+const TenantOrderNumberInputSchema = Schema.Struct({
+  tenantId: TenantIdSchema,
+  number: CreateOrderInputSchema.fields.number,
+})
+
+const TenantInvoiceNumberInputSchema = Schema.Struct({
+  tenantId: TenantIdSchema,
+  number: IssueInvoiceInputSchema.fields.number,
+})
 
 const AddLineRecordSchema = Schema.Struct({
   ...AddLineInputSchema.fields,
   tenantId: TenantIdSchema,
-  totalMinor: Schema.Int,
+  totalMinor: MinorUnitsSchema,
 })
-
-interface AddLineRecord extends Schema.Schema.Type<typeof AddLineRecordSchema> {}
 
 const IssueInvoiceRecordSchema = Schema.Struct({
   ...IssueInvoiceInputSchema.fields,
   tenantId: TenantIdSchema,
-  totalMinor: Schema.Int,
+  totalMinor: MinorUnitsSchema,
 })
-
-interface IssueInvoiceRecord extends Schema.Schema.Type<typeof IssueInvoiceRecordSchema> {}
 
 const PayInvoiceRecordSchema = Schema.Struct({
   ...PayInvoiceInputSchema.fields,
   tenantId: TenantIdSchema,
 })
 
-interface PayInvoiceRecord extends Schema.Schema.Type<typeof PayInvoiceRecordSchema> {}
-const NullableJsonSchema = Schema.NullOr(Schema.String)
-
 const OrderSummaryStorageSchema = Schema.Struct({
-  id: OrdersResource.table.identifierSchema,
-  ...OrderSchema.fields,
-  lines: Schema.String,
-  invoice: NullableJsonSchema,
+  ...OrdersResource.table.rowSchema.fields,
+  lines: Schema.fromJsonString(Schema.Array(OrderLinesResource.table.storageSchema)),
+  invoice: Schema.NullOr(Schema.fromJsonString(InvoicesResource.table.storageSchema)),
 })
 
 interface OrderSummaryStorage extends Schema.Schema.Type<typeof OrderSummaryStorageSchema> {}
+
 const IdRowSchema = Schema.Struct({ id: Schema.String })
-interface IdRow extends Schema.Schema.Type<typeof IdRowSchema> {}
-const TenantNumberInputSchema = Schema.Struct({ tenantId: TenantIdSchema, number: Schema.String })
-interface TenantNumberInput extends Schema.Schema.Type<typeof TenantNumberInputSchema> {}
-const OrderLinesSchema = Schema.Array(OrderLinesResource.table.rowSchema)
 
-const BillingSubjectSchema = Schema.Struct({
-  ...ExampleSubjectSchema.fields,
-  tenantId: TenantIdSchema,
-})
-
-interface BillingSubject extends Schema.Schema.Type<typeof BillingSubjectSchema> {}
 
 const createOrderRecord = SqlSchema.findOne({
   Request: CreateOrderRecordSchema,
-  Result: OrdersResource.table.rowSchema,
+  Result: OrdersResource.table.storageSchema,
   execute: Effect.fn("Billing.createOrder.record")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -107,7 +100,7 @@ const createOrderRecord = SqlSchema.findOne({
 })
 
 const orderNumberForTenant = SqlSchema.findOneOption({
-  Request: TenantNumberInputSchema,
+  Request: TenantOrderNumberInputSchema,
   Result: IdRowSchema,
   execute: Effect.fn("Billing.orderNumberForTenant")(function* (input) {
     const sql = yield* SqlClient.SqlClient
@@ -122,7 +115,7 @@ const orderNumberForTenant = SqlSchema.findOneOption({
 })
 
 const invoiceNumberForTenant = SqlSchema.findOneOption({
-  Request: TenantNumberInputSchema,
+  Request: TenantInvoiceNumberInputSchema,
   Result: IdRowSchema,
   execute: Effect.fn("Billing.invoiceNumberForTenant")(function* (input) {
     const sql = yield* SqlClient.SqlClient
@@ -138,7 +131,7 @@ const invoiceNumberForTenant = SqlSchema.findOneOption({
 
 const updateDraftOrderForLine = SqlSchema.findOneOption({
   Request: AddLineRecordSchema,
-  Result: OrdersResource.table.rowSchema,
+  Result: OrdersResource.table.storageSchema,
   execute: Effect.fn("Billing.updateDraftOrderForLine")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -157,7 +150,7 @@ const updateDraftOrderForLine = SqlSchema.findOneOption({
 
 const insertLineRecord = SqlSchema.findOne({
   Request: AddLineRecordSchema,
-  Result: OrderLinesResource.table.rowSchema,
+  Result: OrderLinesResource.table.storageSchema,
   execute: Effect.fn("Billing.insertLineRecord")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -173,7 +166,7 @@ const insertLineRecord = SqlSchema.findOne({
 
 const issueInvoiceRecord = SqlSchema.findOne({
   Request: IssueInvoiceRecordSchema,
-  Result: InvoicesResource.table.rowSchema,
+  Result: InvoicesResource.table.storageSchema,
   execute: Effect.fn("Billing.issueInvoice.record")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -189,7 +182,7 @@ const issueInvoiceRecord = SqlSchema.findOne({
 
 const markOrderInvoiced = SqlSchema.findOneOption({
   Request: IssueInvoiceRecordSchema,
-  Result: OrdersResource.table.rowSchema,
+  Result: OrdersResource.table.storageSchema,
   execute: Effect.fn("Billing.markOrderInvoiced")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -208,7 +201,7 @@ const markOrderInvoiced = SqlSchema.findOneOption({
 
 const markInvoicePaid = SqlSchema.findOneOption({
   Request: PayInvoiceRecordSchema,
-  Result: InvoicesResource.table.rowSchema,
+  Result: InvoicesResource.table.storageSchema,
   execute: Effect.fn("Billing.markInvoicePaid")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
@@ -262,47 +255,42 @@ const orderSummaryForTenant = SqlSchema.findOneOption({
   }),
 })
 
-const decodeJson = <S extends Schema.Top>(schema: S) => (source: string) =>
-  pipe(
-    Effect.try({ try: () => JSON.parse(source), catch: () => BillingUnavailable.make({}) }),
-    Effect.flatMap(Schema.decodeUnknownEffect(schema)),
-  )
+const invoiceForTenant = SqlSchema.findOneOption({
+  Request: ScopedInvoiceInputSchema,
+  Result: InvoicesResource.table.storageSchema,
+  execute: Effect.fn("Billing.invoiceForTenant")(function* (input) {
+    const sql = yield* SqlClient.SqlClient
+
+    return yield* sql<SqliteRow>`
+      SELECT * FROM ${sql(InvoicesResource.table.name)}
+      WHERE ${sql("id")} = ${input.invoiceId} AND ${sql("tenantId")} = ${input.tenantId}
+      LIMIT 1
+    `
+  }),
+})
 
 const summaryFromStorage = Effect.fn("Billing.summaryFromStorage")(function* (
   stored: OrderSummaryStorage,
 ) {
-  const lines = yield* pipe(stored.lines, decodeJson(OrderLinesSchema))
-
-  const invoice = yield* pipe(
-    Option.fromNullishOr(stored.invoice),
-    Option.match({ onNone: () => Effect.succeed(null), onSome: decodeJson(InvoicesResource.table.rowSchema) }),
-  )
-
-  return OrderSummary.make({ order: stored, lines, invoice })
+  return OrderSummary.make({
+    order: {
+      id: stored.id,
+      tenantId: stored.tenantId,
+      number: stored.number,
+      customer: stored.customer,
+      status: stored.status,
+      totalMinor: stored.totalMinor,
+      version: stored.version,
+    },
+    lines: stored.lines,
+    invoice: stored.invoice,
+  })
 })
 
-const authenticatedSubject = Effect.fn("Billing.authenticatedSubject")(function* () {
-  const raw = yield* AuthorizationSubject
-
-  return yield* pipe(
-    Schema.decodeUnknownEffect(BillingSubjectSchema)(raw),
-    Effect.catchTag("SchemaError", () => Forbidden.make({})),
-  )
-})
-
-const billingSubject = Effect.fn("Billing.subject")(function* () {
-  const subject = yield* authenticatedSubject()
-  const editor = Array.contains(subject.roles, "editor")
-  const administrator = Array.contains(subject.roles, "admin")
-  const canEdit = editor || administrator
-
-  if (!canEdit) return yield* Forbidden.make({})
-  return subject
-})
 
 const requireOrder = Effect.fn("Billing.requireOrder")(function* (
   orderId: string,
-  tenantId: BillingSubject["tenantId"],
+  tenantId: typeof TenantIdSchema.Type,
 ) {
   const found = yield* orderSummaryForTenant({ orderId, tenantId })
   if (Option.isNone(found)) return yield* OrderNotFound.make({ orderId })
@@ -311,19 +299,11 @@ const requireOrder = Effect.fn("Billing.requireOrder")(function* (
 
 const requireInvoice = Effect.fn("Billing.requireInvoice")(function* (
   invoiceId: string,
-  tenantId: BillingSubject["tenantId"],
+  tenantId: typeof TenantIdSchema.Type,
 ) {
-  const sql = yield* SqlClient.SqlClient
-
-  const rows = yield* sql<SqliteRow>`
-    SELECT * FROM ${sql(InvoicesResource.table.name)}
-    WHERE ${sql("id")} = ${invoiceId} AND ${sql("tenantId")} = ${tenantId}
-    LIMIT 1
-  `
-
-  const first = Array.get(rows, 0)
-  if (Option.isNone(first)) return yield* InvoiceNotFound.make({ invoiceId })
-  return yield* Schema.decodeUnknownEffect(InvoicesResource.table.rowSchema)(first.value)
+  const found = yield* invoiceForTenant({ invoiceId, tenantId })
+  if (Option.isNone(found)) return yield* InvoiceNotFound.make({ invoiceId })
+  return found.value
 })
 
 const persistenceFailure = Effect.fn("Billing.persistenceFailure")(function* () {
@@ -338,11 +318,11 @@ const persistenceFailures = {
 const requiredRowFailures = { ...persistenceFailures, NoSuchElementError: persistenceFailure }
 
 const createOrder = Effect.fn("Billing.createOrder")(function* (input: CreateOrderInput) {
-  const subject = yield* billingSubject()
+  const subject = yield* Authorization.requireSubject(BillingWriteAuthorization)
   const sql = yield* SqlClient.SqlClient
 
   const transaction = Effect.gen(function* () {
-    const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
+    const numberInput = TenantOrderNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
     const existing = yield* orderNumberForTenant(numberInput)
     if (Option.isSome(existing)) return yield* DuplicateOrderNumber.make({ number: input.number })
     const record = CreateOrderRecordSchema.make({ ...input, tenantId: subject.tenantId })
@@ -353,7 +333,7 @@ const createOrder = Effect.fn("Billing.createOrder")(function* (input: CreateOrd
 })
 
 const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
-  const subject = yield* billingSubject()
+  const subject = yield* Authorization.requireSubject(BillingWriteAuthorization)
   const sql = yield* SqlClient.SqlClient
   const lineTotal = input.quantity * input.unitAmountMinor
   if (!Number.isSafeInteger(lineTotal)) return yield* TotalOverflow.make({ orderId: input.orderId })
@@ -388,7 +368,7 @@ const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
 })
 
 const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueInvoiceInput) {
-  const subject = yield* billingSubject()
+  const subject = yield* Authorization.requireSubject(BillingWriteAuthorization)
   const sql = yield* SqlClient.SqlClient
 
   const transaction = Effect.gen(function* () {
@@ -408,7 +388,7 @@ const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueIn
       return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
     }
 
-    const numberInput = TenantNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
+    const numberInput = TenantInvoiceNumberInputSchema.make({ tenantId: subject.tenantId, number: input.number })
     const existing = yield* invoiceNumberForTenant(numberInput)
     if (Option.isSome(existing)) return yield* DuplicateInvoiceNumber.make({ number: input.number })
 
@@ -431,7 +411,7 @@ const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueIn
 })
 
 const payInvoice = Effect.fn("Billing.payInvoice")(function* (input: PayInvoiceInput) {
-  const subject = yield* billingSubject()
+  const subject = yield* Authorization.requireSubject(BillingWriteAuthorization)
   const sql = yield* SqlClient.SqlClient
 
   const transaction = Effect.gen(function* () {
@@ -459,7 +439,7 @@ const payInvoice = Effect.fn("Billing.payInvoice")(function* (input: PayInvoiceI
 })
 
 const getOrder = Effect.fn("Billing.getOrder")(function* (input: GetOrderInput) {
-  const subject = yield* authenticatedSubject()
+  const subject = yield* Authorization.requireSubject(BillingReadAuthorization)
   yield* SqlClient.SqlClient
 
   const operation = Effect.gen(function* () {

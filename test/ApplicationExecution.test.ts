@@ -5,21 +5,15 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 const source = `
   import { Context, Effect, Layer } from "effect"
-  import { SqliteClient } from "@effect/sql-sqlite-bun"
   import { SqlClient } from "effect/unstable/sql"
-  import { assertDistinctDatabases } from "@effect-domains/example-support/databases"
+  import { privateSqlite } from "@effect-domains/example-support/databases"
   import { Application } from "effect-domains/application"
   import { ApplicationBun } from "effect-domains/application-bun"
   class PrivateSql extends Context.Service()("test/PrivateSql") {}
   process.argv = [process.execPath, "execution-isolation", "worker"]
   const app = Application.make({ name: "execution-isolation" })
-  const services = Layer.unwrap(Effect.gen(function* () {
-    const application = yield* SqlClient.SqlClient
-    const privateDatabase = SqliteClient.layer({ filename: process.env.EXECUTION_DB }).pipe(
-      Layer.tap((context) => assertDistinctDatabases(application, Context.get(context, SqlClient.SqlClient))),
-    )
-    return Layer.effect(PrivateSql, SqlClient.SqlClient).pipe(Layer.provide(privateDatabase))
-  }))
+  const privateDatabase = privateSqlite(process.env.EXECUTION_DB)
+  const services = Layer.effect(PrivateSql, SqlClient.SqlClient).pipe(Layer.provide(privateDatabase))
   const initialize = Effect.gen(function* () {
     const application = yield* SqlClient.SqlClient
     const execution = yield* PrivateSql

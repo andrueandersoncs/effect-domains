@@ -73,6 +73,27 @@ const seed = Effect.gen(function* () {
     ('3', 'b', 'eve', 'charlie'), ('4', 'a', 'alice', 'delta')`
 })
 
+it.effect("subject policies snapshot allowed values and reject invalid claims and resource-dependent rules", Effect.fn("Authorization.subjectPolicy")(function* () {
+  const subject = Authorization.subject(SubjectSchema)
+  const allowedUsers = ["alice"]
+  const allowed = subject.includes(allowedUsers, subject.subject.userId)
+  const policy = subject.policy(allowed)
+  yield* Effect.sync(() => Reflect.set(allowedUsers, "0", "bob"))
+  const admitted = yield* pipe(Authorization.requireSubject(policy), asAlice)
+  expect(admitted.userId).toBe("alice")
+  const denied = yield* pipe(Authorization.requireSubject(policy), asBob, rejectedTag)
+  expect(denied).toBe("Forbidden")
+
+  const invalid = yield* pipe(
+    Authorization.requireSubject(policy),
+    Effect.provideService(AuthorizationSubject, { userId: "alice", tenantId: "a", roles: "admin" }),
+    rejectedTag,
+  )
+
+  expect(invalid).toBe("Forbidden")
+  expect(() => subject.policy(owned as never)).toThrow()
+}))
+
 it.effect("repository visibility scopes identifiers and pagination before computing continuations", () => pipe(
   Effect.gen(function* () {
     yield* seed

@@ -14,4 +14,3 @@ export const ArticleSchema = Schema.Struct({
   plannedPublicationAt: Schema.NullOr(Schema.DateTimeUtcFromString),
 })
 
-interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}

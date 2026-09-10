@@ -9,7 +9,6 @@
     "serve": "bun run main.ts serve"
   },
   "dependencies": {
-    "@effect/sql-sqlite-bun": "catalog:",
     "@effect-domains/example-support": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"

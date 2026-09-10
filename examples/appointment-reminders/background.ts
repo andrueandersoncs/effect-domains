@@ -1,6 +1,7 @@
 import { ClusterCron, Singleton } from "effect/unstable/cluster"
 import { SqlClient } from "effect/unstable/sql"
-import { Array, Config, Cron, DateTime, Effect, Equivalence, FileSystem, Layer, Path, Schedule, Schema, pipe } from "effect"
+import { Array, Config, Cron, DateTime, Effect, Equivalence, Layer, Schedule, Schema, pipe } from "effect"
+import { replaceFileAtomically } from "@effect-domains/example-support/files"
 
 import {
   AppointmentReminderDeliveryFailed,
@@ -98,18 +99,13 @@ const registerAppointmentRecipient = Effect.gen(function* () {
   return AppointmentRecipientEntity.toLayer(handlers)
 })
 
-const writeInboxProjection = pipe(Effect.gen(function* () {
+const writeInboxProjection = Effect.gen(function* () {
   const database = yield* SqlClient.SqlClient
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
 
   const destination = yield* pipe(
     Config.string("APPOINTMENT_REMINDERS_PROJECTION_FILE"),
     Config.withDefault("appointment-reminders.notifications.json"),
   )
-
-  const directory = path.dirname(destination)
-  const prefix = `.${path.basename(destination)}.`
 
   const notifications = yield* database<Readonly<Record<string, unknown>>>`
     SELECT id, recipient, reminderId, appointmentId, appointmentAt, reminderAt, location, purpose, deliveredAt, archivedAt
@@ -117,12 +113,9 @@ const writeInboxProjection = pipe(Effect.gen(function* () {
     ORDER BY ${database("id")} ASC
   `
 
-  yield* fileSystem.makeDirectory(directory, { recursive: true })
-  const temporary = yield* fileSystem.makeTempFileScoped({ directory, prefix })
   const snapshot = `${JSON.stringify({ notifications }, null, 2)}\n`
-  yield* fileSystem.writeFileString(temporary, snapshot)
-  yield* fileSystem.rename(temporary, destination)
-}), Effect.scoped)
+  yield* replaceFileAtomically({ path: destination, contents: snapshot })
+})
 
 const projectionSchedule = Schedule.spaced("5 seconds")
 

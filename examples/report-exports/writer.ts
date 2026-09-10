@@ -1,4 +1,5 @@
-import { Effect, FileSystem, Path } from "effect"
+import { Effect, Path } from "effect"
+import { replaceFileAtomically } from "@effect-domains/example-support/files"
 import { ReportArtifactSchema, type ReportExportJob } from "./contracts.ts"
 import { ReportArtifactOutput } from "./output.ts"
 
@@ -7,7 +8,6 @@ const isSafeExecutionId = (value: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact")(
   function* (input: ReportExportJob) {
     const output = yield* ReportArtifactOutput
-    const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
 
     if (!isSafeExecutionId(input.executionId)) {
@@ -16,10 +16,7 @@ export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact"
 
     const directory = path.resolve(output.directory)
     const artifactPath = path.join(directory, `${input.executionId}.json`)
-    yield* fileSystem.makeDirectory(directory, { recursive: true })
-    const temporary = yield* fileSystem.makeTempFileScoped({ directory, prefix: `.${input.executionId}.` })
-    yield* fileSystem.writeFileString(temporary, input.contents)
-    yield* fileSystem.rename(temporary, artifactPath)
+    yield* replaceFileAtomically({ path: artifactPath, contents: input.contents })
 
     return ReportArtifactSchema.make({
       artifactPath,
@@ -33,6 +30,5 @@ export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact"
       totalCreditMinor: input.totalCreditMinor,
     })
   },
-  Effect.scoped,
   Effect.orDie,
 )
