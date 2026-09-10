@@ -2,7 +2,7 @@
 
 Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and JSON CLI inputs from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
 
-The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and `BookSchema`, and `examples/` contains the runnable examples. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
+The repository root is a private Bun workspace. `packages/effect-domains` is the framework library, `packages/example-support` holds shared demo authentication and database-isolation helpers, and `examples/` contains independent domain applications. `apps/admin` is the separately built browser application; after `bun install`, run `bun run build` to prebuild its assets. At runtime the Bun adapter only loads those prebuilt assets.
 
 ## Declare an application
 
@@ -14,8 +14,8 @@ import { Resource } from "effect-domains/resource"
 
 const BookSchema = Schema.Struct({
   title: Schema.NonEmptyString,
-  pageCount: Schema.Int.check(Schema.isGreaterThan(0)),
-  publishedAt: Schema.DateTimeUtc,
+  author: Schema.NonEmptyString,
+  status: Schema.Literals(["planned", "reading", "finished"]),
 })
 
 const Books = Resource.make({
@@ -31,7 +31,7 @@ export const Catalog = Application.make({
 })
 ```
 
-An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, timestamp storage codecs, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
+An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
 `ApplicationBun.run(application, options)` returns the application Effect; execute it with native `BunRuntime.runMain`. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
 
@@ -52,7 +52,7 @@ const program = Effect.gen(function* () {
 pipe(program, BunRuntime.runMain)
 ```
 
-Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [basic-crud](examples/basic-crud/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [reading-list](examples/reading-list/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and JSON CLI inputs without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -160,7 +160,7 @@ See the [explicit authoring walkthrough](examples/README.md#review-schema-change
 
 ## Native execution composition
 
-Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [durable runbooks](examples/README.md#durable-workflows).
+Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [report export runbook](examples/README.md#report-exports).
 
 ## Run the reservation application
 
@@ -182,11 +182,11 @@ The example is loopback-only and unauthenticated. Its [guide](examples/README.md
 
 The authenticated [orders/invoices walkthrough](examples/README.md#orders-and-invoices) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Run `bun run orders-invoices:server`, then use `ORDERS_INVOICES_TOKEN=alice-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'` in another terminal. Mutations remain authored transactions; generated reads stay tenant-scoped.
 
-The [example applications](examples/README.md) have persistent SQLite databases, HTTP servers, generated CLIs, and local inspection. Resource applications retain frozen migrations; native Effect manages durable execution history. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Todo rules](examples/resource-crud/resources.ts) demonstrate tenant/owner scope and completion locks; [note rules](examples/service-codec/resources.ts) demonstrate reader/editor/admin permissions alongside a storage codec. Their [demo credentials and walkthroughs](examples/README.md#demo-authentication) are deliberately public and loopback-only. Other examples cover minimal public CRUD, authored queries, explicit schema evolution, reservation policy, and native durable execution.
+The [example applications](examples/README.md) cover reading lists, expense tracking, team tasks, field notes, editorial planning, equipment records, stock reservations, billing, financial report exports, and appointment notifications. Each has persistent SQLite storage, an HTTP server, a generated CLI, and local inspection. Run `bun run <example>:server` and use `bun run <example> --help` in another terminal. [Task rules](examples/team-tasks/resources.ts) demonstrate tenant/owner scope and completion locks; [field-note rules](examples/field-notes/resources.ts) demonstrate reader/editor/admin permissions separately from encrypted text storage. Their [demo credentials](examples/README.md#demo-authentication) are deliberately public and loopback-only.
 
 ## Escape hatches and documentation
 
-Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper, database-service alias, or persistent-reference cache. Authorization, transactions, caching, concurrency, and recovery policy remain application concerns. Workflow diagnostics use native Effect services directly in the [workflow application](examples/durable-workflows/workflow.ts).
+Authored SQL uses Effect's `SqlSchema` combinators for request encoding and result decoding, or explicit Schema encode/decode Effects when semantics differ. There is no framework `Query` wrapper, database-service alias, or persistent-reference cache. Authorization, transactions, caching, concurrency, and recovery policy remain application concerns. Workflow diagnostics use native Effect services directly in the [workflow application](examples/report-exports/workflow.ts).
 
 - [Runnable applications](examples/README.md)
 - [Project wiki](docs/wiki/README.md)

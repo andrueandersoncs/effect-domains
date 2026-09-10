@@ -2,7 +2,7 @@
 
 This example separates generated read access from authored stock policy. It reserves a finite inventory item through transactions, so a reservation is more than a row: it has a lifecycle and changes available stock.
 
-For common runtime and explicit-migration conventions, see the [examples overview](../README.md). Compare the policy-protected generated CRUD in [resource-crud](../resource-crud/) and the historical rename/backfill workflow in [migration-lifecycle](../migration-lifecycle/).
+For common runtime and explicit-migration conventions, see the [examples overview](../README.md). Compare the policy-protected project work in [team-tasks](../team-tasks/) and the historical rename/backfill workflow in [editorial-calendar](../editorial-calendar/).
 
 ## Run it
 

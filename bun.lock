@@ -26,23 +26,8 @@
         "effect": "catalog:",
       },
     },
-    "examples/authored-sql": {
-      "name": "@effect-domains/example-authored-sql",
-      "dependencies": {
-        "@effect-domains/example-support": "workspace:*",
-        "effect": "catalog:",
-        "effect-domains": "workspace:*",
-      },
-    },
-    "examples/basic-crud": {
-      "name": "@effect-domains/example-basic-crud",
-      "dependencies": {
-        "@effect-domains/example-support": "workspace:*",
-        "effect-domains": "workspace:*",
-      },
-    },
-    "examples/durable-reminders": {
-      "name": "@effect-domains/example-durable-reminders",
+    "examples/appointment-reminders": {
+      "name": "@effect-domains/example-appointment-reminders",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
         "@effect/sql-sqlite-bun": "catalog:",
@@ -50,30 +35,34 @@
         "effect-domains": "workspace:*",
       },
     },
-    "examples/durable-workflows": {
-      "name": "@effect-domains/example-durable-workflows",
+    "examples/editorial-calendar": {
+      "name": "@effect-domains/example-editorial-calendar",
       "dependencies": {
-        "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
-        "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
     },
-    "examples/mcp-server": {
-      "name": "@effect-domains/example-mcp-server",
+    "examples/equipment-register": {
+      "name": "@effect-domains/example-equipment-register",
       "dependencies": {
-        "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
     },
-    "examples/migration-lifecycle": {
-      "name": "@effect-domains/example-migration-lifecycle",
+    "examples/expense-ledger": {
+      "name": "@effect-domains/example-expense-ledger",
       "dependencies": {
-        "@effect/platform-bun": "catalog:",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "examples/field-notes": {
+      "name": "@effect-domains/example-field-notes",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
@@ -86,6 +75,23 @@
         "effect-domains": "workspace:*",
       },
     },
+    "examples/reading-list": {
+      "name": "@effect-domains/example-reading-list",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "examples/report-exports": {
+      "name": "@effect-domains/example-report-exports",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "@effect/platform-bun": "catalog:",
+        "@effect/sql-sqlite-bun": "catalog:",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
     "examples/reservations": {
       "name": "@effect-domains/example-reservations",
       "dependencies": {
@@ -93,16 +99,8 @@
         "effect-domains": "workspace:*",
       },
     },
-    "examples/resource-crud": {
-      "name": "@effect-domains/example-resource-crud",
-      "dependencies": {
-        "@effect-domains/example-support": "workspace:*",
-        "effect": "catalog:",
-        "effect-domains": "workspace:*",
-      },
-    },
-    "examples/service-codec": {
-      "name": "@effect-domains/example-service-codec",
+    "examples/team-tasks": {
+      "name": "@effect-domains/example-team-tasks",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
@@ -199,27 +197,27 @@
 
     "@effect-domains/admin": ["@effect-domains/admin@workspace:apps/admin"],
 
-    "@effect-domains/example-authored-sql": ["@effect-domains/example-authored-sql@workspace:examples/authored-sql"],
+    "@effect-domains/example-appointment-reminders": ["@effect-domains/example-appointment-reminders@workspace:examples/appointment-reminders"],
 
-    "@effect-domains/example-basic-crud": ["@effect-domains/example-basic-crud@workspace:examples/basic-crud"],
+    "@effect-domains/example-editorial-calendar": ["@effect-domains/example-editorial-calendar@workspace:examples/editorial-calendar"],
 
-    "@effect-domains/example-durable-reminders": ["@effect-domains/example-durable-reminders@workspace:examples/durable-reminders"],
+    "@effect-domains/example-equipment-register": ["@effect-domains/example-equipment-register@workspace:examples/equipment-register"],
 
-    "@effect-domains/example-durable-workflows": ["@effect-domains/example-durable-workflows@workspace:examples/durable-workflows"],
+    "@effect-domains/example-expense-ledger": ["@effect-domains/example-expense-ledger@workspace:examples/expense-ledger"],
 
-    "@effect-domains/example-mcp-server": ["@effect-domains/example-mcp-server@workspace:examples/mcp-server"],
-
-    "@effect-domains/example-migration-lifecycle": ["@effect-domains/example-migration-lifecycle@workspace:examples/migration-lifecycle"],
+    "@effect-domains/example-field-notes": ["@effect-domains/example-field-notes@workspace:examples/field-notes"],
 
     "@effect-domains/example-orders-invoices": ["@effect-domains/example-orders-invoices@workspace:examples/orders-invoices"],
 
+    "@effect-domains/example-reading-list": ["@effect-domains/example-reading-list@workspace:examples/reading-list"],
+
+    "@effect-domains/example-report-exports": ["@effect-domains/example-report-exports@workspace:examples/report-exports"],
+
     "@effect-domains/example-reservations": ["@effect-domains/example-reservations@workspace:examples/reservations"],
 
-    "@effect-domains/example-resource-crud": ["@effect-domains/example-resource-crud@workspace:examples/resource-crud"],
-
-    "@effect-domains/example-service-codec": ["@effect-domains/example-service-codec@workspace:examples/service-codec"],
-
     "@effect-domains/example-support": ["@effect-domains/example-support@workspace:packages/example-support"],
+
+    "@effect-domains/example-team-tasks": ["@effect-domains/example-team-tasks@workspace:examples/team-tasks"],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.112", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.112" }, "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-Y5n2HhV/vsbrJls9ukX42RL7zqXQxISHegWFsP9njsCyDmGTnq7QYSO82rglwrLPwtTrv5dkSRTuGw4+oXxgMg=="],
 

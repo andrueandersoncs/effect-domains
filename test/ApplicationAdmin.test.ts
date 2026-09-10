@@ -3,7 +3,7 @@ import { Array, Deferred, Effect, Equivalence, Fiber, Layer, Option, Ref, Schema
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
-import { StoragePrefix, StoredTextSchema } from "../examples/service-codec/storage.ts"
+import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Application } from "effect-domains/application"
 import { ApplicationAdmin } from "effect-domains/application-admin"
 import { AuthorizationSubject } from "effect-domains/authorization"

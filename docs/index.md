@@ -48,7 +48,8 @@ import { Resource } from "effect-domains/resource"
 
 const BookSchema = Schema.Struct({
   title: Schema.NonEmptyString,
-  pageCount: Schema.Int.check(Schema.isGreaterThan(0)),
+  author: Schema.NonEmptyString,
+  status: Schema.Literals(["planned", "reading", "finished"]),
 })
 
 const Books = Resource.make({
@@ -67,7 +68,7 @@ The schema describes books; the resource declares access and published operation
 
 ## Follow the evidence
 
-- **Run a small vertical slice** — [Basic CRUD onboarding](/getting-started) walks through the generated book resource, server, CLI, and admin surface.
+- **Run a small vertical slice** — [Reading-list onboarding](/getting-started) walks through the personal reading-list resource, server, CLI, and admin surface.
 - **Understand the claim** — [Thesis](/wiki/thesis) explains the mechanical derivation boundary and the constraints on generalization.
 - **Inspect the implementation contract** — [Tables and Queries](/wiki/tables-and-queries) covers resources, authorization, commands, migrations, and runtime behavior.
 - **Keep claims bounded** — [Validation Strategy](/wiki/validation-strategy) records exercised behavior and its limits.

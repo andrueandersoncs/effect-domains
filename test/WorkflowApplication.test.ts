@@ -4,6 +4,7 @@ import { RpcMiddleware, RpcTest } from "effect/unstable/rpc"
 import { Headers } from "effect/unstable/http"
 import { Workflow, WorkflowEngine, WorkflowProxy, WorkflowProxyServer } from "effect/unstable/workflow"
 import { Application } from "effect-domains/application"
+import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
 
 class OperatorRequired extends Schema.TaggedError<OperatorRequired>()("OperatorRequired", {}) {}
 
@@ -66,4 +67,69 @@ it.effect("authorizes native workflow submissions and recovery before invoking t
     const deniedRecovery = yield* pipe(client["workflow.ExportResume"]({ executionId }), Effect.result)
     expect(deniedRecovery).toMatchObject({ _tag: "Failure", failure: { _tag: "OperatorRequired" } })
   }), Effect.provide(handlers), Effect.scoped)
+}))
+
+const reportExportInputSchema = Schema.toCodecJson(ReportExportRequestSchema)
+
+
+it.effect("rejects report exports outside supported currencies or an ordered period", Effect.fn("WorkflowApplication.reportExportInput")(function* () {
+  const request = yield* Schema.decodeUnknownEffect(reportExportInputSchema)({
+    report: {
+      reportId: "fy2026-q2",
+      reportingPeriod: {
+        startsAt: "2026-04-01T00:00:00.000Z",
+        endsAt: "2026-06-30T23:59:59.999Z",
+      },
+      currency: "USD",
+      releasePolicy: "automatic",
+    },
+    lines: [{
+      accountCode: "4000",
+      description: "Subscription revenue",
+      direction: "credit",
+      amountMinor: 125000,
+    }],
+  })
+
+  const unsupportedCurrency = yield* pipe(
+    Schema.decodeUnknownEffect(reportExportInputSchema)({
+      ...request,
+      report: { ...request.report, currency: "ZZZ", reportingPeriod: { startsAt: "2026-04-01T00:00:00.000Z", endsAt: "2026-06-30T23:59:59.999Z" } },
+    }),
+    Effect.result,
+  )
+
+  expect(unsupportedCurrency._tag).toBe("Failure")
+
+  const unorderedPeriod = yield* pipe(
+    Schema.decodeUnknownEffect(reportExportInputSchema)({
+      ...request,
+      report: {
+        ...request.report,
+        reportingPeriod: {
+          startsAt: "2026-06-30T23:59:59.999Z",
+          endsAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+    }),
+    Effect.result,
+  )
+
+  expect(unorderedPeriod._tag).toBe("Failure")
+
+  const emptyPeriod = yield* pipe(
+    Schema.decodeUnknownEffect(reportExportInputSchema)({
+      ...request,
+      report: {
+        ...request.report,
+        reportingPeriod: {
+          startsAt: "2026-04-01T00:00:00.000Z",
+          endsAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+    }),
+    Effect.result,
+  )
+
+  expect(emptyPeriod._tag).toBe("Failure")
 }))

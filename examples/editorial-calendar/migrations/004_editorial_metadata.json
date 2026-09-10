@@ -1,0 +1,275 @@
+{
+  "id": "004_editorial_metadata",
+  "from": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "documents",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "heading",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "summary",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "priority",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "documents",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "heading",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "summary",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "priority",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "channel",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "website",
+                  "newsletter",
+                  "print"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "plannedPublicationAt",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteRebuildTable",
+      "table": {
+        "name": "documents",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "heading",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "summary",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "priority",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "channel",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "website",
+                  "newsletter",
+                  "print"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "plannedPublicationAt",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      },
+      "copies": [
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "id",
+          "source": "id"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "heading",
+          "source": "heading"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "summary",
+          "source": "summary"
+        },
+        {
+          "_tag": "SqliteColumnSource",
+          "column": "priority",
+          "source": "priority"
+        },
+        {
+          "_tag": "SqliteColumnValue",
+          "column": "channel",
+          "value": "website"
+        }
+      ]
+    }
+  ]
+}

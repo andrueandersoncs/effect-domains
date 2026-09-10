@@ -9,9 +9,9 @@ import { Value } from "effect-domains/value"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
-import { NotesResource } from "../examples/service-codec/resources.ts"
-import { StoragePrefix } from "../examples/service-codec/storage.ts"
-import { NoteIdSchema } from "../examples/service-codec/domain.ts"
+import { FieldReportsResource } from "../examples/field-notes/resources.ts"
+import { FieldNoteEncryption, makeFieldNoteEncryption } from "../examples/field-notes/storage.ts"
+import { FieldReportIdSchema } from "../examples/field-notes/domain.ts"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
 import { RpcTest } from "effect/unstable/rpc"
 
@@ -27,7 +27,6 @@ const PagedTodoSchema = Schema.Struct({
 
 interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
 const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, operations: { list: { filter: ["completed"], limit: 1, publish: false } } })
-
 const DefaultTodoSchema = Schema.Struct({ id: identifier(Schema.Int), title: Schema.NonEmptyString })
 interface DefaultTodo extends Schema.Schema.Type<typeof DefaultTodoSchema> {}
 
@@ -110,22 +109,53 @@ const todoIdentifier = Struct.get<PagedTodo, "id">("id")
 const noteAuthor = ExampleSubjectSchema.make({ userId: "codec-author", tenantId: "codec-test", roles: ["editor"] })
 
 const generatedCrudProgram = Effect.gen(function* () {
-  yield* prepareTables([NotesResource.table, GeneratedTodos.table])
+  yield* prepareTables([FieldReportsResource.table, GeneratedTodos.table])
 
-  const noteInput = NotesResource.schema.make({
-    id: NoteIdSchema.make("note-1"),
-    text: "visible",
+  const noteInput = FieldReportsResource.schema.make({
+    id: FieldReportIdSchema.make("report_crudtest"),
+    title: "West site inspection",
+    site: "West depot",
+    body: "visible\u0000\ud800",
   })
 
-  const note = yield* pipe(NotesResource.repository.create(noteInput), Effect.provideService(AuthorizationSubject, noteAuthor))
+  const note = yield* pipe(FieldReportsResource.repository.create(noteInput), Effect.provideService(AuthorizationSubject, noteAuthor))
   const database = yield* SqlClient.SqlClient
 
-  const rows = yield* database<Readonly<{ readonly text: string }>>`
-    SELECT text FROM ${database(NotesResource.table.name)} WHERE id = ${note.id}
+  const rows = yield* database<Readonly<{ readonly body: string }>>`
+    SELECT body FROM ${database(FieldReportsResource.table.name)} WHERE id = ${note.id}
   `
 
-  expect(note.text).toBe("visible")
-  expect(rows).toEqual([{ text: "stored:visible" }])
+  expect(note.body).toBe("visible\u0000\ud800")
+  const storedOption = Array.head(rows)
+  const stored = Option.getOrThrow(storedOption)
+  const encrypted = stored.body !== note.body
+  expect(encrypted).toBe(true)
+  const loaded = yield* pipe(FieldReportsResource.repository.get(note.id), Effect.provideService(AuthorizationSubject, noteAuthor))
+  expect(loaded).toEqual(note)
+
+  const wrongEncryption = makeFieldNoteEncryption("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE")
+
+  const wrongKey = yield* pipe(
+    FieldReportsResource.repository.get(note.id),
+    Effect.provideService(AuthorizationSubject, noteAuthor),
+    Effect.provideServiceEffect(FieldNoteEncryption, wrongEncryption),
+    Effect.result,
+  )
+
+  expect(wrongKey).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
+  const invalidCiphertext = `${stored.body.slice(0, 20)}AAAAAAAAAAAAAAAAAAAAAA`
+
+  yield* database`
+    UPDATE ${database(FieldReportsResource.table.name)} SET body = ${invalidCiphertext} WHERE id = ${note.id}
+  `
+
+  const tampered = yield* pipe(
+    FieldReportsResource.repository.get(note.id),
+    Effect.provideService(AuthorizationSubject, noteAuthor),
+    Effect.result,
+  )
+
+  expect(tampered).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
   const todo = yield* GeneratedTodos.repository.create({ title: "defaulted" })
   expect(todo.completed).toBe(false)
 
@@ -141,7 +171,8 @@ const generatedCrudProgram = Effect.gen(function* () {
   expect(overrideFailed).toBe(true)
 })
 
-it.effect("generated CRUD keeps storage codecs off the canonical wire and applies defaults", () => pipe(generatedCrudProgram, Effect.provideService(StoragePrefix, { value: "stored:" }), Effect.provide(sqlite)))
+const testEncryption = makeFieldNoteEncryption("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+it.effect("generated CRUD protects encrypted text, preserves canonical Unicode, and applies defaults", () => pipe(generatedCrudProgram, Effect.provideServiceEffect(FieldNoteEncryption, testEncryption), Effect.provide(sqlite)))
 
 const pagedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([PagedTodos.table])

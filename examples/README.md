@@ -1,153 +1,142 @@
-# Examples
+# Example applications
 
-Each example is a runnable Bun workspace package under `examples/`; `apps/` contains repository applications, not demonstrations. The private repository root separates the `effect-domains` framework library in [`packages/effect-domains`](../packages/effect-domains/), shared fixtures in [`packages/example-support`](../packages/example-support/), the prebuilt browser admin in [`apps/admin`](../apps/admin/), and these ten loopback applications. Each has persistent SQLite storage, an HTTP RPC server, a generated CLI, and local inspection. Table-bearing applications use ordered imported migration artifacts; the durable examples additionally isolate native execution storage from application data.
+Each example solves a concrete record-keeping or operational problem. Small does not mean artificial: start with a personal reading list, then compare authored expense queries, scoped team tasks, encrypted field notes, historical editorial planning, equipment tools, transactional reservations and billing, and durable reports and notifications. Each application owns its domain schema; framework capabilities are the implementation, not the domain.
 
 ## Choose an application
 
-| Application | Purpose | Database setting |
+| Application | Useful scenario | Principal boundary |
 | --- | --- | --- |
-| [basic-crud](basic-crud/README.md) | Minimal book CRUD generated from one resource declaration | `BASIC_CRUD_DB` |
-| [authored-sql](#authored-sql) | Custom book contracts and authored SQL with Effect `SqlSchema` | `AUTHORED_SQL_DB` |
-| [resource-crud](resource-crud/README.md) | Tenant/owner todo policies, completion locks, pagination, and patch | `RESOURCE_CRUD_DB` |
-| [service-codec](service-codec/README.md) | Reader/editor/admin note permissions alongside a service-dependent storage codec | `SERVICE_CODEC_DB` |
-| [migration-lifecycle](migration-lifecycle/README.md) | Document CRUD with historical rename and backfill | `MIGRATION_LIFECYCLE_DB` |
-| [reservations](reservations/README.md) | Explicit stock policy and transactional reservation commands | `RESERVATIONS_DB` |
-| [orders-invoices](#orders-and-invoices) | Tenant-scoped relational billing, authenticated transactions, and optimistic versions | `ORDERS_INVOICES_DB` |
-| [durable-workflows](#durable-workflows) | Approval/export workflow with durable timing and queue-backed file creation | `DURABLE_WORKFLOWS_DB`, `DURABLE_WORKFLOWS_EXECUTION_DB` |
-| [durable-reminders](#durable-reminders) | Persisted per-recipient scheduling, receipt projection, and cron retention | `DURABLE_REMINDERS_DB`, `DURABLE_REMINDERS_EXECUTION_DB` |
-| [mcp-server](#mcp-client-walkthrough) | Generated book tools consumed by an official MCP SDK client | `MCP_SERVER_DB` |
-
-The guides explain what is generated, what is deliberately authored, how to run each application, and its limitations. Start with [basic-crud](basic-crud/README.md); compare [tenant/owner todo rules](resource-crud/resources.ts) with [role-based note rules](service-codec/resources.ts) to see custom authorization. [Authored SQL](#authored-sql) demonstrates the privileged escape hatch.
+| [reading-list](reading-list/README.md) | Maintain a reading backlog and record progress and ratings | Generated CRUD and filtered lists |
+| [expense-ledger](#expense-ledger) | Record expenses and review period/category totals by currency | Authored SQL and checked money |
+| [team-tasks](team-tasks/README.md) | Track project work, priorities, and completion | Tenant/owner policy and completion locks |
+| [field-notes](field-notes/README.md) | Share site observations with encrypted report text | Role policy independent of storage encryption |
+| [editorial-calendar](editorial-calendar/README.md) | Plan articles by channel and publication date | Historical rename and explicit backfill |
+| [equipment-register](#equipment-register) | Register, relocate, and inspect equipment through MCP tools | Unique asset tags and generated tool contracts |
+| [reservations](reservations/README.md) | Hold stock, confirm it, or release it | Explicit transitions and transactional inventory |
+| [orders-invoices](#orders-and-invoices) | Build an order, issue an invoice, and record payment | Tenant relations, transactions, optimistic versions |
+| [report-exports](#report-exports) | Approve and publish a financial JSON report | Durable approval and queue-backed artifact writing |
+| [appointment-reminders](#appointment-reminders) | Schedule an appointment notification in an application inbox | Durable scheduling, deduplication, and retention |
 
 ## Shared runtime
 
-Install dependencies and prebuild the admin once from the repository root:
+Run commands from the repository root:
 
 ```bash
 bun install
 bun run build
+bun run reading-list:server
 ```
 
-Run commands from the repository root. Start one server, then use its CLI in another terminal:
+Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `<application>.sqlite` in the working directory.
 
-```bash
-bun run resource-crud:server
-bun run resource-crud --help
-```
-
-Each database defaults to `<application>.sqlite` in the working directory. Startup requires and applies frozen migration history, including for a fresh database; it does not reset existing data. An untracked database is rejected rather than silently adopted.
-
-All servers default to `http://127.0.0.1:3000`, and all CLIs default to `http://127.0.0.1:3000/rpc/v1`. To run applications concurrently, assign distinct ports and matching client URLs:
-
-```bash
-PORT=3001 BASIC_CRUD_DB=books.sqlite bun run basic-crud:server
-BASIC_CRUD_URL=http://127.0.0.1:3001/rpc/v1 bun run basic-crud books.list
-```
-
-Client settings follow the database naming convention: `<APPLICATION_NAME>_URL` and `<APPLICATION_NAME>_TOKEN`, with hyphens replaced by underscores and names uppercased. Todo and note RPCs require the demo credentials below; the other five original examples remain explicitly public. The seven resource-focused examples opt into admin at `/admin`; the two durable examples do not. Durable reminders require the admin demo session, while durable workflows require an explicitly configured operator token. These are loopback examples, not production deployment templates.
+Table-bearing applications apply ordered, frozen JSON migrations imported in `migrations.ts`. Startup preserves rows and rejects untracked databases rather than silently adopting them. Report exports have no application tables and use empty history. Native Effect manages separate durable execution storage. New replacement domains use their own databases; these are not automatic conversions from retired book/prefix-codec demos.
 
 ### Demo authentication
 
-[`ExampleAuthentication`](../packages/example-support/src/authentication.ts) supplies an `AuthorizationRpc.Authenticator` layer to the todo, note, orders/invoices, and durable-reminder applications. It resolves an exact bearer token to server-owned subject claims; missing or unknown tokens fail with `Unauthenticated`. It does not accept user, tenant, or role claims from caller headers.
+[Shared authentication](../packages/example-support/src/authentication.ts) resolves exact bearer tokens to server-owned claims. Set tokens on clients:
 
 | Token | User | Tenant | Roles |
 | --- | --- | --- | --- |
-| `alice-demo` | `alice` | `acme` | `editor` |
-| `bob-demo` | `bob` | `acme` | `reader` |
-| `admin-demo` | `admin` | `acme` | `admin` |
-| `outsider-demo` | `alice` | `other` | `editor` |
+| `alice-demo` | alice | acme | editor |
+| `bob-demo` | bob | acme | reader |
+| `admin-demo` | admin | acme | admin |
+| `outsider-demo` | alice | other | editor |
 
-These are deliberately public credentials. Anyone who knows a token can impersonate that demo identity; there is no login, expiry, revocation, or production identity provider. Keep these servers on loopback and replace the authenticator for a real application.
+Team tasks, field notes, and orders/invoices use these sessions; appointment reminders require the admin session. Report exports require their separately configured operator token. Other applications explicitly allow public access. Missing or unknown credentials fail authentication. These are public demonstration identities, with no login, expiry, revocation, or identity provider. Keep every example on loopback; do not use it as a production deployment template.
 
-Set the token on the **client**, not the server:
-
-```bash
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.create --input-json '{"title":"Ship authorization examples"}'
-SERVICE_CODEC_TOKEN=alice-demo bun run service-codec notes.create --input-json '{"id":"example-note","text":"Shared notes"}'
-```
-
-Todo creation binds `tenantId` and `ownerId` from the authenticated subject. They are deliberately absent from the generated create input; sending either field is rejected by the server. Full-row updates still include both ownership fields, while the todo guide retains forbidden ownership-patch examples.
-
-Todo policies combine tenant scope, ownership, current completion state, immutable ownership, and admin-only removal. `outsider-demo` deliberately has Alice's user ID in another tenant, demonstrating that ownership alone does not grant access. Existing todos migrate to tenant `acme`, owner `alice`; this is explicit demo backfill intent, not an inferred ownership rule.
-
-Notes instead form one global shared collection: readers can read, editors can create/update, and admins can also remove. Tenant claims do not partition this collection. The storage codec remains independent of authorization. Follow each guide for successful and denied operations.
-
-Policy is declared in `resources.ts`, not in canonical schemas or per-operation handlers. `operations.create.fromSubject` records typed subject provenance for server-injected create fields; generated repositories reject caller-supplied bound fields, enforce policies before SQL pagination, and transact mutations. `inspect` is local and needs no token; native SQL remains privileged.
+Task ownership comes from verified subject claims, not caller-supplied owner/tenant fields. Field notes form a shared global collection: tenant claims do not partition it. Their encryption key is separate from the bearer token. Policy belongs in resource configuration, not canonical schemas.
 
 ### Shared structure
 
-- `domain.ts`: canonical values and errors.
-- `resources.ts`: storage registration and selected generated operations.
-- `contracts.ts`: native `Rpc.make` contracts grouped with `RpcGroup.make`; use explicit `Schema.toCodecJson` for non-JSON-native representations such as dates. Absent for generated-only applications.
-- `application.ts`: `Application.make({ name, parts })`, which accepts resources, native `{ group, handlers }` bundles, and nested applications.
-- `migrations.ts`: ordered JSON artifact imports decoded with `SqliteMigrations.decodeHistory` for runtime use.
-- `main.ts`: the sole runner for `serve`, `inspect`, generated remote commands, and `worker` when background layers are configured.
+- `domain.ts`: canonical values and domain errors.
+- `resources.ts`: storage registration, policies, and selected generated operations.
+- `contracts.ts` and `sqlite.ts` where needed: native RPC contracts and authored SQL semantics.
+- `application.ts`: `Application.make({ name, parts })` composition.
+- `migrations.ts`: ordered artifact imports decoded by `SqliteMigrations.decodeHistory`.
+- `main.ts`: shared `serve`, `inspect`, remote CLI, and optional `worker` runner.
 
-`parts` flattens nested application resources and merges their RPC groups; duplicate tables or operation names are rejected. Entrypoints pass `ApplicationBun.run(...)` to native `BunRuntime.runMain`. Table-bearing examples decode ordered JSON imports in `migrations.ts` and pass `database: { migrations, filename? }`; the workflow-only application uses empty history. There is no manifest loader or `database.manifest` option. Services, initialization, native `background`, HTTP `routes`, and admin are explicit options. Native execution layers compose in application `services` with explicit `Layer.provide` of private SQLite; there is no `execution` option. The runner supplies loopback RPC, CLI, inspection, MCP, and opted-in admin. There are no schema CLI commands. `*:server` scripts alias `main.ts serve`; the durable examples also have `*:worker` scripts. Admin uses prebuilt assets; run the shared build first.
+Services, initialization, native background layers, routes, and admin opt-in are explicit. There is no extra command wrapper, migration manifest loader, inferred migration planner, or framework jobs registry.
 
 ## Generated lists
 
-Every generated resource list returns `{ items, nextCursor }`, including resources using `Resource.crud` without list configuration. Pages default to 50 items and order by identifier ascending only. Configured lists can declare equality filters and a limit. Pass a non-null cursor back unchanged with the same filters. There is no arbitrary ordering, unbounded generated array list, or separate repository `page` method. Authored SQL contracts can intentionally differ, as the book query example does.
+Every generated list returns `{ items, nextCursor }`, defaults to a bounded page, and orders by identifier ascending. Applications declare supported equality filters and limits. Pass a non-null cursor back unchanged with the same filters. Authored expense queries deliberately declare their own ordering and range contract.
 
 ## Generated admin
 
-The seven resource-focused examples enable the optional admin server in `main.ts`; the durable examples do not. Build its browser assets first with `bun install` followed by `bun run build` at the repository root, then start an admin-enabled example and open `http://127.0.0.1:3000/admin` (or its configured port). The browser sources are [`client.ts`](../apps/admin/src/client.ts) and [`style.css`](../apps/admin/src/style.css); the native adapter is [`application-admin.ts`](../packages/effect-domains/src/application-admin.ts). It exposes only the application's published unary RPC operations; it does not infer permissions or bypass resource policy. Its in-process transport shares the RPC handlers, middleware, codecs, and request headers with the MCP server, and every protected call forwards and authenticates its bearer token independently.
+Reading lists, expenses, tasks, notes, editorial planning, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment and the durable applications do not enable admin.
 
-The page keeps a manually entered bearer token in the browser's current memory only; it has no login, issuer, persistence, or token refresh. It builds scalar and structured forms from the RPC JSON schemas, hides forbidden fields, offers an entire-input JSON fallback for complex values, renders resource lists with declared filters and cursor next/back controls, and displays declared input/domain errors plus transport failures in the page.
+Admin uses the same published RPC schemas, handlers, codecs, and authorization as the CLI. It neither infers permissions nor bypasses policy. Enter a demo bearer token when needed; the page keeps it in browser memory only. Generated forms support scalar and structured inputs, a full JSON fallback, declared list filters, and cursor navigation. See the [browser source](../apps/admin/src/client.ts) and [native adapter](../packages/effect-domains/src/application-admin.ts).
 
-`admin: true` uses `/admin`. A host can instead use the lower-level layer with presentation metadata:
+## CLI conventions
 
-```ts
-ApplicationAdmin.layerHttp({
-  application,
-  javascript,
-  stylesheet,
-  path: "/operations",
-  presentation: {
-    title: "Library operations",
-    resources: { books: { label: "Catalog", columns: ["id", "title"] } },
-    operations: { "books.create": { label: "Add book", description: "Creates a catalog entry." } },
-  },
-})
-```
+Operation input is canonical JSON supplied through `--input-json`; there are no generated field flags. Use camelCase keys, JSON numbers/booleans, and declared ISO timestamp representations. Storage-only ciphertext never belongs in canonical CLI input. No-payload calls need no input; empty structs and all-optional payloads default to `{}`. `inspect [operation]` is local and needs no server or token.
 
-The default Bun runner listens only on the loopback hostname. Admin browser calls must be same-origin; custom non-loopback hosts must explicitly name allowed origins with `allowedOrigins`. That allow-list validates trusted same-origin browser requests; it is not a CORS grant or a general cross-origin API.
+The endpoint uses Effect JSON RPC, not REST. Use the generated CLI or Effect `RpcClient` instead of duplicating its envelope. Success is JSON on stdout; schema, domain, authorization, and transport failures exit nonzero.
 
-## Authored SQL
+## MCP server
 
-[`authored-sql`](authored-sql/) preserves the custom book behavior separately from minimal generated CRUD. It reuses the canonical [`BookSchema`](../packages/example-support/src/book.ts), while its [`Resource.make`](authored-sql/resources.ts) uses `operations: {}`: table derivation stays automatic, but no generated RPC handlers are published.
+Every `serve` command also exposes Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`. Configure an MCP client with that URL; `/rpc/v1` remains the separate CLI endpoint. One generated tool corresponds to each published RPC operation.
 
-[`contracts.ts`](authored-sql/contracts.ts) declares JSON-native payload/success/error schemas directly with `Rpc.make` and exports `BooksRpcs`. [`sqlite.ts`](authored-sql/sqlite.ts) installs handlers with `BooksRpcs.toLayer`, using native `SqlClient` and `SqlSchema.findOne`, `findOneOption`, and `findAll`. Query failures are translated with explicit `Effect.catchTags`; missing-row domain errors are preserved. [`application.ts`](authored-sql/application.ts) registers `{ group: BooksRpcs, handlers: BooksSqlite }` directly, without an extra service wrapper or entrypoint service layer.
+Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text; void becomes null. Declared failures return `isError: true` and the encoded domain error. Protected tools require the same bearer credentials as RPC on every call; a session is not an identity. Discovery exposes contracts, not protected rows. The [equipment walkthrough](#equipment-register) uses the official SDK.
 
-Unlike generated CRUD, missing rows report `BookNotFound`, database/query failures report `BookPersistenceError`, and `books.remove` returns the deleted row. List returns an array with no ordering or pagination guarantees.
+## Reservation application
 
-Start the server:
+The [reservation guide](reservations/README.md) walks through stock reads, reserve, confirm, release, transition failures, and persistence. The [authored commands](reservations/sqlite.ts) own transactional stock accounting; generated operations are read-only. This existing business-policy slice is retained unchanged.
+
+## Expense ledger
+
+[Expense contracts](expense-ledger/contracts.ts) and [authored SQL](expense-ledger/sqlite.ts) record dated merchant expenses, query a bounded period, and calculate category totals separately for each currency. Amounts are positive safe-integer minor units. Calendar dates use YYYY-MM-DD; currencies are uppercase three-letter codes, with no exchange-rate conversion.
 
 ```bash
-bun run authored-sql:server
+bun run expense-ledger:server
 ```
 
 In another terminal:
 
 ```bash
-bun run authored-sql books.create --input-json '{"title":"A Field Guide","pageCount":120}'
-bun run authored-sql books.list
+bun run expense-ledger expenses.record --input-json '{"date":"2026-09-01","merchant":"Railway Cafe","category":"meals","amountMinor":1875,"currency":"USD"}'
+bun run expense-ledger expenses.record --input-json '{"date":"2026-09-02","merchant":"Station Bistro","category":"meals","amountMinor":1600,"currency":"EUR"}'
+bun run expense-ledger expenses.query --input-json '{"from":"2026-09-01","through":"2026-09-30","category":"meals","limit":10}'
+bun run expense-ledger expenses.totals --input-json '{"from":"2026-09-01","through":"2026-09-30"}'
 ```
 
-Copy the returned UUIDv7 into `BOOK_ID`:
+Totals return separate EUR and USD rows, not a meaningless combined amount. Queries include both date endpoints, order by date then identifier, and return at most 50 rows by default (maximum 100). This bounded query has no cursor; totals include all matching expenses, independently of the query limit. Categories are meals, travel, software, supplies, and other.
+
+Copy a returned identifier into `EXPENSE_ID`:
 
 ```bash
-bun run authored-sql books.get --input-json "{\"id\":\"$BOOK_ID\"}"
-bun run authored-sql books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Revised Field Guide\",\"pageCount\":144}"
-bun run authored-sql books.remove --input-json "{\"id\":\"$BOOK_ID\"}"
-bun run authored-sql inspect books.create
+bun run expense-ledger expenses.get --input-json "{\"id\":\"$EXPENSE_ID\"}"
+bun run expense-ledger expenses.update --input-json "{\"id\":\"$EXPENSE_ID\",\"date\":\"2026-09-01\",\"merchant\":\"Railway Cafe\",\"category\":\"meals\",\"amountMinor\":1975,\"currency\":\"USD\"}"
+bun run expense-ledger expenses.remove --input-json "{\"id\":\"$EXPENSE_ID\"}"
 ```
 
-`AUTHORED_SQL_DB` defaults to `authored-sql.sqlite`; `AUTHORED_SQL_URL` defaults to `http://127.0.0.1:3000/rpc/v1`, and `PORT` defaults to `3000`. Set distinct ports and matching URLs to run alongside basic CRUD. Its independent [migration history](authored-sql/migrations.ts) retains the same frozen initial book-table artifact; startup does not reset rows or adopt untracked databases. Author later changes with [explicit migration steps](#review-schema-changes).
+Remove returns the deleted expense; subsequent reads report `ExpenseNotFound`. A reversed range reports `InvalidExpenseDateRange`; SQL/codec failures, including unrepresentable totals, report `ExpenseLedgerUnavailable`. Negative amounts and impossible dates fail input validation. `EXPENSE_LEDGER_DB` defaults to `expense-ledger.sqlite`. This is a local expense register, not double-entry accounting, reimbursement approval, or tax software.
 
-## Reservation application
+## Equipment register
 
-The [reservation guide](reservations/README.md) covers the business-policy slice: generated read operations alongside explicit transactional reserve, confirm, and release commands. It includes the stock walkthrough, transition errors, restart behavior, and historical timestamp migration. The [validation record](../docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
+[Equipment records](equipment-register/domain.ts) contain a unique asset tag, name, model, nullable serial number, location, and condition (in-service, needs-repair, or retired). Tags match `EQ-[A-Z0-9]{4,12}`; duplicates fail persistence. A generated UUID identifies each record independently of its editable asset tag.
+
+```bash
+bun run equipment-register:server
+```
+
+In another terminal, run the [official MCP SDK walkthrough](equipment-register/client.ts):
+
+```bash
+bun run equipment-register:client
+```
+
+The client discovers generated tools, registers a field camera, reads it, moves it to the editorial desk, finds it by location/condition, marks it retired, removes only its own record, and confirms `ResourceNotFound` afterward. An interrupted run can leave its equipment record behind. It is an inventory register, not a checkout, maintenance-ticket, or depreciation workflow.
+
+The equivalent CLI creation is:
+
+```bash
+bun run equipment-register assets.create --input-json '{"assetTag":"EQ-CAM2048","name":"Field camera","model":"X100V","serial":"FJ2-2025-0042","location":"Studio A","condition":"in-service"}'
+bun run equipment-register assets.list --input-json '{"filter":{"location":"Studio A","condition":"in-service"}}'
+bun run equipment-register inspect assets.create
+```
+
+For MCP, call `assets.create` with `{ input: <that JSON object> }`; results are under `structuredContent.result`. `EQUIPMENT_REGISTER_DB` defaults to `equipment-register.sqlite`; `EQUIPMENT_REGISTER_MCP_URL` configures the SDK client (default `http://127.0.0.1:3000/mcp`), and `EQUIPMENT_REGISTER_URL` configures the separate RPC CLI endpoint. No token or admin build is needed for this public loopback application.
 
 ## Orders and invoices
 
@@ -188,158 +177,73 @@ Amounts are checked safe-integer minor units. Empty orders cannot be invoiced; d
 
 `ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial history](orders-invoices/migrations.ts), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
 
-## Durable workflows
+## Report exports
 
-[`durable-workflows`](durable-workflows/main.ts) registers a native Workflow and its proxy commands directly in the application. The workflow waits five seconds through `DurableClock`, optionally waits for a `DurableDeferred` approval, renders JSON in an Activity, and uses a SQL-backed `DurableQueue` worker to publish the artifact. Queue completion resumes the workflow; no custom jobs registry is involved. ([Workflow](durable-workflows/workflow.ts); [native layers](durable-workflows/runtime.ts); [writer](durable-workflows/writer.ts))
+[Report exports](report-exports/workflow.ts) publish a concrete financial JSON artifact from explicitly supplied account lines and a reporting period. Inputs identify a report, currency (AUD, CAD, EUR, GBP, JPY, or USD), debit/credit amounts, and release policy. This does not query an imaginary accounting system or claim balanced books; the supplied lines are the source data.
 
-Start the server:
-
-```bash
-export DURABLE_WORKFLOWS_TOKEN=local-operator-secret
-export DURABLE_WORKFLOWS_OUTPUT_DIR="$PWD/export-artifacts"
-PORT=3001 bun run durable-workflows:server
-```
-
-In another terminal, configure the same token and submit:
+Start the server with a private local operator token and output directory:
 
 ```bash
-export DURABLE_WORKFLOWS_TOKEN=local-operator-secret
-export DURABLE_WORKFLOWS_URL=http://127.0.0.1:3001/rpc/v1
-bun run durable-workflows DurableWorkflow.ExportDiscard --input-json '{"exportId":"demo-export","records":[{"id":"alice","name":"Alice","attributes":{"active":true}}],"requiresApproval":true}'
-```
-
-Set `EXECUTION_ID` to the returned execution ID, without its JSON quotes:
-
-```bash
-bun run durable-workflows DurableWorkflow.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run durable-workflows DurableWorkflow.Approve --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run durable-workflows DurableWorkflow.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run durable-workflows DurableWorkflow.Status
-curl -H "Authorization: Bearer $DURABLE_WORKFLOWS_TOKEN" http://127.0.0.1:3001/operator/metrics
-```
-
-Poll again until `Succeeded`; success contains `artifactPath` and `recordCount`. `PendingOrUnknown` deliberately does not distinguish a pending/suspended execution from an unknown ID. `Export` waits for completion; `ExportDiscard` returns the stable execution ID. Repeating the same `exportId` targets the same execution: use a new ID for different input. An operator can explicitly request native resume with `DurableWorkflow.ExportResume` and the same execution-ID payload. Submission, resume, approval, polling, and status are authenticated; metrics independently requires the configured bearer token.
-
-Application storage defaults to `durable-workflows.sqlite` (`DURABLE_WORKFLOWS_DB`); private native execution storage defaults to `durable-workflows-execution.sqlite` (`DURABLE_WORKFLOWS_EXECUTION_DB`). This example has no application tables and uses empty application history. Native Effect owns execution-table migrations.
-
-To run without HTTP, stop the server and run `PORT=3001 bun run durable-workflows:worker` with the same database, output-directory, and token settings. Accepted executions continue after restart, including durable sleep and queue-backed file creation. Remote CLI/MCP calls require a running server; switch back to `serve` for approval or inspection of execution state.
-
-## Durable reminders
-
-[`durable-reminders`](durable-reminders/main.ts) uses one native Entity identity per recipient, not one actor per Resource. Persisted `Schedule` messages carry native `PrimaryKey` and `DeliverAt` protocols. Delivery records an application receipt transactionally, with `(recipient, requestId)` deduplication. A native Singleton writes a receipt projection every five seconds; a native ClusterCron archives receipts older than 90 days. This is a receipt-delivery demonstration, not an email/SMS integration. ([Protocol](durable-reminders/reminder-entity.ts); [registrations](durable-reminders/background.ts))
-
-```bash
-PORT=3002 bun run durable-reminders:server
+export REPORT_EXPORTS_TOKEN=local-operator-secret
+export REPORT_EXPORTS_OUTPUT_DIR="$PWD/report-artifacts"
+PORT=3001 bun run report-exports:server
 ```
 
 In another terminal:
 
 ```bash
-export DURABLE_REMINDERS_URL=http://127.0.0.1:3002/rpc/v1
-export DURABLE_REMINDERS_TOKEN=admin-demo
-REQUEST_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
-DELIVER_AT=$(bun -e 'console.log(new Date(Date.now() + 30000).toISOString())')
-bun run durable-reminders ReminderRecipient.ScheduleDiscard --input-json "{\"entityId\":\"alice\",\"payload\":{\"recipient\":\"alice\",\"requestId\":\"$REQUEST_ID\",\"message\":\"Review the export\",\"deliverAt\":\"$DELIVER_AT\"}}"
-bun run durable-reminders reminder_receipts.list --input-json '{"filter":{"recipient":"alice"}}'
+export REPORT_EXPORTS_TOKEN=local-operator-secret
+export REPORT_EXPORTS_URL=http://127.0.0.1:3001/rpc/v1
+bun run report-exports ReportExport.GenerateDiscard --input-json '{"report":{"reportId":"september-ledger-1","reportingPeriod":{"startsAt":"2026-09-01T00:00:00.000Z","endsAt":"2026-10-01T00:00:00.000Z"},"currency":"USD","releasePolicy":"operatorApproval"},"lines":[{"accountCode":"4000","description":"September consulting revenue","direction":"credit","amountMinor":125000},{"accountCode":"6100","description":"September office supplies","direction":"debit","amountMinor":8500}]}'
 ```
 
-`ScheduleDiscard` acknowledges acceptance without waiting for delivery. `Schedule` takes the same envelope and waits for the receipt. Repeat a request with the same recipient, request ID, and payload to retrieve the existing result rather than deliver again. The handler rejects an `entityId` that differs from the payload recipient. Missing credentials fail authentication; valid non-admin demo sessions cannot schedule or read receipts.
+Copy the returned execution ID into `EXECUTION_ID`:
 
-Application storage defaults to `durable-reminders.sqlite` (`DURABLE_REMINDERS_DB`), with its frozen [initial migration](durable-reminders/migrations/001_initial.json). Private execution storage defaults to `durable-reminders.execution.sqlite` (`DURABLE_REMINDERS_EXECUTION_DB`). The projection defaults to `durable-reminders.receipts.json` (`DURABLE_REMINDERS_PROJECTION_FILE`). Retention runs at midnight UTC; `DURABLE_REMINDERS_RETENTION_CRON` explicitly overrides the native cron expression.
+```bash
+bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run report-exports ReportExport.Release --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
+bun run report-exports ReportExport.Status
+```
 
-To exercise restart recovery, schedule a future message, stop the server, and start `PORT=3002 bun run durable-reminders:worker` with the same database and projection settings. The persisted delivery, singleton projection, and retention work continue without an HTTP listener. Switch back to `serve` to query receipts remotely.
+A native durable clock waits five seconds; operatorApproval reports then wait for explicit release. The automatic policy skips that approval barrier. An Activity prepares JSON and a durable queue worker atomically publishes the artifact. Poll until `Succeeded`, then open the returned `artifactPath`; it contains the report, lines, and currency-local debit/credit totals. `PendingOrUnknown` does not distinguish suspended work from an unknown ID. `Generate` waits for completion, `GenerateDiscard` acknowledges the stable execution ID, and `GenerateResume` explicitly resumes an execution.
+
+Reuse a report ID only to address the same execution; use a fresh ID for different source data. Do not treat repeat submission as replacement. Invalid period ordering, line amounts, and currency syntax fail input validation; unsafe total arithmetic fails the workflow. Release, submission, resume, polling, and status require the configured token; `/operator/metrics` independently requires it too.
+
+Application storage defaults to `report-exports.sqlite` (`REPORT_EXPORTS_DB`); native execution storage defaults to `report-exports-execution.sqlite` (`REPORT_EXPORTS_EXECUTION_DB`). Stop the server and run `bun run report-exports:worker` with the same token, databases, and output directory to continue accepted work without HTTP. Switch back to serve for remote release or polling.
+
+## Appointment reminders
+
+[Appointment reminders](appointment-reminders/appointment-reminder-entity.ts) schedule an actual in-application inbox notification: recipient, appointment ID, appointment time, reminder time, location, and purpose. Delivery means a durable `appointment_notifications` row, not email or SMS. The example does not book appointments or synchronize cancellations with a calendar provider.
+
+```bash
+PORT=3002 bun run appointment-reminders:server
+```
+
+In another terminal:
+
+```bash
+export APPOINTMENT_REMINDERS_URL=http://127.0.0.1:3002/rpc/v1
+export APPOINTMENT_REMINDERS_TOKEN=admin-demo
+REMINDER_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
+APPOINTMENT_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
+REMINDER_AT=$(bun -e 'console.log(new Date(Date.now() + 30000).toISOString())')
+APPOINTMENT_AT=$(bun -e 'console.log(new Date(Date.now() + 3600000).toISOString())')
+bun run appointment-reminders AppointmentRecipient.ScheduleReminderDiscard --input-json "{\"entityId\":\"alice\",\"payload\":{\"recipient\":\"alice\",\"reminderId\":\"$REMINDER_ID\",\"appointmentId\":\"$APPOINTMENT_ID\",\"appointmentAt\":\"$APPOINTMENT_AT\",\"reminderAt\":\"$REMINDER_AT\",\"location\":\"Studio A\",\"purpose\":\"Equipment handover\"}}"
+bun run appointment-reminders appointment_notifications.list --input-json '{"filter":{"recipient":"alice"}}'
+```
+
+Query again after the reminder time to see the inbox row. `ScheduleReminderDiscard` acknowledges acceptance; `ScheduleReminder` takes the same envelope and waits for delivery. Repeat the same recipient, reminder ID, and payload to obtain the same delivery rather than duplicate it. An entity ID differing from the payload recipient fails with `AppointmentRecipientMismatch`. A reminder at or after its appointment fails with `ReminderMustPrecedeAppointment`. Editors cannot schedule or read the admin-only inbox.
+
+Application storage defaults to `appointment-reminders.sqlite` (`APPOINTMENT_REMINDERS_DB`), private execution storage to `appointment-reminders.execution.sqlite` (`APPOINTMENT_REMINDERS_EXECUTION_DB`), and the projection to `appointment-reminders.notifications.json` (`APPOINTMENT_REMINDERS_PROJECTION_FILE`). A Singleton refreshes the projection every five seconds. Cron archives delivered notifications older than 90 days at midnight UTC; `APPOINTMENT_REMINDERS_RETENTION_CRON` explicitly overrides its schedule.
+
+For recovery, accept a future notification, stop the server, then start `bun run appointment-reminders:worker` against the same databases and projection path. Accepted notifications and background projection/retention continue without an HTTP listener. Return to serve to query the inbox remotely.
 
 ### Durable execution boundaries
 
-Both examples use native `SingleRunner`: run either `serve` or `worker` against an execution store, never both concurrently. Multi-runner topology requires an explicitly different native composition. Preserve both databases across restarts and back them up according to application recovery requirements; the applications use the [shared database helper](../packages/example-support/src/databases.ts) to compare opened database paths and inodes before native execution tables initialize. This is not a framework pre-open filename/URL or dangling-symlink guarantee.
+Both applications use native SingleRunner: run either serve or worker against an execution store, never both concurrently. Back up both application and execution databases. [Shared isolation](../packages/example-support/src/databases.ts) checks opened paths and inodes before native execution storage initializes.
 
-Application and execution transactions are separate. No cross-database transaction or automatic outbox is supplied. Retried external effects need explicit idempotency: the export writes the same execution-ID artifact through an atomic rename, while reminders deduplicate application receipt writes. Neither establishes exactly-once delivery to an arbitrary external service. Native Entity/Cron work explicitly captures application SQL during registration because Sharding supplies private execution SQL in its invocation context. ([Runtime contract](../docs/wiki/tables-and-queries.md#native-durable-execution); [verification and limits](../docs/wiki/validation-strategy.md#2026-09-09-native-durable-execution))
-
-## CLI conventions
-
-Operation input uses only `--input-json` with the canonical JSON payload; generated field flags are removed. Keep canonical camelCase keys and nested objects. Encode numbers and booleans as JSON values, not strings; negative numbers need no special flag syntax. Timestamp codecs use their declared JSON representation, such as UTC ISO strings for `DateTime.Utc`; storage-only encodings such as the note's `stored:` prefix never belong in CLI input. No-payload procedures require no input; empty structs and payloads with only optional fields default to `{}`. Native application subcommands, `--help`, and `inspect [operation]` remain.
-
-```bash
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.list --input-json '{"filter":{"completed":false},"limit":10}'
-RESOURCE_CRUD_TOKEN=alice-demo bun run resource-crud todos.patch --input-json "{\"key\":\"$TODO_ID\",\"changes\":{\"title\":\"Ship docs\"}}"
-bun run reservations reserve --input-json '{"sku":"book","quantity":1}'
-```
-
-The endpoint uses Effect's JSON RPC protocol, not REST. Use the generated CLI or Effect's `RpcClient` rather than duplicating its envelope. Schema and business failures exit nonzero and report to stderr; successful results are JSON on stdout. Effect CLI parser errors may also print usage on stdout. `inspect [operation]` writes resource schemas, a JSON-encoded physical `Table.snapshot` (including its native `generation` key), creation/list policies (including implicit UUID generation), local and remote commands, and selected operation contracts. It does not invent opaque runtime fields: handler services and transaction boundaries remain uninspectable.
-
-## MCP server
-
-Every existing `serve` command also exposes Streamable HTTP MCP at `http://127.0.0.1:3000/mcp` (or the configured `PORT`). No extra application declarations or dependencies are needed:
-
-```bash
-bun run basic-crud:server
-```
-
-Configure your MCP client with that HTTP URL. It initializes an MCP session and discovers one tool per application RPC, using the unchanged operation name, such as `books.create`. `/rpc/v1` remains the separate Effect RPC endpoint used by the CLI.
-
-Tool arguments are `{ "input": <RPC JSON payload> }`; successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text. These object envelopes preserve scalar, array, and void contracts without guessing their meaning. Void uses `null`; an operation with an empty object payload, such as `books.list`, takes `{ "input": {} }`. After MCP initialization, a book creation call is:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/call",
-  "params": {
-    "name": "books.create",
-    "arguments": { "input": { "title": "A Field Guide", "pageCount": 120 } }
-  }
-}
-```
-
-Protected operations use the same authenticator and resource policies as RPC. Configure the MCP client to send `Authorization: Bearer alice-demo` for the authenticated examples; an MCP session is not an identity, and every tool call is authenticated independently. Tool discovery exposes contracts without credentials, not protected row data. Declared domain and authorization failures return `isError: true` with their encoded JSON error; unexpected defects return a generic error without internal details.
-
-The runtime negotiates MCP `2025-11-25`, `2025-06-18`, or `2025-03-26`. It rejects browser Origin headers by default. This is an HTTP tool server, not a stdio adapter, REST API, or inferred MCP resource/prompt interface. Custom Effect hosts can use `RpcMcp.layerHttp({ name, group, path })` from `effect-domains/rpc-mcp`, providing the group's handlers, middleware, and codec services. ([Adapter](../packages/effect-domains/src/rpc-mcp.ts); [Bun wiring](../packages/effect-domains/src/application-bun.ts))
-
-### MCP client walkthrough
-
-[`mcp-server`](mcp-server/) is a dedicated, public book catalog with a runnable MCP client. Its [resource declaration](mcp-server/resources.ts) generates the same five CRUD operations as basic CRUD; [the runner](mcp-server/main.ts) exposes them as MCP tools without hand-written tool schemas or handlers. It does not enable the browser admin, so no admin build is needed.
-
-From the repository root:
-
-```bash
-bun install
-bun run mcp-server:server
-```
-
-In another terminal:
-
-```bash
-bun run mcp-server:client
-```
-
-The [client](mcp-server/client.ts) uses the official `@modelcontextprotocol/sdk` Streamable HTTP transport inside a scoped Effect program. `connect` performs initialization; `listTools` prints the discovered input/output schemas. It then creates a book, reads it, updates it, lists books, and removes only the book it created. Finally, it reads the deleted ID to demonstrate `isError: true` with `ResourceNotFound`, terminates the MCP session, and closes the connection. Unexpected tool failures exit nonzero. An interrupted walkthrough can leave its newly created book in the database.
-
-The create call illustrates the wire envelope:
-
-```ts
-await client.callTool({
-  name: "books.create",
-  arguments: { input: { title: "MCP Field Guide", pageCount: 120 } },
-})
-```
-
-Success includes `structuredContent.result` and equivalent JSON text; the client decodes the created row with its Effect Schema to obtain the generated UUID. List takes `{ input: {} }` and returns `{ items, nextCursor }` under `result`; removal returns `{ result: null }`. A declared domain error is returned as tool content, not thrown as a transport exception.
-
-To use a coding agent or another MCP client instead, configure **Streamable HTTP** with URL `http://127.0.0.1:3000/mcp`. No token is required for this explicitly public example. The generated CLI remains available separately:
-
-```bash
-bun run mcp-server books.list
-bun run mcp-server inspect books.create
-```
-
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `MCP_SERVER_DB` | `mcp-server.sqlite` | Persistent application database |
-| `PORT` | `3000` | Loopback server port |
-| `MCP_SERVER_MCP_URL` | `http://127.0.0.1:3000/mcp` | Walkthrough client endpoint |
-| `MCP_SERVER_URL` | `http://127.0.0.1:3000/rpc/v1` | Generated CLI endpoint, not MCP |
-
-For a second server, set `PORT=3003` on the server and `MCP_SERVER_MCP_URL=http://127.0.0.1:3003/mcp` on the walkthrough client. Startup applies its own frozen [migration history](mcp-server/migrations.ts); it does not reset existing rows. Keep this unauthenticated example on loopback. For protected MCP operations, use the tenant/owner or role-policy applications described above.
+Application and execution transactions are separate. There is no cross-database transaction, automatic outbox, or exactly-once guarantee for arbitrary external services. Report writes use an execution-ID artifact and atomic rename; inbox inserts deduplicate in the application database. Entity/Cron registrations capture application SQL explicitly because native Sharding supplies private execution SQL in its invocation context. See the [native runtime contract](../docs/wiki/tables-and-queries.md#native-durable-execution).
 
 ## Review schema changes
 
@@ -389,7 +293,7 @@ Run it and inspect the draft:
 
 ```bash
 bun run author-migration.ts > migration-history-draft.json
-bun run migration-lifecycle inspect documents.create
+bun run editorial-calendar inspect documents.create
 ```
 
 The draft array is suitable for `decodeHistory`. Save each artifact as a separate JSON object, import it in the application's `migrations.ts`, and append it to the ordered array passed to `SqliteMigrations.decodeHistory`. For an existing application, use the last frozen artifact's `to` as `from`, not a reconstructed historical schema. Review the new artifact and history module together. Replay the complete history on a disposable database, including representative old rows, before using it for normal startup. Construction and decoding validate structure, snapshots, and expression syntax; only replay checks that authored steps actually produce the target. File writing and history registration are authored tooling, not a framework atomic-write guarantee. Remove the draft files after review; never regenerate already-applied artifacts from current models.
@@ -406,7 +310,7 @@ The draft array is suitable for `decodeHistory`. Save each artifact as a separat
 
 Rebuild mappings use `SqliteMigrations.copies.Source` for original columns, `.Value` for stored scalar constants, or `.Expression` for a single SQL expression. Expressions run in the `SELECT` over the physical **from** table. The frozen [timestamp artifact](reservations/migrations/002_timestamp.json) converts historical epoch seconds to ISO text. Interacting renames can copy original columns in a rebuild rather than rely on sequential renames.
 
-The todo, document, and reservation histories retain `003_schema_string_checks`, which removes previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas. Existing artifact JSON histories are unchanged.
+The task, editorial, and reservation histories retain `003_schema_string_checks`, which removes previously misderived SQLite string-length constraints while preserving rows. Canonical string checks remain enforced by schemas. These historical artifacts remain unchanged.
 
 Runtime checks immutable ledger contents and exact table/index definitions, rejects untracked tables, indexes, and triggers, and applies each artifact transactionally. Authors use explicit rebuilds for unique/foreign-key changes and explicit create/drop steps for index changes. The final schema and `foreign_key_check` must pass before the artifact is recorded and committed; invalid rows or inconsistent steps roll back the migration and its ledger entry. No rename/backfill/transform intent language, inferred joins, cascades, or general custom-object migration system is provided. ([Relational contract](../docs/wiki/tables-and-queries.md#relational-storage-declarations))
 
@@ -416,6 +320,6 @@ Runtime checks immutable ledger contents and exact table/index definitions, reje
 - [`Resource`](../packages/effect-domains/src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
 - [`Authorization`](../packages/effect-domains/src/authorization.ts): typed resource policy declarations and evaluator.
 - [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
-- [Authored SQL](authored-sql/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
+- [Authored SQL](expense-ledger/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): native operation subcommands with canonical JSON input.
 - [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, explicit migration steps, and verified transactional replay.

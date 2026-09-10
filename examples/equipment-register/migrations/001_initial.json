@@ -1,0 +1,250 @@
+{
+  "id": "001_initial",
+  "from": {
+    "version": 1,
+    "tables": []
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "assets",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "assetTag",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "model",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "serial",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "location",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "condition",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "in-service",
+                  "needs-repair",
+                  "retired"
+                ]
+              }
+            ]
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "assets_asset_tag_key",
+              "fields": [
+                "assetTag"
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "assets_location_condition_idx",
+              "fields": [
+                "location",
+                "condition"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "name": "assets",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "assetTag",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "model",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "serial",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "location",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "condition",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "in-service",
+                  "needs-repair",
+                  "retired"
+                ]
+              }
+            ]
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "assets_asset_tag_key",
+              "fields": [
+                "assetTag"
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "assets_location_condition_idx",
+              "fields": [
+                "location",
+                "condition"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "assets",
+      "name": "assets_location_condition_idx",
+      "fields": [
+        "location",
+        "condition"
+      ]
+    }
+  ]
+}

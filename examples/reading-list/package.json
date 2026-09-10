@@ -1,0 +1,15 @@
+{
+  "name": "@effect-domains/example-reading-list",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

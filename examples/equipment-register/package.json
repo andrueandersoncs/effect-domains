@@ -1,0 +1,18 @@
+{
+  "name": "@effect-domains/example-equipment-register",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve",
+    "client": "bun run client.ts"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

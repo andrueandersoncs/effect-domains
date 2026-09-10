@@ -1,0 +1,32 @@
+import { Array, Effect, Layer, Schema } from "effect"
+import { Forbidden, Unauthenticated } from "effect-domains/authorization"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { RpcMiddleware } from "effect/unstable/rpc"
+
+const isOperator = (subject: Readonly<Record<string, unknown>>) =>
+  Array.isArray(subject.roles) && Array.contains(subject.roles, "admin")
+
+const operatorErrorSchema = Schema.Union([Unauthenticated, Forbidden])
+
+export class AppointmentReminderOperatorAuthorization extends RpcMiddleware.Service<AppointmentReminderOperatorAuthorization>()(
+  "examples/appointment-reminders/AppointmentReminderOperatorAuthorization",
+  { error: operatorErrorSchema },
+) {
+  static readonly make = Effect.gen(function* () {
+    const authenticator = yield* AuthorizationRpc.Authenticator
+
+    return AppointmentReminderOperatorAuthorization.of(
+      Effect.fn("AppointmentReminders.authorizeOperator")(function* (effect, metadata) {
+        const subject = yield* authenticator.authenticate(metadata.headers)
+
+        if (!isOperator(subject)) {
+          return yield* Forbidden.make({})
+        }
+
+        return yield* effect
+      }),
+    )
+  })
+
+  static readonly layer = Layer.effect(AppointmentReminderOperatorAuthorization, AppointmentReminderOperatorAuthorization.make)
+}

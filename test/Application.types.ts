@@ -2,8 +2,9 @@ import { BunRuntime } from "@effect/platform-bun"
 import { Context, Effect, Layer, Schema, pipe } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/unstable/rpc"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
-import { NotesApplication } from "../examples/service-codec/application.ts"
-import { StoragePrefix, StoredTextSchema } from "../examples/service-codec/storage.ts"
+import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
+import { Authorization } from "effect-domains/authorization"
+import { Resource } from "effect-domains/resource"
 import { Application } from "effect-domains/application"
 import { ApplicationBun } from "effect-domains/application-bun"
 
@@ -11,6 +12,20 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false
 
 const emptyApplication = Application.make({ name: "empty" })
+const NoteSchema = Schema.Struct({ text: Schema.String })
+interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
+const StoredNoteSchema = Schema.Struct({ text: StoredTextSchema })
+interface StoredNote extends Schema.Schema.Type<typeof StoredNoteSchema> {}
+
+const Notes = Resource.make({
+  name: "notes",
+  schema: NoteSchema,
+  storage: StoredNoteSchema,
+  authorization: Authorization.public,
+  operations: Resource.crud,
+})
+
+const NotesApplication = Application.make({ name: "codec-notes", parts: [Notes] })
 
 const nestedNotes = Application.make({
   name: "nested-notes",
@@ -30,7 +45,6 @@ const storedTextRpc = Rpc.make("stored-text", {
 })
 
 const storedTextGroup = RpcGroup.make(storedTextRpc)
-
 const storedTextApplication = Application.make({ name: "stored-text", parts: [{ group: storedTextGroup, handlers: Layer.empty }] })
 
 const storedTextCli = ApplicationBun.run(storedTextApplication, {

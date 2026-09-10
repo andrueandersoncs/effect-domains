@@ -1,0 +1,191 @@
+{
+  "id": "001_initial",
+  "from": {
+    "version": 1,
+    "tables": []
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "expenses",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "date",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "merchant",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "category",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": ["meals", "travel", "software", "supplies", "other"]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "amountMinor",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "currency",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "name": "expenses",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "date",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "merchant",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "category",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": ["meals", "travel", "software", "supplies", "other"]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "amountMinor",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "currency",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    }
+  ]
+}

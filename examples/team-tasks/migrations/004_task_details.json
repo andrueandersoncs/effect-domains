@@ -1,0 +1,70 @@
+{
+  "id": "004_task_details",
+  "from": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "todos",
+        "identifier": "id",
+        "fields": [
+          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "Some", "value": "uuidv7" }, "checks": [] },
+          { "_tag": "TableField", "name": "title", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "completed", "scalar": "integer", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": [0, 1] }] },
+          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "ownerId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+        ]
+      }
+    ]
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "todos",
+        "identifier": "id",
+        "fields": [
+          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "Some", "value": "uuidv7" }, "checks": [] },
+          { "_tag": "TableField", "name": "project", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "title", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "detail", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "priority", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["low", "normal", "high", "urgent"] }] },
+          { "_tag": "TableField", "name": "dueDate", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "completed", "scalar": "integer", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": [0, 1] }] },
+          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "ownerId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteRebuildTable",
+      "table": {
+        "name": "todos",
+        "identifier": "id",
+        "fields": [
+          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "Some", "value": "uuidv7" }, "checks": [] },
+          { "_tag": "TableField", "name": "project", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "title", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "detail", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "priority", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["low", "normal", "high", "urgent"] }] },
+          { "_tag": "TableField", "name": "dueDate", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "completed", "scalar": "integer", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": [0, 1] }] },
+          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "ownerId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+        ]
+      },
+      "copies": [
+        { "_tag": "SqliteColumnSource", "column": "id", "source": "id" },
+        { "_tag": "SqliteColumnValue", "column": "project", "value": "Unassigned project" },
+        { "_tag": "SqliteColumnSource", "column": "title", "source": "title" },
+        { "_tag": "SqliteColumnValue", "column": "detail", "value": null },
+        { "_tag": "SqliteColumnValue", "column": "priority", "value": "normal" },
+        { "_tag": "SqliteColumnValue", "column": "dueDate", "value": null },
+        { "_tag": "SqliteColumnSource", "column": "completed", "source": "completed" },
+        { "_tag": "SqliteColumnSource", "column": "tenantId", "source": "tenantId" },
+        { "_tag": "SqliteColumnSource", "column": "ownerId", "source": "ownerId" }
+      ]
+    }
+  ]
+}
