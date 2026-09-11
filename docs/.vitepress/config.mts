@@ -7,7 +7,7 @@ const sourceRef = encodeURIComponent(process.env.DOCS_SOURCE_REF ?? "main")
 
 export default defineConfig({
   title: "Effect Domains",
-  description: "Declare the domain. Derive the machinery. Schema-driven applications built with Effect.",
+  description: "Build SQLite-backed Effect applications with generated resource operations, CLI, MCP tools, and a browser admin.",
   lang: "en-US",
   base,
   cleanUrls: false,
@@ -17,23 +17,43 @@ export default defineConfig({
     siteTitle: "Effect Domains",
     nav: [
       { text: "Get started", link: "/getting-started" },
-      { text: "Documentation", link: "/wiki/README", activeMatch: "/wiki/" },
+      { text: "Guides", link: "/guides/define-a-resource", activeMatch: "/guides/" },
+      { text: "Reference", link: "/reference/resources", activeMatch: "/reference/" },
+      { text: "Examples", link: "/examples" },
     ],
     sidebar: [
       {
         text: "Start here",
         items: [
-          { text: "Introduction", link: "/getting-started" },
-          { text: "Documentation overview", link: "/wiki/README" },
-          { text: "Design principles", link: "/wiki/thesis" },
+          { text: "Run your first application", link: "/getting-started" },
+          { text: "How the pieces fit", link: "/concepts" },
+          { text: "Choose an example", link: "/examples" },
         ],
       },
       {
-        text: "Framework",
+        text: "Build an application",
         items: [
-          { text: "Tables, resources & queries", link: "/wiki/tables-and-queries" },
-          { text: "Implementation & research", link: "/wiki/research-agenda" },
-          { text: "Validation & boundaries", link: "/wiki/validation-strategy" },
+          { text: "Define a resource", link: "/guides/define-a-resource" },
+          { text: "Restrict access", link: "/guides/authorization" },
+          { text: "Change a stored schema", link: "/guides/migrations" },
+        ],
+      },
+      {
+        text: "Reference",
+        items: [
+          { text: "Resources and operations", link: "/reference/resources" },
+          { text: "Runtime and clients", link: "/reference/runtime" },
+        ],
+      },
+      {
+        text: "Project research",
+        collapsed: true,
+        items: [
+          { text: "Wiki overview", link: "/wiki/README" },
+          { text: "Design thesis", link: "/wiki/thesis" },
+          { text: "Detailed framework contract", link: "/wiki/tables-and-queries" },
+          { text: "Research agenda", link: "/wiki/research-agenda" },
+          { text: "Verification record", link: "/wiki/validation-strategy" },
         ],
       },
     ],
@@ -41,7 +61,8 @@ export default defineConfig({
       provider: "local",
       options: {
         _render(src, env, md) {
-          return env.relativePath.startsWith("wiki/raw/") ? "" : md.render(src, env)
+          // Public search serves current usage; research remains in the sidebar.
+          return env.relativePath.startsWith("wiki/") ? "" : md.render(src, env)
         },
       },
     },
@@ -63,11 +84,14 @@ export default defineConfig({
       // The wiki is plain Markdown, not Vue templates. Preserve literal
       // angle-bracket placeholders in immutable source quotations.
       md.core.ruler.before("normalize", "wiki-markdown", (state) => {
+        // Inline fragments such as callout titles have no page environment.
+        if (!state.env.relativePath) return
         state.md.options.html = !state.env.relativePath.startsWith("wiki/")
       })
       // Preserve repository-relative citations in Markdown; only the website
       // maps source files outside docs (and maintainer instructions) to GitHub.
       md.core.ruler.after("inline", "repository-links", (state) => {
+        if (!state.env.relativePath) return
         for (const block of state.tokens) {
           let sourceLabel = false
           for (const token of block.children ?? []) {

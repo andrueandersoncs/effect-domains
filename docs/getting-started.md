@@ -1,84 +1,139 @@
-# Getting Started
+---
+description: Run a reading-list application, create a book from the CLI, and edit it in the generated admin.
+---
 
-Work from the root of this private Bun workspace. The smallest application is a personal **reading list**: keep a backlog, record reading progress, filter by format, and save ratings and notes. It uses generated resource operations without pretending that routine record editing needs a business workflow.
+# Run your first application
 
-## Install and prebuild
+Run a reading list with SQLite persistence, a command-line client, and a browser admin. You’ll add a book, mark it finished, and see the same record through both interfaces.
+
+## Before you start
+
+You need a checkout of this repository, **Bun** (the workspace pins 1.4.0), and two terminals. Run all commands from the repository root. The code uses **Effect 4.0.0-rc.112**; Effect 3 examples are not interchangeable with these APIs.
+
+This is a workspace walkthrough, not an installation guide for a published package. You don’t need to know the framework to run it; the [next guide](/guides/define-a-resource) assumes TypeScript and basic Effect Schema knowledge.
+
+::: warning Local demonstration only
+The reading list deliberately allows public access. Keep it on loopback; it has no user accounts or private records. The Bun runner binds to `127.0.0.1`.
+:::
+
+## 1. Install and start the server
+
+In the first terminal:
 
 ```bash
 bun install
 bun run build
-```
-
-The build precompiles the optional browser admin. Runtime serves those assets rather than compiling a browser application on startup.
-
-## Run the reading-list server
-
-```bash
 bun run reading-list:server
 ```
 
-The server listens on `http://127.0.0.1:3000`, with RPC at `/rpc/v1`, MCP at `/mcp`, and admin at `/admin`. SQLite defaults to `reading-list.sqlite`; startup applies frozen migration history without resetting rows.
+`build` compiles the browser admin assets. Leave the server running, then open [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). You should see the reading-list application and its `books` resource.
 
-The [canonical schema](../examples/reading-list/domain.ts) describes a book's title, author, reading status, format, nullable one-to-five rating, and nullable notes. The [resource declaration](../examples/reading-list/resources.ts) is the complete routine implementation:
+The server creates `reading-list.sqlite` in your working directory and applies the example’s checked-in migrations. Restarting preserves your books.
 
-```ts
-import { Authorization } from "effect-domains/authorization"
-import { Resource } from "effect-domains/resource"
-import { ReadingListBookSchema } from "./domain.ts"
+::: tip Port 3000 already in use?
+Start with `PORT=3001 bun run reading-list:server`, open port 3001 in the browser, and run `export READING_LIST_URL=http://127.0.0.1:3001/rpc/v1` in the second terminal before the commands below. The client does not read the server’s `PORT` variable.
+:::
 
-export const ReadingListResource = Resource.make({
-  authorization: Authorization.public,
-  name: "books",
-  schema: ReadingListBookSchema,
-  operations: {
-    ...Resource.crud,
-    create: { defaults: { rating: null, notes: null } },
-    list: { filter: ["status", "format"], limit: 25 },
-  },
-})
-```
+## 2. Add a book
 
-[Application composition](../examples/reading-list/application.ts) and the [Bun entrypoint](../examples/reading-list/main.ts) provide persistence and transports. There are no hand-written CRUD handlers or duplicate wire models.
-
-## Keep a reading backlog
-
-In another terminal:
+In the second terminal:
 
 ```bash
 bun run reading-list books.create --input-json '{"title":"A Wizard of Earthsea","author":"Ursula K. Le Guin","status":"planned","format":"paperback"}'
+```
+
+The command prints a JSON record like this. Your generated `id` will differ:
+
+```json
+{
+  "title": "A Wizard of Earthsea",
+  "author": "Ursula K. Le Guin",
+  "status": "planned",
+  "format": "paperback",
+  "rating": null,
+  "notes": null,
+  "id": "01a0908b-7f60-7365-b26a-215ad811179b"
+}
+```
+
+You supplied four fields. The resource supplied an identifier and the two declared creation defaults.
+
+## 3. Find your backlog
+
+```bash
 bun run reading-list books.list --input-json '{"filter":{"status":"planned"}}'
 ```
 
-Creation returns a generated UUIDv7 `id` and defaults `rating` and `notes` to null. Copy the identifier into `BOOK_ID`, then record progress with the complete row:
+The result is an object with `items` and `nextCursor`. Your book appears in `items`; with no more than 25 matching books, `nextCursor` is `null`.
+
+The example allows equality filters for `status` and `format`. Lists are bounded and ordered by identifier, not by title or rating. See [list requests](/reference/resources#list) when you need another page.
+
+## 4. Mark the book finished
+
+Copy the `id` from the create result into this shell variable, replacing the sample value:
+
+```bash
+BOOK_ID='01a0908b-7f60-7365-b26a-215ad811179b'
+```
+
+Then update the book:
 
 ```bash
 bun run reading-list books.update --input-json "{\"id\":\"$BOOK_ID\",\"title\":\"A Wizard of Earthsea\",\"author\":\"Ursula K. Le Guin\",\"status\":\"finished\",\"format\":\"paperback\",\"rating\":5,\"notes\":\"Revisit the balance of names and power\"}"
 bun run reading-list books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 ```
 
-Lists return `{ items, nextCursor }`, order by identifier ascending, and default to 25 items. Pass a non-null cursor back unchanged with the same filters for another page. Invalid statuses and ratings outside one through five are rejected.
+Both commands return the book with `status: "finished"` and `rating: 5`.
 
-This is a public, local personal list—not a lending library, a multi-user reading service, or a publication catalog. See the [reading-list guide](../examples/reading-list/README.md) for removal, errors, and configuration.
+**Update takes the complete row**, including `rating` and `notes`. The creation defaults do not make those fields optional on update. Partial changes require publishing the separate `patch` operation; this example does not publish it.
 
-## Open the admin surface
+## 5. See the same record in the browser
 
-Open [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). Forms and lists use the same published operations as the CLI; there is no separate admin contract or permission bypass.
+Return to `/admin` and select `books`. Reload the list if it was already open. Your finished book should be visible. The operation forms let you create, retrieve, update, and remove books using the same contracts as the CLI.
 
-## Inspect contracts and author migrations
+There is no second admin database or permission bypass. Both clients call the same operations.
 
-Inspection is local and needs no server:
+## 6. Try an invalid rating
+
+```bash
+bun run reading-list books.create --input-json '{"title":"Example","author":"Author","status":"finished","format":"ebook","rating":6}'
+```
+
+This command exits with an error and does not create a book. Ratings must be whole numbers from 1 to 5, or `null`. The CLI validates the input against the operation schema before sending it.
+
+## 7. Inspect the contract
 
 ```bash
 bun run reading-list inspect books.create
 ```
 
-There are no schema CLI commands. Author reviewed changes with `SqliteMigrations.make({ id, from, to, steps })`; use `initial({ id, tables })` for fresh creation. Append frozen artifacts and ordered imports decoded by `SqliteMigrations.decodeHistory`. Never regenerate already-applied history from current models. The [migration authoring walkthrough](../examples/README.md#review-schema-changes) includes a runnable draft.
+Inspection prints JSON containing the operation’s input, success, and error schemas along with resource metadata. Find the input schema’s `required` fields: `rating` and `notes` are not required on create.
 
-## Try another domain
+Inspection runs locally; you can stop the server with **Ctrl+C** and run it again. Creating and retrieving books require the server.
 
-The [application guide](../examples/README.md) progresses from generated records to expense reports, scoped project tasks, encrypted field notes, editorial planning, equipment tools, stock reservations, billing, and durable report and notification delivery.
+## What you just ran
 
-- [Thesis](/wiki/thesis) — the derivation boundary.
-- [Tables and Queries](/wiki/tables-and-queries) — the implemented resource and runtime contract.
-- [Research Agenda](/wiki/research-agenda) — scope and open questions.
-- [Validation Strategy](/wiki/validation-strategy) — exercised evidence and its limits.
+The application has no hand-written CRUD handlers. These files provide the declarations:
+
+| File under `examples/reading-list/` | Responsibility |
+| --- | --- |
+| `domain.ts` | Book fields and validation rules |
+| `resources.ts` | Public access, published operations, defaults, and list filters |
+| `application.ts` | Registers the resource in an application |
+| `migrations.ts` and `migrations/` | Imports the frozen SQLite history |
+| `main.ts` | Runs the server, CLI, and optional admin |
+
+The [reading-list source](../examples/reading-list/) is small enough to read end to end.
+
+## Next: define your own resource
+
+[Define a resource](/guides/define-a-resource) takes you from your own schema to a running application. For the underlying model, read [how the pieces fit](/concepts). To compare business rules, authorization, or durable work, [choose another example](/examples).
+
+### If something goes wrong
+
+| Symptom | Check |
+| --- | --- |
+| CLI connection fails | Keep the server running. Match `READING_LIST_URL` to its port, including `/rpc/v1`. |
+| Startup reports missing admin assets | Run `bun run build` from the repository root, then restart. |
+| `ResourceNotFound` after copying a command | Use the identifier returned by your own create command. |
+| Startup reports migration or schema drift | Don’t delete an existing database to silence the error. Use `READING_LIST_DB=reading-list-tutorial.sqlite bun run reading-list:server` for a separate tutorial database; use the [migration guide](/guides/migrations) for data you need to retain. |

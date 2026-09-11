@@ -3,76 +3,71 @@ layout: home
 
 hero:
   name: Effect Domains
-  text: Derive the routine. Author the meaning.
-  tagline: Build from canonical Effect Schemas. Derive persistence, RPC, CLI, and admin interfaces. Keep business policy explicit.
+  text: From schema to application.
+  tagline: Define your data with Effect Schema. Get SQLite persistence, typed operations, a CLI, MCP tools, and an optional admin. Write business rules where they belong.
   actions:
     - theme: brand
-      text: Get started
+      text: Run your first application
       link: /getting-started
     - theme: alt
-      text: Read the thesis
-      link: /wiki/thesis
-    - theme: alt
-      text: Browse the contract
-      link: /wiki/tables-and-queries
+      text: Define a resource
+      link: /guides/define-a-resource
 
 features:
-  - title: One canonical description
-    details: Define the domain with an Effect Schema, then derive storage representation, codecs, repository operations, and selected resource contracts where the mapping is mechanical.
-  - title: Policy stays explicit
-    details: Authorization, domain transitions, migration intent, transaction boundaries, and storage transformations are authored decisions—not consequences inferred from a schema.
-  - title: Runnable boundaries
-    details: "Small applications keep the generated path concrete: SQLite history, an Effect RPC server, a generated CLI, and an opt-in administrative surface."
+  - title: Stop rewriting the same record
+    details: A resource derives its table, repository, and selected CRUD contracts from your schema. Declare defaults and filters alongside the operations that use them.
+  - title: Use the same operations everywhere
+    details: The CLI, MCP tools, and browser admin share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
+  - title: Keep business rules in your code
+    details: Use native Effect RPCs and SQL for approvals, inventory changes, and transactions. Compose them with generated resources in the same application.
 ---
-
-<div class="home-intro">
-
-## A narrow derivation boundary
-
-Effect Domains treats an Effect Schema as a runtime domain description that multiple interpreters can consume. The goal is to remove duplicate declarations that must stay mechanically equivalent—not to make business decisions disappear.
-
-What derives is deliberately bounded: routine columns and codecs, repository operations, selected RPCs, JSON CLI inputs, and inspection data. What changes the meaning of an application remains visible in authored code: authorization, commands, transactions, migrations, indexes, retry and idempotency policy, and semantic storage transforms.
-
-[Start with the minimal runnable application](/getting-started) or read the maintained [thesis](/wiki/thesis) and [resource contract](/wiki/tables-and-queries).
-
-</div>
 
 <div class="home-code">
 
-## One schema. A working resource.
+## Start with a resource
 
 ```ts
 import { Schema } from "effect"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 
-const BookSchema = Schema.Struct({
-  title: Schema.NonEmptyString,
-  author: Schema.NonEmptyString,
-  status: Schema.Literals(["planned", "reading", "finished"]),
-})
-
 const Books = Resource.make({
   name: "books",
-  schema: BookSchema,
+  schema: Schema.Struct({
+    title: Schema.NonEmptyString,
+    author: Schema.NonEmptyString,
+    status: Schema.Literals(["planned", "reading", "finished"]),
+  }),
   authorization: Authorization.public,
   operations: Resource.crud,
 })
 ```
 
-The schema describes books; the resource declares access and published operations. Effect Domains derives the table, repository, and selected RPC contracts. Public access is an explicit choice—not a default. See the [authorization contract](/wiki/tables-and-queries#resource-authorization) for typed policies and their runtime boundaries.
+This declares `books.create`, `books.get`, `books.list`, `books.update`, and `books.remove`, plus a SQLite table and repository. Rows get a UUIDv7 identifier because this schema does not declare its own identity. Public access is an explicit choice for this example.
+
+Compose the resource into an application, supply migration history, and run it with Bun. [The resource guide covers those steps](/guides/define-a-resource); [the first-run tutorial](/getting-started) uses a ready-made reading list.
+
+</div>
+
+<div class="home-intro">
+
+## What this project is—and isn’t
+
+Effect Domains is an experimental TypeScript framework in a Bun workspace, using Effect 4. The implemented persistence adapter is SQLite. These docs describe the current checkout, not a stable release or production deployment recipe.
+
+A schema can describe a book’s fields. It cannot decide who may edit the book, whether an order may be invoiced, or how old data should change. You declare those decisions explicitly. [How the pieces fit](/concepts) explains the boundary.
 
 </div>
 
 <div class="home-paths">
 
-## Follow the evidence
+## Find what you need
 
-- **Run a small vertical slice** — [Reading-list onboarding](/getting-started) walks through the personal reading-list resource, server, CLI, and admin surface.
-- **Understand the claim** — [Thesis](/wiki/thesis) explains the mechanical derivation boundary and the constraints on generalization.
-- **Inspect the implementation contract** — [Tables and Queries](/wiki/tables-and-queries) covers resources, authorization, commands, migrations, and runtime behavior.
-- **Keep claims bounded** — [Validation Strategy](/wiki/validation-strategy) records exercised behavior and its limits.
+- **Try it** — [Run a reading list](/getting-started) and see a book in both the CLI and browser.
+- **Build with it** — [Define a resource](/guides/define-a-resource), [restrict access](/guides/authorization), or [change a stored schema](/guides/migrations).
+- **Look something up** — Find [resource operations](/reference/resources), [runtime options, environment variables, and endpoints](/reference/runtime).
+- **Go beyond CRUD** — [Explore the applications](/examples) for authored queries, transactions, encryption, entitlements, and durable execution.
 
-The [workspace README](../README.md) and [project wiki](/wiki/README) remain the detailed, source-grounded references.
+Design rationale and dated verification records live separately in the [project wiki](/wiki/README).
 
 </div>
