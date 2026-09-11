@@ -1,5 +1,4 @@
-import { Array, Context, DateTime, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Array, DateTime, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -8,15 +7,15 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell, textI
 import { Form } from "@effect-domains/example-web/form"
 import { Page } from "@effect-domains/example-web/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
-import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { ArticleSchema, EditorialChannelSchema, NonNegativePrioritySchema } from "../domain.ts"
 import { DocumentsResource } from "../resources.ts"
 
 const DocumentRowSchema = DocumentsResource.table.rowSchema
 const DocumentPageSchema = Page.schema(DocumentRowSchema)
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof DocumentsResource.group, RpcClientError.RpcClientError>>()("editorial-calendar/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(DocumentsResource.group)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "editorial-calendar/WebClient", group: DocumentsResource.group })
+export type WebClient = Type<typeof WebClient>
 
 const channels = ["website", "newsletter", "print"] as const
 const channelChoices = Array.map(channels, (value) => ({ value, label: value }))

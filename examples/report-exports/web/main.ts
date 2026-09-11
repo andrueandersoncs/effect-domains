@@ -1,12 +1,12 @@
-import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Array, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "@effect-domains/example-web/form"
-import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { FinancialReportLineSchema, ReportExportPollResultSchema, ReportExportRequestSchema, ReportExportStatusSchema } from "../contracts.ts"
@@ -15,9 +15,8 @@ import { ReportExportRpcs } from "../workflow.ts"
 const currencies = ["AUD", "CAD", "EUR", "GBP", "JPY", "USD"] as const
 const releasePolicies = ["automatic", "operatorApproval"] as const
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReportExportRpcs, RpcClientError.RpcClientError>>()("report-exports/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ReportExportRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "report-exports/WebClient", group: ReportExportRpcs })
+export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
   session: SessionModel,

@@ -1,5 +1,4 @@
-import { Context, DateTime, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { DateTime, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -12,7 +11,8 @@ import {
   textInput,
 } from "@effect-domains/example-web/html"
 import { Form } from "@effect-domains/example-web/form"
-import { formatRpcError, browserProtocol } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { InventoryOperations } from "../sqlite.ts"
 import { QuantitySchema, ReservationSchema, StockSchema } from "../domain.ts"
@@ -22,12 +22,8 @@ const ReservationWebRpcs = InventoryOperations.group
   .merge(StockResource.group)
   .merge(ReservationResource.group)
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReservationWebRpcs, RpcClientError.RpcClientError>>()("reservations/WebClient") {
-  static readonly layer = pipe(
-    Layer.effect(WebClient, RpcClient.make(ReservationWebRpcs)),
-    Layer.provide(browserProtocol),
-  )
-}
+export const WebClient = RpcService.make({ name: "reservations/WebClient", group: ReservationWebRpcs })
+export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
   stock: Schema.NullOr(StockSchema),

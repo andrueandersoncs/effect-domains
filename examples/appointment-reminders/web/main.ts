@@ -1,12 +1,12 @@
-import { Context, DateTime, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { DateTime, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
-import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { AppointmentRecipientProxy, AppointmentReminderDelivery } from "../appointment-reminder-entity.ts"
@@ -20,9 +20,8 @@ const uuidV7 = () => { const bytes = crypto.getRandomValues(new Uint8Array(16));
 const defaultTimes = () => ({ reminderAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), appointmentAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() })
 const emptyForm = () => ({ recipient: "", reminderId: uuidV7(), appointmentId: uuidV7(), ...defaultTimes(), location: "", purpose: "" })
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReminderWebRpcs, RpcClientError.RpcClientError>>()("appointment-reminders/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ReminderWebRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "appointment-reminders/WebClient", group: ReminderWebRpcs })
+export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
   session: SessionModel,

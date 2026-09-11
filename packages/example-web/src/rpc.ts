@@ -36,6 +36,10 @@ export const browserProtocol = pipe(
   Layer.provide(RpcSerialization.layerJson),
 )
 
+export const browserLayer = <I, E, R>(client: {
+  readonly layerProtocol: Layer.Layer<I, E, R>
+}) => pipe(client.layerProtocol, Layer.provide(browserProtocol))
+
 export const bearer = (token: string | null): Readonly<{ headers: Readonly<Record<string, string>> }> => ({
   headers: token === null || token === "" ? {} : { authorization: `Bearer ${token}` },
 })

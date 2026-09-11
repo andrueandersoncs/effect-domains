@@ -1,12 +1,12 @@
-import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Array, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "@effect-domains/example-web/form"
-import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { ExpenseQueryInputSchema, ExpenseSchema, ExpenseTotalSchema } from "../domain.ts"
 import { ExpensesResource } from "../resources.ts"
@@ -23,9 +23,8 @@ const ExpenseLedgerWebRpcs = ExpensesResource.group.merge(
   ExpenseLedgerOperations.group,
 )
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ExpenseLedgerWebRpcs, RpcClientError.RpcClientError>>()("expense-ledger/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ExpenseLedgerWebRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "expense-ledger/WebClient", group: ExpenseLedgerWebRpcs })
+export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
   expenses: Schema.Array(ExpenseRowSchema),

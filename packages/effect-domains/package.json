@@ -22,6 +22,7 @@
     "./repository-store": "./src/repository-store.ts",
     "./rpc-cli": "./src/rpc-cli.ts",
     "./rpc-mcp": "./src/rpc-mcp.ts",
+    "./rpc-service": "./src/rpc-service.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
     "./sqlite-identity": "./src/sqlite-identity.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",

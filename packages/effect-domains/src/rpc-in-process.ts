@@ -38,3 +38,31 @@ export const makeClient = Effect.fn("RpcInProcess.makeClient")(function* (group:
   yield* Deferred.succeed(ready, client)
   return { client: client.client, withHandlerContext }
 })
+
+export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(function* <Rpcs extends Rpc.Any>(
+  group: RpcGroup.RpcGroup<Rpcs>,
+) {
+  type ClientRpc = Rpc.Rpc<string, Schema.Codec<unknown>, Schema.Codec<unknown>, Schema.Codec<unknown>>
+  type Client = Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<UnaryRpc, never, false>>>
+  const ready = yield* Deferred.make<Client>()
+  const awaitingClient = Deferred.await(ready)
+
+  const deliver = (response: Parameters<Client["write"]>[0]) =>
+    Effect.flatMap(awaitingClient, (client) => client.write(response))
+
+  const server = yield* RpcServer.makeNoSerialization(group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>, {
+    disableFatalDefects: true,
+    onFromServer: deliver,
+  })
+
+  const client = yield* RpcClient.makeNoSerialization<ClientRpc, never, false>(
+    group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<ClientRpc>,
+    {
+      flatten: false,
+      onFromClient: ({ message }) => server.write(0, message),
+    },
+  )
+
+  yield* Deferred.succeed(ready, client)
+  return client.client as RpcClient.RpcClient<Rpcs>
+})

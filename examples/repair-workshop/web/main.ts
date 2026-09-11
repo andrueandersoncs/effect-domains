@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError, RpcGroup } from "effect/unstable/rpc"
+import { Effect, Option, Schema, pipe } from "effect"
+import { RpcGroup } from "effect/unstable/rpc"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -8,7 +8,8 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell, textI
 import { Form } from "@effect-domains/example-web/form"
 import { Page } from "@effect-domains/example-web/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
-import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { RepairBoardRowSchema } from "../board.ts"
 import { CustomerSchema, RepairJobSchema, RepairStatusSchema, TechnicianSchema } from "../domain.ts"
 import { CustomersResource, RepairJobsResource, TechniciansResource } from "../resources.ts"
@@ -20,9 +21,8 @@ const CustomerPageSchema = Page.schema(CustomerRowSchema)
 const TechnicianPageSchema = Page.schema(TechnicianRowSchema)
 const RepairJobRowSchema = RepairJobsResource.table.rowSchema
 const RepairWorkshopWebRpcs = RpcGroup.make().merge(CustomersResource.group, TechniciansResource.group, RepairJobsResource.group, RepairWorkshopOperations.group)
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof RepairWorkshopWebRpcs, RpcClientError.RpcClientError>>()("repair-workshop/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(RepairWorkshopWebRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "repair-workshop/WebClient", group: RepairWorkshopWebRpcs })
+export type WebClient = Type<typeof WebClient>
 
 const statuses = ["queued", "repairing", "ready"] as const
 const statusChoices = statuses.map((value) => ({ value, label: value }))

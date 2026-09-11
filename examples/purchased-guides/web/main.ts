@@ -1,16 +1,16 @@
-import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
-import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { EntitlementRequired } from "effect-domains/entitlements"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { GuidesResource } from "../resources.ts"
 
 const PurchasedGuidesRpcs = IdentityRpcs.merge(GuidesResource.group)
@@ -18,11 +18,8 @@ const GuideSchema = GuidesResource.table.rowSchema
 const GuidePageSchema = Page.schema(GuideSchema)
 type Guide = typeof GuideSchema.Type
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof PurchasedGuidesRpcs, RpcClientError.RpcClientError>>()(
-  "purchased-guides/WebClient",
-) {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(PurchasedGuidesRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "purchased-guides/WebClient", group: PurchasedGuidesRpcs })
+export type WebClient = Type<typeof WebClient>
 
 const guideChoices = [
   { value: "guide-sql-basics", label: "SQL field guide" },

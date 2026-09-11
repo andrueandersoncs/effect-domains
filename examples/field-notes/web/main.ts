@@ -1,15 +1,15 @@
-import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput, textareaInput } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
-import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { FieldReportSchema } from "../domain.ts"
 import { FieldReportsResource } from "../resources.ts"
 
@@ -18,11 +18,8 @@ const ReportSchema = Schema.toType(FieldReportsResource.table.rowSchema)
 const ReportPageSchema = Page.schema(ReportSchema)
 type Report = typeof ReportSchema.Type
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof FieldNotesRpcs, RpcClientError.RpcClientError>>()(
-  "field-notes/WebClient",
-) {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(FieldNotesRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "field-notes/WebClient", group: FieldNotesRpcs })
+export type WebClient = Type<typeof WebClient>
 
 const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 export const Model = Schema.Struct({

@@ -1,5 +1,4 @@
-import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Array, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -17,15 +16,15 @@ import {
 import { Form } from "@effect-domains/example-web/form"
 import { Page } from "@effect-domains/example-web/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
-import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { BookFormatSchema, RatingSchema, ReadingListBookSchema, ReadingStatusSchema } from "../domain.ts"
 import { ReadingListResource } from "../resources.ts"
 
 const BookRowSchema = ReadingListResource.table.rowSchema
 const BookPageSchema = Page.schema(BookRowSchema)
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReadingListResource.group, RpcClientError.RpcClientError>>()("reading-list/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ReadingListResource.group)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "reading-list/WebClient", group: ReadingListResource.group })
+export type WebClient = Type<typeof WebClient>
 
 const statuses = ["planned", "reading", "finished"] as const
 const formats = ["paperback", "hardcover", "ebook", "audiobook"] as const

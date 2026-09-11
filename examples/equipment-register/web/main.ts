@@ -1,5 +1,4 @@
-import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Array, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -8,15 +7,15 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell, textI
 import { Form } from "@effect-domains/example-web/form"
 import { Page } from "@effect-domains/example-web/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
-import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { AssetConditionSchema, AssetSchema } from "../domain.ts"
 import { AssetsResource } from "../resources.ts"
 
 const AssetRowSchema = AssetsResource.table.rowSchema
 const AssetPageSchema = Page.schema(AssetRowSchema)
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof AssetsResource.group, RpcClientError.RpcClientError>>()("equipment-register/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(AssetsResource.group)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "equipment-register/WebClient", group: AssetsResource.group })
+export type WebClient = Type<typeof WebClient>
 const conditions = ["in-service", "needs-repair", "retired"] as const
 const conditionChoices = [{ value: "", label: "Any condition" }, ...Array.map(conditions, (value) => ({ value, label: value }))]
 const formConditionChoices = Array.map(conditions, (value) => ({ value, label: value }))

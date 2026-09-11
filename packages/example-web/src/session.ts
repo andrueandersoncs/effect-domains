@@ -1,17 +1,16 @@
-import { Clock, Context, DateTime, Effect, Layer, Option, Redacted, Schema, pipe } from "effect"
-import { RpcClient, type RpcClientError } from "effect/unstable/rpc"
+import { Clock, DateTime, Effect, Option, Redacted, Schema, pipe } from "effect"
 import { Command, type Update } from "foldkit"
 import type { HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { CredentialsSchema, IssuedSessionSchema } from "effect-domains/identity"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { field, notice, primaryButton, quietButton, textInput } from "./html.ts"
-import { bearer, browserProtocol, formatRpcError } from "./rpc.ts"
+import { bearer, formatRpcError } from "./rpc.ts"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "./requests.ts"
 
-export class SessionClient extends Context.Service<SessionClient, RpcClient.FromGroup<typeof IdentityRpcs, RpcClientError.RpcClientError>>()("example-web/SessionClient") {
-  static readonly layer = pipe(Layer.effect(SessionClient, RpcClient.make(IdentityRpcs)), Layer.provide(browserProtocol))
-}
+export const SessionClient = RpcService.make({ name: "example-web/SessionClient", group: IdentityRpcs })
+export type SessionClient = Type<typeof SessionClient>
 
 export const SessionModel = Schema.Struct({
   username: Schema.String,

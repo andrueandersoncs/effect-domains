@@ -1,12 +1,11 @@
-import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
-import { RpcClient, RpcClientError } from "effect/unstable/rpc"
+import { Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "@effect-domains/example-web/form"
-import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
@@ -19,16 +18,14 @@ import {
   QuantitySchema,
 } from "../domain.ts"
 import { VersionConflict } from "effect-domains/repository-store"
+import { RpcService, type Type } from "effect-domains/rpc-service"
 import { OrdersResource } from "../resources.ts"
 import { BillingOperations } from "../sqlite.ts"
 const BillingBrowserRpcs = IdentityRpcs.merge(BillingOperations.group)
 const OrderSchema = OrdersResource.table.rowSchema
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof BillingBrowserRpcs, RpcClientError.RpcClientError>>()(
-  "orders-invoices/WebClient",
-) {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(BillingBrowserRpcs)), Layer.provide(browserProtocol))
-}
+export const WebClient = RpcService.make({ name: "orders-invoices/WebClient", group: BillingBrowserRpcs })
+export type WebClient = Type<typeof WebClient>
 
 const integerFields = Schema.Struct({
   lineNumber: Form.integer(LineNumberSchema),

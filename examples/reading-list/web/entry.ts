@@ -1,6 +1,6 @@
-import { WebClient } from "./main.ts"
 import { Runtime } from "foldkit"
-import { Model, init, update, view } from "./main.ts"
+import { browserLayer } from "@effect-domains/example-web/rpc"
+import { Model, WebClient, init, update, view } from "./main.ts"
 
 const application = Runtime.makeApplication({
   Model,
@@ -8,7 +8,7 @@ const application = Runtime.makeApplication({
   update,
   view,
   container: document.getElementById("root"),
-  resources: WebClient.layer,
+  resources: browserLayer(WebClient),
 })
 
 Runtime.run(application)
