@@ -106,6 +106,15 @@
         "foldkit": "0.158.2",
       },
     },
+    "examples/repair-workshop": {
+      "name": "@effect-domains/example-repair-workshop",
+      "dependencies": {
+        "@effect-domains/example-web": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+        "foldkit": "0.158.2",
+      },
+    },
     "examples/report-exports": {
       "name": "@effect-domains/example-report-exports",
       "dependencies": {
@@ -249,6 +258,8 @@
     "@effect-domains/example-purchased-guides": ["@effect-domains/example-purchased-guides@workspace:examples/purchased-guides"],
 
     "@effect-domains/example-reading-list": ["@effect-domains/example-reading-list@workspace:examples/reading-list"],
+
+    "@effect-domains/example-repair-workshop": ["@effect-domains/example-repair-workshop@workspace:examples/repair-workshop"],
 
     "@effect-domains/example-report-exports": ["@effect-domains/example-report-exports@workspace:examples/report-exports"],
 

@@ -21,6 +21,7 @@
     "./rpc-mcp": "./src/rpc-mcp.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",
+    "./sqlite-view": "./src/sqlite-view.ts",
     "./table": "./src/table.ts",
     "./value": "./src/value.ts"
   },

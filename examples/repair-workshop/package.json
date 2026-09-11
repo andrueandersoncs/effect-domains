@@ -1,0 +1,17 @@
+{
+  "name": "@effect-domains/example-repair-workshop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript --files '*.ts'",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "@effect-domains/example-web": "workspace:*",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*",
+    "foldkit": "0.158.2"
+  }
+}

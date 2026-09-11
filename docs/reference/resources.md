@@ -136,10 +136,78 @@ At request time, generated schemas reject malformed payloads. Repository validat
 
 Resource generation stops at routine persistence and CRUD. Business transitions, custom ordering/range queries, retries, idempotency, caching, transaction composition across resources, and a production authentication mechanism remain authored application code.
 
+## Joined read projections
+
+`SqliteView.make` from `effect-domains/sqlite-view` derives a flat read projection from existing tables. It does not create a SQLite `VIEW` or execute a query. For example, using the [workshop resources](../../examples/repair-workshop/resources.ts):
+
+```ts
+import { SqliteView } from "effect-domains/sqlite-view"
+import { CustomersResource, RepairJobsResource, TechniciansResource } from "./resources.ts"
+
+const RepairBoard = SqliteView.make({
+  tables: {
+    job: RepairJobsResource.table,
+    customer: CustomersResource.table,
+    technician: TechniciansResource.table,
+  },
+  from: "job",
+  joins: [
+    { kind: "inner", table: "customer", on: [
+      { left: ["job", "customerId"], right: ["customer", "id"] },
+    ] },
+    { kind: "left", table: "technician", on: [
+      { left: ["job", "technicianId"], right: ["technician", "id"] },
+    ] },
+  ],
+  select: {
+    id: ["job", "id"],
+    customerName: ["customer", "name"],
+    urgent: ["job", "urgent"],
+    technicianName: ["technician", "name"],
+    technicianOnCall: ["technician", "onCall"],
+  },
+})
+```
+
+| Product | Contract |
+| --- | --- |
+| `schema` | Selected physical-to-canonical row codec, with exact selected field types and codec services. Left-joined fields additionally accept `null`. |
+| `select(sql)` | Native SQL fragment containing the complete `SELECT … FROM … JOIN …` prefix, with quoted table, alias, column, and output names. |
+| `column(sql, [alias, field])` | Typed, quoted physical column reference for authored SQL clauses; it does not encode comparison values. |
+| `description` | Frozen, schema-backed aliases, physical table names, joins, and selection for inspection. |
+| `dependencies` | The original table descriptors read by the projection, deduplicated across aliases. |
+
+Compose the prefix with native `SqlClient` and decode with `SqlSchema`; filters, order, bounds, and cardinality remain explicit:
+
+```ts
+import { Effect, Schema } from "effect"
+import { SqlClient, SqlSchema } from "effect/unstable/sql"
+
+const readBoard = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const query = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: RepairBoard.schema,
+    execute: () => sql`${RepairBoard.select(sql)}
+      ORDER BY ${RepairBoard.column(sql, ["job", "id"])} ASC LIMIT 50`,
+  })
+  return yield* query(undefined)
+})
+```
+
+Use `Schema.toType(RepairBoard.schema)` for the canonical RPC result, with an explicit JSON codec when its values require one. Annotate the native RPC with `.annotate(SqliteView.annotation, [RepairBoard])`. `Application.make` then requires every dependency to be the exact table descriptor of a registered resource, including resources in nested applications; a separately constructed same-name table is rejected. Operation inspection exposes the declarations in `views`. This records declared dependencies, not arbitrary additional SQL in the handler.
+
+Joins support explicit inner/left equality conjunctions, including composite keys. Every alias must be introduced once; each equality must connect the new alias to an earlier alias with compatible physical scalar types. Unknown fields, unused aliases, empty joins/selections, and case-insensitive alias/output collisions are rejected. Equality compares encoded SQLite values: matching scalar types alone does not prove semantic equivalence between different codecs.
+
+Projection reuses the existing compiled column codec without decoding it twice. For a left join, an original nullable field codec that transforms stored `null` is rejected: SQL cannot distinguish an unmatched row from that application-defined value without an explicit row-presence discriminator. Use authored SQL and an explicit result codec for that case.
+
+No authorization, relationship cardinality, grouping, nested aggregate, sorting, pagination, cache, invalidation, or transaction policy is inferred. In particular, native SQL remains privileged even when its view references policy-protected resources. See the [complete board](../../examples/repair-workshop/board.ts), [handler](../../examples/repair-workshop/sqlite.ts), and [regressions](../../test/SqliteView.test.ts).
+
 ## Source
 
 - [`Resource.make` and generated operation schemas](../../packages/effect-domains/src/resource.ts)
 - [`Creation input compilation`](../../packages/effect-domains/src/resource-creation.ts)
 - [`Table` storage and identifier rules](../../packages/effect-domains/src/table.ts)
+- [`SqliteView` projection compilation](../../packages/effect-domains/src/sqlite-view.ts)
 - [`Authorization` definitions and enforcement](../../packages/effect-domains/src/authorization.ts)
 - [`Application` composition](../../packages/effect-domains/src/application.ts)

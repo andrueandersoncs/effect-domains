@@ -1,0 +1,471 @@
+{
+  "id": "001_initial",
+  "from": {
+    "version": 1,
+    "tables": []
+  },
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "customers",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      },
+      {
+        "name": "technicians",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "onCall",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "repair_jobs",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "customerId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "item",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "fault",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "urgent",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "queued",
+                  "repairing",
+                  "ready"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "technicianId",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ],
+        "relations": {
+          "foreignKeys": [
+            {
+              "name": "repair_jobs_customer",
+              "fields": [
+                "customerId"
+              ],
+              "references": {
+                "table": "customers",
+                "fields": [
+                  "id"
+                ]
+              }
+            },
+            {
+              "name": "repair_jobs_technician",
+              "fields": [
+                "technicianId"
+              ],
+              "references": {
+                "table": "technicians",
+                "fields": [
+                  "id"
+                ]
+              }
+            }
+          ],
+          "indexes": [
+            {
+              "name": "repair_jobs_status",
+              "fields": [
+                "status"
+              ]
+            },
+            {
+              "name": "repair_jobs_customer_id",
+              "fields": [
+                "customerId"
+              ]
+            },
+            {
+              "name": "repair_jobs_technician_id",
+              "fields": [
+                "technicianId"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "name": "customers",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      }
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "name": "technicians",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "onCall",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": {
+        "name": "repair_jobs",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "customerId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "item",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "fault",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "urgent",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "queued",
+                  "repairing",
+                  "ready"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "technicianId",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ],
+        "relations": {
+          "foreignKeys": [
+            {
+              "name": "repair_jobs_customer",
+              "fields": [
+                "customerId"
+              ],
+              "references": {
+                "table": "customers",
+                "fields": [
+                  "id"
+                ]
+              }
+            },
+            {
+              "name": "repair_jobs_technician",
+              "fields": [
+                "technicianId"
+              ],
+              "references": {
+                "table": "technicians",
+                "fields": [
+                  "id"
+                ]
+              }
+            }
+          ],
+          "indexes": [
+            {
+              "name": "repair_jobs_status",
+              "fields": [
+                "status"
+              ]
+            },
+            {
+              "name": "repair_jobs_customer_id",
+              "fields": [
+                "customerId"
+              ]
+            },
+            {
+              "name": "repair_jobs_technician_id",
+              "fields": [
+                "technicianId"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "repair_jobs",
+      "name": "repair_jobs_status",
+      "fields": [
+        "status"
+      ]
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "repair_jobs",
+      "name": "repair_jobs_customer_id",
+      "fields": [
+        "customerId"
+      ]
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "repair_jobs",
+      "name": "repair_jobs_technician_id",
+      "fields": [
+        "technicianId"
+      ]
+    }
+  ]
+}

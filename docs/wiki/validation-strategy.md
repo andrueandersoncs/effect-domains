@@ -30,6 +30,21 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-11: Repair-workshop joined projections
+
+The repair workshop was implemented and run before adding framework support: its original native `SqlSchema` handler manually selected aliased customer/technician fields and duplicated Boolean storage decoding. `SqliteView` then derived that mechanical projection from registered tables, and the example cut over without retaining the manual decoder or SQL prefix. The frozen initial migration stayed unchanged. ([Example](../../examples/README.md#repair-workshop); [declaration](../../examples/repair-workshop/board.ts); [handler](../../examples/repair-workshop/sqlite.ts); [compiler](../../packages/effect-domains/src/sqlite-view.ts))
+
+- The original server created customers, technicians, an assigned urgent repair, and an unassigned ordinary repair through the real CLI. After the cutover and restart, its board returned exactly the same serialized rows.
+- Live CLI edits changed customer/technician names and the on-call flag; subsequent joined reads returned current values. Assignment, unassignment, status filtering, and a one-row bound worked. Invalid foreign keys, deletion of a referenced technician, and a limit above 100 failed; the failed writes left the board intact. Local inspection exposed the complete join/dependency declaration.
+- The official MCP SDK discovered and invoked `workshop.board`; structured results retained canonical `true`/`false` and unmatched-row `null`, rather than SQLite bits.
+- The actual Foldkit page loaded persisted rows. Scripted DOM input/change/click events created a customer, technician, and repair, edited the customer, changed repair status, removed an assignment, and filtered/reloaded the board. Screenshots confirmed the full-width joined board and forms; real CLI reads confirmed the resulting rows. Native browser input helpers stalled in the harness, so event dispatch was used instead of claiming keyboard/mouse verification.
+- All **95 tests in 19 files** passed. Five new regressions cover real composite joins, quoted/dotted names, single decoding with selected codec services, ordinary nullable fields, current reads, declaration snapshots, malformed join graphs, and missing/same-name dependency rejection. The stored-null transformation regression failed before its rejection guard and passed afterward. Compile-only probes check exact field/null types, selected service requirements, and invalid aliases/fields. ([Regressions](../../test/SqliteView.test.ts); [type boundaries](../../test/SqliteView.types.ts))
+- Workspace typechecks, unchanged workspace lint plus the root lint pass, and the admin/Foldkit build passed.
+
+This is a public loopback record-keeping example, not production identity, tenant policy, repair scheduling, billing, guarded business transitions, load testing, general aggregate inference, automatic authorization of joined SQL, or distributed cache coherence. Join equality is explicitly physical equality; ambiguous stored-null transformations require an authored discriminator and result codec.
+
+`bun run docs:build` passed. The owned smoke server and browser tabs were closed; the temporary SQLite database and migration-authoring script were removed.
+
 ### 2026-09-11: Automatic RPC telemetry
 
 The Bun runtime now supplies a scoped native Effect OTLP tracer automatically when a traces endpoint is configured. Declarative runtime options configure export without changing domain schemas, operation contracts, handlers, or authorization. The exported `ApplicationTelemetry.layer` also supports custom runtimes with a runtime-provided native HTTP client. ([Runtime](../../packages/effect-domains/src/application-bun.ts); [telemetry layer](../../packages/effect-domains/src/application-telemetry.ts); [configuration reference](../reference/runtime.md#opentelemetry-tracing))

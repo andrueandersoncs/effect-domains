@@ -47,6 +47,8 @@
     "field-notes": "bun run examples/field-notes/main.ts",
     "editorial-calendar:server": "bun run examples/editorial-calendar/main.ts serve",
     "editorial-calendar": "bun run examples/editorial-calendar/main.ts",
+    "repair-workshop": "bun run examples/repair-workshop/main.ts",
+    "repair-workshop:server": "bun run examples/repair-workshop/main.ts serve",
     "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
   },
   "devDependencies": {

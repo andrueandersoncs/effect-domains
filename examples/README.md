@@ -1,6 +1,6 @@
 # Example applications
 
-Each example solves a concrete record-keeping or operational problem. Small does not mean artificial: start with a personal reading list, then compare authored expense queries, scoped team tasks, encrypted field notes, historical editorial planning, equipment tools, transactional reservations and billing, and durable reports and notifications. Each application owns its domain schema; framework capabilities are the implementation, not the domain.
+Each example solves a concrete record-keeping or operational problem. Small does not mean artificial: start with a personal reading list, then compare authored expense queries, scoped team tasks, encrypted field notes, historical editorial planning, equipment tools, a joined repair board, transactional reservations and billing, and durable reports and notifications. Each application owns its domain schema; framework capabilities are the implementation, not the domain.
 
 ## Choose an application
 
@@ -12,6 +12,7 @@ Each example solves a concrete record-keeping or operational problem. Small does
 | [field-notes](field-notes/README.md) | Share site observations with encrypted report text | Role policy independent of storage encryption |
 | [editorial-calendar](editorial-calendar/README.md) | Plan articles by channel and publication date | Historical rename and explicit backfill |
 | [equipment-register](#equipment-register) | Register, relocate, and inspect equipment through MCP tools | Unique asset tags and generated tool contracts |
+| [repair-workshop](#repair-workshop) | Track customer repairs with optional technician assignments | Derived joined projections and declared query dependencies |
 | [reservations](reservations/README.md) | Hold stock, confirm it, or release it | Explicit transitions and transactional inventory |
 | [orders-invoices](#orders-and-invoices) | Build an order, issue an invoice, and record payment | Tenant relations, transactions, optimistic versions |
 | [purchased-guides](#purchased-guides) | Read a guide unlocked by a one-time purchase | Tenant visibility and current per-resource entitlements |
@@ -75,7 +76,7 @@ Every application `serve` command also serves a small [Foldkit](https://foldkit.
 
 ## Generated admin
 
-Reading lists, expenses, tasks, notes, editorial planning, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment and the durable applications do not enable admin.
+Reading lists, expenses, tasks, notes, editorial planning, repair workshops, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment and the durable applications do not enable admin.
 
 Admin uses the same published RPC schemas, handlers, codecs, and authorization as the CLI. It neither infers permissions nor bypasses policy. Enter a demo bearer token when needed; the page keeps it in browser memory only. Generated forms support scalar and structured inputs, a full JSON fallback, declared list filters, and cursor navigation. See the [browser source](../apps/admin/src/client.ts) and [native adapter](../packages/effect-domains/src/application-admin.ts).
 
@@ -94,6 +95,34 @@ Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured cont
 ## Reservation application
 
 The [reservation guide](reservations/README.md) walks through stock reads, reserve, confirm, release, transition failures, and persistence. The [authored commands](reservations/sqlite.ts) own transactional stock accounting; generated operations are read-only. This existing business-policy slice is retained unchanged.
+
+## Repair workshop
+
+[Repair workshop](repair-workshop/) tracks customers, technicians, and repairs. Its [board declaration](repair-workshop/board.ts) uses `SqliteView` to derive the selected storage codecs, output aliases, and explicit customer/technician joins. The [native handler](repair-workshop/sqlite.ts) still owns filtering, ordering, limits, and error translation; the [RPC annotation](repair-workshop/contracts.ts) declares the tables it reads.
+
+```bash
+bun run build
+bun run repair-workshop:server
+```
+
+In another terminal:
+
+```bash
+bun run repair-workshop customers.create --input-json '{"id":"river","name":"River Cycles"}'
+bun run repair-workshop technicians.create --input-json '{"id":"sam","name":"Sam","onCall":true}'
+bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Cargo bike","fault":"Brake rub","urgent":true,"technicianId":"sam"}'
+bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Commuter bike","fault":"Wheel wobble"}'
+bun run repair-workshop workshop.board --input-json '{"status":"queued","limit":25}'
+bun run repair-workshop technicians.patch --input-json '{"key":"sam","changes":{"name":"Samuel","onCall":false}}'
+bun run repair-workshop workshop.board
+bun run repair-workshop inspect workshop.board
+```
+
+The board returns current customer and technician names, canonical `urgent`/`technicianOnCall` booleans, and `null` technician fields for unassigned repairs. Renaming a customer or changing a technician's on-call flag changes subsequent reads without copying those values onto repairs. Foreign keys reject nonexistent customers/technicians and deletion of referenced records.
+
+At `http://127.0.0.1:3000/`, create or edit customers and technicians, create repairs, and change status or assignment directly on the board. Choose a board status and press **Reload**. The browser requests up to 100 matching repairs; the native operation defaults to 50 and accepts integer limits from 1 through 100, ordered urgent-first then identifier ascending. This board is a bounded array, not a cursor page. Customer/technician selectors load ordinary 50-row resource pages with explicit **Load next** controls.
+
+Use `REPAIR_WORKSHOP_DB`, `PORT`, and `REPAIR_WORKSHOP_URL` for separate local instances. This example deliberately allows public loopback access. It does not implement production identity, tenant authorization, staffing schedules, parts inventory, billing, or guarded business transitions: its status values are editable record state. A `SqliteView` neither grants access nor applies resource authorization to privileged native SQL.
 
 ## Expense ledger
 

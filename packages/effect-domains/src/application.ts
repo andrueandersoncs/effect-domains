@@ -1,9 +1,10 @@
-import { Array, Effect, Function, HashSet, Layer, Match, Schema, Struct, pipe } from "effect"
+import { Array, Context, Effect, Function, HashSet, Layer, Match, Option, Schema, Struct, pipe } from "effect"
 import { RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { SchemaStore } from "./migrations.ts"
 import type { Resource } from "./resource.ts"
 import { Table } from "./table.ts"
+import { SqliteView } from "./sqlite-view.ts"
 
 type HandlerLayer<Bundle> = Bundle extends {
   readonly handlers: infer Handlers extends Layer.Layer<never, any, any>
@@ -57,6 +58,20 @@ const make = <const Parts extends ReadonlyArray<RpcBundle> = typeof emptyParts>(
 
     const proceduresForGroup = (group: RpcBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
     const procedures = Array.flatMap(groups, proceduresForGroup)
+
+    yield* Effect.forEach(procedures, Effect.fn("Application.validateViewDependencies")(function* (procedure) {
+      const views = pipe(Context.getOption(procedure.annotations, SqliteView.annotation), Option.getOrElse(() => []))
+
+      yield* Effect.forEach(views, Effect.fn("Application.validateView")(function* (view) {
+        yield* Effect.forEach(view.dependencies, Effect.fn("Application.validateViewTable")(function* (dependency) {
+          if (!Array.contains(tables, dependency)) {
+            return yield* ApplicationDefinitionError.make({
+              reason: `Operation ${procedure._tag} reads unregistered table ${dependency.name}; use the registered resource's table`,
+            })
+          }
+        }))
+      }))
+    }))
 
     yield* Effect.reduce(procedures, HashSet.empty<string>, Effect.fn("Application.validateOperation")(function* (names, procedure) {
       if (HashSet.has(names, procedure._tag)) {

@@ -12,6 +12,7 @@ export const exampleWebApps = [
   "field-notes",
   "orders-invoices",
   "purchased-guides",
+  "repair-workshop",
   "reading-list",
   "report-exports",
   "reservations",

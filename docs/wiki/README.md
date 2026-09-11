@@ -7,9 +7,9 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 ## Content Map
 
 - [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
-- [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, JSON-only CLI input, imported migration artifacts, and native execution composition.
-- [Validation Strategy](validation-strategy.md) — slice criteria, completed JSON/history cutover checks, prior validation, and dated evidence limits.
-- [Research Agenda](research-agenda.md) — current JSON CLI and decoded-history runtime contract, 2026-09-11 next-slice direction, and remaining evidence.
+- [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, declared joined projections, imported migrations, and native execution composition.
+- [Validation Strategy](validation-strategy.md) — slice criteria, repair-workshop baseline/cutover evidence, prior validation, and dated evidence limits.
+- [Research Agenda](research-agenda.md) — current framework contract, implemented join/dependency slice, next identity direction, and remaining evidence.
 
 ## Wiki Operations and Sources
 
@@ -27,6 +27,8 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 ## Current Status
 
 On 2026-09-11 the remaining research questions were sequenced: stay SQLite with more domains; declare joins and query dependencies next; keep explicit per-field storage transforms; prove identity issuance and revocation next; add encoded shapes only when a slice cannot avoid them; defer migration-authoring changes until a history hurts; prove interruption with a failure slice. See [current direction](research-agenda.md#current-direction).
+
+The [repair-workshop slice](../../examples/README.md#repair-workshop) now supplies the first join/dependency evidence from that direction. A runnable handwritten board came first; `SqliteView` then removed repeated storage codecs and SQL aliases/joins while leaving native query execution and policy explicit. [Final verification](validation-strategy.md#2026-09-11-repair-workshop-joined-projections) covers CLI equivalence, current joined values, null and codec boundaries, dependency rejection, MCP results, and the actual Foldkit surface. Broader joins and production identity remain unproven.
 
 Automatic [RPC telemetry](../reference/runtime.md#opentelemetry-tracing) now installs native Effect OTLP tracing across Bun command lifetimes when an endpoint is configured. Runtime options expose export configuration declaratively; no endpoint means no collector traffic. [Live verification](validation-strategy.md#2026-09-11-automatic-rpc-telemetry) covers generated/native RPCs, CLI propagation, admin/MCP parent isolation, export formats, configuration precedence, and graceful flushing; it also records unrelated workspace lint failures.
 

@@ -6,6 +6,7 @@ import { CreationInspectionSchema } from "./resource-creation.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
+import { SqliteView, SqliteViewDescriptionSchema } from "./sqlite-view.ts"
 
 type InspectableApplication = Readonly<{
   name: string
@@ -55,6 +56,7 @@ const OperationInspectionSchema = Schema.Struct({
   output: Schema.Unknown,
   error: Schema.Unknown,
   subjectPolicy: Schema.optionalKey(SubjectPolicyInspectionSchema),
+  views: Schema.optionalKey(Schema.Array(SqliteViewDescriptionSchema)),
 })
 
 interface OperationInspection extends Schema.Schema.Type<typeof OperationInspectionSchema> {}
@@ -128,9 +130,15 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
   const policy = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
   const subjectPolicy = Option.map(policy, inspectSubjectPolicy)
 
+  const views = pipe(
+    Context.getOption(procedure.annotations, SqliteView.annotation),
+    Option.map(Array.map(Struct.get("description"))),
+  )
+
   return OperationInspectionSchema.make({
     name: contract._tag, input, output, error,
     ...Option.match(subjectPolicy, { onNone: () => ({}), onSome: (subjectPolicy) => ({ subjectPolicy }) }),
+    ...Option.match(views, { onNone: () => ({}), onSome: (views) => ({ views }) }),
   })
 })
 
