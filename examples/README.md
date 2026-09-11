@@ -2,22 +2,24 @@
 
 Each example solves a concrete record-keeping or operational problem. Small does not mean artificial: start with a personal reading list, then compare authored expense queries, scoped team tasks, encrypted field notes, historical editorial planning, equipment tools, a joined repair board, transactional reservations and billing, and durable reports and notifications. Each application owns its domain schema; framework capabilities are the implementation, not the domain.
 
+Every application has a standalone guide with setup, a runnable workflow, expected results and failures, runtime settings, and source links. Choose one below; this page contains only conventions shared across applications and migration-authoring guidance.
+
 ## Choose an application
 
 | Application | Useful scenario | Principal boundary |
 | --- | --- | --- |
 | [reading-list](reading-list/README.md) | Maintain a reading backlog and record progress and ratings | Generated CRUD and filtered lists |
-| [expense-ledger](#expense-ledger) | Record expenses and review period/category totals by currency | Authored SQL and checked money |
+| [expense-ledger](expense-ledger/README.md) | Record expenses and review period/category totals by currency | Authored SQL and checked money |
 | [team-tasks](team-tasks/README.md) | Track project work, priorities, and completion | Tenant/owner policy and completion locks |
 | [field-notes](field-notes/README.md) | Share site observations with encrypted report text | Role policy independent of storage encryption |
 | [editorial-calendar](editorial-calendar/README.md) | Plan articles by channel and publication date | Historical rename and explicit backfill |
-| [equipment-register](#equipment-register) | Register, relocate, and inspect equipment through MCP tools | Unique asset tags and generated tool contracts |
-| [repair-workshop](#repair-workshop) | Track customer repairs with optional technician assignments | Derived joined projections and declared query dependencies |
+| [equipment-register](equipment-register/README.md) | Register, relocate, and inspect equipment through MCP tools | Unique asset tags and generated tool contracts |
+| [repair-workshop](repair-workshop/README.md) | Track customer repairs with optional technician assignments | Derived joined projections and declared query dependencies |
 | [reservations](reservations/README.md) | Hold stock, confirm it, or release it | Explicit transitions and transactional inventory |
-| [orders-invoices](#orders-and-invoices) | Build an order, issue an invoice, and record payment | Tenant relations, transactions, optimistic versions |
-| [purchased-guides](#purchased-guides) | Read a guide unlocked by a one-time purchase | Tenant visibility and current per-resource entitlements |
-| [report-exports](#report-exports) | Approve and publish a financial JSON report | Account subscription gating and durable artifact writing |
-| [appointment-reminders](#appointment-reminders) | Schedule an appointment notification in an application inbox | Durable scheduling, deduplication, and retention |
+| [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Tenant relations, transactions, optimistic versions |
+| [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a one-time purchase | Tenant visibility and current per-resource entitlements |
+| [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Account subscription gating and durable artifact writing |
+| [appointment-reminders](appointment-reminders/README.md) | Schedule an appointment notification in an application inbox | Durable scheduling, deduplication, and retention |
 
 ## Shared runtime
 
@@ -31,7 +33,9 @@ bun run reading-list:server
 
 Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `<application>.sqlite` in the working directory.
 
-Table-bearing applications apply ordered, frozen JSON migrations imported in `migrations.ts`. Startup preserves rows and rejects untracked databases rather than silently adopting them. Report exports have no application tables and use empty history. Native Effect manages separate durable execution storage. New replacement domains use their own databases; these are not automatic conversions from retired book/prefix-codec demos.
+Reading-list OTLP export: `bun run reading-list:server:otel` plus `bun run reading-list:otel …` against a collector on `127.0.0.1:4318`. See [reading-list traces](reading-list/README.md#opentelemetry-traces) and the [runtime reference](../docs/reference/runtime.md#opentelemetry-tracing).
+
+Applications apply ordered, frozen JSON migrations imported in `migrations.ts`. Startup preserves rows and rejects untracked databases rather than silently adopting them. Report exports persist account subscriptions in application storage; native Effect manages its separate durable execution storage. The appointment example likewise has separate application and execution stores. Use a fresh database for a walkthrough that assumes seeded or empty state, not an existing database containing work you need to keep.
 
 ### Demo authentication
 
@@ -44,14 +48,13 @@ Table-bearing applications apply ordered, frozen JSON migrations imported in `mi
 | `admin-demo` | admin | acme | admin |
 | `outsider-demo` | alice | other | editor |
 
-Team tasks, field notes, and orders/invoices use these sessions; appointment reminders require the admin session. Report exports require their separately configured operator token. Other applications explicitly allow public access. Missing or unknown credentials fail authentication. These are public demonstration identities, with no login, expiry, revocation, or identity provider. Keep every example on loopback; do not use it as a production deployment template.
+Team tasks, field notes, orders/invoices, purchased guides, report exports, and appointment reminders use these sessions. Appointment reminders require the admin role; report generation requires an editor and a current subscription, while report operator actions require admin. Other applications explicitly allow public access. Missing or unknown credentials fail authentication on protected operations. These are public demonstration identities, with no login, expiry, revocation, or identity provider. Keep every example on loopback; do not use it as a production deployment template.
 
 Task ownership comes from verified subject claims, not caller-supplied owner/tenant fields. Field notes form a shared global collection: tenant claims do not partition it. Their encryption key is separate from the bearer token. Policy belongs in resource configuration, not canonical schemas.
 
 Appointment scheduling and inbox reads reuse one [subject-only admin policy](appointment-reminders/operator-authorization.ts). Native proxy RPCs install `AuthorizationRpc` and annotate the published group with `AuthorizationRpc.policy`; the middleware checks verified claims before invoking handlers. Billing's authored handlers use `Authorization.requireSubject` for typed read/editor policies. Neither declaration makes persisted execution an authenticated request.
 
 ### Shared structure
-
 
 - `domain.ts`: canonical values and domain errors.
 - `resources.ts`: storage registration, policies, and selected generated operations.
@@ -67,8 +70,7 @@ Task due dates and expense dates share `CalendarDateSchema` from `effect-domains
 
 ## Generated lists
 
-Every generated list returns `{ items, nextCursor }`, defaults to a bounded page, and orders by identifier ascending. Applications declare supported equality filters and limits. Pass a non-null cursor back unchanged with the same filters. Authored expense queries deliberately declare their own ordering and range contract.
-
+Every generated list returns `{ items, nextCursor }`, defaults to its configured maximum (50 unless overridden), and orders by identifier ascending. Applications declare supported equality filters and page-size bounds; each guide lists its actual settings. Pass a non-null cursor back unchanged with the same filters. Authored expense and workshop queries deliberately have their own ordering and bounded-array contracts, without cursors.
 
 ## Foldkit frontends
 
@@ -76,7 +78,7 @@ Every application `serve` command also serves a small [Foldkit](https://foldkit.
 
 ## Generated admin
 
-Reading lists, expenses, tasks, notes, editorial planning, repair workshops, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment and the durable applications do not enable admin.
+Reading lists, expenses, tasks, notes, editorial planning, repair workshops, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment, purchased guides, and the durable applications do not enable admin, but still need the build for their Foldkit pages.
 
 Admin uses the same published RPC schemas, handlers, codecs, and authorization as the CLI. It neither infers permissions nor bypasses policy. Enter a demo bearer token when needed; the page keeps it in browser memory only. Generated forms support scalar and structured inputs, a full JSON fallback, declared list filters, and cursor navigation. See the [browser source](../apps/admin/src/client.ts) and [native adapter](../packages/effect-domains/src/application-admin.ts).
 
@@ -90,223 +92,11 @@ The endpoint uses Effect JSON RPC, not REST. Use the generated CLI or Effect `Rp
 
 Every `serve` command also exposes Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`. Configure an MCP client with that URL; `/rpc/v1` remains the separate CLI endpoint. One generated tool corresponds to each published RPC operation.
 
-Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text; void becomes null. Declared failures return `isError: true` and the encoded domain error. Protected tools require the same bearer credentials as RPC on every call; a session is not an identity. Discovery exposes contracts, not protected rows. The [equipment walkthrough](#equipment-register) uses the official SDK.
+Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text; void becomes null. Declared failures return `isError: true` and the encoded domain error. Protected tools require the same bearer credentials as RPC on every call; a session is not an identity. Discovery exposes contracts, not protected rows. The [equipment walkthrough](equipment-register/README.md) uses the official SDK.
 
-## Reservation application
+## Durable execution boundaries
 
-The [reservation guide](reservations/README.md) walks through stock reads, reserve, confirm, release, transition failures, and persistence. The [authored commands](reservations/sqlite.ts) own transactional stock accounting; generated operations are read-only. This existing business-policy slice is retained unchanged.
-
-## Repair workshop
-
-[Repair workshop](repair-workshop/) tracks customers, technicians, and repairs. Its [board declaration](repair-workshop/board.ts) uses `SqliteView` to derive the selected storage codecs, output aliases, and explicit customer/technician joins. The [native handler](repair-workshop/sqlite.ts) still owns filtering, ordering, limits, and error translation; the [RPC annotation](repair-workshop/contracts.ts) declares the tables it reads.
-
-```bash
-bun run build
-bun run repair-workshop:server
-```
-
-In another terminal:
-
-```bash
-bun run repair-workshop customers.create --input-json '{"id":"river","name":"River Cycles"}'
-bun run repair-workshop technicians.create --input-json '{"id":"sam","name":"Sam","onCall":true}'
-bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Cargo bike","fault":"Brake rub","urgent":true,"technicianId":"sam"}'
-bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Commuter bike","fault":"Wheel wobble"}'
-bun run repair-workshop workshop.board --input-json '{"status":"queued","limit":25}'
-bun run repair-workshop technicians.patch --input-json '{"key":"sam","changes":{"name":"Samuel","onCall":false}}'
-bun run repair-workshop workshop.board
-bun run repair-workshop inspect workshop.board
-```
-
-The board returns current customer and technician names, canonical `urgent`/`technicianOnCall` booleans, and `null` technician fields for unassigned repairs. Renaming a customer or changing a technician's on-call flag changes subsequent reads without copying those values onto repairs. Foreign keys reject nonexistent customers/technicians and deletion of referenced records.
-
-At `http://127.0.0.1:3000/`, create or edit customers and technicians, create repairs, and change status or assignment directly on the board. Choose a board status and press **Reload**. The browser requests up to 100 matching repairs; the native operation defaults to 50 and accepts integer limits from 1 through 100, ordered urgent-first then identifier ascending. This board is a bounded array, not a cursor page. Customer/technician selectors load ordinary 50-row resource pages with explicit **Load next** controls.
-
-Use `REPAIR_WORKSHOP_DB`, `PORT`, and `REPAIR_WORKSHOP_URL` for separate local instances. This example deliberately allows public loopback access. It does not implement production identity, tenant authorization, staffing schedules, parts inventory, billing, or guarded business transitions: its status values are editable record state. A `SqliteView` neither grants access nor applies resource authorization to privileged native SQL.
-
-## Expense ledger
-
-[Expense contracts](expense-ledger/contracts.ts) and [authored SQL](expense-ledger/sqlite.ts) record dated merchant expenses, query a bounded period, and calculate category totals separately for each currency. Amounts are positive safe-integer minor units. Calendar dates use YYYY-MM-DD; currencies are uppercase three-letter codes, with no exchange-rate conversion.
-
-```bash
-bun run expense-ledger:server
-```
-
-In another terminal:
-
-```bash
-bun run expense-ledger expenses.record --input-json '{"date":"2026-09-01","merchant":"Railway Cafe","category":"meals","amountMinor":1875,"currency":"USD"}'
-bun run expense-ledger expenses.record --input-json '{"date":"2026-09-02","merchant":"Station Bistro","category":"meals","amountMinor":1600,"currency":"EUR"}'
-bun run expense-ledger expenses.query --input-json '{"from":"2026-09-01","through":"2026-09-30","category":"meals","limit":10}'
-bun run expense-ledger expenses.totals --input-json '{"from":"2026-09-01","through":"2026-09-30"}'
-```
-
-Totals return separate EUR and USD rows, not a meaningless combined amount. Queries include both date endpoints, order by date then identifier, and return at most 50 rows by default (maximum 100). This bounded query has no cursor; totals include all matching expenses, independently of the query limit. Categories are meals, travel, software, supplies, and other.
-
-Copy a returned identifier into `EXPENSE_ID`:
-
-```bash
-bun run expense-ledger expenses.get --input-json "{\"id\":\"$EXPENSE_ID\"}"
-bun run expense-ledger expenses.update --input-json "{\"id\":\"$EXPENSE_ID\",\"date\":\"2026-09-01\",\"merchant\":\"Railway Cafe\",\"category\":\"meals\",\"amountMinor\":1975,\"currency\":\"USD\"}"
-bun run expense-ledger expenses.remove --input-json "{\"id\":\"$EXPENSE_ID\"}"
-```
-
-Remove returns the deleted expense; subsequent reads report `ExpenseNotFound`. A reversed range reports `InvalidExpenseDateRange`; SQL/codec failures, including unrepresentable totals, report `ExpenseLedgerUnavailable`. Negative amounts and impossible dates fail input validation. `EXPENSE_LEDGER_DB` defaults to `expense-ledger.sqlite`. This is a local expense register, not double-entry accounting, reimbursement approval, or tax software.
-
-## Equipment register
-
-[Equipment records](equipment-register/domain.ts) contain a unique asset tag, name, model, nullable serial number, location, and condition (in-service, needs-repair, or retired). Tags match `EQ-[A-Z0-9]{4,12}`; duplicates fail persistence. A generated UUID identifies each record independently of its editable asset tag.
-
-```bash
-bun run equipment-register:server
-```
-
-In another terminal, run the [official MCP SDK walkthrough](equipment-register/client.ts):
-
-```bash
-bun run equipment-register:client
-```
-
-The client discovers generated tools, registers a field camera, reads it, moves it to the editorial desk, finds it by location/condition, marks it retired, removes only its own record, and confirms `ResourceNotFound` afterward. An interrupted run can leave its equipment record behind. It is an inventory register, not a checkout, maintenance-ticket, or depreciation workflow.
-
-The equivalent CLI creation is:
-
-```bash
-bun run equipment-register assets.create --input-json '{"assetTag":"EQ-CAM2048","name":"Field camera","model":"X100V","serial":"FJ2-2025-0042","location":"Studio A","condition":"in-service"}'
-bun run equipment-register assets.list --input-json '{"filter":{"location":"Studio A","condition":"in-service"}}'
-bun run equipment-register inspect assets.create
-```
-
-For MCP, call `assets.create` with `{ input: <that JSON object> }`; results are under `structuredContent.result`. `EQUIPMENT_REGISTER_DB` defaults to `equipment-register.sqlite`; `EQUIPMENT_REGISTER_MCP_URL` configures the SDK client (default `http://127.0.0.1:3000/mcp`), and `EQUIPMENT_REGISTER_URL` configures the separate RPC CLI endpoint. No token or admin build is needed for this public loopback application.
-
-## Orders and invoices
-
-[`orders-invoices`](orders-invoices/) exercises a second business-policy domain across orders, order lines, and invoices. [Resource configuration](orders-invoices/resources.ts) declares tenant-local unique numbers, composite tenant/order foreign keys, one invoice per order, and tenant/status indexes. Canonical [schemas](orders-invoices/domain.ts) remain free of storage and authorization declarations. Generated `get`/`list` operations are read-only and tenant-scoped; [authored commands](orders-invoices/sqlite.ts) own every mutation, transaction, role check, and expected-version guard.
-
-Start the server:
-
-```bash
-bun run orders-invoices:server
-```
-
-In another terminal:
-
-```bash
-export ORDERS_INVOICES_TOKEN=alice-demo
-bun run orders-invoices billing.createOrder --input-json '{"number":"SO-1","customer":"Example customer"}'
-```
-
-Copy its returned `id` into `ORDER_ID`. A new order is draft at version 1:
-
-```bash
-bun run orders-invoices billing.addLine --input-json "{\"orderId\":\"$ORDER_ID\",\"expectedVersion\":1,\"lineNumber\":1,\"description\":\"Consulting\",\"quantity\":2,\"unitAmountMinor\":1250}"
-bun run orders-invoices billing.issueInvoice --input-json "{\"orderId\":\"$ORDER_ID\",\"expectedVersion\":2,\"number\":\"INV-1\"}"
-```
-
-The line advances the order to version 2 and total 2500. Issuing the invoice atomically marks the order invoiced at version 3 and creates an issued invoice at version 1. Copy the invoice's returned `id` into `INVOICE_ID`:
-
-```bash
-bun run orders-invoices billing.payInvoice --input-json "{\"invoiceId\":\"$INVOICE_ID\",\"expectedVersion\":1}"
-bun run orders-invoices billing.getOrder --input-json "{\"orderId\":\"$ORDER_ID\"}"
-ORDERS_INVOICES_TOKEN=bob-demo bun run orders-invoices orders.get --input-json "{\"id\":\"$ORDER_ID\"}"
-bun run orders-invoices inspect
-```
-
-The paid invoice has version 2. Repeating a mutation with its old version returns `VersionConflict`; re-paying the current paid version returns `InvalidInvoiceTransition`. Readers can query but cannot mutate. Another tenant can reuse `SO-1` or `INV-1` but cannot access or attach a line to this order. Foreign keys also enforce the tenant boundary for privileged SQL.
-
-Amounts are checked safe-integer minor units. Empty orders cannot be invoiced; duplicate numbers, duplicate line numbers, arithmetic overflow, invalid transitions, and stale writes have declared errors. Payment records a local transition, not a payment-provider call. Taxes, currencies, credit notes, production identity, and request-idempotent retries are not implemented; fetch the current summary and make an explicit decision after a conflict.
-
-`ORDERS_INVOICES_DB` defaults to `orders-invoices.sqlite`; `ORDERS_INVOICES_URL` defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching client URL to run beside another example. Startup applies its frozen [initial history](orders-invoices/migrations.ts), never resets data, and enables foreign keys. The generated admin is available at `/admin` after the shared build; enter a demo bearer token to use it. [Verification](../docs/wiki/validation-strategy.md#2026-09-09-tenant-scoped-orders-and-invoices) records live CLI/browser behavior and rollback/migration regressions.
-
-## Purchased guides
-
-The [purchased-guides application](purchased-guides/resources.ts) exposes read-only `guides.get` and bounded `guides.list`. Ordinary role and tenant policies apply first; `guides.read` additionally requires a persisted purchase matching the trusted subject's tenant, user, and guide. The private purchase resource publishes no grant-writing operations. Start it:
-
-```bash
-PORT=3003 bun run purchased-guides:server
-```
-
-In another terminal:
-
-```bash
-export PURCHASED_GUIDES_URL=http://127.0.0.1:3003/rpc/v1
-export PURCHASED_GUIDES_TOKEN=bob-demo
-bun run purchased-guides guides.get --input-json '{"id":"guide-sql-basics"}'
-bun run purchased-guides guides.get --input-json '{"id":"guide-audit-trails"}'
-bun run purchased-guides guides.get --input-json '{"id":"guide-other-tenant"}'
-bun run purchased-guides guides.list --input-json '{}'
-bun run purchased-guides inspect
-```
-
-The first guide succeeds; the second fails with `EntitlementRequired`; the third remains `ResourceNotFound`. The list fails because it includes a visible locked guide: entitlement checks do not silently filter pages. `PURCHASED_GUIDES_DB` defaults to `purchased-guides.sqlite`. Initial guide/purchase facts are inserted once; the [resolver](purchased-guides/entitlements.ts) reads current status on every check, so setting a purchase to `refunded` or `revoked` denies access and restart preserves that decision. These are application-owned facts, not a payment-provider simulation or checkout implementation.
-
-## Report exports
-
-[Report exports](report-exports/workflow.ts) publish a concrete financial JSON artifact from explicitly supplied account lines and a reporting period. Inputs identify a report, currency (AUD, CAD, EUR, GBP, JPY, or USD), debit/credit amounts, and release policy. This does not query an imaginary accounting system or claim balanced books; the supplied lines are the source data.
-
-Start the server with an output directory. It uses the public demo sessions from [example authentication](../packages/example-support/src/authentication.ts), not production credentials:
-
-```bash
-export REPORT_EXPORTS_OUTPUT_DIR="$PWD/report-artifacts"
-PORT=3001 bun run report-exports:server
-```
-
-In another terminal:
-
-```bash
-export REPORT_EXPORTS_TOKEN=alice-demo
-export REPORT_EXPORTS_URL=http://127.0.0.1:3001/rpc/v1
-bun run report-exports ReportExport.GenerateDiscard --input-json '{"report":{"reportId":"september-ledger-1","reportingPeriod":{"startsAt":"2026-09-01T00:00:00.000Z","endsAt":"2026-10-01T00:00:00.000Z"},"currency":"USD","releasePolicy":"operatorApproval"},"lines":[{"accountCode":"4000","description":"September consulting revenue","direction":"credit","amountMinor":125000},{"accountCode":"6100","description":"September office supplies","direction":"debit","amountMinor":8500}]}'
-```
-
-Copy the returned execution ID into `EXECUTION_ID`. Switch to the global admin operator to poll and release:
-
-```bash
-export REPORT_EXPORTS_TOKEN=admin-demo
-bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run report-exports ReportExport.Release --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run report-exports ReportExport.Poll --input-json "{\"executionId\":\"$EXECUTION_ID\"}"
-bun run report-exports ReportExport.Status
-```
-
-A native durable clock waits five seconds; operatorApproval reports then wait for explicit release. The automatic policy skips that approval barrier. An Activity prepares JSON and a durable queue worker atomically publishes the artifact. Poll until `Succeeded`, then open the returned `artifactPath`; it contains the report, lines, and currency-local debit/credit totals. `PendingOrUnknown` does not distinguish suspended work from an unknown ID. `Generate` waits for completion, `GenerateDiscard` acknowledges the stable execution ID, and `GenerateResume` explicitly resumes an execution.
-
-Reuse a report ID within an account only to address the same execution; use a fresh ID for different source data. Handlers derive account identity from the authenticated subject, not input, and account/report pairs determine execution identity. Do not treat repeat submission as replacement. Invalid period ordering, line amounts, and currency syntax fail input validation; unsafe total arithmetic fails the workflow.
-
-Generation requires an editor role and the `reports.generate` entitlement. Acme receives a persisted 30-day subscription on first startup, so `alice-demo` can generate; `outsider-demo` is initially unpaid, while `bob-demo` lacks the editor role. The [subscription resolver](report-exports/subscriptions.ts) reads the database and Effect clock on every check. Cancellation preserves access until the paid term ends; an explicit `graceUntilEpochSeconds` can extend canceled access. Expiry/grace endpoints are exclusive. Restart never renews a subscription. Global admins retain release, resume, polling, status, and `/operator/metrics` access regardless of payment; already accepted work continues without per-step entitlement checks.
-
-Application storage defaults to `report-exports.sqlite` (`REPORT_EXPORTS_DB`); native execution storage defaults to `report-exports-execution.sqlite` (`REPORT_EXPORTS_EXECUTION_DB`). Stop the server and run `bun run report-exports:worker` with the same databases and output directory to continue accepted work without HTTP. Switch back to serve for remote release or polling. Use fresh execution storage for this account-bound workflow contract; old unscoped workflow payloads are not migrated. No provider, webhook, checkout, or credit-consumption integration is included.
-
-## Appointment reminders
-
-[Appointment reminders](appointment-reminders/appointment-reminder-entity.ts) schedule an actual in-application inbox notification: recipient, appointment ID, appointment time, reminder time, location, and purpose. Delivery means a durable `appointment_notifications` row, not email or SMS. The example does not book appointments or synchronize cancellations with a calendar provider.
-
-```bash
-PORT=3002 bun run appointment-reminders:server
-```
-
-In another terminal:
-
-```bash
-export APPOINTMENT_REMINDERS_URL=http://127.0.0.1:3002/rpc/v1
-export APPOINTMENT_REMINDERS_TOKEN=admin-demo
-REMINDER_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
-APPOINTMENT_ID=$(bun -e 'console.log(Bun.randomUUIDv7())')
-REMINDER_AT=$(bun -e 'console.log(new Date(Date.now() + 30000).toISOString())')
-APPOINTMENT_AT=$(bun -e 'console.log(new Date(Date.now() + 3600000).toISOString())')
-bun run appointment-reminders AppointmentRecipient.ScheduleReminderDiscard --input-json "{\"entityId\":\"alice\",\"payload\":{\"recipient\":\"alice\",\"reminderId\":\"$REMINDER_ID\",\"appointmentId\":\"$APPOINTMENT_ID\",\"appointmentAt\":\"$APPOINTMENT_AT\",\"reminderAt\":\"$REMINDER_AT\",\"location\":\"Studio A\",\"purpose\":\"Equipment handover\"}}"
-bun run appointment-reminders appointment_notifications.list --input-json '{"filter":{"recipient":"alice"}}'
-```
-
-Query again after the reminder time to see the inbox row. `ScheduleReminderDiscard` acknowledges acceptance; `ScheduleReminder` takes the same envelope and waits for delivery. Repeat the same recipient, reminder ID, and payload to obtain the same delivery rather than duplicate it. An entity ID differing from the payload recipient fails with `AppointmentRecipientMismatch`. A reminder at or after its appointment fails with `ReminderMustPrecedeAppointment`. Editors cannot schedule or read the admin-only inbox.
-
-Application storage defaults to `appointment-reminders.sqlite` (`APPOINTMENT_REMINDERS_DB`), private execution storage to `appointment-reminders.execution.sqlite` (`APPOINTMENT_REMINDERS_EXECUTION_DB`), and the projection to `appointment-reminders.notifications.json` (`APPOINTMENT_REMINDERS_PROJECTION_FILE`). A Singleton refreshes the projection every five seconds. Cron archives delivered notifications older than 90 days at midnight UTC; `APPOINTMENT_REMINDERS_RETENTION_CRON` explicitly overrides its schedule.
-
-For recovery, accept a future notification, stop the server, then start `bun run appointment-reminders:worker` against the same databases and projection path. Accepted notifications and background projection/retention continue without an HTTP listener. Return to serve to query the inbox remotely.
-
-### Durable execution boundaries
-
-Both applications use native SingleRunner: run either serve or worker against an execution store, never both concurrently. Back up both application and execution databases. [Shared isolation](../packages/example-support/src/databases.ts) checks opened paths and inodes before native execution storage initializes.
+[Report exports](report-exports/README.md) and [appointment reminders](appointment-reminders/README.md) use native SingleRunner: run either serve or worker against an execution store, never both concurrently. Their individual guides cover acceptance, completion, output paths, and restart procedures. Back up both application and execution databases. [Shared isolation](../packages/example-support/src/databases.ts) checks opened paths and inodes before native execution storage initializes.
 
 Application and execution transactions are separate. There is no cross-database transaction, automatic outbox, or exactly-once guarantee for arbitrary external services. Report writes use an execution-ID artifact and atomic rename; inbox inserts deduplicate in the application database. Entity/Cron registrations capture application SQL explicitly because native Sharding supplies private execution SQL in its invocation context. See the [native runtime contract](../docs/wiki/tables-and-queries.md#native-durable-execution).
 

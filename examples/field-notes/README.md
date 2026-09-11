@@ -1,73 +1,138 @@
-# Field notes: shared field reports with encrypted stored bodies
+# Field notes: shared reports with encrypted stored bodies
 
-This application records shared field reports. A report has a constrained application-supplied identifier, a non-empty title, a non-empty site, and a non-empty body. Readers, editors, and administrators collaborate globally: readers can list and read reports, editors can also create and update them, and administrators can also remove them. The policy is intentionally global rather than tenant-scoped, making a field report useful to every authenticated member of the response team.
+This guide files a handover report, reads it as a different role, updates it, and removes it as an administrator. The report collection is intentionally global: role checks decide what a caller may do, while an authenticated subject's tenant does not decide which reports are visible. Separately, the SQLite representation encrypts each report body with a key supplied by the server.
 
-The canonical and wire records always contain plaintext `title`, `site`, and `body`. [`storage.ts`](storage.ts) replaces only the physical `body` field with a runtime service-dependent AES-256-GCM codec. SQLite stores a versioned `v1.<nonce>.<ciphertext-and-tag>` Base64URL envelope. The random 96-bit nonce and GCM authentication tag make a changed byte, wrong key, malformed envelope, invalid UTF-8, or non-string decoded payload fail decoding; the codec never strips text or returns unauthenticated bytes.
+The one resource is `reports`. Its [canonical record](domain.ts) has an application-supplied `id`, `title`, `site`, and `body`; all four are non-empty strings. The identifier must match `report_` followed by 8 through 32 lowercase letters or digits.
 
-The codec JSON-encodes the canonical string before encryption so every `Schema.String` value, including a lone UTF-16 surrogate, round-trips exactly. `id`, `title`, and `site` remain plaintext columns so the generated identifier lookup and site filter work. This is field-level at-rest protection only: it is not full-database encryption, key management, backup encryption, audit logging, or an access-control replacement. The generated role policy remains responsible for who may request plaintext.
+## Before you start
 
-## Run a handover report
+Run all commands from the repository root with Bun installed. Install dependencies and build the prebuilt Foldkit assets before serving:
 
-Create one stable 32-byte Base64URL key and keep it for the lifetime of the database:
+```bash
+bun install
+bun run build
+```
+
+Generate one new 32-byte key in unpadded Base64URL form. Save the resulting value in a password manager or another secure local secret store: this example has no key rotation or recovery workflow.
 
 ```bash
 export FIELD_NOTES_ENCRYPTION_KEY="$(bun -e 'console.log(Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"))')"
 ```
 
-Start the server from the repository root:
+Start a disposable instance in the **server terminal**. The key must be in this server process's environment:
 
 ```bash
+export PORT=3002
+export FIELD_NOTES_DB="$(mktemp -d)/field-notes.sqlite"
 bun run field-notes:server
 ```
 
-Alice is an editor and can write a handover report:
+In a separate **client terminal**, configure only the RPC endpoint and the demo bearer token:
 
 ```bash
+export FIELD_NOTES_URL=http://127.0.0.1:3002/rpc/v1
 export FIELD_NOTES_TOKEN=alice-demo
+```
+
+The client does not receive the encryption key; the server's storage codec encrypts and decrypts bodies. The public tokens are demonstration credentials, not a production login system: `alice-demo` is an editor, `bob-demo` a reader, `admin-demo` an administrator, and `outsider-demo` an editor in another tenant. Their exact server-owned claims are in the shared [authentication fixture](../../packages/example-support/src/authentication.ts).
+
+## Run it
+
+Alice files a report and retrieves a site-filtered page:
+
+```bash
 bun run field-notes reports.create --input-json '{"id":"report_pump7handover","title":"Pump 7 pressure-test handover","site":"North Yard","body":"Gauge held 180 psi for ten minutes. Attach the site-tablet photo before closing the work order."}'
 bun run field-notes reports.list --input-json '{"filter":{"site":"North Yard"},"limit":10}'
 ```
 
-Bob is a reader and can retrieve the same report but cannot create one:
+Creation and reads use canonical plaintext JSON. The returned report has the same `body` string; ciphertext is a storage concern and is never CLI input or output. Empty `title`, `site`, or `body`, or an identifier outside the required pattern, is rejected. For example:
+
+```bash
+bun run field-notes reports.create --input-json '{"id":"report_BAD","title":"Bad identifier","site":"North Yard","body":"This request is invalid."}'
+```
+
+The command exits nonzero and does not create a report.
+
+### Read globally, authorize by role
+
+Bob is a reader. He can read the report Alice created even though he is not its owner—reports have no owner field—and he can see it regardless of tenant-based partitioning:
 
 ```bash
 FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
-FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.create --input-json '{"id":"report_northyardsurvey","title":"Denied survey","site":"North Yard","body":"Reader cannot submit reports."}'
+FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.create --input-json '{"id":"report_northyardsurvey","title":"Denied survey","site":"North Yard","body":"A reader cannot file reports."}'
+FIELD_NOTES_TOKEN=outsider-demo bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
 ```
 
-The second Bob command exits nonzero with `Forbidden`. An administrator can remove the report:
+Both get commands return the full report, including plaintext body. The attempted reader create exits nonzero with `Forbidden`. `outsider-demo` is an editor in a different tenant but can also list, get, create, and update this global collection. Editors and administrators have create/update access; only administrators have remove access. Missing or unknown bearer credentials fail with `Unauthenticated`.
+
+The exported mutation for an existing report is **`reports.update`**, not `reports.patch`. Update requires a complete replacement record, including the unchanged identifier:
 
 ```bash
+bun run field-notes reports.update --input-json '{"id":"report_pump7handover","title":"Pump 7 pressure-test handover","site":"North Yard","body":"Gauge held 180 psi for ten minutes. Photo attached to the work order."}'
 FIELD_NOTES_TOKEN=admin-demo bun run field-notes reports.remove --input-json '{"id":"report_pump7handover"}'
 ```
 
-The identifier must match `report_` followed by 8 to 32 lowercase letters or digits. Generated list accepts only `filter.site`, `limit`, and an opaque cursor; it returns bounded `{ items, nextCursor }` pages ordered by identifier. The example deliberately has no per-report ownership, tenant membership, attachments, geospatial validation, offline synchronization, or workflow state.
+The update succeeds for Alice; the administrator remove succeeds and returns no value. `reports.get`, `.list`, `.create`, `.update`, and `.remove` are the published generated operations. The resource's local repository has a patch method, but this application does **not** export `reports.patch`; do not assume a generic partial-update endpoint.
 
-## Runtime, key provisioning, and persistence
+### Page filtered reports
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `FIELD_NOTES_ENCRYPTION_KEY` | required | Unpadded Base64URL encoding of exactly 32 random bytes |
-| `FIELD_NOTES_DB` | `field-notes.sqlite` | SQLite database file used by the server |
-| `FIELD_NOTES_URL` | `http://127.0.0.1:3000/rpc/v1` | RPC endpoint used by the CLI |
-| `FIELD_NOTES_TOKEN` | unset | Demo bearer token sent by the CLI |
-| `PORT` | `3000` | Loopback HTTP port |
+`reports.list` accepts only an equality `filter.site`, an opaque `cursor`, and `limit`. The configured limit is both the default and maximum: omission returns up to 50 reports and the accepted explicit range is 1 through 50. Results are identifier-ascending and return `{ "items": [...], "nextCursor": string | null }`.
 
-Startup fails if the encryption key is absent, not Base64URL, not 32 bytes, or cannot be imported as AES-GCM. Do not change the key for an existing database: the old report bodies cannot be authenticated or decrypted with a new key. A real key rotation needs an explicit, authenticated data migration; this small example does not implement one.
-
-Use different database, server, endpoint, and key values when running beside another instance:
+To see cursor use with a fresh report database, create two distinct matching reports, then ask for one at a time:
 
 ```bash
-PORT=3001 FIELD_NOTES_DB=field-notes-demo.sqlite bun run field-notes:server
-FIELD_NOTES_URL=http://127.0.0.1:3001/rpc/v1 FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.list
+bun run field-notes reports.create --input-json '{"id":"report_northyardsurvey","title":"North Yard survey","site":"North Yard","body":"Drainage cover inspected."}'
+bun run field-notes reports.create --input-json '{"id":"report_northyardsafety","title":"North Yard safety check","site":"North Yard","body":"Access route clear."}'
+bun run field-notes reports.list --input-json '{"filter":{"site":"North Yard"},"limit":1}'
 ```
 
-[`001_initial`](migrations/001_initial.json) is a fresh history for the replacement field-report domain and its encrypted body representation. Existing prefix-encoded note databases are deliberately incompatible: export and validate real note data, then import it through the canonical report API under the configured key. Startup rejects an untracked old database rather than guessing at its contents.
+Copy a non-null `nextCursor` exactly into the client terminal, then keep the filter identical:
 
-Inspection is local and needs no server, token, or key:
+```bash
+export REPORT_CURSOR='paste-the-returned-nextCursor-here'
+bun run field-notes reports.list --input-json "{\"filter\":{\"site\":\"North Yard\"},\"limit\":1,\"cursor\":\"$REPORT_CURSOR\"}"
+```
+
+An undeclared filter (including `title`), a malformed cursor, a cursor made for different filters, or a limit greater than 50 is rejected. There is no owner/tenant filter, text search, custom ordering, unbounded list, attachment, geospatial validation, offline synchronization, or report workflow state.
+
+## Browser, admin, and MCP
+
+Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Foldkit report page. It starts with Alice's token and offers the four demo-token chips and a bearer-token field. The page lists title, site, and identifier; **Open** fetches the full report and fills the edit form, while **File report** calls `reports.create` and **Save changes** calls full `reports.update`. Its form trims the identifier, title, site, and body before sending them.
+
+The browser lists by exact site with a fixed request limit of 25. It stores a returned cursor but renders no next-page control, so use the CLI or generated admin to walk later pages. **Remove** is visible regardless of role; with a reader token it fails in the page's error notice because server policy remains authoritative.
+
+The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Admin uses the same generated contracts, per-call bearer authentication, declared site filter, and cursor navigation. MCP tools likewise use the same policy; supply arguments as `{ "input": <RPC payload> }`.
+
+## Encryption, persistence, and settings
+
+Only the stored `body` field is transformed. [`storage.ts`](storage.ts) JSON-encodes the canonical string and encrypts it with AES-256-GCM using a fresh random 96-bit nonce. SQLite holds a canonical Base64URL envelope:
+
+```text
+v1.<nonce>.<ciphertext-and-tag>
+```
+
+The `id`, `title`, and `site` columns remain plaintext so identifier lookup and the declared site filter work. On decode, the storage codec requires the `v1` shape, canonical Base64URL parts, a 96-bit nonce, an authentication tag, successful AES-GCM authentication with the configured key, valid UTF-8, and a JSON string. A modified body, malformed envelope, or wrong key therefore fails to decode; it does not yield unauthenticated text.
+
+This is field-level at-rest protection for bodies only. It is not whole-database or backup encryption, key management, audit logging, access control, or a replacement for role checks. Read authorization still decides who may request the plaintext report.
+
+| Setting | Default | Used by | Meaning |
+| --- | --- | --- | --- |
+| `FIELD_NOTES_ENCRYPTION_KEY` | required | server | unpadded Base64URL encoding of exactly 32 bytes for AES-256-GCM |
+| `FIELD_NOTES_DB` | `field-notes.sqlite` | server | SQLite database path |
+| `PORT` | `3000` | server | loopback HTTP port |
+| `FIELD_NOTES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |
+| `FIELD_NOTES_TOKEN` | unset | CLI | bearer token sent to each RPC call |
+
+Server startup rejects a missing key, a padded/noncanonical Base64URL value, a value other than 32 bytes, or material that cannot be imported as AES-GCM. To restart against the same database, provide the **same** key. A different syntactically valid key can open the database but cannot authenticate existing body ciphertext when it is read; a lost old key makes those stored bodies unavailable to this example. Real key rotation requires an explicit authenticated data migration, which this application does not implement.
+
+[`001_initial`](migrations/001_initial.json) is a fresh field-report history. Its imported [migration list](migrations.ts) is tracked at startup; an old prefix-encoded note database is deliberately incompatible and rejected rather than guessed. Export and validate old data, then import canonical reports under the chosen key. The server binds to `127.0.0.1`, and changing `PORT` does not change `FIELD_NOTES_URL`.
+
+Inspection is local and needs no server, token, or encryption key:
 
 ```bash
 bun run field-notes inspect reports.create
 ```
 
-See the [examples overview](../README.md), [team task ownership rules](../team-tasks/README.md), and [expense-ledger](../README.md#expense-ledger).
+For common RPC, page, endpoint, and failure contracts, see the [runtime reference](../../docs/reference/runtime.md) and [resource reference](../../docs/reference/resources.md). The global role policy and exported operation set are in [`resources.ts`](resources.ts); encryption is in [`storage.ts`](storage.ts); the server provisions the encryption service, Foldkit route, and admin in [`main.ts`](main.ts); and browser behavior is in [`web/main.ts`](web/main.ts).
+
+[All examples](../README.md) · [Team tasks: tenant-owned work](../team-tasks/README.md)

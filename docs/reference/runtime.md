@@ -71,10 +71,12 @@ RPC tracing requires no handler wrappers or domain annotations. The runner insta
 Export starts automatically when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set:
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 bun run reading-list:server
+bun run reading-list:server:otel
 ```
 
-Configure the client process too to export both sides of a CLI-to-server trace. With no endpoint, no collector is contacted and an externally supplied tracer is left intact.
+That sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Use `bun run reading-list:otel …` for the matching CLI process so both sides of a trace export. With no endpoint, no collector is contacted and an externally supplied tracer is left intact.
+
+The [reading-list walkthrough](../../examples/reading-list/README.md#opentelemetry-traces) searches Jaeger service `reading-list` at [http://127.0.0.1:16686](http://127.0.0.1:16686/).
 
 For declarative configuration, add this option to `ApplicationBun.run`:
 

@@ -16,4 +16,10 @@ pipe(ApplicationBun.run(ReadingListApplication, {
   database: { migrations: ReadingListMigrations },
   admin: true,
   routes: web,
+  telemetry: {
+    resource: {
+      serviceName: "reading-list",
+      attributes: { "deployment.environment.name": "local" },
+    },
+  },
 }), BunRuntime.runMain)

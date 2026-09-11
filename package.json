@@ -39,6 +39,8 @@
     "reservations": "bun run examples/reservations/main.ts",
     "reading-list:server": "bun run examples/reading-list/main.ts serve",
     "reading-list": "bun run examples/reading-list/main.ts",
+    "reading-list:server:otel": "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 bun run examples/reading-list/main.ts serve",
+    "reading-list:otel": "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 bun run examples/reading-list/main.ts",
     "expense-ledger:server": "bun run examples/expense-ledger/main.ts serve",
     "expense-ledger": "bun run examples/expense-ledger/main.ts",
     "team-tasks:server": "bun run examples/team-tasks/main.ts serve",
