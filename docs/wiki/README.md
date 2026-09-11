@@ -52,7 +52,7 @@ HTTP RPC, MCP, and opt-in prebuilt browser admin remain native adapters over the
 
 The [verification record](validation-strategy.md#verification-record) preserves earlier CLI, browser, MCP, migration, billing, and durable-restart observations with their original dates and limits. The [research agenda](research-agenda.md) distinguishes implemented boundaries from broader claims that remain unproven. The [application guide](../../examples/README.md) contains the current walkthroughs.
 
-Each of the twelve applications now has a standalone README for setup, runnable workflows, observable failures, runtime settings, and source navigation. The [example index](../../examples/README.md) and [documentation catalogue](../examples.md) link to those guides; shared transport and migration conventions remain in the index rather than being maintained as duplicate application walkthroughs.
+Each of the twelve applications now has a standalone README for setup, runnable workflows, observable failures, runtime settings, and source navigation. The [example index](../../examples/README.md) and [documentation catalogue](../examples.md) link to those guides; shared transport and migration conventions remain in the index rather than being maintained as duplicate application walkthroughs. The [documentation smoke record](validation-strategy.md#2026-09-11-standalone-example-guides) covers all twelve CLI workflows and records observed reading-list browser loading and report-interruption limitations separately.
 
 ## Development
 

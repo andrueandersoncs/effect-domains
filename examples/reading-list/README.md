@@ -114,13 +114,15 @@ Remove has a void result, not a deleted book. The following get exits nonzero wi
 
 At `/`, use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors filter the list. **Reload** fetches current data after CLI changes. This hand-authored page requests 25 rows and has no next-page control; use the CLI cursor workflow or `/admin` for subsequent pages.
 
+Verification caveat (2026-09-11): the documentation smoke rendered this page, but its initial list remained **Loading…** in headless Chromium while the CLI workflow passed. Browser mutations were not verified in that run. See the [verification record](../../docs/wiki/validation-strategy.md#2026-09-11-standalone-example-guides); the CLI steps above remain the exercised walkthrough.
+
 The generated admin exposes the same five operations and their schemas. The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
 
 ## Runtime and persistence
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `READING_LIST_DB` | `reading-list.sqlite` | SQLite database file |
+| `READING_LIST_DB` | `data/reading-list.sqlite` | SQLite database file |
 | `PORT` | `3000` | Loopback HTTP port |
 | `READING_LIST_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 

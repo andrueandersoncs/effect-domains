@@ -94,7 +94,7 @@ Open the returned `artifactPath`. Its JSON has `report`, `release`, `lines`, and
 
 For an export that does not need operator approval, use a **new** report ID and set `releasePolicy` to `automatic` in the same request. It still observes the five-second durable delay, but it bypasses the release barrier; poll it as admin until it succeeds. An automatic artifact has `releasedBy: null`.
 
-`ReportExport.Generate` takes the identical request but waits for completion, which is useful for the automatic path. Do not use it alone for an approval-gated report: it remains waiting until an operator releases that execution from another client. `ReportExport.GenerateResume` accepts `{ "executionId": "..." }` and lets an admin resume that existing execution; it does not create a replacement report or make an unknown execution valid.
+`ReportExport.Generate` takes the identical request but waits for completion, which is useful for the automatic path. It returns the report result directly (`artifactPath`, totals, and the other result fields), without `Poll`'s `_tag` wrapper. Do not use it alone for an approval-gated report: it remains waiting until an operator releases that execution from another client. `ReportExport.GenerateResume` accepts `{ "executionId": "..." }` and lets an admin resume that existing execution; it does not create a replacement report or make an unknown execution valid.
 
 ## Identity, access, and safe retries
 
@@ -111,12 +111,14 @@ The request is deliberately constrained: report IDs start alphanumeric and may t
 
 At `http://127.0.0.1:3001/`, the Foldkit page lets Alice submit a generated request and then lets an administrator enter the execution ID to poll, release, or inspect runner status. The page has no generated admin area. The same published operations are available as protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every tool call and wrap a request as `{ "input": <RPC payload> }`. A successful MCP tool result is `structuredContent.result`; declared errors have `isError: true`.
 
-The durable engine uses one native `SingleRunner` for an execution store. Run **either** `report-exports:server` **or** `report-exports:worker` with a given `REPORT_EXPORTS_EXECUTION_DB`, never both concurrently. To continue accepted work without HTTP, stop the server and run this in the worker terminal with the same three paths:
+The durable engine uses one native `SingleRunner` for an execution store. Run **either** `report-exports:server` **or** `report-exports:worker` with a given `REPORT_EXPORTS_EXECUTION_DB`, never both concurrently. Worker mode hosts the same execution/background layers without HTTP; stop the server and run this in the same terminal, retaining all three path variables:
 
 ```bash
 bun run report-exports:worker
 ```
 
-Return to `report-exports:server` with those paths to poll or release remotely. The application database defaults to `report-exports.sqlite`; execution storage defaults to `report-exports-execution.sqlite`; `REPORT_EXPORTS_OUTPUT_DIR` is required. Back up the application and execution databases together, but recognize their transaction boundaries are separate. There is no cross-database transaction, automatic outbox, or exactly-once claim for arbitrary external services. The queue makes the artifact's execution-ID file durable and writes it via atomic rename; it does not turn a broader multi-system workflow into exactly-once delivery.
+Interruption caveat (2026-09-11): stopping immediately after an automatic `GenerateDiscard` acknowledgement produced a persisted `Failed` result with `EntityNotAssignedToRunner` in the documentation smoke. Starting the worker did not publish that artifact, and an explicit `GenerateResume` followed by `Poll` still reported failure. Do not assume every accepted execution will recover across arbitrary stop points; inspect `Poll` and its `reason`, and require `Succeeded` plus the artifact before treating an export as complete. See the [verification record](../../docs/wiki/validation-strategy.md#2026-09-11-standalone-example-guides).
+
+Return to `report-exports:server` with those paths to poll or release remotely. The application database defaults to `data/report-exports.sqlite`; execution storage defaults to `data/report-exports-execution.sqlite`; `REPORT_EXPORTS_OUTPUT_DIR` is required. Back up the application and execution databases together, but recognize their transaction boundaries are separate. There is no cross-database transaction, automatic outbox, or exactly-once claim for arbitrary external services. The queue makes the artifact's execution-ID file durable and writes it via atomic rename; it does not turn a broader multi-system workflow into exactly-once delivery.
 
 For source details, see the [workflow and RPCs](workflow.ts), [contracts](contracts.ts), [authorization](authorization.ts), [subscription resolver](subscriptions.ts), [runtime layer](runtime.ts), [artifact writer](writer.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).

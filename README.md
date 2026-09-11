@@ -160,7 +160,7 @@ See the [explicit authoring walkthrough](examples/README.md#review-schema-change
 
 ## Native execution composition
 
-Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [report export runbook](examples/README.md#report-exports).
+Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [report export runbook](examples/report-exports/README.md).
 
 ## Run the reservation application
 
