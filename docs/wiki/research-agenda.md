@@ -66,22 +66,33 @@ These are scoped integration decisions, not claims that unused APIs were validat
 - Keep RateLimiter at an explicitly chosen application boundary; do not infer durable business quotas or add a framework wrapper without a concrete requirement.
 - Defer EventLog/EventJournal until an actual synchronization slice defines its semantics. They do not imply audit logging, event sourcing, or an outbox for existing resources.
 - Defer Reactivity/AtomRpc until an interactive or read-model slice needs invalidation. Do not couple canonical domain schemas to client cache behavior.
-- Multi-runner topology, execution-store version upgrades, production identity, cancellation policy, and external-effect idempotency/outbox design remain authored operational concerns. Separate execution and application databases are not an atomic transaction boundary. ([Runtime contract](tables-and-queries.md#native-durable-execution))
+- Multi-runner topology, execution-store version upgrades, cancellation policy, and external-effect idempotency/outbox design remain authored operational concerns. Separate execution and application databases are not an atomic transaction boundary. Production identity issuance and revocation is no longer in that deferral: it is the next identity slice. ([Runtime contract](tables-and-queries.md#native-durable-execution); [Current direction](#current-direction))
 
-## Remaining Questions
+## Current Direction
 
-Further evidence must determine:
+Human direction on 2026-09-11 sequenced the remaining questions. These are next-slice choices, not evidence that the hypothesis is proven.
 
-- whether these conventions generalize beyond SQLite and the demonstrated business domains;
-- whether joins, multi-table query dependencies, or richer relationship policies earn declarations beyond the implemented physical constraints;
-- how explicit storage transformations compose where a canonical value has no lossless scalar representation;
-- how verified identity issuance and revocation compose with the demonstrated authenticated multi-resource commands in production;
-- which encoded shapes earn mechanical storage support beyond the existing scalar subset;
-- whether explicit migration steps remain readable for larger histories and database-specific changes; and
-- how interruption and ambiguous database outcomes should be reconciled.
+- Stay on SQLite. Next evidence is more business domains, not another database.
+- Next declaration work is joins and multi-table query dependencies. Physical uniqueness, foreign keys, and indexes stay; cascade and richer relationship policy stay out until a slice needs them. The implemented contract still infers no joins. ([Relational contract](tables-and-queries.md#relational-storage-declarations))
+- Where a canonical value has no lossless scalar representation, keep an explicit typed transform per field. Do not infer a JSON blob or other non-lossless encoding. This restates the derivation boundary. ([Thesis](thesis.md#derivation-boundary))
+- Next identity slice: verified issuance and revocation composed with the existing authenticated multi-resource commands. Demo bearer sessions are not that proof. ([Demo identities](../../packages/example-support/src/authentication.ts))
+- Expand mechanical storage support only when a slice cannot stay honest with the current scalar subset.
+- Keep explicit migration steps as-is until an authored history is actually unreadable. No planner, generator, or dialect work now.
+- Do not invent a framework reconciliation policy for interruption or ambiguous commits until a failure slice actually hits them.
+
+## Remaining Evidence
+
+Still unproven after those choices:
+
+- whether further SQLite domains actually generalize the conventions;
+- whether declared joins and query dependencies earn their place without becoming a query DSL;
+- whether issuance and revocation can compose with request-local subjects without loading identity into canonical schemas;
+- which encoded shape, if any, a future slice cannot avoid;
+- readability of large or database-specific histories, when one hurts; and
+- reconciliation of interruption and ambiguous commits, once a failure slice exists.
 
 The table compiler directly interprets supported Effect AST nodes and rejects cyclic suspended scalar fields. Its storage semantics remain separate from canonical JSON RPC codecs; CLI support does not imply arbitrary schemas have lossless table representations. ([Table compiler](../../packages/effect-domains/src/table.ts); [table regressions](../../test/Table.test.ts); [CLI](../../packages/effect-domains/src/rpc-cli.ts))
 
 ## Success and Stop Conditions
 
-The SQLite implementation removes exercised mechanical duplication, and the native execution examples avoid introducing another workflow/actor language. Further architectural claims still require richer domain slices and explicit distributed failure scenarios. Compare propagation, annotation cost, escape hatches, and clarity against the [validation criteria](validation-strategy.md) before generalizing these integrations. ([Refactoring direction](raw/refactoring-and-compatibility-direction.md))
+The SQLite implementation removes exercised mechanical duplication, and the native execution examples avoid introducing another workflow/actor language. Further architectural claims still require richer SQLite domain slices, declared joins/query dependencies, an issuance/revocation identity slice, and an explicit failure slice for interruption. Compare propagation, annotation cost, escape hatches, and clarity against the [validation criteria](validation-strategy.md) before generalizing these integrations. ([Refactoring direction](raw/refactoring-and-compatibility-direction.md); [Current direction](#current-direction))

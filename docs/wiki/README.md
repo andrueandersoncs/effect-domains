@@ -9,7 +9,7 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 - [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, JSON-only CLI input, imported migration artifacts, and native execution composition.
 - [Validation Strategy](validation-strategy.md) — slice criteria, completed JSON/history cutover checks, prior validation, and dated evidence limits.
-- [Research Agenda](research-agenda.md) — current JSON CLI and decoded-history runtime contract, internal compiler boundaries, and unresolved questions.
+- [Research Agenda](research-agenda.md) — current JSON CLI and decoded-history runtime contract, 2026-09-11 next-slice direction, and remaining evidence.
 
 ## Wiki Operations and Sources
 
@@ -25,6 +25,8 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 Files under `raw/` are immutable source material. Maintained pages synthesize them and cite implementation evidence close to claims. Current implementation links use the workspace layout; dated verification records retain their original dates and observations.
 
 ## Current Status
+
+On 2026-09-11 the remaining research questions were sequenced: stay SQLite with more domains; declare joins and query dependencies next; keep explicit per-field storage transforms; prove identity issuance and revocation next; add encoded shapes only when a slice cannot avoid them; defer migration-authoring changes until a history hurts; prove interruption with a failure slice. See [current direction](research-agenda.md#current-direction).
 
 The examples now model concrete applications rather than framework features: reading lists, expenses, team tasks, field notes, editorial calendars, equipment registers, reservations, orders/invoices, report exports, and appointment reminders. See the [application guide](../../examples/README.md) for current contracts and runnable scenarios, and the [domain-example verification](validation-strategy.md#2026-09-10-domain-first-example-applications) for live CLI/MCP, migration, encryption, browser, and durable-restart evidence. Earlier dated verification records describe their original fixtures, even where source links now point to successor applications.
 
