@@ -25,7 +25,7 @@ From the repository root, start the server:
 bun run reading-list:server
 ```
 
-The runner enables the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). It is the same published RPC surface, not a separate management API.
+The runner serves a Foldkit reading list at [http://127.0.0.1:3000/](http://127.0.0.1:3000/) and the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). Both use the same published RPC surface as the CLI. Build frontend and admin assets first with `bun run build`.
 
 In another terminal, create and filter entries:
 

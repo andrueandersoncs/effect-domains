@@ -1,10 +1,10 @@
 ---
-description: Run a reading-list application, create a book from the CLI, and edit it in the generated admin.
+description: Run a reading-list application, use the Foldkit page at /, and compare it with the CLI and generated admin.
 ---
 
 # Run your first application
 
-Run a reading list with SQLite persistence, a command-line client, and a browser admin. You’ll add a book, mark it finished, and see the same record through both interfaces.
+Run a reading list with SQLite persistence, a command-line client, a Foldkit app at `/`, and a generated admin at `/admin`. You’ll add a book, mark it finished, and see the same record through those interfaces.
 
 ## Before you start
 
@@ -26,7 +26,7 @@ bun run build
 bun run reading-list:server
 ```
 
-`build` compiles the browser admin assets. Leave the server running, then open [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). You should see the reading-list application and its `books` resource.
+`build` compiles the Foldkit application and browser admin assets. Leave the server running, then open [http://127.0.0.1:3000/](http://127.0.0.1:3000/) for the reading list and [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) for generated operation forms.
 
 The server creates `reading-list.sqlite` in your working directory and applies the example’s checked-in migrations. Restarting preserves your books.
 
@@ -121,7 +121,8 @@ The application has no hand-written CRUD handlers. These files provide the decla
 | `resources.ts` | Public access, published operations, defaults, and list filters |
 | `application.ts` | Registers the resource in an application |
 | `migrations.ts` and `migrations/` | Imports the frozen SQLite history |
-| `main.ts` | Runs the server, CLI, and optional admin |
+| `main.ts` | Runs the server, CLI, Foldkit page, and optional admin |
+| `web/` | Foldkit Model/Message/update/view over the published RPCs |
 
 The [reading-list source](../examples/reading-list/) is small enough to read end to end.
 

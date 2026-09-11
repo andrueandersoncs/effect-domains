@@ -4,14 +4,16 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript",
+    "lint": "better-typescript --files '*.ts'",
     "start": "bun run main.ts",
     "serve": "bun run main.ts serve",
     "seed-v1": "bun run seed-v1.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
+    "@effect-domains/example-web": "workspace:*",
     "effect": "catalog:",
-    "effect-domains": "workspace:*"
+    "effect-domains": "workspace:*",
+    "foldkit": "0.158.2"
   }
 }

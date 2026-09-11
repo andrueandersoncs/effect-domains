@@ -4,15 +4,17 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript",
+    "lint": "better-typescript --files '*.ts'",
     "start": "bun run main.ts",
     "serve": "bun run main.ts serve",
     "client": "bun run client.ts"
   },
   "dependencies": {
+    "@effect-domains/example-web": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "effect": "catalog:",
-    "effect-domains": "workspace:*"
+    "effect-domains": "workspace:*",
+    "foldkit": "0.158.2"
   }
 }

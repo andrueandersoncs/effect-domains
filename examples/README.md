@@ -51,20 +51,27 @@ Appointment scheduling and inbox reads reuse one [subject-only admin policy](app
 
 ### Shared structure
 
+
 - `domain.ts`: canonical values and domain errors.
 - `resources.ts`: storage registration, policies, and selected generated operations.
 - `contracts.ts` and `sqlite.ts` where needed: native RPC contracts and authored SQL semantics.
 - `application.ts`: `Application.make({ name, parts })` composition.
 - `migrations.ts`: ordered artifact imports decoded by `SqliteMigrations.decodeHistory`.
 - `main.ts`: shared `serve`, `inspect`, remote CLI, and optional `worker` runner.
+- `web/`: Foldkit SPA for the application’s primary workflow, served at `/`.
 
-Services, initialization, native background layers, routes, and admin opt-in are explicit. There is no extra command wrapper, migration manifest loader, inferred migration planner, or framework jobs registry.
+Services, initialization, native background layers, routes, admin opt-in, and the Foldkit page are explicit. There is no extra command wrapper, migration manifest loader, inferred migration planner, or framework jobs registry.
 
 Task due dates and expense dates share `CalendarDateSchema` from `effect-domains/domain`, preserving Gregorian date-only strings. Expense create/get/update use resource repositories beneath their authored RPCs; range totals and deleted-row removal remain authored SQL. Billing uses native schema JSON codecs for aggregate projections. Example support supplies `privateSqlite(filename)` and `replaceFileAtomically({ path, contents })`; applications still own execution layers, output contents, destinations, and error policy.
 
 ## Generated lists
 
 Every generated list returns `{ items, nextCursor }`, defaults to a bounded page, and orders by identifier ascending. Applications declare supported equality filters and limits. Pass a non-null cursor back unchanged with the same filters. Authored expense queries deliberately declare their own ordering and range contract.
+
+
+## Foldkit frontends
+
+Every application `serve` command also serves a small [Foldkit](https://foldkit.dev/) page at `/`. It is a hand-authored Elm-architecture UI over the same `/rpc/v1` operations as the CLI, not a second API. Authenticated examples expose the public demo bearer tokens in the page; they are still sent per RPC call. Build assets with `bun run build` from the repository root (`apps/admin` plus `packages/example-web`). Missing frontend files fail serve the same way missing admin assets do. Shared shell, RPC helper, and static routes live in [`packages/example-web`](../packages/example-web/).
 
 ## Generated admin
 

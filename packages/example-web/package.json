@@ -1,0 +1,19 @@
+{
+  "name": "@effect-domains/example-web",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./html": "./src/html.ts",
+    "./rpc": "./src/rpc.ts",
+    "./serve": "./src/serve.ts"
+  },
+  "scripts": {
+    "build": "bun run build.ts",
+    "check": "tsc --noEmit",
+    "lint": "better-typescript --files build.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "foldkit": "0.158.2"
+  }
+}

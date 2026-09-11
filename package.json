@@ -15,7 +15,7 @@
     "@effect/vitest": "4.0.0-rc.112"
   },
   "scripts": {
-    "build": "bun run --filter @effect-domains/admin build",
+    "build": "bun run --filter @effect-domains/admin build && bun run --filter @effect-domains/example-web build",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
