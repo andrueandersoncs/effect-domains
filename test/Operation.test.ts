@@ -3,7 +3,7 @@ import { Effect, Equivalence, Schema, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
-import { Authorization, Unauthenticated } from "effect-domains/authorization"
+import { Authorization, Forbidden, Unauthenticated } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { Operation } from "effect-domains/operation"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -52,6 +52,19 @@ const protectedOperation = Operation.make({
   handler: authenticatedUserId,
 })
 
+const forbidden = Forbidden.make({})
+const denyInside = (_input: void, _authenticated: Subject) => Effect.fail(forbidden)
+
+// Nested denials stay Forbidden because the middleware already publishes that failure.
+const deniedInside = Operation.make({
+  name: "operation.deniedInside",
+  success: Schema.String,
+  error: ErrorSchema,
+  policy: aliceOnly,
+  unavailable: OperationUnavailable,
+  handler: denyInside,
+})
+
 const transactional = Operation.make({
   name: "operation.transactional",
   success: Schema.Void,
@@ -65,7 +78,7 @@ const transactional = Operation.make({
   }),
 })
 
-const bundle = Operation.bundle(failures, protectedOperation, transactional)
+const bundle = Operation.bundle(failures, protectedOperation, transactional, deniedInside)
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
 const authenticator = AuthorizationRpc.Authenticator.of({
@@ -100,9 +113,11 @@ const subjectPolicy = Effect.gen(function* () {
   expect(anonymous._tag).toBe("Unauthenticated")
   const result = yield* client["operation.protected"](undefined, { headers: { authorization: "alice" } })
   expect(result).toBe("alice")
+  const denied = yield* pipe(client["operation.deniedInside"](undefined, { headers: { authorization: "alice" } }), Effect.flip)
+  expect(denied._tag).toBe("Forbidden")
 })
 
-it.effect("enforces subject policy and passes the typed authenticated subject", () => runtime(subjectPolicy))
+it.effect("enforces subject policy, passes the typed subject, and keeps nested denials as Forbidden", () => runtime(subjectPolicy))
 
 const transactionalRollback = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

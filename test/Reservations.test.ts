@@ -118,11 +118,7 @@ const terminalTransitionsAction = Effect.fn(
   const repeatedReleaseEffect = client.release(repeatedReleaseInput)
   const repeatedRelease = yield* Effect.result(repeatedReleaseEffect)
 
-  const repeatedReleaseFailure = ReservationStateTransitions.Error.make({
-    key: held.id,
-    action: "release",
-    actual: "released",
-  })
+  const repeatedReleaseFailure = ReservationStateTransitions.invalid("release", held.id, "released")
 
   const repeatedReleaseExpected = Result.fail(repeatedReleaseFailure)
   const stockAfterRepeatedRelease = yield* StockResource.repository.get(sku)
@@ -140,11 +136,7 @@ const terminalTransitionsAction = Effect.fn(
   const invalidReleaseEffect = client.release(invalidReleaseInput)
   const invalidRelease = yield* Effect.result(invalidReleaseEffect)
 
-  const invalidReleaseFailure = ReservationStateTransitions.Error.make({
-    key: next.id,
-    action: "release",
-    actual: "confirmed",
-  })
+  const invalidReleaseFailure = ReservationStateTransitions.invalid("release", next.id, "confirmed")
 
   const invalidReleaseExpected = Result.fail(invalidReleaseFailure)
   const stockAfterInvalidRelease = yield* StockResource.repository.get(sku)

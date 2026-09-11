@@ -25,10 +25,8 @@ interface TransitionError<Name extends string = string> {
   readonly key: string
   readonly action: string
   readonly actual: string
+  readonly message: string
 }
-
-const transitionErrorValues = <Name extends string>(error: TransitionError<Name>) =>
-  [error._tag, error.key, error.action, error.actual] as const
 
 class TransitionDefinitionError extends Schema.TaggedError<TransitionDefinitionError>()(
   "TransitionDefinitionError",
@@ -43,6 +41,7 @@ const TransitionErrorFields = {
   key: Schema.String,
   action: Schema.String,
   actual: Schema.String,
+  message: Schema.String,
 }
 
 const definitionFailure = (name: string, reason: string) =>
@@ -116,11 +115,8 @@ const make = <
   const actions = Record.keys(transitions) as Array<Action>
   const ActionsSchema = Schema.Literals(actions) as Schema.Literals<ReadonlyArray<Action>>
 
-  const invalid = (action: string, key: string, actual: string) => {
-    const error = ErrorSchema.make({ key, action, actual })
-    transitionErrorValues(error)
-    return error
-  }
+  const invalid = (action: string, key: string, actual: string) =>
+    ErrorSchema.make({ key, action, actual, message: `${input.name} ${key} cannot ${action} while ${actual}` })
 
   const allows = (actual: string) => (entry: TransitionDeclaration<Status["Type"]>) =>
     Array.contains(entry.from, actual as Status["Type"])

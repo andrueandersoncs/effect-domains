@@ -49,7 +49,7 @@ Published names are `${name}.get`, `${name}.list`, `${name}.create`, `${name}.up
 | `get` / `remove` | `{ [identifier]: key }` | Complete row / `void` |
 | `update` | Complete row, including its identifier | Complete row |
 | `patch` | `{ key, changes }`, or `{ key, expectedVersion, changes }` with `version` | Complete row |
-| `transition` | `{ key, action, changes?, expectedVersion? }` | Complete row |
+| `transition` | `{ key, action, changes? }`, or `{ key, action, expectedVersion, changes? }` with `version` | Complete row |
 | `repository.ensure(row)` | Complete row | Inserts if its identifier is absent; otherwise returns the existing read-authorized row. |
 
 `repository.find(key)` is local-only and returns `Option`. `repository.transition(key, action, changes?, expectedVersion?)` checks the declared graph, applies the status change, and uses optimistic version checking when configured. A transition declaration also exposes `apply(action, key)(row)` for a guarded in-memory status change.

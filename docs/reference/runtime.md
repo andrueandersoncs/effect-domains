@@ -4,7 +4,7 @@ description: Bun runner options, environment variables, generated commands, HTTP
 
 # Runtime and clients
 
-This reference covers `ApplicationBun.main` and `ApplicationBun.run` in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
+This reference covers `ApplicationBun.run` in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
 
 ## Application composition
 
@@ -24,7 +24,7 @@ This example belongs beside the reading list's `resources.ts`. In your applicati
 
 ## Bun runner
 
-Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.main(application, options)` runs the application through `BunRuntime.runMain`; use it for a Bun entrypoint. `ApplicationBun.run(application, options)` returns the Effect when another runtime owns execution.
+Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to `BunRuntime.runMain` in a Bun entrypoint.
 
 | Option | Contract |
 | --- | --- |

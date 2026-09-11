@@ -57,6 +57,7 @@ The demonstrated history is the checked-in ordered import in [`migrations.ts`](m
 4. [`004_editorial_metadata`](migrations/004_editorial_metadata.json) kept `id`, `heading`, `summary`, and `priority`, wrote `channel: "website"`, and omitted the nullable target `plannedPublicationAt`, so it becomes `null`.
 
 The seed is isolated to [`legacy.ts`](legacy.ts) and [`seed-v1.ts`](seed-v1.ts). It uses only the first artifact, so it is for this disposable demonstration—not a way to insert legacy rows into an upgraded store. On a fresh database, the current server instead applies the full history and creates no historical article. On a known history, a restart verifies and reuses it; it does not reset articles. A database with untracked tables, schema drift, or a different/changed recorded migration history is rejected rather than adopted. For migration mechanics and authoring future changes, see the [shared migration walkthrough](../README.md#review-schema-changes) and [`sqlite-migrations.ts`](../../packages/effect-domains/src/sqlite-migrations.ts).
+Databases created before the v2 artifact format must be recreated; startup reports `MigrationError: migration history changed at 001_initial`.
 
 ## Plan an article
 

@@ -31,21 +31,27 @@ See the [resource reference](/reference/resources) for exact contracts.
 Use `Operation.make` for an authored application operation instead of assembling `Rpc.make`, a group, a handler layer, authorization middleware, and error translation by hand.
 
 ```ts
-const issueInvoice = Operation.make("billing.issueInvoice", {
-  payload: IssueInvoiceInputSchema,
-  success: InvoiceSchema,
-  error: Schema.Union([InvoiceNotFound, BillingUnavailable]),
-  policy: ExampleRoles.editor,
-  transaction: true,
-  views: [OrderSummaryView],
+import { Effect, Schema } from "effect"
+import { Operation } from "effect-domains/operation"
+
+class BillingUnavailable extends Schema.TaggedError<BillingUnavailable>()(
+  "BillingUnavailable",
+  {},
+) {}
+
+const issueInvoice = Operation.make({
+  name: "billing.issueInvoice",
+  payload: Schema.Struct({ orderId: Schema.String }),
+  success: Schema.Struct({ invoiceId: Schema.String }),
+  error: BillingUnavailable,
   unavailable: BillingUnavailable,
-  handler: (input, subject) => /* Effect using input and subject */,
+  handler: (input) => Effect.succeed({ invoiceId: input.orderId }),
 })
 
 export const BillingOperations = Operation.bundle(issueInvoice)
 ```
 
-`Operation.make` applies JSON codecs to payload, success, and error schemas, supplies a typed subject when `policy` is a `SubjectPolicy`, wraps the handler in `RepositoryStore.transaction` when `transaction: true`, and records `views` as `SqliteView` dependencies. Declared failures pass through; undeclared failures are logged and translated to `unavailable`. `Operation.bundle(...)` supplies the `{ group, handlers }` application part.
+`Operation.make` takes one definition with a `name`, JSON-codecs its payload, success, and error schemas, and translates undeclared infrastructure or untagged failures to `unavailable`; a domain-tagged failure the handler can raise but `error` omits is a compile error, so nothing a client should see is silently hidden. With a `SubjectPolicy`, its handler also receives a typed subject; `transaction: true` wraps it in `RepositoryStore.transaction`, and `views` records `SqliteView` dependencies.
 
 Use an authored operation when an action preserves a cross-record invariant, calculates an aggregate, invokes an external system, or has a domain-specific failure boundary. For example, reservations can use declared state transitions while their inventory accounting remains an authored transactional operation.
 
@@ -66,7 +72,7 @@ Operation.bundle ┤
                 └── Optional browser admin
 ```
 
-`ApplicationBun.main(application, options)` supplies SQLite history, application services, initialization, background layers, and the Bun entrypoint. See [runtime and clients](/reference/runtime).
+`ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to `BunRuntime.runMain` in a Bun entrypoint. See [runtime and clients](/reference/runtime).
 
 ## One contract, several clients
 

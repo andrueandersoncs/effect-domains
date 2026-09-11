@@ -65,7 +65,7 @@ Report exports and appointment reminders have separate native execution stores. 
 - `sqlite.ts` where needed: `Operation.make` handlers and authored SQL for cross-record rules, aggregates, and projections.
 - `application.ts`: `Application.make({ name, parts })` with resources, `Operation.bundle(...)`, and `IdentityBundle` where identity is provided.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
-- `main.ts`: `ApplicationBun.main` with database, services, initialization, background, routes, and optional admin.
+- `main.ts`: `ApplicationBun.run` piped to `BunRuntime.runMain`, with database, services, initialization, background, routes, and optional admin.
 - `web/`: Foldkit SPA over the published RPC contracts.
 
 `Operation.make` owns JSON codecs, policy middleware, optional repository transactions, declared `SqliteView` dependencies, and unavailable-error translation. The handler keeps its business rules. `Operation.bundle(...)` produces the application part; examples do not hand-assemble `Rpc.make`/`toLayer` skeletons.
@@ -74,7 +74,7 @@ Report exports and appointment reminders have separate native execution stores. 
 
 Nullable (`Schema.NullOr`) fields default to `null` when omitted on create. Do not add `defaults: { field: null }` just for that behavior.
 
-A versioned resource has `version: "version"`. Its patch request is `{ key, expectedVersion, changes }`; stale writes return `VersionConflict`. A transition resource publishes `<resource>.transition` with `{ key, action, changes?, expectedVersion? }`; local handlers use `repository.transition(key, action, changes?, expectedVersion?)`.
+A versioned resource has `version: "version"`. Its patch request is `{ key, expectedVersion, changes }`; stale writes return `VersionConflict`. A transition resource publishes `<resource>.transition` with `{ key, action, changes? }`, adding `expectedVersion` when versioned; local handlers use `repository.transition(key, action, changes?, expectedVersion?)`.
 
 Use `repository.ensure(row)` for every seed. It inserts by identifier only when absent, otherwise returns an existing read-authorized row. A declared unique relation reports `UniqueViolation { resource, constraint, fields }`; translate it to a domain error only where that domain needs one.
 

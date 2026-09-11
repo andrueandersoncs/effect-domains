@@ -3,7 +3,7 @@ import { Headers } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Unauthenticated } from "./authorization.ts"
 import { CredentialsSchema, CurrentSessionSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema } from "./identity.ts"
-import type { RpcBundle } from "./rpc-contract.ts"
+import { RpcBundle } from "./rpc-contract.ts"
 
 export const authenticateIdentity = Effect.fn("Identity.authenticate")(function* (headers: Headers.Headers) {
   const token = pipe(
@@ -51,5 +51,4 @@ export const IdentityHandlers = IdentityRpcs.toLayer({
   "identity.logout": (_payload, { headers }) => logoutHandler(headers),
 })
 
-const emptyBundle = Record.empty<string, never>()
-export const IdentityBundle = Struct.assign(emptyBundle, { group: IdentityRpcs, handlers: IdentityHandlers }) satisfies RpcBundle
+export const IdentityBundle = RpcBundle.make(IdentityRpcs)(IdentityHandlers)

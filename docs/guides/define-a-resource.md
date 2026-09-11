@@ -113,16 +113,18 @@ export const LibraryMigrations = SqliteMigrations.history(initial)
 Create `scratch-library/main.ts`:
 
 ```ts
+import { BunRuntime } from "@effect/platform-bun"
+import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { Library } from "./application.ts"
 import { LibraryMigrations } from "./migrations.ts"
 
-ApplicationBun.main(Library, {
+pipe(ApplicationBun.run(Library, {
   database: { migrations: LibraryMigrations },
-})
+}), BunRuntime.runMain)
 ```
 
-`ApplicationBun.main` supplies the `serve` command and generated CLI. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
+`ApplicationBun.run` supplies the `serve` command and generated CLI; `BunRuntime.runMain` runs its Effect. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
 
 ## 4. Run and exercise the resource
 
@@ -163,4 +165,4 @@ Before using this pattern for private data, [restrict access](/guides/authorizat
 - [`Resource.make`](../../packages/effect-domains/src/resource.ts) compiles the canonical schema into a table, local repository, selected RPC group, create input, list input, and patch contract. It rejects undeclared filters and enforces the configured list maximum.
 - [`Application.make`](../../packages/effect-domains/src/application.ts) flattens resource parts and rejects duplicate table and operation names.
 - [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index artifact. Import frozen artifacts with `SqliteMigrations.history(...)`.
-- [`ApplicationBun.main`](../../packages/effect-domains/src/application-bun.ts) hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.
+- [`ApplicationBun.run`](../../packages/effect-domains/src/application-bun.ts) creates the command Effect that hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.

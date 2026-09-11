@@ -1,9 +1,10 @@
 import { Array, Cause, Effect, Equivalence, Function, Layer, Option, Record, Schema, Struct, flow, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import type { SqlError } from "effect/unstable/sql"
 import { AuthorizationSubject, type SubjectPolicy } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
-import { RepositoryStore } from "./repository-store.ts"
-import type { RpcBundle, RpcProcedure } from "./rpc-contract.ts"
+import { RepositoryError, RepositoryStore, ResourceNotFound, UniqueViolation, VersionConflict } from "./repository-store.ts"
+import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
 import { SqliteView } from "./sqlite-view.ts"
 
 type Codec<SchemaType extends Schema.Constraint | undefined> = SchemaType extends Schema.Constraint
@@ -41,6 +42,31 @@ interface UnavailableConstructor<Error extends Schema.Constraint> {
   readonly make: (fields: Record<string, never>) => Error["Type"]
 }
 
+type Tagged = Readonly<Record<"_tag", string>>
+
+/** Failures the runtime owns; collapsing them into `unavailable` is the intended contract. */
+type InfrastructureFailure =
+  | SqlError.SqlError
+  | Schema.SchemaError
+  | RepositoryError
+  | ResourceNotFound
+  | UniqueViolation
+  | VersionConflict
+  | Cause.NoSuchElementError
+  | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+
+/**
+ * Domain-tagged failures the handler can raise but the contract does not declare. Untagged
+ * failures and infrastructure failures are allowed because `unavailable` exists for them.
+ */
+type UndeclaredFailure<Failure, Declared> = Failure extends Tagged
+  ? Failure extends Declared | InfrastructureFailure ? never : Failure
+  : never
+
+type DeclaresEveryFailure<Failure, Error extends Schema.Constraint> = [UndeclaredFailure<Failure, Error["Type"]>] extends [never]
+  ? unknown
+  : Readonly<{ undeclaredFailure: UndeclaredFailure<Failure, Error["Type"]> }>
+
 type OperationDefinition<
   Name extends string,
   Payload extends Schema.Constraint | undefined,
@@ -55,7 +81,7 @@ type OperationDefinition<
   success: Success
   error: Error
   unavailable: UnavailableConstructor<Error>
-  handler: Handler<Payload, Success, Policy, Failure, Requirements>
+  handler: Handler<Payload, Success, Policy, Failure, Requirements> & DeclaresEveryFailure<Failure, Error>
 }> & Readonly<Partial<{
   payload: Payload
   policy: Policy
@@ -70,23 +96,25 @@ export interface Operation<Contract extends RpcProcedure = RpcProcedure> {
 }
 
 const equals = Equivalence.strictEqual<number>()
-const emptyBundle = Record.empty<string, never>()
 
 const inTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   pipe(RepositoryStore, Effect.flatMap((store) => store.transaction(effect)))
 
 // Only a lone declared failure passes through because interruptions and defects are never part of the contract.
-const declaredFailure = <Error extends Schema.Constraint>(schema: Error, cause: Cause.Cause<unknown>) => {
-  const isDeclared = Schema.is(schema)
+const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.Cause<unknown>) => {
   const single = equals(cause.reasons.length, 1)
 
   const declared = (reason: Cause.Reason<unknown>) => Cause.isFailReason(reason) && isDeclared(reason.error)
     ? Option.some(reason.error)
-    : Option.none<Error["Type"]>()
+    : Option.none<unknown>()
 
   const head = Array.head(cause.reasons)
-  return single ? Option.flatMap(head, declared) : Option.none<Error["Type"]>()
+  return single ? Option.flatMap(head, declared) : Option.none<unknown>()
 }
+
+// Protected operations pass authorization failures through because the middleware already publishes them.
+const isMiddlewareFailure = Schema.is(AuthorizationRpc.errorSchema)
+const alwaysUndeclared = Function.constant(false)
 
 const make = <
   const Name extends string,
@@ -132,9 +160,12 @@ const make = <
   const run = transactional ? flow(invoke, inTransaction) : invoke
   const unavailable = () => definition.unavailable.make({})
   const fallback = Effect.failSync(unavailable)
+  const isContractFailure = Schema.is(definition.error)
+  const isAuthorizationFailure = Option.match(policy, { onNone: Function.constant(alwaysUndeclared), onSome: Function.constant(isMiddlewareFailure) })
+  const isDeclared = (value: unknown) => isContractFailure(value) || isAuthorizationFailure(value)
 
   const translate = (cause: Cause.Cause<unknown>) => pipe(
-    declaredFailure(definition.error, cause),
+    declaredFailure(isDeclared, cause),
     Option.match({
       onNone: () => pipe(Effect.logError(cause), Effect.andThen(fallback)),
       onSome: Effect.fail,
@@ -160,7 +191,7 @@ const bundle = <const Operations extends ReadonlyArray<Operation>>(...operations
 
   const layers = Array.map(operations, install)
   const handlers = Layer.mergeAll(Layer.empty, ...layers) as Layer.Layer<Rpc.ToHandler<Contract>, never, Requirements>
-  return Struct.assign(emptyBundle, { group, handlers }) satisfies RpcBundle
+  return RpcBundle.make(group)(handlers)
 }
 
 export const Operation = { make, bundle }

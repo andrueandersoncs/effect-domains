@@ -104,12 +104,6 @@ const workflowRequest = (request: ReportExportRequest, tenantId: string) =>
   WorkflowRequestSchema.make({ ...request, accountId: tenantId })
 
 
-const selectWorkflow = (request: ReportExportRequest, tenantId: string) =>
-  pipe(
-    workflowRequest(request, tenantId),
-    FinancialReportExport.execute,
-  )
-
 const selectGenerateDiscard = Effect.fn(
   "ReportExports.selectGenerateDiscard",
 )(function* (
@@ -124,10 +118,14 @@ const selectGenerateDiscard = Effect.fn(
 const resumeWorkflow = ({ executionId }: typeof PollReportExportSchema.Type) =>
   FinancialReportExport.resume(executionId)
 
-const selectGenerate = (
+// Call execute as a method because the native workflow reads its payload schema from `this`.
+const selectGenerate = Effect.fn("ReportExports.selectGenerate")(function* (
   request: ReportExportRequest,
   subject: typeof ExampleSubjectSchema.Type,
-) => selectWorkflow(request, subject.tenantId)
+) {
+  const workflow = workflowRequest(request, subject.tenantId)
+  return yield* FinancialReportExport.execute(workflow)
+})
 
 const generate = Operation.make({
   name: "ReportExport.Generate",

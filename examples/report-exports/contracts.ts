@@ -139,7 +139,6 @@ export interface ReportExportJob extends Schema.Schema.Type<typeof ReportExportJ
 
 interface FinancialReportLine extends Schema.Schema.Type<typeof FinancialReportLineSchema> {}
 interface ReportingPeriod extends Schema.Schema.Type<typeof ReportingPeriodSchema> {}
-interface FinancialReport extends Schema.Schema.Type<typeof FinancialReportSchema> {}
 interface ReportArtifact extends Schema.Schema.Type<typeof ReportArtifactSchema> {}
 interface ReportRelease extends Schema.Schema.Type<typeof ReportReleaseSchema> {}
 interface ReleaseReport extends Schema.Schema.Type<typeof ReleaseReportSchema> {}

@@ -115,6 +115,7 @@ No token is required for this public loopback example. It binds only to `127.0.0
 The ordered artifacts in [`migrations.ts`](migrations.ts) are frozen. [`002_timestamp`](migrations/002_timestamp.json) specifically rebuilds historical reservation rows, preserving the business fields and converting `created_at_seconds` with SQLite `strftime` into the current ISO UTC `createdAt` text. [`003_schema_string_checks`](migrations/003_schema_string_checks.json) preserves existing rows while removing misderived physical SKU-length checks; canonical non-empty SKU validation remains.
 
 On later starts, the seed adds `book: 5` only if the SKU does not exist; it never resets available stock or deletes reservations. Stop with Ctrl-C and restart in the same server terminal, then read stock and the saved reservation IDs to observe the preserved count and terminal states. A recognized earlier prefix of the frozen history is upgraded; an untracked or drifted database is rejected rather than adopted. For authored migration steps rather than their framework implementation, see the [shared migration walkthrough](../README.md#review-schema-changes).
+Databases created before the v2 artifact format must be recreated; startup reports `MigrationError: migration history changed at 001_initial`.
 
 ## Settings and source map
 

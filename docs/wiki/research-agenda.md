@@ -98,7 +98,6 @@ Still unproven after those choices:
 - whether a production IdP or user-management lifecycle is required beyond the bounded example credential store;
 - which encoded shape, if any, a future slice cannot avoid;
 - whether declared `version`/`transitions`/`range`/`order` cover the next domains without growing into a query or workflow language (only billing and reservations exercise transitions; only the ledger and workshop exercise range/order);
-- whether `Operation.make`'s total `unavailable` translation hides failures a domain would rather declare;
 - readability of large or database-specific v2 histories, when one hurts; and
 - reconciliation of interruption and ambiguous commits, once a failure slice exists.
 

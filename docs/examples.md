@@ -90,6 +90,6 @@ Most examples use this layout:
 | `sqlite.ts` | `Operation.make` handlers and authored SQL where needed |
 | `application.ts` | Composition of resources, authored operation bundles, and identity bundle |
 | `migrations.ts` | Ordered `SqliteMigrations.history(...)` imports of frozen artifacts |
-| `main.ts` | `ApplicationBun.main` runtime service wiring and admin opt-in |
+| `main.ts` | `ApplicationBun.run` runtime service wiring and admin opt-in |
 
 For shared command options, see [runtime and clients](/reference/runtime). For dated verification and its limits, see the [validation record](/wiki/validation-strategy).

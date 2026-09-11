@@ -137,6 +137,7 @@ The same server also provides the generated browser admin at [http://127.0.0.1:3
 | `TEAM_TASKS_TOKEN` | unset | CLI | bearer token sent to each RPC call |
 
 The server binds to `127.0.0.1`; `PORT` does not update `TEAM_TASKS_URL`. Reuse the same database path to retain tasks after a restart. The ordered, frozen [migration history](migrations.ts) includes [`004_task_details`](migrations/004_task_details.json), which rebuilt the historical `todos` table and backfilled older rows with project `"Unassigned project"`, priority `"normal"`, and null detail/due date. Review those backfilled rows before treating them as classified work. Startup applies tracked history and rejects an untracked database rather than guessing its schema.
+Databases created before the v2 artifact format must be recreated; startup reports `MigrationError: migration history changed at 001_initial`.
 
 Inspection is local and does not need a server or token:
 

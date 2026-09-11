@@ -1,6 +1,6 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { CustomerSchema, RepairJobSchema, TechnicianSchema } from "./domain.ts"
+import { CustomerSchema, RepairJobSchema, RepairJobTransitions, TechnicianSchema } from "./domain.ts"
 
 export const CustomersResource = Resource.make({
   name: "customers",
@@ -20,9 +20,11 @@ export const RepairJobsResource = Resource.make({
   name: "repair_jobs",
   schema: RepairJobSchema,
   authorization: Authorization.public,
+  transitions: RepairJobTransitions,
   operations: {
     ...Resource.crud,
     patch: true,
+    transition: true,
     create: { defaults: { urgent: false, status: "queued" } },
     list: {
       filter: ["status", "customerId", "technicianId"],

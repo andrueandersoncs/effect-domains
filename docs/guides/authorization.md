@@ -46,6 +46,7 @@ import { TaskSchema } from "./domain.ts"
 const p = Authorization.for({ resource: TaskSchema, subject: ExampleSubjectSchema })
 const scope = p.sameAs("tenantId")
 const owned = p.eq(p.row.ownerId, p.subject.userId)
+const candidateOwner = p.eq(p.next.ownerId, p.subject.userId)
 const incomplete = p.eq(p.row.completed, false)
 const unchangedOwnership = p.unchanged("tenantId", "ownerId")
 const editable = p.any(ExampleRoles.admin.expression, p.all(owned, incomplete))
@@ -54,7 +55,7 @@ const authorization = p.policy({
   scope,
   allow: {
     read: p.any(owned, ExampleRoles.admin.expression),
-    create: ExampleRoles.editor,
+    create: candidateOwner,
     update: p.all(unchangedOwnership, editable),
     patch: p.all(unchangedOwnership, editable),
     remove: ExampleRoles.admin,
@@ -89,8 +90,10 @@ Use policy expressions for identity, tenant visibility, ownership, and roles. Us
 
 ```ts
 import { Entitlements } from "effect-domains/entitlements"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { GuidePurchasesResource } from "./resources.ts"
 
-export const PurchasedGuideEntitlements = Entitlements.fromTable({
+const purchasedGuideEntitlement = new Entitlements.Source({
   name: "guides.read",
   table: GuidePurchasesResource.table,
   subject: ExampleSubjectSchema,
@@ -98,6 +101,8 @@ export const PurchasedGuideEntitlements = Entitlements.fromTable({
   where: (subject) => ({ tenantId: subject.tenantId, userId: subject.userId }),
   grant: (purchase) => purchase.status === "granted",
 })
+
+export const PurchasedGuideEntitlements = Entitlements.fromTable(purchasedGuideEntitlement)
 ```
 
 Use `Entitlements.fromTables([...])` for multiple names. Each definition finds the named key under its subject-derived `where` fields and calls `grant(row, now)`. A missing grant yields `EntitlementRequired`; database or decoding failure yields `EntitlementUnavailable`. Neither one replaces resource scope or authentication.
