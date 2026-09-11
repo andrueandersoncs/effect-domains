@@ -35,6 +35,7 @@ Import `ApplicationBun` from `effect-domains/application-bun`. Pass its returned
 | `background` | Background layer, built after initialization. Also enables the `worker` command. |
 | `routes` | Additional native HTTP route layer for `serve`. |
 | `admin` | Omitted by default. `true` enables the prebuilt admin; an object accepts `path`, `presentation`, and `allowedOrigins`. |
+| `telemetry` | Automatic OTLP tracing when an endpoint is configured. An object configures export; `false` opts out of the runtime exporter. |
 
 For `serve` and `worker`, startup prepares the database, builds `services`, runs `initialize`, and then starts `background`. `serve` additionally starts HTTP. Initialization therefore also runs in worker mode; it must be appropriate for each process you launch.
 
@@ -62,6 +63,55 @@ READING_LIST_URL=http://127.0.0.1:3001/rpc/v1 bun run reading-list books.list
 ```
 
 The Bun runner binds to `127.0.0.1`. It does not provide a configurable public bind address or a production deployment setup.
+
+## OpenTelemetry tracing
+
+RPC tracing requires no handler wrappers or domain annotations. The runner installs Effect's native OTLP tracer around the entire command lifetime: HTTP RPC, generated CLI calls, in-process admin/MCP RPCs, initialization, and workers. Existing Effect and SQL spans participate in the same traces. Finished spans are batched and flushed on graceful shutdown, including short-lived CLI commands.
+
+Export starts automatically when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 bun run reading-list:server
+```
+
+Configure the client process too to export both sides of a CLI-to-server trace. With no endpoint, no collector is contacted and an externally supplied tracer is left intact.
+
+For declarative configuration, add this option to `ApplicationBun.run`:
+
+```ts
+telemetry: {
+  endpoint: "https://collector.example.com/v1/traces",
+  protocol: "http/protobuf",
+  resource: {
+    serviceName: "reading-list",
+    serviceVersion: "1.2.0",
+    attributes: { "deployment.environment.name": "production" },
+  },
+  exportInterval: "5 seconds",
+  maxBatchSize: 1000,
+  shutdownTimeout: "3 seconds",
+},
+```
+
+| Option | Contract |
+| --- | --- |
+| `endpoint` | Full OTLP traces URL, used unchanged. The generic environment endpoint instead appends `/v1/traces`. |
+| `protocol` | `http/protobuf` (default) or `http/json`. No gRPC transport. |
+| `resource.serviceName` | Explicit service identity; otherwise `OTEL_SERVICE_NAME`, then `service.name` in `OTEL_RESOURCE_ATTRIBUTES`, then `application.name`. |
+| `resource.serviceVersion` | Optional service version. |
+| `resource.attributes` | Static resource metadata. Explicit resource fields override matching attributes; explicit attributes override environment metadata. |
+| `headers` | Native Effect HTTP headers for collector authentication. These are exporter headers, not RPC credentials. Prefer deployment-provided secrets. |
+| `exportInterval` | Effect duration input; defaults to 5 seconds. |
+| `maxBatchSize` | Number of buffered spans triggering an export; defaults to 1000. Not a bounded queue or total-memory limit. |
+| `shutdownTimeout` | Effect duration input limiting graceful exporter shutdown; defaults to 3 seconds. |
+
+Explicit options override environment configuration. Otherwise the native exporter honors `OTEL_EXPORTER_OTLP_TRACES_*` ahead of corresponding generic `OTEL_EXPORTER_OTLP_*` settings for endpoint, headers, protocol, and timeout. Resource metadata also accepts `OTEL_SERVICE_VERSION` and `OTEL_RESOURCE_ATTRIBUTES`. Batching accepts `OTEL_BSP_SCHEDULE_DELAY`, `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`, and `OTEL_BSP_EXPORT_TIMEOUT`; environment durations are milliseconds. Shutdown timeout precedence is traces timeout, generic timeout, then BSP export timeout.
+
+`telemetry: false`, `OTEL_SDK_DISABLED=true`, or `OTEL_TRACES_EXPORTER=none` disables this exporter. Otherwise `OTEL_TRACES_EXPORTER` defaults to `otlp`. Opt-out does not disable native span creation or an independently installed tracer.
+
+Native RPC trace propagation and parent sampling decisions remain authoritative; this integration does not add a second RPC span, sampler, metrics exporter, or log exporter. It does not add payload/result attributes. Native HTTP/SQL instrumentation and exception events can still contain sensitive data: treat the collector as trusted and apply application/collector redaction policy.
+
+For a custom runtime or independently composed RPC adapter, import `ApplicationTelemetry` from `effect-domains/application-telemetry` and provide `ApplicationTelemetry.layer({ name }, options)` around the runtime. Supply its native `HttpClient` requirement with your platform's HTTP client layer. For a custom tracer implementation, opt out of the automatic exporter and provide the native tracing layer yourself.
 
 ## Local commands
 
@@ -131,6 +181,7 @@ The runner composes native Effect layers; it does not supply its own job system.
 
 - [Bun runtime](../../packages/effect-domains/src/application-bun.ts)
 - [Application composition](../../packages/effect-domains/src/application.ts)
+- [Telemetry configuration](../../packages/effect-domains/src/application-telemetry.ts)
 - [CLI adapter](../../packages/effect-domains/src/rpc-cli.ts)
 - [MCP adapter](../../packages/effect-domains/src/rpc-mcp.ts)
 - [Admin adapter](../../packages/effect-domains/src/application-admin.ts)

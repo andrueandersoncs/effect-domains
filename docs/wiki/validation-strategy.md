@@ -30,6 +30,18 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-11: Automatic RPC telemetry
+
+The Bun runtime now supplies a scoped native Effect OTLP tracer automatically when a traces endpoint is configured. Declarative runtime options configure export without changing domain schemas, operation contracts, handlers, or authorization. The exported `ApplicationTelemetry.layer` also supports custom runtimes with a runtime-provided native HTTP client. ([Runtime](../../packages/effect-domains/src/application-bun.ts); [telemetry layer](../../packages/effect-domains/src/application-telemetry.ts); [configuration reference](../reference/runtime.md#opentelemetry-tracing))
+
+- A live local HTTP collector received spans from a Bun application combining reading-list generated RPCs and an authored success/failure RPC. CLI and server spans shared trace IDs; generated `books.list` succeeded, and declared failures produced error span status without changing the RPC error response.
+- Admin and MCP HTTP requests with distinct W3C trace parents reached handlers with the corresponding trace IDs. Each exported in-process server span had its own matching client parent, rather than a captured startup/request span.
+- Explicit endpoint, JSON protocol, service identity/version/attributes, collector authorization headers, and shutdown timeout overrode conflicting deployment values. Native protobuf export produced an OTLP protobuf request at `/v1/traces`. Environment resource attributes supplied service identity/version when explicit options were absent.
+- A one-hour export interval still flushed CLI spans at command completion and worker spans at graceful termination. Explicit opt-out, SDK disablement, exporter `none`, and no-endpoint operation preserved successful RPC responses without exporting client traces.
+- Workspace typechecks and all **90 existing tests in 18 files** passed. Framework package lint passed. Workspace lint remained failing in unrelated `packages/example-web` and `examples/reading-list` code.
+
+These are local transport/export observations, not a production collector interoperability certification, browser visual test, load/memory bound, collector-outage recovery proof, crash-safe delivery guarantee, durable trace persistence, or a new sampling/metrics/logging implementation. The temporary collector and runtime probes were removed after verification.
+
 ### 2026-09-10: Entitlement gating
 
 Resource and subject policies declare string-keyed entitlement requirements; an application-provided Effect service resolves current access. `EntitlementRequired` distinguishes a missing grant from `EntitlementUnavailable`. Generated repositories, native RPC middleware, authored authorization calls, and inspection share that contract. No provider SDK, charging, checkout, or quota consumption was added. ([Authorization](../../packages/effect-domains/src/authorization.ts); [resolver interface](../../packages/effect-domains/src/entitlements.ts); [adapters](../../packages/effect-domains/src/resource.ts))

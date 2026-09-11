@@ -7,6 +7,7 @@ import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effe
 import { Application } from "./application.ts"
 import { ApplicationAdmin, type AdminOptions } from "./application-admin.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
+import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RpcCli } from "./rpc-cli.ts"
 import { RpcMcp } from "./rpc-mcp.ts"
@@ -30,6 +31,7 @@ type RunOptions<
   background: Background
   routes: Routes
   admin: true | AdminOptions
+  telemetry: false | TelemetryOptions
 }>>
 
 type ProvidedRuntime = Layer.Success<ReturnType<typeof SqliteBunRuntime.sqlClient>> | BunServices.BunServices | Scope.Scope
@@ -276,9 +278,15 @@ export const ApplicationBun = {
       Background extends RuntimeLayer = Layer.Layer<never, never, never>,
     Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
   >(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
+    const telemetry = pipe(
+      ApplicationTelemetry.layer(application, options.telemetry),
+      Layer.provide(FetchHttpClient.layer),
+    )
+
     return yield* pipe(
       runApplication(application, options),
       Effect.provide(BunServices.layer),
+      Effect.provide(telemetry),
     ) as Effect.Effect<
       void,
       RunErrors<App, Services, Initialize, Background, Routes>,

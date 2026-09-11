@@ -7,6 +7,7 @@
     "./application-admin": "./src/application-admin.ts",
     "./application-bun": "./src/application-bun.ts",
     "./application-inspect": "./src/application-inspect.ts",
+    "./application-telemetry": "./src/application-telemetry.ts",
     "./authorization": "./src/authorization.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",
     "./domain": "./src/domain.ts",
