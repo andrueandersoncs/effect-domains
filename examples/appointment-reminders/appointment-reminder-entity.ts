@@ -1,8 +1,18 @@
-import { ClusterSchema, DeliverAt, Entity, EntityProxy, EntityProxyServer } from "effect/unstable/cluster"
-import { Rpc } from "effect/unstable/rpc"
 import { PrimaryKey, Schema } from "effect"
-import { AppointmentReminderOperatorAuthorization } from "./operator-authorization.ts"
+
+import {
+  ClusterSchema,
+  DeliverAt,
+  Entity,
+  EntityProxy,
+  EntityProxyServer,
+} from "effect/unstable/cluster"
+
+import { Rpc } from "effect/unstable/rpc"
+
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+
+import { ExampleRoles } from "@effect-domains/example-support/subject"
 
 import {
   AppointmentIdSchema,
@@ -57,7 +67,7 @@ export const AppointmentRecipientProxy = EntityProxy.toRpcGroup(
   AppointmentRecipientEntity,
 )
   .middleware(AuthorizationRpc)
-  .annotateRpcs(AuthorizationRpc.policy, AppointmentReminderOperatorAuthorization)
+  .annotateRpcs(AuthorizationRpc.policy, ExampleRoles.admin)
 
 export const AppointmentReminderEntityCommands = {
   group: AppointmentRecipientProxy,

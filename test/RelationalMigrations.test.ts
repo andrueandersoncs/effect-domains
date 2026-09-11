@@ -54,41 +54,24 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
   const initial = SqliteMigrations.initial({ id: "relational_001", tables: [sourceParent, sourceChild] })
 
   const addConstraintsSteps = [
-    SqliteMigrations.steps.RebuildTable.make({
-      table: Table.snapshot(constrainedParent),
-      copies: [
-        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-        SqliteMigrations.copies.Source.make({ column: "code", source: "code" }),
-      ],
-    }),
-    SqliteMigrations.steps.RebuildTable.make({
-      table: Table.snapshot(constrainedChild),
-      copies: [
-        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-        SqliteMigrations.copies.Source.make({ column: "parentId", source: "parentId" }),
-        SqliteMigrations.copies.Source.make({ column: "label", source: "label" }),
-      ],
-    }),
+    SqliteMigrations.steps.RebuildTable.make({ table: constrainedParent.name, copies: [
+    ] }),
+    SqliteMigrations.steps.RebuildTable.make({ table: constrainedChild.name, copies: [
+    ] }),
   ]
 
-  const addConstraints = SqliteMigrations.make({
-    id: "relational_002", from: source, to: constrained,
-    steps: addConstraintsSteps,
-  })
+  const addConstraints = SqliteMigrations.make({ id: "relational_002", to: constrained,
+  steps: addConstraintsSteps, })
 
-  const addIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: "relational_children", name: "relational_child_parent_idx", fields: ["parentId"] })]
+  const addIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: "relational_children", name: "relational_child_parent_idx" })]
 
-  const addIndex = SqliteMigrations.make({
-    id: "relational_003", from: constrained, to: indexed,
-    steps: addIndexSteps,
-  })
+  const addIndex = SqliteMigrations.make({ id: "relational_003", to: indexed,
+  steps: addIndexSteps, })
 
   const dropIndexSteps = [SqliteMigrations.steps.DropIndex.make({ name: "relational_child_parent_idx" })]
 
-  const dropIndex = SqliteMigrations.make({
-    id: "relational_004", from: indexed, to: constrained,
-    steps: dropIndexSteps,
-  })
+  const dropIndex = SqliteMigrations.make({ id: "relational_004", to: constrained,
+  steps: dropIndexSteps, })
 
   yield* makeMigrationStore(sql, [initial]).prepare(source.tables)
   yield* sql`INSERT INTO relational_parents (id, code) VALUES ('parent-1', 'one')`
@@ -166,18 +149,11 @@ const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebu
   const target = SqliteMigrations.snapshot([targetParent, sourceChild])
   const initial = SqliteMigrations.initial({ id: "rebuild_001", tables: [sourceParent, sourceChild] })
 
-  const rebuildSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(targetParent),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "code", source: "code" }),
-    ],
-  })]
+  const rebuildSteps = [SqliteMigrations.steps.RebuildTable.make({ table: targetParent.name, copies: [
+  ] })]
 
-  const rebuild = SqliteMigrations.make({
-    id: "rebuild_002", from: source, to: target,
-    steps: rebuildSteps,
-  })
+  const rebuild = SqliteMigrations.make({ id: "rebuild_002", to: target,
+  steps: rebuildSteps, })
 
   yield* makeMigrationStore(sql, [initial]).prepare(source.tables)
   yield* sql`INSERT INTO rebuild_parents (id, code) VALUES ('rebuild-parent', 'one')`
@@ -207,8 +183,8 @@ const initialIndexes = Effect.fn("SqliteMigrations.initialIndexes")(function* ()
   const initial = SqliteMigrations.initial({ id: "001", tables: [table] })
 
   expect(initial.steps).toMatchObject([
-    { _tag: "SqliteCreateTable", table: { name: "initial_indexes" } },
-    { _tag: "SqliteCreateIndex", table: "initial_indexes", name: "initial_label_idx", fields: ["label"] },
+    { _tag: "SqliteCreateTable", table: "initial_indexes" },
+    { _tag: "SqliteCreateIndex", table: "initial_indexes", name: "initial_label_idx" },
   ])
 
   const store = makeMigrationStore(sql, [initial])

@@ -24,7 +24,7 @@ Start a disposable instance in the **server terminal**. The encryption key and r
 ```bash
 export PORT=3002
 export FIELD_NOTES_DB="$(mktemp -d)/field-notes.sqlite"
-export EFFECT_DOMAINS_IDENTITY_DB="$(mktemp -d)/field-notes-identity.sqlite"
+export FIELD_NOTES_IDENTITY_DB="$(mktemp -d)/field-notes-identity.sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 bun run field-notes:server
 ```
@@ -130,7 +130,7 @@ This is field-level at-rest protection for bodies only. It is not whole-database
 | --- | --- | --- | --- |
 | `FIELD_NOTES_ENCRYPTION_KEY` | required | server | unpadded Base64URL encoding of exactly 32 bytes for AES-256-GCM |
 | `FIELD_NOTES_DB` | `data/field-notes.sqlite` | server | SQLite database path |
-| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | server | Separate SQLite identity store |
+| `FIELD_NOTES_IDENTITY_DB` | `data/field-notes-identity.sqlite` | server | Separate SQLite identity store |
 | `EFFECT_DOMAINS_DEMO_PASSWORD` | required | server | Bootstrap password for the seed accounts |
 | `PORT` | `3000` | server | loopback HTTP port |
 | `FIELD_NOTES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |

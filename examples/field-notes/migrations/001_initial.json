@@ -1,9 +1,5 @@
 {
   "id": "001_initial",
-  "from": {
-    "version": 1,
-    "tables": []
-  },
   "to": {
     "version": 1,
     "tables": [
@@ -16,7 +12,10 @@
             "name": "id",
             "scalar": "string",
             "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
             "checks": []
           },
           {
@@ -24,7 +23,10 @@
             "name": "title",
             "scalar": "string",
             "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
             "checks": []
           },
           {
@@ -32,7 +34,10 @@
             "name": "site",
             "scalar": "string",
             "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
             "checks": []
           },
           {
@@ -40,7 +45,10 @@
             "name": "body",
             "scalar": "string",
             "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
             "checks": []
           }
         ]
@@ -50,44 +58,7 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "reports",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "title",
-            "scalar": "string",
-            "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "site",
-            "scalar": "string",
-            "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "body",
-            "scalar": "string",
-            "nullable": false,
-            "generation": { "_id": "Option", "_tag": "None" },
-            "checks": []
-          }
-        ]
-      }
+      "table": "reports"
     }
   ]
 }

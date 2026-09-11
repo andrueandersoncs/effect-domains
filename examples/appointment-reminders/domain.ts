@@ -1,20 +1,18 @@
 import { Schema, pipe } from "effect"
-import { identifier } from "effect-domains/domain"
+import { UuidV7Schema, identifier } from "effect-domains/domain"
 
 export const AppointmentRecipientSchema = pipe(
   Schema.NonEmptyString,
   Schema.brand("AppointmentRecipient"),
 )
 
-const isUuidV7 = Schema.isUUID(7)
-
 export const AppointmentReminderIdSchema = pipe(
-  Schema.String.check(isUuidV7),
+  UuidV7Schema,
   Schema.brand("AppointmentReminderId"),
 )
 
 export const AppointmentIdSchema = pipe(
-  Schema.String.check(isUuidV7),
+  UuidV7Schema,
   Schema.brand("AppointmentId"),
 )
 

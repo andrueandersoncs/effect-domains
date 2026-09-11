@@ -1,6 +1,5 @@
 {
   "id": "001_initial",
-  "from": { "version": 1, "tables": [] },
   "to": {
     "version": 1,
     "tables": [
@@ -8,22 +7,131 @@
         "name": "guides",
         "identifier": "id",
         "fields": [
-          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "title", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "summary", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "body", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "title",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "summary",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "body",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
         ]
       },
       {
         "name": "guide_purchases",
         "identifier": "id",
         "fields": [
-          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "userId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "guideId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["granted", "refunded", "revoked"] }] }
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "userId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "guideId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "granted",
+                  "refunded",
+                  "revoked"
+                ]
+              }
+            ]
+          }
         ]
       }
     ]
@@ -31,31 +139,11 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "guides",
-        "identifier": "id",
-        "fields": [
-          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "title", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "summary", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "body", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
-        ]
-      }
+      "table": "guides"
     },
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "guide_purchases",
-        "identifier": "id",
-        "fields": [
-          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "userId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "guideId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["granted", "refunded", "revoked"] }] }
-        ]
-      }
+      "table": "guide_purchases"
     }
   ]
 }

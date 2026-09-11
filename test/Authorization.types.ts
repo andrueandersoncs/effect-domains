@@ -11,6 +11,9 @@ const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const owned = p.eq(p.row.ownerId, p.subject.userId)
 const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unchanged = p.unchanged("ownerId")
+
+const sharedTenant = p.sameAs("tenantId")
+void sharedTenant
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
 Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: { get: true } })
 
@@ -75,10 +78,18 @@ p.policy({ scope: unchanged, allow: { read: owned } })
 const subject = Authorization.subject(PolicyAuthorSchema)
 const editorRole = subject.includes(subject.subject.roles, "editor")
 const canEdit = subject.policy(editorRole)
-p.policy({ scope, allow: { read: canEdit.expression } })
+p.policy({ scope: canEdit, allow: { read: canEdit } })
 // @ts-expect-error Because a subject policy cannot depend on a current resource row.
 subject.policy(owned)
 // @ts-expect-error Because a subject policy cannot depend on a candidate resource row.
 subject.policy(candidateOwned)
 // @ts-expect-error Because a subject policy retains scalar membership checking.
 subject.includes(subject.subject.roles, 1)
+
+const LiteralRolesSchema = Schema.Struct({ roles: Schema.Array(Schema.Literals(["reader", "editor"])) })
+const literalRoles = Authorization.subject(LiteralRolesSchema)
+literalRoles.includes(literalRoles.subject.roles, "reader")
+// @ts-expect-error Because a literal collection only includes members of its literal union.
+literalRoles.includes(literalRoles.subject.roles, "adnim")
+// @ts-expect-error Because sameAs requires a scalar field shared by the resource and subject schemas.
+p.sameAs("score")

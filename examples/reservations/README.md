@@ -87,18 +87,18 @@ All remote operation input is canonical JSON passed through `--input-json`. Succ
 | Unknown SKU | `{"sku":"missing","quantity":1}` to `reserve` | `UnknownSku` |
 | Stock not available after the two-book hold | `{"sku":"book","quantity":4}` to `reserve` | `InsufficientStock`, carrying `sku`, `requested`, and the read `available` count |
 | Invalid quantity | `{"sku":"book","quantity":0}` to `reserve` | Input schema failure: quantity must be a positive safe integer |
-| Unknown valid UUIDv7 | `{"id":"018f3d72-4a68-7cc1-9f23-2e1f8530a0e1"}` to `reservations.get`, `confirm`, or `release` | Generated `get` reports `ResourceNotFound`; authored transitions report `ReservationNotFound` |
-| Releasing the confirmed `RESERVATION_ID` | `{"id":"<confirmed UUIDv7>"}` to `release` | `InvalidReservationState` with `action: "release"` and `actual: "confirmed"` |
+| Unknown valid UUIDv7 | `{"id":"018f3d72-4a68-7cc1-9f23-2e1f8530a0e1"}` to `reservations.get`, `confirm`, or `release` | `ResourceNotFound` |
+| Releasing the confirmed `RESERVATION_ID` | `{"id":"<confirmed UUIDv7>"}` to `release` | Framework `InvalidReservationTransition` with `key`, `action: "release"`, and `actual: "confirmed"` |
 
-The native contracts in [`contracts.ts`](contracts.ts) declare the typed business failures for `reserve`, `confirm`, and `release`; [`domain.ts`](domain.ts) defines the transition rule. Do not retry `reserve` as though it were idempotent: every successful invocation creates a separate held reservation. There is no idempotency key or ambiguous-outcome recovery.
+[`sqlite.ts`](sqlite.ts) declares `reserve`, `confirm`, and `release` with `Operation.make`; `ReservationStateTransitions` on the resource declares the valid lifecycle. Do not retry `reserve` as though it were idempotent: every successful invocation creates a separate held reservation. There is no idempotency key or ambiguous-outcome recovery.
 
 ## What stays atomic
 
 [`sqlite.ts`](sqlite.ts) puts each stock-changing operation in one SQLite transaction:
 
 - `reserve` checks that the SKU exists, performs a guarded decrement only when `available >= quantity`, generates the UUIDv7 and current timestamp, and creates the `held` row.
-- `confirm` changes a held row to `confirmed` without restoring stock.
-- `release` restores that held row's quantity with a safe-integer upper-bound guard, then marks it `released`.
+- `confirm` transitions a held row to `confirmed` without restoring stock.
+- `release` transitions a held row to `released` and restores its quantity with a safe-integer upper-bound guard.
 
 Consequently, a successful reserve cannot make stored available stock negative, and a failed transition does not apply a partial restoration/status change. Persistence failures that reach the handlers are reported as `InventoryUnavailable`. The application is an inventory-hold demonstration, not a payment provider, checkout, fulfillment, or production-concurrency/retry design.
 
@@ -130,9 +130,9 @@ On later starts, the seed adds `book: 5` only if the SKU does not exist; it neve
 bun run reservations inspect reserve
 ```
 
-- [`domain.ts`](domain.ts): stock/quantity schemas, statuses, typed errors, and valid transitions.
+- [`domain.ts`](domain.ts): stock/quantity schemas, statuses, typed errors, and the transition declaration.
 - [`resources.ts`](resources.ts): the intentionally narrow generated `stock.get` and `reservations.get` surface; private reservation creation supplies held status plus UUIDv7 and current-time defaults, while public `reserve` owns the stock policy.
-- [`contracts.ts`](contracts.ts) and [`sqlite.ts`](sqlite.ts): authored RPC contracts, transactions, and idempotent seed behavior.
+- [`sqlite.ts`](sqlite.ts): `Operation.make` commands, transactional stock changes, and idempotent seed behavior.
 - [`migrations.ts`](migrations.ts) and [`migrations/`](migrations/): ordered imported history and historical timestamp conversion.
 - [`main.ts`](main.ts): server initialization, generated admin, and Foldkit routes.
 - [`web/main.ts`](web/main.ts): application-specific reservation UI.

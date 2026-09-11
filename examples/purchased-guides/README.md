@@ -14,12 +14,12 @@ Run the commands from the repository root. The server serves a Foldkit frontend,
 bun install
 bun run build
 export PURCHASED_GUIDES_DB="$PWD/purchased-guides-walkthrough-$(date +%s).sqlite"
-export EFFECT_DOMAINS_IDENTITY_DB="$PWD/purchased-guides-identity-$(date +%s).sqlite"
+export PURCHASED_GUIDES_IDENTITY_DB="$PWD/purchased-guides-identity-$(date +%s).sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3003 bun run purchased-guides:server
 ```
 
-The loopback server is now at `http://127.0.0.1:3003`: its RPC endpoint is `/rpc/v1`, its Streamable HTTP MCP endpoint is `/mcp`, and the frontend is at `/`. There is no `/admin` route for this application. `EFFECT_DOMAINS_IDENTITY_DB` must be distinct from `PURCHASED_GUIDES_DB`; the required bootstrap password does not reset the accounts when the server restarts.
+The loopback server is now at `http://127.0.0.1:3003`: its RPC endpoint is `/rpc/v1`, its Streamable HTTP MCP endpoint is `/mcp`, and the frontend is at `/`. There is no `/admin` route for this application. `PURCHASED_GUIDES_IDENTITY_DB` must be distinct from `PURCHASED_GUIDES_DB`; the required bootstrap password does not reset the accounts when the server restarts.
 
 **Client terminal**
 
@@ -73,7 +73,7 @@ A guide read requires all of the following:
 2. A guide whose `tenantId` equals that subject's `tenantId`.
 3. A `guide_purchases` row whose `tenantId`, `userId`, and `guideId` exactly match that subject and requested guide, with `status: "granted"`.
 
-The entitlement resolver queries the database each time it checks a guide. `refunded` and `revoked` status values do not grant access. The seed routine uses `INSERT … WHERE NOT EXISTS` for each guide/purchase identifier, so it creates its facts only when absent and never turns a preserved refund or revocation back into `granted` on restart. There is no public grant, refund, revoke, create, update, patch, or remove operation: `guide_purchases` is registered with `Authorization.deny` and publishes no operations. This is an application-owned entitlement demonstration, not a payment-provider simulation, checkout flow, or general purchase-management API.
+The entitlement resolver queries the database each time it checks a guide. `refunded` and `revoked` status values do not grant access. The seed routine uses each resource repository's idempotent `ensure` operation, so it creates its facts only when absent and never turns a preserved refund or revocation back into `granted` on restart. There is no public grant, refund, revoke, create, update, patch, or remove operation: `guide_purchases` publishes no operations. This is an application-owned entitlement demonstration, not a payment-provider simulation, checkout flow, or general purchase-management API.
 
 The seed contains the following initial facts:
 
@@ -99,7 +99,7 @@ There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`
 | `PORT` | `3000` | Loopback server port |
 | `PURCHASED_GUIDES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `PURCHASED_GUIDES_TOKEN` | unset | CLI bearer token |
-| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | Server identity database; must differ from guide data |
+| `PURCHASED_GUIDES_IDENTITY_DB` | `data/purchased-guides-identity.sqlite` | Server identity database; must differ from guide data |
 | `EFFECT_DOMAINS_DEMO_PASSWORD` | required | Bootstrap password for seeded example accounts |
 
 Startup decodes and applies the frozen [migration history](migrations.ts), then runs the idempotent seed routine. It preserves rows; restarts do not reset entitlement state. The runtime rejects an untracked or drifted database rather than adopting it, so choose a fresh `PURCHASED_GUIDES_DB` for a clean walkthrough. The [initial artifact](migrations/001_initial.json) defines the `guides` and private `guide_purchases` tables.

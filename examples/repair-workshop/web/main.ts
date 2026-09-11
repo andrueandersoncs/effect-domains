@@ -10,16 +10,16 @@ import { Page } from "@effect-domains/example-web/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
 import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
 import { RepairBoardRowSchema } from "../board.ts"
-import { RepairWorkshopRpcs } from "../contracts.ts"
 import { CustomerSchema, RepairJobSchema, RepairStatusSchema, TechnicianSchema } from "../domain.ts"
 import { CustomersResource, RepairJobsResource, TechniciansResource } from "../resources.ts"
+import { RepairWorkshopOperations } from "../sqlite.ts"
 
 const CustomerRowSchema = CustomersResource.table.rowSchema
 const TechnicianRowSchema = TechniciansResource.table.rowSchema
 const CustomerPageSchema = Page.schema(CustomerRowSchema)
 const TechnicianPageSchema = Page.schema(TechnicianRowSchema)
 const RepairJobRowSchema = RepairJobsResource.table.rowSchema
-const RepairWorkshopWebRpcs = RpcGroup.make().merge(CustomersResource.group, TechniciansResource.group, RepairJobsResource.group, RepairWorkshopRpcs)
+const RepairWorkshopWebRpcs = RpcGroup.make().merge(CustomersResource.group, TechniciansResource.group, RepairJobsResource.group, RepairWorkshopOperations.group)
 export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof RepairWorkshopWebRpcs, RpcClientError.RpcClientError>>()("repair-workshop/WebClient") {
   static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(RepairWorkshopWebRpcs)), Layer.provide(browserProtocol))
 }

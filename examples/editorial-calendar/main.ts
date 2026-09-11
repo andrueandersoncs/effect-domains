@@ -1,6 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { pipe } from "effect"
+import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { EditorialCalendarApplication } from "./application.ts"
 import { EditorialCalendarMigrations } from "./migrations.ts"

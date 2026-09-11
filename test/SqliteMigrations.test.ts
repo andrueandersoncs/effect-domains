@@ -48,10 +48,8 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   const comment = pipe(nullableTable.fields, Array.findFirst(isComment), Option.getOrThrow)
   const additionSteps = [SqliteMigrations.steps.AddColumn.make({ table: "documents", column: comment })]
 
-  const addition = SqliteMigrations.make({
-    id: "002", from: source, to: withComment,
-    steps: additionSteps,
-  })
+  const addition = SqliteMigrations.make({ id: "002", to: withComment,
+  steps: additionSteps, })
 
   const HeadingSchema = Schema.Struct({ heading: Schema.NonEmptyString, comment: NullableCommentSchema })
   interface Heading extends Schema.Schema.Type<typeof HeadingSchema> {}
@@ -59,25 +57,15 @@ const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAd
   const withHeading = SqliteMigrations.snapshot([heading])
   const renameSteps = [SqliteMigrations.steps.RenameColumn.make({ table: "documents", from: "title", to: "heading" })]
 
-  const rename = SqliteMigrations.make({
-    id: "003", from: withComment, to: withHeading,
-    steps: renameSteps,
-  })
+  const rename = SqliteMigrations.make({ id: "003", to: withHeading,
+  steps: renameSteps, })
 
-  const changeSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(renamed.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "heading", source: "heading" }),
-      SqliteMigrations.copies.Source.make({ column: "comment", source: "comment" }),
-      SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
-    ],
-  })]
+  const changeSteps = [SqliteMigrations.steps.RebuildTable.make({ table: renamed.table.name, copies: [
+    SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
+  ] })]
 
-  const change = SqliteMigrations.make({
-    id: "004", from: withHeading, to: target,
-    steps: changeSteps,
-  })
+  const change = SqliteMigrations.make({ id: "004", to: target,
+  steps: changeSteps, })
 
   const initialStore = makeMigrationStore(database, [initial])
   yield* initialStore.prepare(source.tables)
@@ -130,19 +118,13 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
   const targetSnapshot = SqliteMigrations.snapshot([target.table])
   const initial = SqliteMigrations.initial({ id: "001_rename_chain", tables: [source.table] })
 
-  const chainSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(target.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
-      SqliteMigrations.copies.Source.make({ column: "c", source: "b" }),
-    ],
-  })]
+  const chainSteps = [SqliteMigrations.steps.RebuildTable.make({ table: target.table.name, copies: [
+    SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
+    SqliteMigrations.copies.Source.make({ column: "c", source: "b" }),
+  ] })]
 
-  const chain = SqliteMigrations.make({
-    id: "002_rename_chain", from: sourceSnapshot, to: targetSnapshot,
-    steps: chainSteps,
-  })
+  const chain = SqliteMigrations.make({ id: "002_rename_chain", to: targetSnapshot,
+  steps: chainSteps, })
 
   const initialStore = makeMigrationStore(database, [initial])
 
@@ -166,26 +148,18 @@ const interactingRenamesAction = Effect.fn("SqliteMigrations.interactingRenames"
   })
 
   const cycleSnapshot = SqliteMigrations.snapshot([target.table, cycle.table])
-  const addCycleSteps = [SqliteMigrations.steps.CreateTable.make({ table: Table.snapshot(cycle.table) })]
+  const addCycleSteps = [SqliteMigrations.steps.CreateTable.make({ table: cycle.table.name })]
 
-  const addCycle = SqliteMigrations.make({
-    id: "003_rename_cycle", from: targetSnapshot, to: cycleSnapshot,
-    steps: addCycleSteps,
-  })
+  const addCycle = SqliteMigrations.make({ id: "003_rename_cycle", to: cycleSnapshot,
+  steps: addCycleSteps, })
 
-  const swapSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(cycle.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "a", source: "b" }),
-      SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
-    ],
-  })]
+  const swapSteps = [SqliteMigrations.steps.RebuildTable.make({ table: cycle.table.name, copies: [
+    SqliteMigrations.copies.Source.make({ column: "a", source: "b" }),
+    SqliteMigrations.copies.Source.make({ column: "b", source: "a" }),
+  ] })]
 
-  const swap = SqliteMigrations.make({
-    id: "004_rename_cycle", from: cycleSnapshot, to: cycleSnapshot,
-    steps: swapSteps,
-  })
+  const swap = SqliteMigrations.make({ id: "004_rename_cycle", to: cycleSnapshot,
+  steps: swapSteps, })
 
   const cycleStore = makeMigrationStore(database, [initial, chain, addCycle])
 
@@ -250,20 +224,13 @@ const explicitExpressions = Effect.fn("SqliteMigrations.explicitExpressions")(fu
   const to = SqliteMigrations.snapshot([target.table])
   const initial = SqliteMigrations.initial({ id: "001", tables: [source.table] })
 
-  const migrationSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(target.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Expression.make({ column: "title", expression: `replace("title", ':', '-')` }),
-      SqliteMigrations.copies.Value.make({ column: "label", value: "json:colon' ); DROP TABLE expressions; --" }),
-      SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
-    ],
-  })]
+  const migrationSteps = [SqliteMigrations.steps.RebuildTable.make({ table: target.table.name, copies: [
+    SqliteMigrations.copies.Expression.make({ column: "title", expression: `replace("title", ':', '-')` }),
+    SqliteMigrations.copies.Value.make({ column: "label", value: "json:colon' ); DROP TABLE expressions; --" }),
+    SqliteMigrations.copies.Value.make({ column: "priority", value: 0 }),
+  ] })]
 
-  const migration = SqliteMigrations.make({
-    id: "002", from, to,
-    steps: migrationSteps,
-  })
+  const migration = SqliteMigrations.make({ id: "002", to, steps: migrationSteps })
 
   yield* makeMigrationStore(database, [initial]).prepare(from.tables)
   const record = yield* source.repository.create({ title: "before:after" })
@@ -352,19 +319,12 @@ const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransfo
   const target = SqliteMigrations.snapshot([after.table])
   const initial = SqliteMigrations.initial({ id: "001", tables: [before.table] })
 
-  const invalidSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(after.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "title", source: "title" }),
-      SqliteMigrations.copies.Expression.make({ column: "priority", expression: "-1" }),
-    ],
-  })]
+  const invalidSteps = [SqliteMigrations.steps.RebuildTable.make({ table: after.table.name, copies: [
+    SqliteMigrations.copies.Expression.make({ column: "priority", expression: "-1" }),
+  ] })]
 
-  const invalid = SqliteMigrations.make({
-    id: "002", from: source, to: target,
-    steps: invalidSteps,
-  })
+  const invalid = SqliteMigrations.make({ id: "002", to: target,
+  steps: invalidSteps, })
 
   const initialStore = makeMigrationStore(database, [initial])
   yield* initialStore.prepare(source.tables)
@@ -380,19 +340,12 @@ const failedTransformsRollBackAction = Effect.fn("SqliteMigrations.failedTransfo
   expect(failed).toBe(true)
   expect(restoredJob).toEqual(job)
 
-  const correctedSteps = [SqliteMigrations.steps.RebuildTable.make({
-    table: Table.snapshot(after.table),
-    copies: [
-      SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
-      SqliteMigrations.copies.Source.make({ column: "title", source: "title" }),
-      SqliteMigrations.copies.Value.make({ column: "priority", value: 1 }),
-    ],
-  })]
+  const correctedSteps = [SqliteMigrations.steps.RebuildTable.make({ table: after.table.name, copies: [
+    SqliteMigrations.copies.Value.make({ column: "priority", value: 1 }),
+  ] })]
 
-  const corrected = SqliteMigrations.make({
-    id: "002", from: source, to: target,
-    steps: correctedSteps,
-  })
+  const corrected = SqliteMigrations.make({ id: "002", to: target,
+  steps: correctedSteps, })
 
   const correctedStore = makeMigrationStore(database, [initial, corrected])
   yield* correctedStore.prepare(target.tables)
@@ -431,9 +384,14 @@ const invalidHistories = Effect.fn("SqliteMigrations.invalidHistories")(function
   const table = Table.make({ name: "invalid_history", schema: TitleSchema })
   const initial = SqliteMigrations.initial({ id: "001", tables: [table] })
   const encodedInitial = encodeMigration(initial)
-  const duplicate = SqliteMigration.make({ ...initial, from: initial.to, steps: [] })
+  const duplicate = SqliteMigration.make({ ...initial, steps: [] })
   const blank = SqliteMigration.make({ ...initial, id: "" })
-  const disconnected = SqliteMigration.make({ id: "002", from: empty, to: empty, steps: [] })
+
+  const disconnected = SqliteMigration.make({
+    id: "002",
+    to: empty,
+    steps: [SqliteMigrations.steps.CreateTable.make({ table: "invalid_history" })],
+  })
 
   const invalid = [
     [encodedInitial, encodeMigration(duplicate)],
@@ -447,17 +405,37 @@ const invalidHistories = Effect.fn("SqliteMigrations.invalidHistories")(function
   })
 
   yield* Effect.forEach(invalid, rejectHistory)
+  expect(() => SqliteMigrations.history(initial, disconnected)).toThrow()
 })
 
-it.effect("history rejects empty or duplicate ids and disconnected snapshots", invalidHistories)
+it.effect("history rejects empty or duplicate ids and target-incoherent chaining", invalidHistories)
+
+it.effect("history requires explicit copies for newly introduced rebuild columns", () =>
+  Effect.sync(() => {
+    const before = Table.make({ name: "new_copy_column", schema: TitleSchema })
+    const TargetSchema = Schema.Struct({ title: Schema.NonEmptyString, priority: Schema.Int })
+    interface Target extends Schema.Schema.Type<typeof TargetSchema> {}
+    const after = Table.make({ name: "new_copy_column", schema: TargetSchema })
+    const initial = SqliteMigrations.initial({ id: "001", tables: [before] })
+    const target = SqliteMigrations.snapshot([after])
+    const rebuild = SqliteMigrations.steps.RebuildTable.make({ table: after.name, copies: [] })
+
+    const migration = SqliteMigrations.make({
+      id: "002",
+      to: target,
+      steps: [rebuild],
+    })
+
+    expect(() => SqliteMigrations.history(initial, migration)).toThrow()
+  }))
 
 const tamperedHistory = Effect.fn("SqliteMigrations.tamperedHistory")(function* () {
   const database = yield* SqlClient.SqlClient
   const resource = Resource.make({ authorization: Authorization.public, name: "tampered_history", schema: TitleSchema, operations: {} })
   const target = SqliteMigrations.snapshot([resource.table])
   const initial = SqliteMigrations.initial({ id: "001", tables: [resource.table] })
-  const second = SqliteMigrations.make({ id: "002", from: target, to: target, steps: [] })
-  const third = SqliteMigrations.make({ id: "003", from: target, to: target, steps: [] })
+  const second = SqliteMigrations.make({ id: "002", to: target, steps: [] })
+  const third = SqliteMigrations.make({ id: "003", to: target, steps: [] })
   const store = makeMigrationStore(database, [initial, second, third])
   yield* store.prepare(target.tables)
   const record = yield* resource.repository.create({ title: "preserved" })
@@ -562,7 +540,7 @@ const dottedIdentifiers = Effect.fn("SqliteMigrations.dottedIdentifiers")(functi
   const renameSteps = [SqliteMigrations.steps.RenameColumn.make({ table: before.name, from: "old.field", to: "new.field" })]
 
   const rename = SqliteMigrations.make({
-    id: "002", from, to: renamedSnapshot,
+    id: "002", to: renamedSnapshot,
     steps: renameSteps,
   })
 
@@ -572,42 +550,33 @@ const dottedIdentifiers = Effect.fn("SqliteMigrations.dottedIdentifiers")(functi
   const note = pipe(physicalAdded.fields, Array.findFirst(isNote), Option.getOrThrow)
   const additionSteps = [SqliteMigrations.steps.AddColumn.make({ table: added.name, column: note })]
 
-  const addition = SqliteMigrations.make({
-    id: "003", from: renamedSnapshot, to: addedSnapshot,
-    steps: additionSteps,
-  })
+  const addition = SqliteMigrations.make({ id: "003", to: addedSnapshot,
+  steps: additionSteps, })
 
   const finalSnapshot = SqliteMigrations.snapshot([final])
   const finalTable = Table.snapshot(final)
 
   const rebuildSteps = [SqliteMigrations.steps.RebuildTable.make({
-      table: finalTable,
+      table: final.name,
       copies: [
-        SqliteMigrations.copies.Source.make({ column: "id", source: "id" }),
         SqliteMigrations.copies.Source.make({ column: "final.field", source: "new.field" }),
         SqliteMigrations.copies.Value.make({ column: "note.field", value: "copied" }),
       ],
     })]
 
-  const rebuild = SqliteMigrations.make({
-    id: "004", from: addedSnapshot, to: finalSnapshot,
-    steps: rebuildSteps,
-  })
+  const rebuild = SqliteMigrations.make({ id: "004", to: finalSnapshot,
+  steps: rebuildSteps, })
 
   const indexedSnapshot = SqliteMigrations.snapshot([indexed])
-  const createIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: final.name, name: "dotted.index", fields: ["final.field"] })]
+  const createIndexSteps = [SqliteMigrations.steps.CreateIndex.make({ table: final.name, name: "dotted.index" })]
 
-  const createIndex = SqliteMigrations.make({
-    id: "005", from: finalSnapshot, to: indexedSnapshot,
-    steps: createIndexSteps,
-  })
+  const createIndex = SqliteMigrations.make({ id: "005", to: indexedSnapshot,
+  steps: createIndexSteps, })
 
   const dropIndexSteps = [SqliteMigrations.steps.DropIndex.make({ name: "dotted.index" })]
 
-  const dropIndex = SqliteMigrations.make({
-    id: "006", from: indexedSnapshot, to: finalSnapshot,
-    steps: dropIndexSteps,
-  })
+  const dropIndex = SqliteMigrations.make({ id: "006", to: finalSnapshot,
+  steps: dropIndexSteps, })
 
   yield* makeMigrationStore(database, [initial, rename, addition, rebuild, createIndex, dropIndex]).prepare(finalSnapshot.tables)
   const rows = yield* database`SELECT * FROM "dotted.table"`

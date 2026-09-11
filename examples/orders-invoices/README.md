@@ -14,7 +14,7 @@ Run these commands from the repository root. The server and its generated fronte
 bun install
 bun run build
 export ORDERS_INVOICES_DB="$PWD/orders-invoices-walkthrough-$(date +%s).sqlite"
-export EFFECT_DOMAINS_IDENTITY_DB="$PWD/orders-invoices-identity-$(date +%s).sqlite"
+export ORDERS_INVOICES_IDENTITY_DB="$PWD/orders-invoices-identity-$(date +%s).sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3001 bun run orders-invoices:server
 ```
@@ -87,7 +87,7 @@ bun run orders-invoices billing.addLine --input-json "{\"orderId\":\"$ORDER_ID\"
 bun run orders-invoices billing.payInvoice --input-json "{\"invoiceId\":\"$INVOICE_ID\",\"expectedVersion\":2}"
 ```
 
-The first request reports `VersionConflict` for the order. The second reports `InvalidOrderTransition` with action `addLine` and actual state `invoiced`; the third reports `InvalidInvoiceTransition` with action `payInvoice` and actual state `paid`. Do not retry a stale mutation blindly: fetch the current summary, choose a new action, and submit its current version.
+The first request reports `VersionConflict` for the order. The second reports `OrderNotDraft`; the third reports framework `InvalidInvoiceTransition` with action `pay` and actual state `paid`. Do not retry a stale mutation blindly: fetch the current summary, choose a new action, and submit its current version.
 
 Mutations require an `editor` or `admin` subject. For example, the issued Bob session is an Acme `reader`, so this request reports `Forbidden`:
 
@@ -109,7 +109,7 @@ All three generated resources are read-only at the RPC boundary:
 | Resource | Published operations | Page limit / filters |
 | --- | --- | --- |
 | `orders` | `orders.get`, `orders.list` | 100; `number`, `status` |
-| `order_lines` | `order_lines.get`, `order_lines.list` | 500; `orderId` |
+| `order_lines` | `order_lines.get`, `order_lines.list` | 100; `orderId` |
 | `invoices` | `invoices.get`, `invoices.list` | 100; `orderId`, `number`, `status` |
 
 A generated list returns `{ "items": [...], "nextCursor": string | null }`, ordered by identifier. Its declared limit is both the default and the maximum; return a non-null cursor unchanged with the same filter to request another page. No generated create, update, patch, or remove operation can bypass the authored lifecycle.
@@ -132,15 +132,15 @@ At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the
 | `PORT` | `3000` | Loopback server port |
 | `ORDERS_INVOICES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `ORDERS_INVOICES_TOKEN` | unset | CLI bearer token |
-| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | Server identity database; must differ from billing data |
+| `ORDERS_INVOICES_IDENTITY_DB` | `data/orders-invoices-identity.sqlite` | Server identity database; must differ from billing data |
 | `EFFECT_DOMAINS_DEMO_PASSWORD` | required | Bootstrap password for seeded example accounts |
 
 Startup decodes and applies the frozen [migration history](migrations.ts); it preserves data and rejects an untracked or drifted database rather than resetting/adopting it. Use a fresh database path when repeating this walkthrough. The checked-in [initial artifact](migrations/001_initial.json) records the indexes, uniqueness, and composite foreign keys.
 
 - [`domain.ts`](domain.ts): canonical rows, inputs, checked minor-unit/version fields, states, and named errors.
 - [`resources.ts`](resources.ts): tenant-scoped generated reads and relational declarations.
-- [`contracts.ts`](contracts.ts): authored billing RPC names, payloads, summaries, and error unions.
-- [`sqlite.ts`](sqlite.ts): trusted-subject role checks, tenant lookups, transactions, version guards, and transitions; its example-local [`NestedRow`](projection.ts) helper derives compiled-schema JSON projection fields, not an ORM relation planner.
+- [`contracts.ts`](contracts.ts): the authored nested order-summary success schema.
+- [`sqlite.ts`](sqlite.ts): declarative billing operations, repository writes, transaction boundaries, and the aggregate SQL read model built with `Table.project`.
 - [`main.ts`](main.ts): identity service, generated admin, frontend route, migrations, and runner.
 - [`web/main.ts`](web/main.ts): the actual browser workflow and its native client reader controls.
 - [Resource reference](../../docs/reference/resources.md): generated list/page and entitlement-independent resource contracts.

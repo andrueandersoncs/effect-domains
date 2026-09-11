@@ -4,8 +4,8 @@ import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
-import { seedStock } from "./sqlite.ts"
 import { InventoryMigrations } from "./migrations.ts"
+import { seedStock } from "./sqlite.ts"
 import { ReservationsWebAssets } from "./web/assets.ts"
 
 const InitialStock = StockSchema.make({
@@ -13,17 +13,17 @@ const InitialStock = StockSchema.make({
   available: 5,
 })
 
-const initialize = seedStock(InitialStock)
-
 const web = ExampleWeb.layerHttp({
   title: "Reservations",
   accent: "#b45309",
   ...ReservationsWebAssets,
 })
 
+const seed = seedStock(InitialStock)
+
 pipe(ApplicationBun.run(ReservationApplication, {
   database: { migrations: InventoryMigrations },
-  initialize,
+  initialize: seed,
   admin: true,
   routes: web,
 }), BunRuntime.runMain)

@@ -94,6 +94,25 @@ it.effect("subject policies snapshot allowed values and reject invalid claims an
   expect(() => subject.policy(owned as never)).toThrow()
 }))
 
+it.effect("sameAs compares a shared resource and subject field", Effect.fn("Authorization.sameAs")(function* () {
+  const sharedTenant = p.sameAs("tenantId")
+  const unrestrictedScope = p.all()
+  const sameTenantPolicy = p.policy({ scope: unrestrictedScope, allow: { read: sharedTenant } })
+  const row = OwnedDocumentSchema.make({ id: "same-tenant", tenantId: "a", ownerId: "eve", title: "shared" })
+  const currentRow = Option.some(row)
+  const absentNext = Option.none()
+  const values = new AuthorizationValues({ row: currentRow, next: absentNext })
+  const otherTenant = SubjectSchema.make({ userId: "eve", tenantId: "b", roles: [] })
+
+  const denied = yield* pipe(
+    Authorization.require(sameTenantPolicy, "read", values),
+    Effect.provideService(AuthorizationSubject, otherTenant),
+    rejectedTag,
+  )
+
+  expect(denied).toBe("Forbidden")
+}))
+
 it.effect("repository visibility scopes identifiers and pagination before computing continuations", () => pipe(
   Effect.gen(function* () {
     yield* seed

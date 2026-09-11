@@ -11,6 +11,6 @@ export const ArticleSchema = Schema.Struct({
   summary: Schema.NullOr(Schema.String),
   priority: NonNegativePrioritySchema,
   channel: EditorialChannelSchema,
-  plannedPublicationAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  plannedPublicationAt: Schema.NullOr(Schema.DateTimeUtc),
 })
 

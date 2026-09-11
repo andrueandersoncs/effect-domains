@@ -15,11 +15,11 @@ hero:
 
 features:
   - title: Stop rewriting the same record
-    details: A resource derives its table, repository, and selected CRUD contracts from your schema. Declare defaults and filters alongside the operations that use them.
+    details: A resource derives its table, repository, and selected CRUD contracts from your schema. Nullable create fields default to null; declare lists, versions, and transitions beside the record.
   - title: Use the same operations everywhere
     details: The CLI, MCP tools, and browser admin share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
   - title: Keep business rules in your code
-    details: Use native Effect RPCs and SQL for approvals, inventory changes, and transactions. Compose them with generated resources in the same application.
+    details: Use Operation.make for authored commands, policies, transactions, SQL-view dependencies, and unavailable-error translation. Compose them with generated resources in one application.
 ---
 
 <div class="home-code">
@@ -66,7 +66,7 @@ A schema can describe a book’s fields. It cannot decide who may edit the book,
 - **Try it** — [Run a reading list](/getting-started) and see a book in both the CLI and browser.
 - **Build with it** — [Define a resource](/guides/define-a-resource), [restrict access](/guides/authorization), or [change a stored schema](/guides/migrations).
 - **Look something up** — Find [resource operations](/reference/resources), [runtime options, environment variables, and endpoints](/reference/runtime).
-- **Go beyond CRUD** — [Explore the applications](/examples) for authored queries, transactions, encryption, entitlements, and durable execution.
+- **Go beyond CRUD** — [Explore the applications](/examples) for transitions, authored operations, transactions, entitlements, and durable execution.
 
 Design rationale and dated verification records live separately in the [project wiki](/wiki/README).
 

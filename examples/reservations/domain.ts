@@ -1,21 +1,24 @@
-import { Effect, Schema, pipe } from "effect"
-import { identifier } from "effect-domains/domain"
+import { Schema, pipe } from "effect"
+
+import {
+  identifier,
+  NonNegativeSafeIntSchema,
+  UuidV7Schema,
+} from "effect-domains/domain"
+
+import { Transitions } from "effect-domains/transitions"
 
 export const SkuSchema = pipe(Schema.NonEmptyString, Schema.brand("Sku"))
-const isReservationId = Schema.isUUID(7)
-const reservationIdStringSchema = Schema.String.check(isReservationId)
 
 export const ReservationIdSchema = pipe(
-  reservationIdStringSchema,
+  UuidV7Schema,
   Schema.brand("ReservationId"),
   identifier,
 )
 
-const isNonNegative = Schema.isGreaterThanOrEqualTo(0)
-const isSafeInteger = Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
-export const StockCountSchema = Schema.Int.check(isNonNegative, isSafeInteger)
-const isPositive = Schema.isGreaterThan(0)
-export const QuantitySchema = StockCountSchema.check(isPositive)
+export const QuantitySchema = NonNegativeSafeIntSchema.check(
+  Schema.isGreaterThan(0),
+)
 
 export const ReservationStatusSchema = Schema.Literals([
   "held",
@@ -27,7 +30,7 @@ const IdentifiedSkuSchema = pipe(SkuSchema, identifier)
 
 export const StockSchema = Schema.Struct({
   sku: IdentifiedSkuSchema,
-  available: StockCountSchema,
+  available: NonNegativeSafeIntSchema,
 })
 
 export interface Stock extends Schema.Schema.Type<typeof StockSchema> {}
@@ -65,12 +68,7 @@ export class UnknownSku extends Schema.TaggedError<UnknownSku>()("UnknownSku", {
 
 export class InsufficientStock extends Schema.TaggedError<InsufficientStock>()(
   "InsufficientStock",
-  { sku: SkuSchema, requested: QuantitySchema, available: StockCountSchema },
-) {}
-
-export class ReservationNotFound extends Schema.TaggedError<ReservationNotFound>()(
-  "ReservationNotFound",
-  { id: ReservationIdSchema },
+  { sku: SkuSchema, requested: QuantitySchema, available: NonNegativeSafeIntSchema },
 ) {}
 
 export class InventoryUnavailable extends Schema.TaggedError<InventoryUnavailable>()(
@@ -78,47 +76,12 @@ export class InventoryUnavailable extends Schema.TaggedError<InventoryUnavailabl
   {},
 ) {}
 
-export const ReservationActionSchema = Schema.Literals(["confirm", "release"])
-
-export class InvalidReservationState extends Schema.TaggedError<InvalidReservationState>()(
-  "InvalidReservationState",
-  {
-    id: ReservationIdSchema,
-    action: ReservationActionSchema,
-    actual: ReservationStatusSchema,
+export const ReservationStateTransitions = Transitions.make({
+  name: "Reservation",
+  field: "status",
+  status: ReservationStatusSchema,
+  transitions: {
+    confirm: { from: ["held"], to: "confirmed" },
+    release: { from: ["held"], to: "released" },
   },
-) {}
-
-const TransitionSchema = Schema.Struct({
-  from: ReservationStatusSchema,
-  to: ReservationStatusSchema,
 })
-
-interface Transition extends Schema.Schema.Type<typeof TransitionSchema> {}
-
-export const ReservationTransitions = Schema.Struct({
-  confirm: TransitionSchema,
-  release: TransitionSchema,
-}).make({
-  confirm: { from: "held", to: "confirmed" },
-  release: { from: "held", to: "released" },
-})
-
-export const transitionReservation = Effect.fn("Reservation.transition")(
-  function* (
-    reservation: Reservation,
-    action: typeof ReservationActionSchema.Type,
-  ) {
-    const transition = ReservationTransitions[action]
-
-    if (reservation.status !== transition.from) {
-      return yield* InvalidReservationState.make({
-        id: reservation.id,
-        action,
-        actual: reservation.status,
-      })
-    }
-
-    return ReservationSchema.make({ ...reservation, status: transition.to })
-  },
-)

@@ -8,9 +8,6 @@ export const ReadingListResource = Resource.make({
   schema: ReadingListBookSchema,
   operations: {
     ...Resource.crud,
-    create: {
-      defaults: { rating: null, notes: null },
-    },
     list: {
       filter: ["status", "format"],
       limit: 25,

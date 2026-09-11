@@ -11,7 +11,7 @@ export const AssetsResource = Resource.make({
     list: { filter: ["assetTag", "location", "condition"], limit: 100 },
   },
   relations: {
-    unique: [{ name: "assets_asset_tag_key", fields: ["assetTag"] }],
-    indexes: [{ name: "assets_location_condition_idx", fields: ["location", "condition"] }],
+    unique: [{ fields: ["assetTag"] }],
+    indexes: [{ fields: ["location", "condition"] }],
   },
 })

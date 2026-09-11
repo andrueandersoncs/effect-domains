@@ -19,7 +19,7 @@ mkdir -p "$PWD/.tmp"
 export REPORT_EXPORTS_DB="$PWD/.tmp/report-exports-$RUN_ID.sqlite"
 export REPORT_EXPORTS_EXECUTION_DB="$PWD/.tmp/report-exports-execution-$RUN_ID.sqlite"
 export REPORT_EXPORTS_OUTPUT_DIR="$PWD/.tmp/report-artifacts-$RUN_ID"
-export EFFECT_DOMAINS_IDENTITY_DB="$PWD/.tmp/report-exports-identity-$RUN_ID.sqlite"
+export REPORT_EXPORTS_IDENTITY_DB="$PWD/.tmp/report-exports-identity-$RUN_ID.sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 ```
 
@@ -113,7 +113,7 @@ The caller never sends an account ID. Generation derives it from the authenticat
 
 - Repeating the same report ID for the same account addresses the same execution. It is not an update or a replacement for changed lines. Use a fresh report ID for different source data.
 - Alice's issued Acme editor credential can generate in the newly seeded database. An issued Bob credential is a reader and fails the editor policy. An issued `outsider` credential is an editor in the `other` account but has no seeded paid subscription, so generation fails its `reports.generate` entitlement. The issued Admin credential is the global operator for polling, release, resume, status, and `GET /operator/metrics`; operator access does not require a subscription.
-- The subscription resolver checks the stored row and clock on each generation request. Cancellation retains access until `validUntilEpochSeconds`; a canceled row can use a non-null `graceUntilEpochSeconds` until that exclusive deadline. Restarting never renews, restores, or seeds over an existing subscription.
+- The subscription resolver checks the stored row and clock on each generation request. Cancellation retains access until `validUntil`; a canceled row can use a non-null `graceUntil` until that exclusive timestamp. Restarting never renews, restores, or seeds over an existing subscription.
 - Once a workflow has been accepted, its durable steps do not re-check the generation entitlement. That lets already accepted work continue after the subscription changes; it does not authorize a new generation.
 
 The request is deliberately constrained: report IDs start alphanumeric and may then contain letters, numbers, `.`, `_`, or `-` (up to 128 characters); account codes are 4–10 digits; currencies are `AUD`, `CAD`, `EUR`, `GBP`, `JPY`, or `USD`; every line has a nonempty description, `debit` or `credit` direction, and a positive safe-integer `amountMinor`. The reporting period must end after it starts. Schema failures exit nonzero, while arithmetic that cannot be represented safely fails the workflow. There is no external ledger lookup, provider, webhook, checkout, or credit-consumption simulation.
@@ -132,6 +132,6 @@ Interruption caveat (2026-09-11): stopping immediately after an automatic `Gener
 
 Return to `report-exports:server` with those paths to poll or release remotely. The application database defaults to `data/report-exports.sqlite`; execution storage defaults to `data/report-exports-execution.sqlite`; `REPORT_EXPORTS_OUTPUT_DIR` is required. Back up the application and execution databases together, but recognize their transaction boundaries are separate. There is no cross-database transaction, automatic outbox, or exactly-once claim for arbitrary external services. The queue makes the artifact's execution-ID file durable and writes it via atomic rename; it does not turn a broader multi-system workflow into exactly-once delivery.
 
-`EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `EFFECT_DOMAINS_IDENTITY_DB` defaults to `data/identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
+`EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `REPORT_EXPORTS_IDENTITY_DB` defaults to `data/report-exports-identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
 
 For source details, see the [workflow and RPCs](workflow.ts), [contracts](contracts.ts), [authorization](authorization.ts), [subscription resolver](subscriptions.ts), [runtime layer](runtime.ts), [artifact writer](writer.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).

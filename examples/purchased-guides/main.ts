@@ -8,14 +8,16 @@ import { PurchasedGuideEntitlements, seedPurchasedGuides } from "./entitlements.
 import { PurchasedGuidesMigrations } from "./migrations.ts"
 import { PurchasedGuidesWebAssets } from "./web/assets.ts"
 
-const services = Layer.mergeAll(ExampleIdentity, PurchasedGuideEntitlements)
-const initialize = seedPurchasedGuides()
+const identity = ExampleIdentity.layer("purchased-guides")
+const services = Layer.mergeAll(identity, PurchasedGuideEntitlements)
 
 const web = ExampleWeb.layerHttp({
   title: "Purchased guides",
   accent: "#be185d",
   ...PurchasedGuidesWebAssets,
 })
+
+const initialize = seedPurchasedGuides()
 
 pipe(ApplicationBun.run(PurchasedGuidesApplication, {
   database: { migrations: PurchasedGuidesMigrations },

@@ -1,79 +1,9 @@
 {
-  "from": {
-    "tables": [
-      {
-        "fields": [
-          {
-            "_tag": "TableField",
-            "checks": [],
-            "generation": {
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "name": "id",
-            "nullable": false,
-            "scalar": "string"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [
-              {
-                "_tag": "MinLength",
-                "value": 1
-              }
-            ],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "title",
-            "nullable": false,
-            "scalar": "string"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": [
-                  0,
-                  1
-                ]
-              }
-            ],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "completed",
-            "nullable": false,
-            "scalar": "integer"
-          }
-        ],
-        "identifier": "id",
-        "name": "todos"
-      }
-    ],
-    "version": 1
-  },
   "id": "002_ownership",
   "steps": [
     {
       "_tag": "SqliteRebuildTable",
       "copies": [
-        {
-          "_tag": "SqliteColumnSource",
-          "column": "id",
-          "source": "id"
-        },
-        {
-          "_tag": "SqliteColumnSource",
-          "column": "title",
-          "source": "title"
-        },
-        {
-          "_tag": "SqliteColumnSource",
-          "column": "completed",
-          "source": "completed"
-        },
         {
           "_tag": "SqliteColumnValue",
           "column": "tenantId",
@@ -85,76 +15,7 @@
           "expression": "'alice'"
         }
       ],
-      "table": {
-        "fields": [
-          {
-            "_tag": "TableField",
-            "checks": [],
-            "generation": {
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "name": "id",
-            "nullable": false,
-            "scalar": "string"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [
-              {
-                "_tag": "MinLength",
-                "value": 1
-              }
-            ],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "title",
-            "nullable": false,
-            "scalar": "string"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": [
-                  0,
-                  1
-                ]
-              }
-            ],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "completed",
-            "nullable": false,
-            "scalar": "integer"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "tenantId",
-            "nullable": false,
-            "scalar": "string"
-          },
-          {
-            "_tag": "TableField",
-            "checks": [],
-            "generation": {
-              "_tag": "None"
-            },
-            "name": "ownerId",
-            "nullable": false,
-            "scalar": "string"
-          }
-        ],
-        "identifier": "id",
-        "name": "todos"
-      }
+      "table": "todos"
     }
   ],
   "to": {

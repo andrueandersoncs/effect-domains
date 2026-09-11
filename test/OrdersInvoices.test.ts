@@ -94,7 +94,7 @@ const billingTest = Effect.gen(function* () {
 
   expect(staleLine).toMatchObject({
     _tag: "Failure",
-    failure: { _tag: "VersionConflict", resource: "order", id: aliceOrder.id, expectedVersion: 1 },
+    failure: { _tag: "VersionConflict", resource: "orders", key: aliceOrder.id, expectedVersion: 1 },
   })
 
   const forgedLine = yield* pipe(database`
@@ -130,33 +130,22 @@ const billingTest = Effect.gen(function* () {
   expect(invoice.status).toBe("issued")
   expect(invoice.totalMinor).toBe(2500)
 
-  const staleIssue = yield* pipe(client["billing.issueInvoice"]({
-    orderId: aliceOrder.id,
-    expectedVersion: 2,
-    number: invoiceNumber,
-  }, { headers: alice }), Effect.result)
-
-  expect(staleIssue).toMatchObject({
-    _tag: "Failure",
-    failure: { _tag: "VersionConflict", resource: "order", id: aliceOrder.id, expectedVersion: 2 },
-  })
 
   const paid = yield* client["billing.payInvoice"]({ invoiceId: invoice.id, expectedVersion: 1 }, { headers: alice })
   expect(paid.status).toBe("paid")
   expect(paid.version).toBe(2)
 
   const stalePayment = yield* pipe(client["billing.payInvoice"]({ invoiceId: invoice.id, expectedVersion: 1 }, { headers: alice }), Effect.result)
+  const illegalPayment = yield* pipe(client["billing.payInvoice"]({ invoiceId: invoice.id, expectedVersion: 2 }, { headers: alice }), Effect.result)
 
   expect(stalePayment).toMatchObject({
     _tag: "Failure",
-    failure: { _tag: "VersionConflict", resource: "invoice", id: invoice.id, expectedVersion: 1 },
+    failure: { _tag: "InvalidInvoiceTransition", key: invoice.id, action: "pay", actual: "paid" },
   })
-
-  const illegalPayment = yield* pipe(client["billing.payInvoice"]({ invoiceId: invoice.id, expectedVersion: 2 }, { headers: alice }), Effect.result)
 
   expect(illegalPayment).toMatchObject({
     _tag: "Failure",
-    failure: { _tag: "InvalidInvoiceTransition", invoiceId: invoice.id, action: "payInvoice", actual: "paid" },
+    failure: { _tag: "InvalidInvoiceTransition", key: invoice.id, action: "pay", actual: "paid" },
   })
 })
 

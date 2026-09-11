@@ -19,7 +19,7 @@ mkdir -p "$PWD/.tmp"
 export APPOINTMENT_REMINDERS_DB="$PWD/.tmp/appointment-reminders-$RUN_ID.sqlite"
 export APPOINTMENT_REMINDERS_EXECUTION_DB="$PWD/.tmp/appointment-reminders-execution-$RUN_ID.sqlite"
 export APPOINTMENT_REMINDERS_PROJECTION_FILE="$PWD/.tmp/appointment-reminders-$RUN_ID.notifications.json"
-export EFFECT_DOMAINS_IDENTITY_DB="$PWD/.tmp/appointment-reminders-identity-$RUN_ID.sqlite"
+export APPOINTMENT_REMINDERS_IDENTITY_DB="$PWD/.tmp/appointment-reminders-identity-$RUN_ID.sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 ```
 
@@ -131,7 +131,7 @@ The `notifications` array contains every current row ordered by identifier, incl
 
 Application data defaults to `data/appointment-reminders.sqlite`; the native execution store defaults to `data/appointment-reminders.execution.sqlite`; the projection defaults to `data/appointment-reminders.notifications.json`. The application and execution stores have separate transaction boundaries. Back up both databases for recovery, but do not infer a cross-database transaction, automatic outbox, or exactly-once delivery guarantee for arbitrary external systems. Inbox insertion is deduplicated in the application database; the scope of that behavior is the durable in-app row described here.
 
-`EFFECT_DOMAINS_DEMO_PASSWORD` is required for each server start and `EFFECT_DOMAINS_IDENTITY_DB` defaults to `data/identity.sqlite`; never point it at the application or execution database.
+`EFFECT_DOMAINS_DEMO_PASSWORD` is required for each server start and `APPOINTMENT_REMINDERS_IDENTITY_DB` defaults to `data/appointment-reminders-identity.sqlite`; never point it at the application or execution database.
 
 A given execution store has one native `SingleRunner`: run **either** `appointment-reminders:server` or `appointment-reminders:worker` with it, never both concurrently. To continue an accepted future reminder, the projection loop, and retention without HTTP, stop the server and start a worker with the same database and projection environment:
 

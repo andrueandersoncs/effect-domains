@@ -1,10 +1,13 @@
-import { Schema } from "effect"
-import { CalendarDateSchema } from "effect-domains/domain"
+import { Schema, pipe } from "effect"
+
+import {
+  CalendarDateSchema,
+  PositiveSafeIntSchema,
+  UuidV7Schema,
+  identifier,
+} from "effect-domains/domain"
 
 const validCurrency = Schema.isPattern(/^[A-Z]{3}$/)
-const atLeastOne = Schema.isGreaterThanOrEqualTo(1)
-const atMostSafeInteger = Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
-const atMostOneHundred = Schema.isLessThanOrEqualTo(100)
 export const CurrencySchema = Schema.String.check(validCurrency)
 
 export const ExpenseCategorySchema = Schema.Literals([
@@ -15,15 +18,13 @@ export const ExpenseCategorySchema = Schema.Literals([
   "other",
 ])
 
-export const PositiveMinorUnitsSchema = Schema.Int.check(atLeastOne, atMostSafeInteger)
-export const QueryLimitSchema = Schema.Int.check(atLeastOne, atMostOneHundred)
-export const ExpenseIdSchema = Schema.String.check(Schema.isUUID(7))
+export const ExpenseIdSchema = pipe(UuidV7Schema, identifier)
 
 export const ExpenseSchema = Schema.Struct({
   date: CalendarDateSchema,
   merchant: Schema.NonEmptyString,
   category: ExpenseCategorySchema,
-  amountMinor: PositiveMinorUnitsSchema,
+  amountMinor: PositiveSafeIntSchema,
   currency: CurrencySchema,
 })
 
@@ -39,7 +40,6 @@ export const ExpenseQueryInputSchema = Schema.Struct({
   from: CalendarDateSchema,
   through: CalendarDateSchema,
   category: Schema.optionalKey(ExpenseCategorySchema),
-  limit: Schema.optionalKey(QueryLimitSchema),
 })
 
 export interface ExpenseQueryInput extends Schema.Schema.Type<
@@ -49,7 +49,7 @@ export interface ExpenseQueryInput extends Schema.Schema.Type<
 export const ExpenseTotalSchema = Schema.Struct({
   category: ExpenseCategorySchema,
   currency: CurrencySchema,
-  totalMinor: PositiveMinorUnitsSchema,
+  totalMinor: PositiveSafeIntSchema,
 })
 
 export class ExpenseNotFound extends Schema.TaggedError<ExpenseNotFound>()(
@@ -66,4 +66,3 @@ export class ExpenseLedgerUnavailable extends Schema.TaggedError<ExpenseLedgerUn
   "ExpenseLedgerUnavailable",
   {},
 ) {}
-

@@ -4,7 +4,7 @@ description: Bun runner options, environment variables, generated commands, HTTP
 
 # Runtime and clients
 
-This reference covers `ApplicationBun.run` in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
+This reference covers `ApplicationBun.main` and `ApplicationBun.run` in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
 
 ## Application composition
 
@@ -24,11 +24,11 @@ This example belongs beside the reading list's `resources.ts`. In your applicati
 
 ## Bun runner
 
-Import `ApplicationBun` from `effect-domains/application-bun`. Pass its returned Effect to `BunRuntime.runMain` from `@effect/platform-bun`.
+Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.main(application, options)` runs the application through `BunRuntime.runMain`; use it for a Bun entrypoint. `ApplicationBun.run(application, options)` returns the Effect when another runtime owns execution.
 
 | Option | Contract |
 | --- | --- |
-| `database.migrations` | Required ordered array of decoded SQLite migration artifacts, usually from `SqliteMigrations.decodeHistory`. |
+| `database.migrations` | Required ordered array of frozen SQLite migration artifacts, usually from `SqliteMigrations.history(...)`. |
 | `database.filename` | Optional explicit filename; overrides the database environment variable. |
 | `services` | Application service layer, built with the application SQL client available. Authentication and storage-codec services belong here. |
 | `initialize` | Startup Effect, run after database preparation and service construction. |
@@ -49,11 +49,12 @@ The prefix comes from `application.name`: uppercase, with each non-alphanumeric 
 | `<PREFIX>_DB` | Server / worker, unless `database.filename` is set | `data/<application-name>.sqlite` |
 | `<PREFIX>_URL` | Remote CLI | `http://127.0.0.1:3000/rpc/v1` |
 | `<PREFIX>_TOKEN` | Remote CLI | Absent; when set, sent as a bearer token |
-| `EFFECT_DOMAINS_IDENTITY_DB` | Protected example identity store | `data/identity.sqlite` |
-| `EFFECT_DOMAINS_DEMO_PASSWORD` | Protected example account bootstrap | Required; no fallback |
-| `EFFECT_DOMAINS_SESSION_LIFETIME` | Protected example issued-session lifetime | `8 hours`; must be positive and finite |
+| `<PREFIX>_IDENTITY_DB` | `SqliteIdentity.layer` | `data/<application-name>-identity.sqlite` |
+| `<PREFIX>_EXECUTION_DB` | `SqliteBunRuntime.privateClient({ purpose: "execution" })` | `data/<application-name>-execution.sqlite` |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | Example account bootstrap | Required; no fallback |
+| `EFFECT_DOMAINS_SESSION_LIFETIME` | Example issued-session lifetime | `8 hours`; must be positive and finite |
 
-The protected examples require `EFFECT_DOMAINS_DEMO_PASSWORD` on every process start. Their identity store must be separate from the application database; use disposable explicit paths in walkthroughs. Account seeds insert only missing accounts, preserving changed passwords, roles, and disabled state.
+`SqliteBunRuntime.privateClient({ application, purpose, filename? })` uses the corresponding `<PREFIX>_<PURPOSE>_DB` variable unless `filename` is supplied, creates its parent directory, and refuses the application database file or inode. `SqliteIdentity.layer` uses it with `purpose: "identity"`. Durable examples use it with `purpose: "execution"`; do not point either private store at the application database.
 
 `PORT` does **not** change the client URL. Example, in separate terminals:
 
@@ -136,11 +137,11 @@ Help and inspection do not need a running server. Inspection does not execute ha
 
 `effect-domains/identity` is the portable identity boundary. It exports `CredentialsSchema`, `IssuedSessionSchema`, `CurrentSessionSchema`, `SubjectSchema`, `IdentityUnavailable`, and the narrow `IdentityRuntime` service. `IdentityRuntime` verifies credentials, authenticates an opaque token into a session ID, expiry, and current subject, and revokes a session ID.
 
-`effect-domains/identity-rpc` is the native RPC adapter, not part of that portable interface. `IdentityRpcs` and `IdentityHandlers` publish `identity.login`, `identity.current`, and `identity.logout`; `authenticateIdentity(headers)` parses and verifies a bearer credential. Applications compose that group and handler layer explicitly in `Application.parts`. `current` and `logout` use native RPC metadata headers and authenticate every call. Their failures are `Unauthenticated` and `IdentityUnavailable`.
+`effect-domains/identity-rpc` is the native RPC adapter. `IdentityBundle` packages its `IdentityRpcs` group and `IdentityHandlers` layer for `Application.parts`, publishing `identity.login`, `identity.current`, and `identity.logout`. `authenticateIdentity(headers)` parses and verifies a bearer credential; `current` and `logout` authenticate every call. Their failures are `Unauthenticated` and `IdentityUnavailable`.
 
-`AuthorizationRpc.Authenticator` remains intentionally narrower: `authenticate(headers)` yields only an `AuthorizationSubject`. It neither requires nor exposes opaque-session data, so applications can supply a verified custom IdP adapter.
+`SqliteIdentity.layer({ application, accounts, password, sessionLifetime?, filename? })` supplies `IdentityRuntime` and the narrower `AuthorizationRpc.Authenticator`. Its identity database is private to the named application. An application can instead provide a verified custom IdP adapter to `AuthorizationRpc.Authenticator`.
 
-The protected examples provide `ExampleIdentity`. It maintains a separate SQLite store with a frozen v1 migration ledger and seeded `alice`, `bob`, `admin`, and `outsider` accounts. It hashes the configured bootstrap password with Argon2id (64 MiB, time cost 2), issues random 32-byte Base64URL credentials, and persists only SHA-256 credential digests. Authentication joins current account claims and disabled state on every call, and rejects expired or revoked sessions. Password verification has two non-queueing permits, retains its permit while native Argon2 is uninterruptible, uses a dummy hash for unknown or disabled accounts, and reports generic invalid credentials. This is an example credential store, not a production user-management system or IdP.
+The examples wrap that factory in `ExampleIdentity.layer(application)`, with seeded demonstration accounts. It is example bootstrap data, not a production user-management system or IdP.
 
 The CLI uses the normal `<APP>_URL` and `<APP>_TOKEN` variables. `identity.login` returns canonical JSON containing a secret token, ISO `expiresAt`, and subject; handle the token as a secret. `identity.current` returns the expiry and subject, and `identity.logout` revokes the presented credential.
 
@@ -221,7 +222,7 @@ The generated admin is a generic bearer-entry surface: it accepts a real issued 
 
 ## Durable execution
 
-The runner composes native Effect layers; it does not supply its own job system. The report and reminder examples use native SingleRunner with a separate execution database. Run **either** their server **or** worker against one execution store, not both concurrently. See [durable examples](/examples#durable-work) for the application-specific setup and limits.
+The runner composes native Effect layers; it does not supply a job system. The report and reminder examples use native SingleRunner with `SqliteBunRuntime.privateClient({ application, purpose: "execution" })`; that store defaults to `<APP>_EXECUTION_DB`. Run **either** their server or worker against one execution store, not both concurrently. See [durable examples](/examples#durable-work) for application-specific setup and limits.
 
 ## Sources
 
@@ -233,5 +234,6 @@ The runner composes native Effect layers; it does not supply its own job system.
 - [Admin adapter](../../packages/effect-domains/src/application-admin.ts)
 - [Portable identity interface](../../packages/effect-domains/src/identity.ts)
 - [Native identity RPC adapter](../../packages/effect-domains/src/identity-rpc.ts)
-- [Example identity store](../../packages/example-support/src/identity.ts)
+- [SQLite identity implementation](../../packages/effect-domains/src/sqlite-identity.ts)
+- [SQLite Bun runtime](../../packages/effect-domains/src/sqlite-bun.ts)
 - [Example browser helpers](../../packages/example-web/src/)

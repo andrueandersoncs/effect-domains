@@ -8,9 +8,9 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell, textI
 import { Form } from "@effect-domains/example-web/form"
 import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
-import { ExpenseLedgerRpcs } from "../contracts.ts"
 import { ExpenseQueryInputSchema, ExpenseSchema, ExpenseTotalSchema } from "../domain.ts"
 import { ExpensesResource } from "../resources.ts"
+import { ExpenseLedgerOperations } from "../sqlite.ts"
 
 const ExpenseRowSchema = ExpensesResource.table.rowSchema
 const ExpenseTotalsSchema = Schema.Array(ExpenseTotalSchema)
@@ -19,8 +19,12 @@ const formCategoryChoices = Array.map(categories, (category) => ({ value: catego
 const filterCategoryChoices = [{ value: "", label: "All categories" }, ...formCategoryChoices]
 const today = new Date().toISOString().slice(0, 10)
 
-export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ExpenseLedgerRpcs, RpcClientError.RpcClientError>>()("expense-ledger/WebClient") {
-  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ExpenseLedgerRpcs)), Layer.provide(browserProtocol))
+const ExpenseLedgerWebRpcs = ExpensesResource.group.merge(
+  ExpenseLedgerOperations.group,
+)
+
+export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ExpenseLedgerWebRpcs, RpcClientError.RpcClientError>>()("expense-ledger/WebClient") {
+  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ExpenseLedgerWebRpcs)), Layer.provide(browserProtocol))
 }
 
 export const Model = Schema.Struct({
@@ -63,7 +67,16 @@ const requestEffect = <A, E, Success extends Message>(request: typeof RequestTok
 
 export const ListExpenses = Command.define("ListExpenses", {
   args: { request: RequestTokenSchema, from: Schema.String, through: Schema.String, filterCategory: Schema.String }, messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, from, through, filterCategory }) => requestEffect(request, Effect.gen(function*() { const client = yield* WebClient; return yield* client["expenses.query"](yield* queryPayload(from, through, filterCategory)) }), (expenses) => Message.SucceededList({ request, expenses })),
+  execute: ({ request, from, through, filterCategory }) => requestEffect(request, Effect.gen(function*() {
+    const client = yield* WebClient
+    const query = yield* queryPayload(from, through, filterCategory)
+    const page = yield* client["expenses.list"]({
+      range: { date: { from: query.from, to: query.through } },
+      ...(query.category === undefined ? {} : { filter: { category: query.category } }),
+      limit: 50,
+    })
+    return page.items
+  }), (expenses) => Message.SucceededList({ request, expenses })),
 })
 export const LoadTotals = Command.define("LoadTotals", {
   args: { request: RequestTokenSchema, from: Schema.String, through: Schema.String, filterCategory: Schema.String }, messages: [Message.SucceededTotals, Message.Failed],

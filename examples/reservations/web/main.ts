@@ -14,11 +14,13 @@ import {
 import { Form } from "@effect-domains/example-web/form"
 import { formatRpcError, browserProtocol } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
-import { InventoryRpcs } from "../contracts.ts"
+import { InventoryOperations } from "../sqlite.ts"
 import { QuantitySchema, ReservationSchema, StockSchema } from "../domain.ts"
 import { ReservationResource, StockResource } from "../resources.ts"
 
-const ReservationWebRpcs = InventoryRpcs.merge(StockResource.group).merge(ReservationResource.group)
+const ReservationWebRpcs = InventoryOperations.group
+  .merge(StockResource.group)
+  .merge(ReservationResource.group)
 
 export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReservationWebRpcs, RpcClientError.RpcClientError>>()("reservations/WebClient") {
   static readonly layer = pipe(

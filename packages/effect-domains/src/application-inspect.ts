@@ -43,6 +43,8 @@ const ResourceInspectionSchema = Schema.Struct({
   schema: Schema.Unknown,
   creation: CreationInspectionSchema,
   list: Schema.Unknown,
+  version: Schema.optionalKey(Schema.String),
+  transitions: Schema.optionalKey(Schema.Unknown),
   authorization: AuthorizationInspectionSchema,
   storage: StorageSchema,
 })
@@ -94,6 +96,14 @@ const resource = (definition: Resource) => {
   const stored = schemaDocument(definition.table.storageSchema)
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
   const authorization = inspectAuthorization(definition.authorization)
+  const version = Option.fromNullishOr(definition.version) as Option.Option<unknown>
+
+  const transitions = pipe(
+    Option.fromNullishOr(definition.transitions),
+    Option.map(Struct.get("inspection")),
+  ) as Option.Option<unknown>
+
+  const details = Record.getSomes({ version, transitions }) as Partial<Pick<ResourceInspection, "version" | "transitions">>
 
   return ResourceInspectionSchema.make({
     name: definition.name,
@@ -101,6 +111,7 @@ const resource = (definition: Resource) => {
     schema,
     creation: definition.creation,
     list: definition.list,
+    ...details,
     authorization,
     storage,
   })

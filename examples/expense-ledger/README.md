@@ -55,16 +55,22 @@ export EXPENSE_ID='paste-the-first-returned-id-here'
 
 The accepted categories are `meals`, `travel`, `software`, `supplies`, and `other`. A date is a Gregorian `YYYY-MM-DD` string; a currency is exactly three uppercase letters.
 
-### 2. Query the inclusive period and calculate totals
+### 2. List the inclusive period and calculate totals
 
 Ask for exactly the two-day period, filtered to meals:
 
 ```bash
-bun run expense-ledger expenses.query --input-json '{"from":"2026-09-01","through":"2026-09-02","category":"meals","limit":10}'
+bun run expense-ledger expenses.list --input-json '{"range":{"date":{"from":"2026-09-01","to":"2026-09-02"}},"filter":{"category":"meals"},"limit":1}'
 bun run expense-ledger expenses.totals --input-json '{"from":"2026-09-01","through":"2026-09-02","category":"meals"}'
 ```
 
-The query returns an array ordered first by `date`, then by `id`. Notice that both endpoint dates are included: the condition is `date >= from` and `date <= through`. The total call returns separate rows such as:
+The list returns `{ "items": [...], "nextCursor": "..." }`, ordered first by `date`, then by `id`. Both endpoint dates are included. To retrieve the next page, send its non-null cursor unchanged with the same range and filter:
+
+```bash
+bun run expense-ledger expenses.list --input-json '{"range":{"date":{"from":"2026-09-01","to":"2026-09-02"}},"filter":{"category":"meals"},"limit":1,"cursor":"PASTE_NEXT_CURSOR"}'
+```
+
+The total call returns separate rows such as:
 
 ```json
 [
@@ -73,9 +79,7 @@ The query returns an array ordered first by `date`, then by `id`. Notice that bo
 ]
 ```
 
-There is deliberately no cross-currency grand total. Totals group by both `category` and `currency`, and they include every matching expense even when a query's limit truncates its rows.
-
-`expenses.query` is an authored bounded array, not a generated cursor page: omitting `limit` uses 50, its maximum is 100, and it returns no `nextCursor`. `expenses.totals` accepts the same date/category filter but ignores `limit` for aggregation.
+There is deliberately no cross-currency grand total. Totals group by both `category` and `currency` and include every matching expense.
 
 ### 3. Read, correct, and remove the first entry
 
@@ -93,23 +97,18 @@ The first three calls return the selected row (the remove call returns the delet
 ## Boundaries to notice
 
 - Amounts must be positive safe integers from 1 through `9007199254740991`. Negative, zero, fractional, or unsafe values fail input validation; this is minor-unit arithmetic, not floating-point currency arithmetic.
-- A query with `from` later than `through` fails with `InvalidExpenseDateRange` and echoes the two dates:
-
-  ```bash
-  bun run expense-ledger expenses.query --input-json '{"from":"2026-09-03","through":"2026-09-02"}'
-  ```
-
+- `expenses.totals` with `from` later than `through` fails with `InvalidExpenseDateRange` and echoes the two dates.
 - Storage and result-codec failures are translated to `ExpenseLedgerUnavailable`. That includes a database failure and a total that cannot satisfy the declared safe-integer result schema; no silently rounded or unrepresentable total is returned.
-- A missing row from `get`, `update`, or `remove` is `ExpenseNotFound`. Invalid dates, categories, currencies, UUIDs, and query limits are rejected by their request schemas before the handler can perform the operation.
-- The Foldkit page at `/` uses the canonical native client with date/category controls, a bounded expense table, a totals-by-category-and-currency table, and record/edit/remove controls. Changing the query invalidates prior rows and totals; saves/removals refresh both. Invalid amount or date inputs produce field-specific errors. `/admin` is the separate generated RPC admin. Neither surface is an accounting workflow.
+- A missing row from `get`, `update`, or `remove` is `ExpenseNotFound`. Invalid dates, categories, currencies, UUIDs, and generated-list limits are rejected by their request schemas before the handler can perform the operation.
+- The Foldkit page at `/` uses the canonical native client with date/category controls, a cursor-backed expense list, a totals-by-category-and-currency table, and record/edit/remove controls. Changing the query invalidates prior rows and totals; saves/removals refresh both. Invalid amount or date inputs produce field-specific errors. `/admin` is the separate generated RPC admin. Neither surface is an accounting workflow.
 
 This is a local expense register. It does not implement double-entry accounting, exchange rates, reimbursement review, taxes, production identity, or a payment-provider workflow.
 
 ## Read next
 
 - [Expense schemas and declared failures](domain.ts)
-- [RPC contracts](contracts.ts) and [authored SQLite handlers](sqlite.ts)
-- [Resource registration](resources.ts), [migration history](migrations.ts), and [runtime entry point](main.ts)
+- [Resource list declaration and `Operation.make` handlers](resources.ts) and [SQLite totals](sqlite.ts)
+- [Migration history](migrations.ts) and [runtime entry point](main.ts)
 - [Foldkit ledger UI](web/main.ts)
 - [Resource/list and implicit identifier contract](../../docs/reference/resources.md)
 - [Bun runtime, RPC, MCP, and environment settings](../../packages/effect-domains/src/application-bun.ts)

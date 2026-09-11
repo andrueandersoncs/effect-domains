@@ -9,7 +9,8 @@ import { Form } from "@effect-domains/example-web/form"
 import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
-import { FinancialReportLineSchema, ReportExportPollResultSchema, ReportExportRequestSchema, ReportExportRpcs, ReportExportStatusSchema } from "../contracts.ts"
+import { FinancialReportLineSchema, ReportExportPollResultSchema, ReportExportRequestSchema, ReportExportStatusSchema } from "../contracts.ts"
+import { ReportExportRpcs } from "../workflow.ts"
 
 const currencies = ["AUD", "CAD", "EUR", "GBP", "JPY", "USD"] as const
 const releasePolicies = ["automatic", "operatorApproval"] as const

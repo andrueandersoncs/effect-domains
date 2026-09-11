@@ -1,9 +1,5 @@
 {
   "id": "001_initial",
-  "from": {
-    "version": 1,
-    "tables": []
-  },
   "to": {
     "version": 1,
     "tables": [
@@ -46,40 +42,7 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "documents",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "title",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "MinLength",
-                "value": 1
-              }
-            ]
-          }
-        ]
-      }
+      "table": "documents"
     }
   ]
 }

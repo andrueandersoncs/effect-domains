@@ -1,5 +1,7 @@
 import { Array, type Brand, Equivalence, Schema } from "effect"
 
+export const UuidV7Schema = Schema.String.check(Schema.isUUID(7))
+
 export const CalendarDateSchema = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/),
   Schema.makeFilter((date: string) => {
@@ -25,6 +27,21 @@ export const CalendarDateSchema = Schema.String.check(
     return validCalendar ? undefined : "a valid Gregorian calendar date"
   }),
 )
+
+export const SafeIntSchema = Schema.Int.check(
+  Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
+export const NonNegativeSafeIntSchema = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
+export const PositiveSafeIntSchema = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
+export const PageLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+
 
 export type StructSchema = Schema.Struct<Schema.Struct.Fields>
 

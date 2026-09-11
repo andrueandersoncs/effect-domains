@@ -12,8 +12,14 @@ import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { prepareTables } from "./prepare-tables.ts"
 
 const equals = Equivalence.strictEqual<unknown>()
+const stringEquals = Equivalence.strictEqual<string>()
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String })
 const ReportSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, title: Schema.String })
+const EntitlementWhereSchema = Schema.Struct({ tenantId: Schema.String })
+const whereReportTenantMatches = (subject: Schema.Schema.Type<typeof SubjectSchema>) => EntitlementWhereSchema.make({ tenantId: subject.tenantId })
+const reportTitle = Struct.get<Schema.Schema.Type<typeof ReportSchema>, "title">("title")
+const isActive = (title: string) => stringEquals(title, "active")
+const activeReport = Function.flow(reportTitle, isActive)
 const p = Authorization.for({ resource: ReportSchema, subject: SubjectSchema })
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const access = p.all()
@@ -57,6 +63,40 @@ const asAlice = Effect.provideService(AuthorizationSubject, alice)
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const denied = Entitlements.of({ has: () => Effect.succeed(false) })
 const admitted = Entitlements.of({ has: () => Effect.succeed(true) })
+
+const reportSubscriptionSource = new Entitlements.Source({
+  name: "reports.subscription",
+  table: AccountReports.table,
+  subject: SubjectSchema,
+  key: "id",
+  where: whereReportTenantMatches,
+  grant: activeReport,
+})
+
+const tableEntitlements = Entitlements.fromTables([reportSubscriptionSource])
+
+
+it.effect("table entitlement resolvers grant matching records, deny misses, and ignore unknown names", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([AccountReports.table])
+    const sql = yield* SqlClient.SqlClient
+
+    yield* sql`INSERT INTO account_reports (id, tenantId, title) VALUES
+      ('granted', 'a', 'active'), ('denied', 'a', 'canceled'), ('other', 'b', 'active')`
+
+    const entitlements = yield* Entitlements
+    const granted = yield* entitlements.has({ name: "reports.subscription", key: "granted", subject: alice })
+    const denied = yield* entitlements.has({ name: "reports.subscription", key: "denied", subject: alice })
+    const hidden = yield* entitlements.has({ name: "reports.subscription", key: "other", subject: alice })
+    const unknown = yield* entitlements.has({ name: "unknown", key: "anything", subject: {} })
+    expect(granted).toBe(true)
+    expect(denied).toBe(false)
+    expect(hidden).toBe(false)
+    expect(unknown).toBe(false)
+  }),
+  Effect.provide(tableEntitlements),
+  Effect.provide(sqlite),
+))
 
 it.effect("account gates reject empty lists, distinguish resolver outages, and observe revocation", () => pipe(
   Effect.gen(function* () {

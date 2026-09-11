@@ -6,13 +6,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 const source = `
   import { Context, Effect, Layer } from "effect"
   import { SqlClient } from "effect/unstable/sql"
-  import { privateSqlite } from "@effect-domains/example-support/databases"
   import { Application } from "effect-domains/application"
   import { ApplicationBun } from "effect-domains/application-bun"
+  import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
   class PrivateSql extends Context.Service()("test/PrivateSql") {}
   process.argv = [process.execPath, "execution-isolation", "worker"]
   const app = Application.make({ name: "execution-isolation" })
-  const privateDatabase = privateSqlite(process.env.EXECUTION_DB)
+  const privateDatabase = SqliteBunRuntime.privateClient({ application: "execution-isolation", purpose: "execution" })
   const services = Layer.effect(PrivateSql, SqlClient.SqlClient).pipe(Layer.provide(privateDatabase))
   const initialize = Effect.gen(function* () {
     const application = yield* SqlClient.SqlClient
@@ -39,7 +39,7 @@ const runProbe = Effect.fn("ApplicationExecution.runProbe")(function* (database:
 
   const command = ChildProcess.make(process.execPath, ["--eval", source], {
     cwd: root.pathname,
-    env: { APPLICATION_DB: database, EXECUTION_DB: execution },
+    env: { APPLICATION_DB: database, EXECUTION_ISOLATION_EXECUTION_DB: execution },
     extendEnv: true,
   })
 
@@ -56,7 +56,7 @@ const isolatedTables = JSON.stringify({
   executionTables: [{ name: "execution_marker" }],
 })
 
-it.effect("native private layers do not replace application SQL", Effect.fn("ApplicationExecution.nativeLayers")(function* () {
+it.effect("private execution clients preserve application SQL isolation", Effect.fn("ApplicationExecution.nativeLayers")(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* fs.makeTempDirectoryScoped()
@@ -66,7 +66,7 @@ it.effect("native private layers do not replace application SQL", Effect.fn("App
   expect(output).toContain(isolatedTables)
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
-it.effect("example-owned checks reject symlink and hardlink aliases before execution initialization", Effect.fn(
+it.effect("private execution clients reject aliased application databases", Effect.fn(
   "ApplicationExecution.rejectAliases",
 )(function* () {
   const fs = yield* FileSystem.FileSystem
@@ -81,7 +81,7 @@ it.effect("example-owned checks reject symlink and hardlink aliases before execu
 
   yield* Effect.forEach([symbolic, hardlink], Effect.fn("ApplicationExecution.checkAlias")(function* (execution) {
     const output = yield* runProbe(database, execution)
-    expect(output).toContain('"_tag":"ExampleDatabaseConflict"')
+    expect(output).toContain('"_tag":"PrivateDatabaseConflict"')
     const assertion = expect(output)
     assertion.not.toContain('"applicationTables"')
   }))

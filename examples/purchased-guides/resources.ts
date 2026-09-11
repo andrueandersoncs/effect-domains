@@ -1,21 +1,33 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { GuidePurchaseSchema, GuideSchema } from "./domain.ts"
 
 const policy = Authorization.for({ resource: GuideSchema, subject: ExampleSubjectSchema })
-const tenantScope = policy.eq(policy.row.tenantId, policy.subject.tenantId)
-const reader = policy.includes(policy.subject.roles, "reader")
-const editor = policy.includes(policy.subject.roles, "editor")
-const administrator = policy.includes(policy.subject.roles, "admin")
-const guideReader = policy.any(reader, editor, administrator)
 const guidePurchase = policy.entitlement({ name: "guides.read", key: policy.row.id })
+const tenantScope = policy.sameAs("tenantId")
+const tenantReader = policy.all(tenantScope, ExampleRoles.reader.expression)
+const guideScope = policy.all()
 
 const guideAuthorization = policy.policy({
-  scope: tenantScope,
-  allow: { read: guideReader },
+  scope: guideScope,
+  allow: {
+    read: tenantReader,
+    create: ExampleRoles.admin,
+  },
   require: {
     read: [guidePurchase],
+  },
+})
+
+const purchasePolicy = Authorization.for({ resource: GuidePurchaseSchema, subject: ExampleSubjectSchema })
+const purchaseScope = purchasePolicy.all()
+
+const purchaseAuthorization = purchasePolicy.policy({
+  scope: purchaseScope,
+  allow: {
+    read: ExampleRoles.admin,
+    create: ExampleRoles.admin,
   },
 })
 
@@ -27,7 +39,7 @@ export const GuidesResource = Resource.make({
 })
 
 export const GuidePurchasesResource = Resource.make({
-  authorization: Authorization.deny,
+  authorization: purchaseAuthorization,
   name: "guide_purchases",
   schema: GuidePurchaseSchema,
   operations: {},

@@ -4,46 +4,61 @@ description: Understand schemas, resources, applications, and the boundary betwe
 
 # How the pieces fit
 
-Effect Domains removes repeated descriptions of the same data. It does not try to derive an entire application from a record type.
-
-Consider the [reading list](/getting-started). A book has a title, an author, and a reading status. Those fields must agree across storage, request validation, CLI input, and admin forms. Writing each representation separately creates opportunities for drift. Effect Schema provides an inspectable runtime description that the framework can reuse.
+Effect Domains removes repeated descriptions of data. It does not derive an entire application from a record type.
 
 ## Schema: what a value means
 
-The canonical schema describes application data: field types, allowed statuses, and valid ratings. “Canonical” means the representation your application works with, rather than the representation SQLite happens to store.
+A canonical schema describes application data: field types, allowed statuses, and valid ranges. It is the representation application code uses, rather than SQLite's storage encoding.
 
-A rating between 1 and 5 belongs in that schema. The name of a SQLite index, a user's permissions, and the label on an admin form do not.
+Use domain value schemas instead of restating common constraints: `UuidV7Schema`, `SafeIntSchema`, `NonNegativeSafeIntSchema`, `PositiveSafeIntSchema`, and `PageLimitSchema`. Use `Schema.DateTimeUtc` for canonical timestamps. Brands compose normally—for example, `pipe(UuidV7Schema, Schema.brand("OrderId"))`.
 
-Storage can have different semantics. The [field-notes example](../examples/field-notes/storage.ts) stores encrypted report text but uses plaintext in the application. That requires an explicit reversible storage codec; encryption does not become the wire format, and it does not grant permission to read a note.
+A rating between 1 and 5 belongs in the schema. A SQLite index name, a user's permissions, and the label on an admin form do not. An explicit storage codec is appropriate when storage differs reversibly from the canonical value, as in the [field-notes encryption codec](../examples/field-notes/storage.ts).
 
-## Resource: how records are stored and exposed
+## Resource: records and routine operations
 
-A resource combines a canonical schema with declarations for:
+A resource combines a canonical schema with authorization, selected CRUD operations, creation sources, list declarations, optional storage, relations, a version field, and a transition graph. It derives a table, local repository, and selected RPC contracts and handlers.
 
-- authorization;
-- the operations to publish;
-- creation defaults, generated values, or trusted subject bindings;
-- supported list filters and a page limit;
-- optional storage codecs and relational constraints.
+A nullable field defaults to `null` when omitted on create. A version field gives patches `{ key, expectedVersion, changes }` and produces `VersionConflict` for stale writes. Declared lists can expose equality filters, inclusive ranges, and a stable declared order. `repository.ensure(row)` is the idempotent seed primitive; declared unique constraints surface `UniqueViolation` rather than requiring preflight reads.
 
-From this, the framework constructs a table, repository, and selected RPC contracts and handlers. A **repository** is the local Effect interface to stored rows. An **RPC operation** is a published contract with input, success, and error schemas.
+`Transitions.make` declares allowed status actions. Passing it as `Resource.make({ transitions })` and selecting `transition: true` publishes the resource transition contract; local code uses `repository.transition(...)`. This fits state changes that remain a single record mutation.
 
-These are separate decisions. A resource may publish only `get` and `list`, or publish no operations at all, while retaining repository methods for application code. Omitting a published operation is not an authorization policy: local repository calls still need appropriate policy and a subject where required.
+A **repository** is the local Effect interface to stored rows. An **RPC operation** is a published contract with input, success, and error schemas. Publication and authorization are separate: omitting an operation does not authorize a local repository call.
 
-See the [resource reference](/reference/resources) for the exact operation contracts.
+See the [resource reference](/reference/resources) for exact contracts.
+
+## Authored operations: business commands
+
+Use `Operation.make` for an authored application operation instead of assembling `Rpc.make`, a group, a handler layer, authorization middleware, and error translation by hand.
+
+```ts
+const issueInvoice = Operation.make("billing.issueInvoice", {
+  payload: IssueInvoiceInputSchema,
+  success: InvoiceSchema,
+  error: Schema.Union([InvoiceNotFound, BillingUnavailable]),
+  policy: ExampleRoles.editor,
+  transaction: true,
+  views: [OrderSummaryView],
+  unavailable: BillingUnavailable,
+  handler: (input, subject) => /* Effect using input and subject */,
+})
+
+export const BillingOperations = Operation.bundle(issueInvoice)
+```
+
+`Operation.make` applies JSON codecs to payload, success, and error schemas, supplies a typed subject when `policy` is a `SubjectPolicy`, wraps the handler in `RepositoryStore.transaction` when `transaction: true`, and records `views` as `SqliteView` dependencies. Declared failures pass through; undeclared failures are logged and translated to `unavailable`. `Operation.bundle(...)` supplies the `{ group, handlers }` application part.
+
+Use an authored operation when an action preserves a cross-record invariant, calculates an aggregate, invokes an external system, or has a domain-specific failure boundary. For example, reservations can use declared state transitions while their inventory accounting remains an authored transactional operation.
 
 ## Application: which operations belong together
 
-`Application.make({ name, parts })` composes resources, native Effect RPC bundles, and nested applications. An authored bundle contains a native RPC group and its handler layer.
-
-This is where routine record operations and business commands meet. An order application can expose generated read operations and an authored `issueInvoice` operation without inventing a second application framework.
+`Application.make({ name, parts })` composes resources, `Operation.bundle(...)` values, `IdentityBundle`, and nested applications. It rejects duplicate tables and operation names.
 
 ```text
 Canonical schema + resource configuration
     ├── SQLite table and repository
     └── Selected RPC contracts and handlers
                 │
-Authored RPCs ───┤
+Operation.bundle ┤
                 ▼
            Application
                 ├── HTTP RPC → generated CLI
@@ -51,43 +66,20 @@ Authored RPCs ───┤
                 └── Optional browser admin
 ```
 
-The application is a description. `ApplicationBun.run` supplies the runtime: database history, services, startup work, background layers, and HTTP routes. See [runtime and clients](/reference/runtime).
-
-## Generated CRUD versus business commands
-
-Changing a book's notes is a record update. Confirming a stock reservation is not: it must check the current reservation state and keep stock accounting consistent within a transaction.
-
-The [reservation application](../examples/reservations/sqlite.ts) therefore authors its transitions using native Effect RPC handlers and SQL. Its generated resources expose reads, not unrestricted writes that would bypass those transitions.
-
-| Requirement | Where it belongs |
-| --- | --- |
-| Title must not be empty | Canonical schema |
-| Missing notes default to `null` on create | Resource creation configuration |
-| A user can read only their tenant’s tasks | Explicit resource authorization policy |
-| A reservation can only be confirmed from a permitted state | Authored handler |
-| Two writes must commit together | Authored transaction |
-| Report text is encrypted at rest | Explicit storage codec and runtime service |
-| Existing rows need a renamed column and a backfill | Reviewed migration artifact |
-| A report must finish after a restart | Native Effect durable execution, composed by the application |
-
-A useful rule: use generated operations when they express the whole intended action. If the operation’s meaning depends on a business decision, write that decision rather than trying to hide it in field annotations.
+`ApplicationBun.main(application, options)` supplies SQLite history, application services, initialization, background layers, and the Bun entrypoint. See [runtime and clients](/reference/runtime).
 
 ## One contract, several clients
 
-The CLI, MCP tools, generated admin, and example Foldkit pages use the application's published operation schemas and handlers. An admin form is not a privileged route, an MCP session is not an identity, and browser pages do not invent a second RPC envelope. Authorization and trusted request subjects must still be provided and enforced.
-
-The HTTP endpoint is **Effect JSON RPC**, not REST. A resource named `books` does not create `/books` routes. Use the generated CLI, a native Effect `RpcClient`, or the generated MCP tools rather than inventing HTTP request envelopes.
+The CLI, MCP tools, generated admin, and example Foldkit pages use the published operation schemas and handlers. An admin form is not a privileged route, an MCP session is not an identity, and browser pages do not invent a second RPC envelope. HTTP is Effect JSON RPC, not REST.
 
 ## Current scope
 
-The repository implements a Bun runtime and SQLite persistence, with example applications that exercise different policies and workflows. It is an experimental workspace, not a promise of stable APIs, other database adapters, or production authentication.
-
-The [examples](/examples) show what you can run now. The [thesis](/wiki/thesis) explains the design direction; the [validation record](/wiki/validation-strategy) distinguishes actual observations from unproven claims.
+The repository implements a Bun runtime and SQLite persistence. It is experimental, not a promise of stable APIs, other database adapters, or production authentication.
 
 ## Continue
 
-- [Define a resource](/guides/define-a-resource) to build a small application.
-- [Restrict access](/guides/authorization) before storing private data.
-- [Choose an example](/examples) when your domain needs more than record editing.
+- [Define a resource](/guides/define-a-resource)
+- [Restrict access](/guides/authorization)
+- [Choose an example](/examples)
 
-Implementation sources: [Resource](../packages/effect-domains/src/resource.ts), [Application](../packages/effect-domains/src/application.ts), [Bun runtime](../packages/effect-domains/src/application-bun.ts).
+Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Operation`](../packages/effect-domains/src/operation.ts), [`Application`](../packages/effect-domains/src/application.ts), and [Bun runtime](../packages/effect-domains/src/application-bun.ts).

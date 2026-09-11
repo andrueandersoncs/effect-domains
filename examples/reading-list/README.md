@@ -13,7 +13,6 @@ export const ReadingListResource = Resource.make({
   schema: ReadingListBookSchema,
   operations: {
     ...Resource.crud,
-    create: { defaults: { rating: null, notes: null } },
     list: { filter: ["status", "format"], limit: 25 },
   },
 })
@@ -28,6 +27,7 @@ Run these commands from the repository root with Bun installed. The build suppli
 ```bash
 bun install
 bun run build
+export READING_LIST_DB="$(mktemp -d)/reading-list.sqlite"
 bun run reading-list:server
 ```
 
@@ -123,8 +123,6 @@ The generated admin exposes the same five operations and their schemas. The Stre
 | `READING_LIST_DB` | `data/reading-list.sqlite` | SQLite database file |
 | `PORT` | `3000` | Loopback HTTP port |
 | `READING_LIST_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
-
-To use another port, start the server with `PORT=3004 bun run reading-list:server` and set `READING_LIST_URL=http://127.0.0.1:3004/rpc/v1` in the client terminal. The client does not infer the server's `PORT`. For an isolated run, point `READING_LIST_DB` at a file in a fresh directory rather than deleting an existing database.
 
 The server is unauthenticated and loopback-only. Startup applies [the imported migration history](migrations.ts); it does not reset rows or adopt an untracked database. Stop with Ctrl-C and restart with the same database path, then list books to see that the remaining entry persists. Local inspection does not require a server:
 

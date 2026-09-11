@@ -1,24 +1,30 @@
-import { Array, Cause, DateTime, Effect, Equivalence, Exit, Layer, Match, Option, Schema, Struct, pipe } from "effect"
+import { Array, Cause, DateTime, Effect, Equivalence, Exit, Function, Match, Option, Schema, Struct, pipe } from "effect"
 import { RunnerStorage, Sharding } from "effect/unstable/cluster"
 import { Activity, DurableClock, DurableDeferred, DurableQueue, Workflow } from "effect/unstable/workflow"
-import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
-import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { Operation } from "effect-domains/operation"
 
 import {
   PollReportExportSchema,
   ReportArtifactSchema,
-  ReportExportGenerationRpcs,
+  ReportExportGenerationErrorsSchema,
   ReportExportJobSchema,
-  ReportExportOperatorRpcs,
+  ReportExportOperatorErrorsSchema,
   ReportExportPollResultSchema,
   ReportExportRequestSchema,
   ReportExportRunnerStatusSchema,
   ReportExportStatusSchema,
+  ReportExportUnavailable,
   ReportReleaseSchema,
+  ReleaseReportSchema,
   type ReportExportRequest,
 } from "./contracts.ts"
 
-import { ReportExportGenerationAuthorization, ReportExportOperatorAuthorization } from "./authorization.ts"
+import { ReportExportGenerationAuthorization } from "./authorization.ts"
+
+import {
+  ExampleRoles,
+  ExampleSubjectSchema,
+} from "@effect-domains/example-support/subject"
 
 export const ReportArtifactQueue = DurableQueue.make({
   name: "ReportExports.WriteArtifact",
@@ -38,7 +44,6 @@ export const FinancialReportExport = Workflow.make("Generate", {
   success: ReportArtifactSchema,
   idempotencyKey: ({ accountId, report }) => JSON.stringify([accountId, report.reportId]),
 })
-
 
 export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.execute")(
   function* (request: ReportExportRequest, executionId: string) {
@@ -95,36 +100,76 @@ export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.ex
   },
 )
 
-const generationGroup = ReportExportGenerationRpcs
-  .annotateRpcs(AuthorizationRpc.policy, ReportExportGenerationAuthorization)
+const workflowRequest = (request: ReportExportRequest, tenantId: string) =>
+  WorkflowRequestSchema.make({ ...request, accountId: tenantId })
 
-const operatorGroup = ReportExportOperatorRpcs
-  .annotateRpcs(AuthorizationRpc.policy, ReportExportOperatorAuthorization)
 
-const authorizedRequest = Effect.fn("ReportExports.authorizedRequest")(function* (request: ReportExportRequest) {
-  const subject = yield* Authorization.requireSubject(ReportExportGenerationAuthorization)
-  return WorkflowRequestSchema.make({ ...request, accountId: subject.tenantId })
+const selectWorkflow = (request: ReportExportRequest, tenantId: string) =>
+  pipe(
+    workflowRequest(request, tenantId),
+    FinancialReportExport.execute,
+  )
+
+const selectGenerateDiscard = Effect.fn(
+  "ReportExports.selectGenerateDiscard",
+)(function* (
+  request: ReportExportRequest,
+  subject: typeof ExampleSubjectSchema.Type,
+) {
+  const workflow = workflowRequest(request, subject.tenantId)
+
+  return yield* FinancialReportExport.execute(workflow, { discard: true })
 })
 
-const generationHandlers = generationGroup.toLayer({
-  "ReportExport.Generate": Effect.fn("ReportExports.generate")(function* (request) {
-    const payload = yield* authorizedRequest(request)
-    return yield* FinancialReportExport.execute(payload)
-  }),
-  "ReportExport.GenerateDiscard": Effect.fn("ReportExports.generateDiscard")(function* (request) {
-    const payload = yield* authorizedRequest(request)
-    return yield* FinancialReportExport.execute(payload, { discard: true })
-  }),
+const resumeWorkflow = ({ executionId }: typeof PollReportExportSchema.Type) =>
+  FinancialReportExport.resume(executionId)
+
+const selectGenerate = (
+  request: ReportExportRequest,
+  subject: typeof ExampleSubjectSchema.Type,
+) => selectWorkflow(request, subject.tenantId)
+
+const generate = Operation.make({
+  name: "ReportExport.Generate",
+  payload: ReportExportRequestSchema,
+  success: ReportArtifactSchema,
+  handler: selectGenerate,
+  error: ReportExportGenerationErrorsSchema,
+  policy: ReportExportGenerationAuthorization,
+  unavailable: ReportExportUnavailable,
 })
 
-const operatorHandlers = operatorGroup.toLayer({
-  "ReportExport.GenerateResume": Effect.fn("ReportExports.resume")(function* ({ executionId }) {
-    yield* Authorization.requireSubject(ReportExportOperatorAuthorization)
-    yield* FinancialReportExport.resume(executionId)
-  }),
-  "ReportExport.Release": Effect.fn("ReportExports.Release")(function* ({ executionId }) {
-    const subject = yield* AuthorizationSubject
-    const releasedBy = yield* pipe(Schema.decodeUnknownEffect(Schema.NonEmptyString)(subject["userId"]), Effect.orDie)
+const generateDiscard = Operation.make({
+  name: "ReportExport.GenerateDiscard",
+  payload: ReportExportRequestSchema,
+  success: Schema.String,
+  handler: selectGenerateDiscard,
+  error: ReportExportGenerationErrorsSchema,
+  policy: ReportExportGenerationAuthorization,
+  unavailable: ReportExportUnavailable,
+})
+
+const resume = Operation.make({
+  name: "ReportExport.GenerateResume",
+  payload: PollReportExportSchema,
+  success: Schema.Void,
+  error: ReportExportOperatorErrorsSchema,
+  policy: ExampleRoles.admin,
+  unavailable: ReportExportUnavailable,
+  handler: resumeWorkflow,
+})
+
+const release = Operation.make({
+  name: "ReportExport.Release",
+  payload: ReleaseReportSchema,
+  success: Schema.Void,
+  error: ReportExportOperatorErrorsSchema,
+  policy: ExampleRoles.admin,
+  unavailable: ReportExportUnavailable,
+  handler: Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
+    const releasedBy = yield* Schema.decodeUnknownEffect(
+      Schema.NonEmptyString,
+    )(subject.userId)
 
     const token = DurableDeferred.tokenFromExecutionId(ReportReleaseApproval, {
       workflow: FinancialReportExport,
@@ -134,7 +179,16 @@ const operatorHandlers = operatorGroup.toLayer({
     const value = ReportReleaseSchema.make({ releasedBy })
     yield* DurableDeferred.succeed(ReportReleaseApproval, { token, value })
   }),
-  "ReportExport.Poll": Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
+})
+
+const poll = Operation.make({
+  name: "ReportExport.Poll",
+  payload: PollReportExportSchema,
+  success: ReportExportPollResultSchema,
+  error: ReportExportOperatorErrorsSchema,
+  policy: ExampleRoles.admin,
+  unavailable: ReportExportUnavailable,
+  handler: Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
     const result = yield* FinancialReportExport.poll(executionId)
 
     return Option.match(result, {
@@ -146,7 +200,15 @@ const operatorHandlers = operatorGroup.toLayer({
       Match.exhaustive,),
     })
   }),
-  "ReportExport.Status": Effect.fn("ReportExports.Status")(function* () {
+})
+
+const status = Operation.make({
+  name: "ReportExport.Status",
+  success: ReportExportStatusSchema,
+  error: ReportExportOperatorErrorsSchema,
+  policy: ExampleRoles.admin,
+  unavailable: ReportExportUnavailable,
+  handler: Effect.fn("ReportExports.Status")(function* () {
     const sharding = yield* Sharding.Sharding
     const storage = yield* RunnerStorage.RunnerStorage
 
@@ -168,7 +230,16 @@ const operatorHandlers = operatorGroup.toLayer({
   }),
 })
 
-export const ReportExportCommands = {
-  group: generationGroup.merge(operatorGroup),
-  handlers: Layer.merge(generationHandlers, operatorHandlers),
-}
+export const ReportExportCommands = Operation.bundle(
+  generate,
+  generateDiscard,
+  resume,
+  release,
+  poll,
+  status,
+)
+
+export const ReportExportRpcs = pipe(
+  ReportExportCommands.group,
+  Function.identity,
+)

@@ -1,24 +1,20 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { FieldReportSchema } from "./domain.ts"
 import { StoredFieldReportSchema } from "./storage.ts"
 
 const p = Authorization.for({ resource: FieldReportSchema, subject: ExampleSubjectSchema })
-const allReports = p.all()
-const reader = p.includes(p.subject.roles, "reader")
-const editor = p.includes(p.subject.roles, "editor")
-const administrator = p.includes(p.subject.roles, "admin")
-const readAccess = p.any(reader, editor, administrator)
-const writeAccess = p.any(editor, administrator)
+
+const scope = p.all()
 
 const authorization = p.policy({
-  scope: allReports,
+  scope,
   allow: {
-    read: readAccess,
-    create: writeAccess,
-    update: writeAccess,
-    remove: administrator,
+    read: ExampleRoles.reader,
+    create: ExampleRoles.editor,
+    update: ExampleRoles.editor,
+    remove: ExampleRoles.admin,
   },
 })
 

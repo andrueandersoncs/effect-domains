@@ -10,17 +10,18 @@ import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example
 import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
-import { OrderSummary, BillingRpcs } from "../contracts.ts"
+import { OrderSummary } from "../contracts.ts"
 import {
   CreateOrderInputSchema,
   InvoiceNumberSchema,
   LineNumberSchema,
   PositiveMinorUnitsSchema,
   QuantitySchema,
-  VersionConflict,
 } from "../domain.ts"
+import { VersionConflict } from "effect-domains/repository-store"
 import { OrdersResource } from "../resources.ts"
-const BillingBrowserRpcs = IdentityRpcs.merge(BillingRpcs)
+import { BillingOperations } from "../sqlite.ts"
+const BillingBrowserRpcs = IdentityRpcs.merge(BillingOperations.group)
 const OrderSchema = OrdersResource.table.rowSchema
 
 export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof BillingBrowserRpcs, RpcClientError.RpcClientError>>()(

@@ -9,13 +9,13 @@ import {
   pipe,
 } from "effect"
 
-import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "effect-domains/migrations"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { LegacyDocumentsResource } from "./legacy.ts"
 import { EditorialCalendarMigrations } from "./migrations.ts"
 
 const seedTitle = "Autumn trail guide"
+const seedId = "018f2520-1468-7e56-9f89-1b2d3c4e5f60"
 
 const initialMigration = pipe(
   EditorialCalendarMigrations,
@@ -37,17 +37,7 @@ const seedVersionOneDraft = Effect.gen(function* () {
     const schemaStore = yield* SchemaStore
     yield* schemaStore.prepare(initialMigration.to.tables)
 
-    const sql = yield* SqlClient.SqlClient
-
-    const documents = yield* sql`
-      SELECT title FROM ${sql(LegacyDocumentsResource.table.name)} WHERE title = ${seedTitle} LIMIT 1
-    `
-
-    const alreadySeeded = Array.isReadonlyArrayNonEmpty(documents)
-
-    if (!alreadySeeded) {
-      yield* LegacyDocumentsResource.repository.create({ title: seedTitle })
-    }
+    yield* LegacyDocumentsResource.repository.ensure({ id: seedId, title: seedTitle })
   })
 
   yield* pipe(seed, Effect.provide(runtime))

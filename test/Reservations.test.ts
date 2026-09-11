@@ -5,11 +5,11 @@ import { ReservationApplication } from "../examples/reservations/application.ts"
 
 import {
   InsufficientStock,
-  InvalidReservationState,
   InventoryUnavailable,
   ReservationIdSchema,
   ReservationInputSchema,
   ReservationSchema,
+  ReservationStateTransitions,
   ReserveStockInputSchema,
   SkuSchema,
   StockSchema,
@@ -118,8 +118,8 @@ const terminalTransitionsAction = Effect.fn(
   const repeatedReleaseEffect = client.release(repeatedReleaseInput)
   const repeatedRelease = yield* Effect.result(repeatedReleaseEffect)
 
-  const repeatedReleaseFailure = InvalidReservationState.make({
-    id: held.id,
+  const repeatedReleaseFailure = ReservationStateTransitions.Error.make({
+    key: held.id,
     action: "release",
     actual: "released",
   })
@@ -140,8 +140,8 @@ const terminalTransitionsAction = Effect.fn(
   const invalidReleaseEffect = client.release(invalidReleaseInput)
   const invalidRelease = yield* Effect.result(invalidReleaseEffect)
 
-  const invalidReleaseFailure = InvalidReservationState.make({
-    id: next.id,
+  const invalidReleaseFailure = ReservationStateTransitions.Error.make({
+    key: next.id,
     action: "release",
     actual: "confirmed",
   })

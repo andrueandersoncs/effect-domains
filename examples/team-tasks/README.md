@@ -18,12 +18,12 @@ Use fresh, separate databases for the task data and example identity state. They
 ```bash
 export PORT=3001
 export TEAM_TASKS_DB="$(mktemp -d)/team-tasks.sqlite"
-export EFFECT_DOMAINS_IDENTITY_DB="$(mktemp -d)/team-tasks-identity.sqlite"
+export TEAM_TASKS_IDENTITY_DB="$(mktemp -d)/team-tasks-identity.sqlite"
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 bun run team-tasks:server
 ```
 
-`EFFECT_DOMAINS_DEMO_PASSWORD` is required on every start, and `EFFECT_DOMAINS_IDENTITY_DB` must not be `TEAM_TASKS_DB`. The seed accounts are inserted only once; the setting does not reset changed credentials, roles, or disabled state. In a separate **client terminal**, point the CLI at that server and issue the credentials the walkthrough needs:
+`EFFECT_DOMAINS_DEMO_PASSWORD` is required on every start, and `TEAM_TASKS_IDENTITY_DB` must not be `TEAM_TASKS_DB`. The seed accounts are inserted only once; the setting does not reset changed credentials, roles, or disabled state. In a separate **client terminal**, point the CLI at that server and issue the credentials the walkthrough needs:
 
 ```bash
 export TEAM_TASKS_URL=http://127.0.0.1:3001/rpc/v1
@@ -131,6 +131,7 @@ The same server also provides the generated browser admin at [http://127.0.0.1:3
 | Setting | Default | Used by | Meaning |
 | --- | --- | --- | --- |
 | `TEAM_TASKS_DB` | `data/team-tasks.sqlite` | server | SQLite database path |
+| `TEAM_TASKS_IDENTITY_DB` | `data/team-tasks-identity.sqlite` | server | Separate SQLite identity store |
 | `PORT` | `3000` | server | loopback HTTP port |
 | `TEAM_TASKS_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |
 | `TEAM_TASKS_TOKEN` | unset | CLI | bearer token sent to each RPC call |

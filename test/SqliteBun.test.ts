@@ -3,19 +3,36 @@ import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { BunServices } from "@effect/platform-bun"
+
 import {
+  Array,
   Context,
   Effect,
   Equivalence,
   flow,
+  Function,
   Layer,
+  Option,
   pipe,
+  Record,
+  Result,
   Schema,
   SchemaGetter,
   Struct,
 } from "effect"
 
 import { identifier } from "effect-domains/domain"
+
+import {
+  RepositoryAccess,
+  RepositoryOrder,
+  RepositorySelect,
+  RepositoryStore,
+} from "effect-domains/repository-store"
+
+import { Policy } from "effect-domains/policy"
+
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
@@ -144,6 +161,25 @@ describe("Bun SQLite tables and authored operations", () => {
   interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
   const Articles = Table.make({ name: "articles", schema: ArticleSchema })
 
+  const StoreRowSchema = Schema.Struct({
+    id: UserIdSchema,
+    bucket: Schema.String,
+    label: Schema.String,
+    rank: Schema.Int,
+  })
+
+  const StoreRows = Table.make({
+    name: "store_rows",
+    schema: StoreRowSchema,
+    relations: { unique: [{ name: "store_rows_bucket_label_key", fields: ["bucket", "label"] }] },
+  })
+
+  const storePolicy = Policy.constant(true)
+  const storeAccess = new RepositoryAccess({ policy: storePolicy, subject: {} })
+
+  const storedRow = (id: string, bucket: string, label: string, rank: number) =>
+    StoreRowSchema.make({ id: UserIdSchema.make(id), bucket, label, rank })
+
   const CreateArticle = SqlSchema.findOne({
     Request: ArticleSchema,
     Result: Articles.rowSchema,
@@ -174,7 +210,10 @@ describe("Bun SQLite tables and authored operations", () => {
 
   const withTemporaryDatabase = Effect.fn("SqliteBun.withTemporaryDatabase")(
     function* <A, E, R>(
-      use: (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) => Effect.Effect<A, E, R>,
+      use: (
+        adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>,
+        filename: string,
+      ) => Effect.Effect<A, E, R>,
     ) {
       const directory = yield* Effect.acquireRelease(
         makeDatabaseDirectory,
@@ -184,7 +223,7 @@ describe("Bun SQLite tables and authored operations", () => {
       const filename = join(directory.path, "test.sqlite")
       const adapter = SqliteBunRuntime.sqlClient(filename, { migrations: [] })
 
-      return yield* use(adapter)
+      return yield* use(adapter, filename)
     },
   )
 
@@ -262,8 +301,188 @@ describe("Bun SQLite tables and authored operations", () => {
 
 
 
-  it.effect("creates a derived table and runs authored CRUD operations", () =>
-    withTemporaryDatabase(runCrudContract))
+  const paginatedStoreRows = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
+    pipe(
+      Effect.gen(function* () {
+        yield* prepareTables([StoreRows])
+        const store = yield* RepositoryStore
+
+        const rows = [
+          storedRow("a2", "a", "two", 2),
+          storedRow("a1", "a", "one", 1),
+          storedRow("a0", "a", "zero", 0),
+          storedRow("b2", "b", "two", 2),
+          storedRow("b1", "b", "one", 1),
+          storedRow("c3", "c", "three", 3),
+        ]
+
+        const insertRow = (row: typeof StoreRowSchema.Type) => store.insert(StoreRows, row)
+        yield* Effect.forEach(rows, insertRow)
+
+        const order = [
+          new RepositoryOrder({ field: "bucket", direction: "asc" }),
+          new RepositoryOrder({ field: "rank", direction: "desc" }),
+          new RepositoryOrder({ field: "id", direction: "asc" }),
+        ]
+
+        const firstAfter = Option.none()
+
+        const firstSelection = new RepositorySelect({
+          filter: {},
+          range: { rank: { from: 1, to: 2 } },
+          order,
+          after: firstAfter,
+          limit: 2,
+        })
+
+        const first = yield* store.select(StoreRows, firstSelection, storeAccess)
+        const secondAfter = Option.some({ bucket: "a", rank: 1, id: "a1" })
+
+        const secondSelection = new RepositorySelect({
+          filter: {},
+          range: { rank: { from: 1, to: 2 } },
+          order,
+          after: secondAfter,
+          limit: 2,
+        })
+
+        const second = yield* store.select(StoreRows, secondSelection, storeAccess)
+        const getStoreRowId = flow(Record.get("id"), Option.getOrThrow)
+        const firstIds = Array.map(first, getStoreRowId)
+        const secondIds = Array.map(second, getStoreRowId)
+        expect(firstIds).toEqual(["a2", "a1"])
+        expect(secondIds).toEqual(["b2", "b1"])
+      }),
+      Effect.provide(adapter),
+    )
+
+  const guardedUpdate = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
+    pipe(
+      Effect.gen(function* () {
+        yield* prepareTables([StoreRows])
+        const store = yield* RepositoryStore
+        const original = storedRow("guarded", "a", "guarded", 1)
+        yield* store.insert(StoreRows, original)
+
+        const updated = yield* store.update(
+          StoreRows,
+          { ...original, rank: 2 },
+          storeAccess,
+          { rank: 0 },
+        )
+
+        const isUnchanged = Option.isNone(updated)
+        expect(isUnchanged).toBe(true)
+      }),
+      Effect.provide(adapter),
+    )
+
+  const declaredUniqueConstraints = (adapter: ReturnType<typeof SqliteBunRuntime.sqlClient>) =>
+    pipe(
+      Effect.gen(function* () {
+        yield* prepareTables([StoreRows])
+        const store = yield* RepositoryStore
+        const firstRow = storedRow("first", "a", "duplicate", 1)
+        yield* store.insert(StoreRows, firstRow)
+
+        const secondRow = storedRow("second", "a", "duplicate", 2)
+        const insertingSecondRow = store.insert(StoreRows, secondRow)
+        const result = yield* Effect.result(insertingSecondRow)
+        const isUniqueViolation = Result.isFailure(result)
+        expect(isUniqueViolation).toBe(true)
+
+        if (isUniqueViolation) {
+          expect(result.failure).toMatchObject({
+            _tag: "UniqueViolation",
+            constraint: "store_rows_bucket_label_key",
+            fields: ["bucket", "label"],
+          })
+        }
+
+        const duplicateIdRow = storedRow("first", "b", "other", 2)
+        const insertingDuplicateIdRow = store.insert(StoreRows, duplicateIdRow)
+        const primaryKey = yield* Effect.result(insertingDuplicateIdRow)
+
+        expect(primaryKey).toMatchObject({
+          _tag: "Failure",
+          failure: {
+            _tag: "UniqueViolation",
+            constraint: "id",
+            fields: ["id"],
+          },
+        })
+      }),
+      Effect.provide(adapter),
+    )
+
+  const selectOne = Effect.fn("SqliteBun.selectOne")(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`SELECT 1`
+  })
+
+  const rejectsPrivateClient = Effect.fn("SqliteBun.rejectsPrivateClient")(function* (
+    application: ReturnType<typeof SqliteBunRuntime.sqlClient>,
+    filename: string,
+  ) {
+    const privateClient = SqliteBunRuntime.privateClient({
+      application: "effect-domains-test",
+      purpose: "identity",
+      filename,
+    })
+
+    const query = selectOne()
+
+    const protectedQuery = pipe(
+      query,
+      Effect.provide(privateClient),
+      Effect.provide(application),
+      Effect.provide(BunServices.layer),
+    )
+
+    const result = yield* Effect.result(protectedQuery)
+
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "PrivateDatabaseConflict" },
+    })
+  })
+
+  const privateIdentityClient = SqliteBunRuntime.privateClient({
+    application: "effect-domains-test",
+    purpose: "identity",
+    filename: ":memory:",
+  })
+
+  const ambientApplicationClient = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
+
+  const opensPrivateClient = pipe(
+    Effect.fn("SqliteBun.opensPrivateClient")(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<Readonly<{ value: number }>>`SELECT 1 AS value`
+      expect(rows).toEqual([{ value: 1 }])
+    })(),
+    Effect.provide(privateIdentityClient),
+    Effect.provide(ambientApplicationClient),
+    Effect.provide(BunServices.layer),
+  )
+
+  const paginatedStoreRowsEffect = withTemporaryDatabase(paginatedStoreRows)
+  const guardedUpdateEffect = withTemporaryDatabase(guardedUpdate)
+  const declaredUniqueConstraintsEffect = withTemporaryDatabase(declaredUniqueConstraints)
+  const rejectsPrivateClientEffect = withTemporaryDatabase(rejectsPrivateClient)
+  const crudContractEffect = withTemporaryDatabase(runCrudContract)
+  const paginatedStoreRowsTest = Function.constant(paginatedStoreRowsEffect)
+  const guardedUpdateTest = Function.constant(guardedUpdateEffect)
+  const declaredUniqueConstraintsTest = Function.constant(declaredUniqueConstraintsEffect)
+  const rejectsPrivateClientTest = Function.constant(rejectsPrivateClientEffect)
+  const opensPrivateClientTest = Function.constant(opensPrivateClient)
+  const crudContractTest = Function.constant(crudContractEffect)
+  it.effect("applies inclusive bounds and two-field descending keyset pagination", paginatedStoreRowsTest)
+  it.effect("returns None when a guarded update no longer matches", guardedUpdateTest)
+  it.effect("reports declared unique constraint names", declaredUniqueConstraintsTest)
+  it.effect("rejects a private client targeting the application database", rejectsPrivateClientTest)
+  it.effect("opens a private SQLite client over an ambient application client", opensPrivateClientTest)
+  it.effect("creates a derived table and runs authored CRUD operations", crudContractTest)
 
 
   it.effect.prop(

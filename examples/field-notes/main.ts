@@ -13,7 +13,8 @@ const encryption = pipe(Effect.gen(function* () {
   return yield* makeFieldNoteEncryption(encodedKey)
 }), Layer.effect(FieldNoteEncryption))
 
-const services = Layer.mergeAll(encryption, ExampleIdentity)
+const identity = ExampleIdentity.layer("field-notes")
+const services = Layer.mergeAll(encryption, identity)
 
 const web = ExampleWeb.layerHttp({
   title: "Field notes",

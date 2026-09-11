@@ -1,8 +1,44 @@
-import { Schema } from "effect"
+import { Schema, Struct } from "effect"
 import { Authorization } from "effect-domains/authorization"
+import { Entitlements } from "effect-domains/entitlements"
+import { Table } from "effect-domains/table"
 
 const ReportSchema = Schema.Struct({ id: Schema.String, tenantId: Schema.String, accountId: Schema.String })
+
 const SubjectSchema = Schema.Struct({ tenantId: Schema.String, nullableTenantId: Schema.NullOr(Schema.String), numberId: Schema.Int })
+const EntitlementRowSchema = Schema.Struct({ tenantId: Schema.String, active: Schema.Boolean })
+interface EntitlementRow extends Schema.Schema.Type<typeof EntitlementRowSchema> {}
+const EntitlementWhereSchema = Schema.Struct({ tenantId: Schema.String })
+const whereEntitlementTenantMatches = (subject: Schema.Schema.Type<typeof SubjectSchema>) => EntitlementWhereSchema.make({ tenantId: subject.tenantId })
+const activeGrant = Struct.get<EntitlementRow, "active">("active")
+
+const EntitlementRows = Table.make({
+  name: "entitlement_rows",
+  schema: EntitlementRowSchema,
+})
+
+const reportSubscriptionSource = new Entitlements.Source({
+  name: "reports.subscription",
+  table: EntitlementRows,
+  subject: SubjectSchema,
+  key: "tenantId",
+  where: whereEntitlementTenantMatches,
+  grant: activeGrant,
+})
+
+Entitlements.fromTable(reportSubscriptionSource)
+
+const invalidReportSource = new Entitlements.Source({
+  name: "reports.invalid",
+  table: EntitlementRows,
+  subject: SubjectSchema,
+  // @ts-expect-error because the lookup key must name a storage column.
+  key: "unknown",
+  where: whereEntitlementTenantMatches,
+  grant: activeGrant,
+})
+
+Entitlements.fromTable(invalidReportSource)
 const p = Authorization.for({ resource: ReportSchema, subject: SubjectSchema })
 const access = p.all()
 const report = p.entitlement({ name: "report", key: p.row.id })

@@ -2,22 +2,23 @@ import { BunRuntime } from "@effect/platform-bun"
 import { SingleRunner } from "effect/unstable/cluster"
 import { Layer, pipe } from "effect"
 import { ExampleWeb } from "@effect-domains/example-web/serve"
-import { privateSqlite } from "@effect-domains/example-support/databases"
-import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
+import { ApplicationBun } from "effect-domains/application-bun"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { AppointmentRemindersApplication } from "./application.ts"
 import { AppointmentReminderBackground } from "./background.ts"
 import { AppointmentReminderMigrations } from "./migrations.ts"
 import { AppointmentRemindersWebAssets } from "./web/assets.ts"
 
-const executionDatabase =
-  process.env.APPOINTMENT_REMINDERS_EXECUTION_DB
-  ?? "data/appointment-reminders.execution.sqlite"
+const privateClient = SqliteBunRuntime.privateClient({
+  application: "appointment-reminders",
+  purpose: "execution",
+})
 
-const executionSql = privateSqlite(executionDatabase)
-
-const execution = pipe(SingleRunner.layer(), Layer.provide(executionSql))
-const services = Layer.mergeAll(ExampleIdentity, execution)
+const execution = pipe(
+  SingleRunner.layer(),
+  Layer.provide(privateClient),
+)
 
 const web = ExampleWeb.layerHttp({
   title: "Appointment reminders",
@@ -25,12 +26,12 @@ const web = ExampleWeb.layerHttp({
   ...AppointmentRemindersWebAssets,
 })
 
-pipe(
-  ApplicationBun.run(AppointmentRemindersApplication, {
-    database: { migrations: AppointmentReminderMigrations },
-    services,
-    background: AppointmentReminderBackground,
-    routes: web,
-  }),
-  BunRuntime.runMain,
-)
+const identity = ExampleIdentity.layer("appointment-reminders")
+const services = Layer.mergeAll(identity, execution)
+
+pipe(ApplicationBun.run(AppointmentRemindersApplication, {
+  database: { migrations: AppointmentReminderMigrations },
+  services,
+  background: AppointmentReminderBackground,
+  routes: web,
+}), BunRuntime.runMain)

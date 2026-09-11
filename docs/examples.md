@@ -12,10 +12,10 @@ Run commands from the repository root after `bun install`. Run `bun run build` b
 
 | Application guide | What to look for | Related framework guide |
 | --- | --- | --- |
-| [Reading list](../examples/reading-list/README.md) | Generated CRUD, nullable creation defaults, status/format filters | [First-run tutorial](/getting-started) |
-| [Team tasks](../examples/team-tasks/README.md) | Tenant scope, ownership, trusted identity fields, completed-task edit restrictions | [Authorization guide](/guides/authorization) |
-| [Editorial calendar](../examples/editorial-calendar/README.md) | Stored rows surviving column changes and explicit backfills | [Migration guide](/guides/migrations) |
-| [Field notes](../examples/field-notes/README.md) | Global role-based access with encrypted report text at rest | [Authorization guide](/guides/authorization) |
+| [Reading list](../examples/reading-list/README.md) | Generated CRUD, implicit nullable defaults, filters, and cursor lists | [First-run tutorial](/getting-started) |
+| [Team tasks](../examples/team-tasks/README.md) | Tenant scope, reusable subject policies, and trusted identity fields | [Authorization guide](/guides/authorization) |
+| [Editorial calendar](../examples/editorial-calendar/README.md) | Version-2 artifacts, rebuild copies, and historical backfills | [Migration guide](/guides/migrations) |
+| [Field notes](../examples/field-notes/README.md) | Global role policy and encrypted report text at rest | [Authorization guide](/guides/authorization) |
 
 For any example, `bun run <application> --help` lists its commands and `bun run <application> inspect` describes its contracts without starting the server.
 
@@ -25,7 +25,7 @@ For any example, `bun run <application> --help` lists its commands and `bun run 
 
 Use this when an operation is a query or calculation, not just a record list. The application records integer minor-unit amounts and calculates category totals separately for each currency. Its date-range query has its own ordering and bounds.
 
-Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to record two currencies, query inclusive date bounds, compare totals, and correct or remove an entry. Read [`contracts.ts`](../examples/expense-ledger/contracts.ts) beside [`sqlite.ts`](../examples/expense-ledger/sqlite.ts) to see native Effect RPC contracts and authored SQL working with generated repositories.
+Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to record two currencies, query inclusive date bounds, compare totals, and correct or remove an entry. Read [`sqlite.ts`](../examples/expense-ledger/sqlite.ts) beside its schemas to see `Operation.make` and authored SQL working with generated repositories.
 
 ### Repair workshop
 
@@ -35,15 +35,15 @@ Use this for a board that joins repairs to current customer and optional technic
 
 ### Reservations
 
-Use this when an action must preserve an invariant across multiple writes. Reserving, confirming, and releasing stock are authored transactional operations; generated resource operations are read-only.
+Use this when a transition changes one record while inventory accounting still preserves a cross-record invariant. The resource declares its status graph with `Transitions.make`; the authored transactional operations reserve stock and run the accounting.
 
-The [reservation walkthrough](../examples/reservations/README.md) covers stock reads, valid transitions, transition errors, and persistence. Compare the [resources](../examples/reservations/resources.ts) with the [handlers](../examples/reservations/sqlite.ts): unrestricted CRUD would bypass the stock-accounting rules.
+The [reservation walkthrough](../examples/reservations/README.md) covers stock reads, valid and invalid transitions, and persistence. Compare the [resource](../examples/reservations/resources.ts) with the [operations](../examples/reservations/sqlite.ts).
 
 ### Orders and invoices
 
-Use this for tenant-scoped relations, uniqueness constraints, optimistic versions, and multi-record transactions. The application builds an order, issues an invoice, and records payment.
+Use this for tenant-scoped relations, uniqueness constraints, optimistic versions, declared transitions, and multi-record transactions. The application builds an order, issues an invoice, and records payment.
 
-Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, exact versions, and role/tenant failures. Storage relations live in [`resources.ts`](../examples/orders-invoices/resources.ts); business transitions live in [`sqlite.ts`](../examples/orders-invoices/sqlite.ts), not in schema annotations.
+Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Operation.bundle`.
 
 ## Connect an MCP client
 
@@ -85,12 +85,11 @@ Most examples use this layout:
 
 | File | Read it to understand |
 | --- | --- |
-| `domain.ts` | Canonical values and errors |
-| `resources.ts` | Persistence, authorization, and generated operations |
-| `contracts.ts` | Authored native RPC input/success/error contracts, where needed |
-| `sqlite.ts` | Authored handlers and SQL, where needed |
-| `application.ts` | Composition of resource and authored operations |
-| `migrations.ts` | Ordered imports of frozen migration artifacts |
-| `main.ts` | Runtime service wiring and admin opt-in |
+| `domain.ts` | Canonical values, shared domain schemas, and domain errors |
+| `resources.ts` | Persistence, authorization, generated operations, versions, and transitions |
+| `sqlite.ts` | `Operation.make` handlers and authored SQL where needed |
+| `application.ts` | Composition of resources, authored operation bundles, and identity bundle |
+| `migrations.ts` | Ordered `SqliteMigrations.history(...)` imports of frozen artifacts |
+| `main.ts` | `ApplicationBun.main` runtime service wiring and admin opt-in |
 
 For shared command options, see [runtime and clients](/reference/runtime). For dated verification and its limits, see the [validation record](/wiki/validation-strategy).

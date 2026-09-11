@@ -91,7 +91,7 @@ The generated `assets.list` accepts equality filters only for `assetTag`, `locat
 | --- | --- |
 | Tag format | `assetTag` must match `EQ-[A-Z0-9]{4,12}`; for example `EQ-CAM2049` is valid. A lowercase or short tag fails request validation. |
 | Asset fields | `name`, `model`, and `location` are non-empty; `serial` is either a non-empty string or `null`; `condition` is `in-service`, `needs-repair`, or `retired`. |
-| Unique tag | A second stored row with the same `assetTag` violates the declared unique constraint and surfaces as `RepositoryError`; change the tag or remove the earlier record. |
+| Unique tag | A second stored row with the same `assetTag` fails with the declared `UniqueViolation`; change the tag or remove the earlier record. |
 | Missing UUID | `assets.get`, `assets.update`, and `assets.remove` report `ResourceNotFound` for a well-formed ID with no row. |
 | Lists | An undeclared filter, invalid limit, or invalid cursor is rejected as `RepositoryError`. Limits run from 1 through 100; preserve a non-null cursor exactly with the same encoded filter. |
 
@@ -99,7 +99,7 @@ At `http://127.0.0.1:3000/`, the Foldkit UI offers filters by tag, location, and
 
 ## Read next
 
-- [Asset schema](domain.ts), [resource and unique/index declarations](resources.ts), and [frozen migration history](migrations.ts)
+- [Asset schema](domain.ts), [resource and derived unique/index declarations](resources.ts), and [frozen migration history](migrations.ts)
 - [Application/runtime entry point](main.ts) and [Foldkit register UI](web/main.ts)
 - [Official SDK MCP walkthrough](client.ts)
 - [Resource CRUD, list, cursor, and implicit UUID contract](../../docs/reference/resources.md)

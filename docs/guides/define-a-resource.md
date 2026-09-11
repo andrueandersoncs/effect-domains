@@ -14,7 +14,7 @@ Run `bun install` first if you have not installed the workspace dependencies. Th
 mkdir -p scratch-library/migrations
 ```
 
-Create `scratch-library/domain.ts`. The schema is the canonical application model. `rating` and `notes` are **nullable**—they accept `null`—but that alone does not make either field optional in create input.
+Create `scratch-library/domain.ts`. The schema is the canonical application model. `rating` and `notes` are nullable and therefore optional on create: omitted values become `null`.
 
 ```ts
 import { Schema } from "effect"
@@ -31,7 +31,7 @@ export const BookSchema = Schema.Struct({
 })
 ```
 
-Create `scratch-library/resource.ts`. `defaults` makes the two nullable fields optional *only for create* and supplies `null` when omitted. The list accepts equality filters only for `status`, with at most 25 rows per page. `Resource.crud` selects `get`, `list`, `create`, `update`, and `remove`; `patch: true` adds the sixth operation.
+Create `scratch-library/resource.ts`. The list accepts equality filters only for `status`, with at most 25 rows per page. `Resource.crud` selects `get`, `list`, `create`, `update`, and `remove`; `patch: true` adds the sixth operation.
 
 ```ts
 import { Authorization } from "effect-domains/authorization"
@@ -45,9 +45,7 @@ export const Books = Resource.make({
   operations: {
     ...Resource.crud,
     patch: true,
-    create: {
-      defaults: { rating: null, notes: null },
-    },
+    create: {},
     list: {
       filter: ["status"],
       limit: 25,
@@ -70,7 +68,7 @@ export const Library = Application.make({
 
 ## 2. Author and freeze the initial migration
 
-Create `scratch-library/author-initial-migration.ts`. It derives a fresh-table artifact from `Books.table`, encodes it as JSON, and decodes it again before printing it. It does not open or alter a database.
+Create `scratch-library/author-initial-migration.ts`. It derives a fresh-table artifact from `Books.table`, encodes it as JSON, validates it as a history, and prints it. It does not open or alter a database.
 
 ```ts
 import { BunRuntime } from "@effect/platform-bun"
@@ -86,7 +84,7 @@ const codec = Schema.toCodecJson(SqliteMigration)
 
 const program = Effect.gen(function* () {
   const artifact = yield* Schema.encodeEffect(codec)(initial)
-  yield* SqliteMigrations.decodeHistory([artifact])
+  SqliteMigrations.history(artifact)
   yield* Console.log(JSON.stringify(artifact, null, 2))
 })
 
@@ -99,20 +97,15 @@ Generate the artifact, inspect the resulting `scratch-library/migrations/001_ini
 bun run scratch-library/author-initial-migration.ts > scratch-library/migrations/001_initial.json
 ```
 
-The file is one JSON object with `id: "001_initial"`, an empty `from.tables`, the derived `books` table in `to.tables`, and a `SqliteCreateTable` step. For subsequent schema changes, append a separately reviewed artifact; do not regenerate this file for an existing database.
+The file is one JSON object with `id: "001_initial"`, the derived `books` table in `to.tables`, and a name-referenced `SqliteCreateTable` step. For subsequent schema changes, append a separately reviewed artifact; do not regenerate this file for an existing database.
 
 Create `scratch-library/migrations.ts` to import and validate the ordered history:
 
 ```ts
-import { Effect, pipe } from "effect"
 import { SqliteMigrations } from "effect-domains/sqlite-migrations"
 import initial from "./migrations/001_initial.json" with { type: "json" }
 
-export const LibraryMigrations = pipe(
-  [initial],
-  SqliteMigrations.decodeHistory,
-  Effect.runSync,
-)
+export const LibraryMigrations = SqliteMigrations.history(initial)
 ```
 
 ## 3. Add the Bun entrypoint
@@ -120,21 +113,16 @@ export const LibraryMigrations = pipe(
 Create `scratch-library/main.ts`:
 
 ```ts
-import { BunRuntime } from "@effect/platform-bun"
-import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { Library } from "./application.ts"
 import { LibraryMigrations } from "./migrations.ts"
 
-pipe(
-  ApplicationBun.run(Library, {
-    database: { migrations: LibraryMigrations },
-  }),
-  BunRuntime.runMain,
-)
+ApplicationBun.main(Library, {
+  database: { migrations: LibraryMigrations },
+})
 ```
 
-`ApplicationBun.run` supplies the `serve` command and generated CLI. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
+`ApplicationBun.main` supplies the `serve` command and generated CLI. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
 
 ## 4. Run and exercise the resource
 
@@ -151,7 +139,7 @@ export LIBRARY_URL=http://127.0.0.1:3001/rpc/v1
 bun run scratch-library/main.ts books.create --input-json '{"title":"The Dispossessed","author":"Ursula K. Le Guin","status":"planned"}'
 ```
 
-The command prints a complete book row. It includes a generated UUIDv7 `id`; `rating` and `notes` are `null` because the create defaults supplied them. Copy that identifier into `BOOK_ID`, then list and patch it:
+The command prints a complete book row. It includes a generated UUIDv7 `id`; `rating` and `notes` are `null` because nullable fields default to `null` on create. Copy that identifier into `BOOK_ID`, then list and patch it:
 
 ```bash
 bun run scratch-library/main.ts books.list --input-json '{"filter":{"status":"planned"},"limit":10}'
@@ -174,5 +162,5 @@ Before using this pattern for private data, [restrict access](/guides/authorizat
 
 - [`Resource.make`](../../packages/effect-domains/src/resource.ts) compiles the canonical schema into a table, local repository, selected RPC group, create input, list input, and patch contract. It rejects undeclared filters and enforces the configured list maximum.
 - [`Application.make`](../../packages/effect-domains/src/application.ts) flattens resource parts and rejects duplicate table and operation names.
-- [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index creation artifact. Historical changes use explicit `make({ id, from, to, steps })` artifacts.
-- [`ApplicationBun.run`](../../packages/effect-domains/src/application-bun.ts) hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.
+- [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index artifact. Import frozen artifacts with `SqliteMigrations.history(...)`.
+- [`ApplicationBun.main`](../../packages/effect-domains/src/application-bun.ts) hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.

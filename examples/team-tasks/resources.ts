@@ -1,18 +1,17 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { TaskSchema } from "./domain.ts"
 
 const p = Authorization.for({ resource: TaskSchema, subject: ExampleSubjectSchema })
-const scope = p.eq(p.row.tenantId, p.subject.tenantId)
+const scope = p.sameAs("tenantId")
 const owned = p.eq(p.row.ownerId, p.subject.userId)
-const administrator = p.includes(p.subject.roles, "admin")
-const ownerOrAdministrator = p.any(owned, administrator)
+const ownerOrAdministrator = p.any(owned, ExampleRoles.admin.expression)
 const candidateOwner = p.eq(p.next.ownerId, p.subject.userId)
 const unchangedOwnership = p.unchanged("tenantId", "ownerId")
 const incomplete = p.eq(p.row.completed, false)
 const incompleteOwned = p.all(owned, incomplete)
-const editable = p.any(administrator, incompleteOwned)
+const editable = p.any(ExampleRoles.admin.expression, incompleteOwned)
 const protectedEdit = p.all(unchangedOwnership, editable)
 
 const authorization = p.policy({
@@ -22,7 +21,7 @@ const authorization = p.policy({
     create: candidateOwner,
     update: protectedEdit,
     patch: protectedEdit,
-    remove: administrator,
+    remove: ExampleRoles.admin,
   },
 })
 
@@ -34,7 +33,7 @@ export const TasksResource = Resource.make({
     ...Resource.crud,
     patch: true,
     create: {
-      defaults: { completed: false, detail: null, dueDate: null, priority: "normal" },
+      defaults: { completed: false, priority: "normal" },
       fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
     },
     list: {

@@ -54,7 +54,7 @@ const SqliteColumnCopySchema = Schema.Union([
 
 class SqliteCreateTable extends Schema.TaggedClass<SqliteCreateTable>()(
   "SqliteCreateTable",
-  { table: TableSnapshot },
+  { table: Schema.String },
 ) {}
 
 class SqliteAddColumn extends Schema.TaggedClass<SqliteAddColumn>()(
@@ -75,12 +75,11 @@ class SqliteRenameColumn extends Schema.TaggedClass<SqliteRenameColumn>()(
 ) {}
 
 const SqliteColumnCopiesSchema = Schema.Array(SqliteColumnCopySchema)
-const SqliteIndexFieldsSchema = Schema.Array(Schema.String)
 
 class SqliteRebuildTable extends Schema.TaggedClass<SqliteRebuildTable>()(
   "SqliteRebuildTable",
   {
-    table: TableSnapshot,
+    table: Schema.String,
     copies: SqliteColumnCopiesSchema,
   },
 ) {}
@@ -90,7 +89,6 @@ class SqliteCreateIndex extends Schema.TaggedClass<SqliteCreateIndex>()(
   {
     table: Schema.String,
     name: Schema.String,
-    fields: SqliteIndexFieldsSchema,
   },
 ) {}
 
@@ -113,7 +111,6 @@ const SqliteMigrationStepsSchema = Schema.Array(SqliteMigrationStepSchema)
 
 export class SqliteMigration extends Schema.Class<SqliteMigration>("SqliteMigration")({
   id: Schema.String,
-  from: SqliteSchemaSnapshot,
   to: SqliteSchemaSnapshot,
   steps: SqliteMigrationStepsSchema,
 }) {}
@@ -196,9 +193,51 @@ const sqlExpressionIsValid = (expression: string) => {
   return content && valid
 }
 
+const namedTable = (name: string) => (table: TableSnapshot) =>
+  same(table.name, name)
+
+const snapshotTable = (snapshot: SqliteSchemaSnapshot, name: string) =>
+  Array.findFirst(snapshot.tables, namedTable(name))
+
+const tableFor = (snapshot: SqliteSchemaSnapshot, name: string, operation: string) => pipe(
+  snapshotTable(snapshot, name),
+  Option.match({
+    onNone: () => migrationFailure(`${operation} references unknown target table ${name}`),
+    onSome: Effect.succeed,
+  }),
+)
+
+const copiedColumns = (copies: ReadonlyArray<Schema.Schema.Type<typeof SqliteColumnCopySchema>>) =>
+  Array.map(copies, Struct.get("column"))
+
+const validateRebuild = (previous: SqliteSchemaSnapshot, target: SqliteSchemaSnapshot) =>
+  Effect.fn("SqliteMigrations.validateRebuild")(function* (rebuild: SqliteRebuildTable) {
+    const table = yield* tableFor(target, rebuild.table, "rebuild")
+    const columns = copiedColumns(rebuild.copies)
+    const columnCount = uniqueCount(columns)
+    if (!same(columnCount, columns.length)) return yield* migrationFailure(`rebuild ${rebuild.table} copies a column more than once`)
+
+    const targetNames = Array.map(table.fields, Struct.get("name"))
+    const invalidTargetColumn = (column: string) => !Array.contains(targetNames, column)
+    const invalid = Array.some(columns, invalidTargetColumn)
+    if (invalid) return yield* migrationFailure(`rebuild ${rebuild.table} copies an unknown target column`)
+
+    const previousTable = snapshotTable(previous, rebuild.table)
+
+    const priorNames = Option.match(previousTable, {
+      onNone: Function.constant([]),
+      onSome: flow(Struct.get("fields"), Array.map(Struct.get("name"))),
+    })
+
+    const unlisted = (column: string) => !Array.contains(columns, column)
+    const unknownPrevious = (column: string) => !Array.contains(priorNames, column)
+    const missingColumn = (column: string) => unlisted(column) && unknownPrevious(column)
+    const missing = Array.findFirst(targetNames, missingColumn)
+    if (Option.isSome(missing)) return yield* migrationFailure(`rebuild ${rebuild.table} must explicitly copy new column ${missing.value}`)
+  })
+
 const validateMigration = Effect.fn("SqliteMigrations.validateMigration")(function* (migration: SqliteMigration) {
   if (same(migration.id.length, 0)) return yield* migrationFailure("migration id must not be empty")
-  yield* validateSnapshot(migration.from)
   yield* validateSnapshot(migration.to)
 
   const expressions = pipe(
@@ -213,6 +252,33 @@ const validateMigration = Effect.fn("SqliteMigrations.validateMigration")(functi
   return migration
 })
 
+const validateCreateIndex = (migration: SqliteMigration) =>
+  Effect.fn("SqliteMigrations.validateCreateIndex")(function* (step: SqliteCreateIndex) {
+    const table = yield* tableFor(migration.to, step.table, "create index")
+    const indexes = declaredIndexes(table)
+    const named = (index: typeof indexes[number]) => same(index.name, step.name)
+    const index = Array.findFirst(indexes, named)
+
+    if (Option.isNone(index)) {
+      return yield* migrationFailure(`create index ${step.name} is not declared by target table ${step.table}`)
+    }
+  })
+
+const validateStep = (previous: SqliteSchemaSnapshot, migration: SqliteMigration) =>
+  Effect.fn("SqliteMigrations.validateStep")(function* (step: SqliteMigrationStep) {
+    yield* pipe(
+      Match.value(step),
+      Match.tagsExhaustive({
+        SqliteCreateTable: (create) => tableFor(migration.to, create.table, "create table"),
+        SqliteRebuildTable: validateRebuild(previous, migration.to),
+        SqliteCreateIndex: validateCreateIndex(migration),
+        SqliteAddColumn: Function.constant(Effect.void),
+        SqliteRenameColumn: Function.constant(Effect.void),
+        SqliteDropIndex: Function.constant(Effect.void),
+      }),
+    )
+  })
+
 const historySnapshot = (migrations: ReadonlyArray<SqliteMigration>, index: number) => pipe(
   Array.get(migrations, index),
   Option.match({ onNone: Function.constant(emptySnapshot), onSome: Struct.get("to") }),
@@ -225,8 +291,8 @@ const validateHistory = Effect.fn("SqliteMigrations.validateHistory")(function* 
 
   yield* Effect.forEach(migrations, Effect.fn("SqliteMigrations.validateHistoryEntry")(function* (migration, index) {
     const previous = historySnapshot(migrations, index - 1)
-    if (!snapshotEquals(previous, migration.from)) return yield* migrationFailure(`migration ${migration.id} does not begin at the preceding frozen snapshot`)
     yield* validateMigration(migration)
+    yield* Effect.forEach(migration.steps, validateStep(previous, migration), { discard: true })
   }), { discard: true })
 
   return freeze(migrations)
@@ -363,26 +429,70 @@ const compileCopy = (sql: SqlClient.SqlClient) => (copy: Schema.Schema.Type<type
 
 const quotedName = (sql: SqlClient.SqlClient) => flow(quoteIdentifier, sql.literal)
 
-const compileRebuild = (sql: SqlClient.SqlClient, rebuild: SqliteRebuildTable) => {
+const implicitCopies = (
+  previous: SqliteSchemaSnapshot,
+  table: TableSnapshot,
+  copies: ReadonlyArray<Schema.Schema.Type<typeof SqliteColumnCopySchema>>,
+) => {
+  const prior = snapshotTable(previous, table.name)
+
+  const fieldNames = flow(
+    Struct.get<TableSnapshot, "fields">("fields"),
+    Array.map(Struct.get("name")),
+  )
+
+  const priorFields = Option.match(prior, { onNone: Function.constant([]), onSome: fieldNames })
+  const explicitColumns = copiedColumns(copies)
+  const explicit = HashSet.fromIterable(explicitColumns)
+  const existing = (column: string) => Array.contains(priorFields, column)
+  const notExplicit = (column: string) => !HashSet.has(explicit, column)
+  const copiedByIdentity = (column: string) => existing(column) && notExplicit(column)
+  const sourceCopy = (column: string) => SqliteColumnSource.make({ column, source: column })
+
+  const identity = pipe(
+    table.fields,
+    Array.map(Struct.get("name")),
+    Array.filter(copiedByIdentity),
+    Array.map(sourceCopy),
+  )
+
+  return [...identity, ...copies]
+}
+
+const compileRebuild = (
+  sql: SqlClient.SqlClient,
+  previous: SqliteSchemaSnapshot,
+  target: TableSnapshot,
+  rebuild: SqliteRebuildTable,
+) => {
   const name = quotedName(sql)
-  const temporary = `__effect_schema_${rebuild.table.name}`
-  const table = TableSnapshot.make({ ...rebuild.table, name: temporary })
-  const columns = pipe(rebuild.copies, Array.map(flow(Struct.get("column"), quoteIdentifier)), sql.join(", ", false))
-  const expressions = pipe(rebuild.copies, Array.map(compileCopy(sql)), sql.join(", ", false))
+  const temporary = `__effect_schema_${rebuild.table}`
+  const table = TableSnapshot.make({ ...target, name: temporary })
+  const copies = implicitCopies(previous, target, rebuild.copies)
+  const columns = pipe(copies, Array.map(flow(Struct.get("column"), quoteIdentifier)), sql.join(", ", false))
+  const expressions = pipe(copies, Array.map(compileCopy(sql)), sql.join(", ", false))
   const create = pipe(table, renderCreateTable, statement(sql))
 
   return [
     create,
-    sql`INSERT INTO ${name(temporary)} (${columns}) SELECT ${expressions} FROM ${name(rebuild.table.name)}`,
-    sql`DROP TABLE ${name(rebuild.table.name)}`,
-    sql`ALTER TABLE ${name(temporary)} RENAME TO ${name(rebuild.table.name)}`,
+    sql`INSERT INTO ${name(temporary)} (${columns}) SELECT ${expressions} FROM ${name(rebuild.table)}`,
+    sql`DROP TABLE ${name(rebuild.table)}`,
+    sql`ALTER TABLE ${name(temporary)} RENAME TO ${name(rebuild.table)}`,
   ]
 }
 
 // Compile exhaustively because every migration instruction needs an execution meaning.
-const compileStep = (sql: SqlClient.SqlClient) => (step: SqliteMigrationStep): ReadonlyArray<Statement.Statement<unknown>> =>
+const compileStep = (
+  sql: SqlClient.SqlClient,
+  previous: SqliteSchemaSnapshot,
+  target: SqliteSchemaSnapshot,
+) => (step: SqliteMigrationStep): ReadonlyArray<Statement.Statement<unknown>> =>
   pipe(Match.value(step), Match.tagsExhaustive({
-    SqliteCreateTable: (create) => pipe(create.table, renderCreateTable, statement(sql), Array.of),
+    SqliteCreateTable: (create) => {
+      const tableOption = snapshotTable(target, create.table)
+      const table = Option.getOrThrow(tableOption)
+      return pipe(table, renderCreateTable, statement(sql), Array.of)
+    },
     SqliteAddColumn: (addition) => {
       const column = renderColumn(addition.column, false)
       const name = quotedName(sql)
@@ -392,18 +502,35 @@ const compileStep = (sql: SqlClient.SqlClient) => (step: SqliteMigrationStep): R
       const name = quotedName(sql)
       return [sql`ALTER TABLE ${name(rename.table)} RENAME COLUMN ${name(rename.from)} TO ${name(rename.to)}`]
     },
-    SqliteRebuildTable: (rebuild) => compileRebuild(sql, rebuild),
-    SqliteCreateIndex: (create) => pipe(create, renderIndex(create.table), statement(sql), Array.of),
+    SqliteRebuildTable: (rebuild) => {
+      const tableOption = snapshotTable(target, rebuild.table)
+      const table = Option.getOrThrow(tableOption)
+      return compileRebuild(sql, previous, table, rebuild)
+    },
+    SqliteCreateIndex: (create) => {
+      const tableOption = snapshotTable(target, create.table)
+      const table = Option.getOrThrow(tableOption)
+      const indexes = declaredIndexes(table)
+      const named = (index: typeof indexes[number]) => same(index.name, create.name)
+      const indexOption = Array.findFirst(indexes, named)
+      const index = Option.getOrThrow(indexOption)
+      return pipe(index, renderIndex(create.table), statement(sql), Array.of)
+    },
     SqliteDropIndex: (drop) => {
       const name = quotedName(sql)
       return [sql`DROP INDEX ${name(drop.name)}`]
     },
   }))
 
-const applyMigration = (sql: SqlClient.SqlClient, migration: SqliteMigration, position: number) => pipe(
+const applyMigration = (
+  sql: SqlClient.SqlClient,
+  previous: SqliteSchemaSnapshot,
+  migration: SqliteMigration,
+  position: number,
+) => pipe(
   Effect.gen(function* () {
     yield* sql`PRAGMA defer_foreign_keys = ON`
-    const statements = Array.flatMap(migration.steps, compileStep(sql))
+    const statements = Array.flatMap(migration.steps, compileStep(sql, previous, migration.to))
     yield* Effect.forEach(statements, applyStatement, { discard: true })
     yield* verifyDatabase(sql, migration.to)
     // Reset because SQLite retains its deferred-constraint counter after a parent rebuild.
@@ -416,23 +543,44 @@ const applyMigration = (sql: SqlClient.SqlClient, migration: SqliteMigration, po
 
 const make = (input: Readonly<{
   id: string
-  from: SqliteSchemaSnapshot
   to: SqliteSchemaSnapshot
   steps: ReadonlyArray<SqliteMigrationStep>
 }>) => pipe(SqliteMigration.make(input), validateMigration, Effect.map(freeze), Effect.runSync)
 
 const initial = (options: Readonly<{ id: string; tables: ReadonlyArray<Table> }>) => {
   const to = snapshotFromTable(options.tables)
-  const tables = Array.map(to.tables, (table) => SqliteCreateTable.make({ table }))
+  const createTable = (table: TableSnapshot) => SqliteCreateTable.make({ table: table.name })
+  const tables = Array.map(to.tables, createTable)
 
   const createIndexes = (table: TableSnapshot) => {
-    const create = (index: ReturnType<typeof declaredIndexes>[number]) => SqliteCreateIndex.make({ table: table.name, ...index })
+    const create = (index: ReturnType<typeof declaredIndexes>[number]) =>
+      SqliteCreateIndex.make({ table: table.name, name: index.name })
+
     return pipe(declaredIndexes(table), Array.map(create))
   }
 
   const indexes = Array.flatMap(to.tables, createIndexes)
-  return make({ id: options.id, from: emptySnapshot, to, steps: [...tables, ...indexes] })
+  return make({ id: options.id, to, steps: [...tables, ...indexes] })
 }
+
+const legacyArtifact = (artifact: unknown) =>
+  Predicate.isObject(artifact) && Record.has(artifact, "from")
+
+const decodeHistory = Effect.fn("SqliteMigrations.decodeHistory")(function* (raw: unknown) {
+  const legacy = Array.isArray(raw) && Array.some(raw, legacyArtifact)
+  if (legacy) return yield* migrationFailure("SQLite migration artifacts must use version 2")
+
+  const migrations = yield* pipe(
+    Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw),
+    Effect.catch(() => Schema.decodeUnknownEffect(Schema.Array(SqliteMigration))(raw)),
+    Effect.mapError(asMigrationFailure("invalid SQLite migration history")),
+  )
+
+  return yield* validateHistory(migrations)
+})
+
+const histories = (...artifacts: ReadonlyArray<unknown>) =>
+  pipe(artifacts, decodeHistory, Effect.runSync)
 
 /** Explicit migration artifacts. Schema changes and copy semantics are authored, never inferred. */
 export const SqliteMigrations = {
@@ -452,13 +600,9 @@ export const SqliteMigrations = {
   make,
   initial,
   snapshot: snapshotFromTable,
+  history: histories,
   decodeHistory: Effect.fn("SqliteMigrations.decodeHistory")(function* (raw: unknown) {
-    const migrations = yield* pipe(
-      Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw),
-      Effect.mapError(asMigrationFailure("invalid SQLite migration history")),
-    )
-
-    return yield* validateHistory(migrations)
+    return yield* decodeHistory(raw)
   }),
 }
 
@@ -506,8 +650,14 @@ export const makeMigrationStore = (sql: SqlClient.SqlClient, migrations: Readonl
     yield* verifyDatabase(sql, expectedCurrent)
     const pending = Array.drop(migrations, ledger.length)
 
-    yield* Effect.forEach(pending,
-      (migration, index) => applyMigration(sql, migration, ledger.length + index), { discard: true })
+    yield* Effect.forEach(
+      pending,
+      Effect.fn("SchemaStore.applyPendingMigration")(function* (migration, index) {
+        const previous = historySnapshot(migrations, ledger.length + index - 1)
+        yield* applyMigration(sql, previous, migration, ledger.length + index)
+      }),
+      { discard: true },
+    )
 
     yield* verifyDatabase(sql, target)
   }),

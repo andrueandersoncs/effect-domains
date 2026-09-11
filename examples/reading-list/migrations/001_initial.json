@@ -1,9 +1,5 @@
 {
   "id": "001_initial",
-  "from": {
-    "version": 1,
-    "tables": []
-  },
   "to": {
     "version": 1,
     "tables": [
@@ -57,7 +53,11 @@
             "checks": [
               {
                 "_tag": "OneOf",
-                "values": ["planned", "reading", "finished"]
+                "values": [
+                  "planned",
+                  "reading",
+                  "finished"
+                ]
               }
             ]
           },
@@ -73,7 +73,12 @@
             "checks": [
               {
                 "_tag": "OneOf",
-                "values": ["paperback", "hardcover", "ebook", "audiobook"]
+                "values": [
+                  "paperback",
+                  "hardcover",
+                  "ebook",
+                  "audiobook"
+                ]
               }
             ]
           },
@@ -115,109 +120,7 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "books",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "title",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "author",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "status",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": ["planned", "reading", "finished"]
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "format",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": ["paperback", "hardcover", "ebook", "audiobook"]
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "rating",
-            "scalar": "integer",
-            "nullable": true,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThanOrEqualTo",
-                "value": 1
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 5
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "notes",
-            "scalar": "string",
-            "nullable": true,
-            "generation": {
-              "_id": "Option",
-              "_tag": "None"
-            },
-            "checks": []
-          }
-        ]
-      }
+      "table": "books"
     }
   ]
 }

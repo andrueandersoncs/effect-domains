@@ -1,47 +1,64 @@
-import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { Schema } from "effect"
-import { InvoiceSchema, OrderLineSchema, OrderSchema, TenantIdSchema } from "./domain.ts"
+import { Transitions } from "effect-domains/transitions"
+import { InvoiceSchema, InvoiceStatusSchema, OrderLineSchema, OrderSchema, OrderStatusSchema } from "./domain.ts"
 
-const BillingSubjectSchema = Schema.Struct({ ...ExampleSubjectSchema.fields, tenantId: TenantIdSchema })
-const subjectPolicy = Authorization.subject(BillingSubjectSchema)
-const authenticated = subjectPolicy.all()
-const editor = subjectPolicy.includes(subjectPolicy.subject.roles, "editor")
-const administrator = subjectPolicy.includes(subjectPolicy.subject.roles, "admin")
-const canEdit = subjectPolicy.any(editor, administrator)
-export const BillingReadAuthorization = subjectPolicy.policy(authenticated)
-export const BillingWriteAuthorization = subjectPolicy.policy(canEdit)
+export const OrderTransitions = Transitions.make({
+  name: "Order",
+  field: "status",
+  status: OrderStatusSchema,
+  transitions: {
+    issueInvoice: { from: ["draft"], to: "invoiced" },
+  },
+})
+
+export const InvoiceTransitions = Transitions.make({
+  name: "Invoice",
+  field: "status",
+  status: InvoiceStatusSchema,
+  transitions: {
+    pay: { from: ["issued"], to: "paid" },
+  },
+})
 
 const ordersPolicy = Authorization.for({ resource: OrderSchema, subject: ExampleSubjectSchema })
-const orderTenant = ordersPolicy.eq(ordersPolicy.row.tenantId, ordersPolicy.subject.tenantId)
-
 const linesPolicy = Authorization.for({ resource: OrderLineSchema, subject: ExampleSubjectSchema })
-const lineTenant = linesPolicy.eq(linesPolicy.row.tenantId, linesPolicy.subject.tenantId)
-
 const invoicesPolicy = Authorization.for({ resource: InvoiceSchema, subject: ExampleSubjectSchema })
-const invoiceTenant = invoicesPolicy.eq(invoicesPolicy.row.tenantId, invoicesPolicy.subject.tenantId)
-const ordersAuthorization = ordersPolicy.policy({ scope: orderTenant, allow: { read: orderTenant } })
-const linesAuthorization = linesPolicy.policy({ scope: lineTenant, allow: { read: lineTenant } })
-const invoicesAuthorization = invoicesPolicy.policy({ scope: invoiceTenant, allow: { read: invoiceTenant } })
+
+const ordersScope = ordersPolicy.sameAs("tenantId")
+
+const ordersAuthorization = ordersPolicy.policy({
+  scope: ordersScope,
+  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor },
+})
 
 export const OrdersResource = Resource.make({
   authorization: ordersAuthorization,
   name: "orders",
   schema: OrderSchema,
+  version: "version",
+  transitions: OrderTransitions,
   operations: {
     get: true,
     list: { filter: ["number", "status"], limit: 100 },
   },
   relations: {
     unique: [
-      { name: "orders_tenant_id_id_key", fields: ["tenantId", "id"] },
-      { name: "orders_tenant_number_key", fields: ["tenantId", "number"] },
+      { fields: ["tenantId", "id"] },
+      { fields: ["tenantId", "number"] },
     ],
     indexes: [
-      { name: "orders_tenant_status_idx", fields: ["tenantId", "status"] },
+      { fields: ["tenantId", "status"] },
     ],
   },
+})
+
+const linesScope = linesPolicy.sameAs("tenantId")
+
+const linesAuthorization = linesPolicy.policy({
+  scope: linesScope,
+  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor },
 })
 
 export const OrderLinesResource = Resource.make({
@@ -50,41 +67,50 @@ export const OrderLinesResource = Resource.make({
   schema: OrderLineSchema,
   operations: {
     get: true,
-    list: { filter: ["orderId"], limit: 500 },
+    list: { filter: ["orderId"], limit: 100 },
   },
   relations: {
     unique: [
-      { name: "order_lines_tenant_order_line_key", fields: ["tenantId", "orderId", "lineNumber"] },
+      { fields: ["tenantId", "orderId", "lineNumber"] },
     ],
     foreignKeys: [{
-      name: "order_lines_order_fk",
-      fields: ["tenantId", "orderId"],
-      references: { table: "orders", fields: ["tenantId", "id"] },
+      fields: ["orderId"],
+      references: { table: "orders", fields: ["id"] },
+      scope: ["tenantId"],
     }],
   },
+})
+
+const invoicesScope = invoicesPolicy.sameAs("tenantId")
+
+const invoicesAuthorization = invoicesPolicy.policy({
+  scope: invoicesScope,
+  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor },
 })
 
 export const InvoicesResource = Resource.make({
   authorization: invoicesAuthorization,
   name: "invoices",
   schema: InvoiceSchema,
+  version: "version",
+  transitions: InvoiceTransitions,
   operations: {
     get: true,
     list: { filter: ["orderId", "number", "status"], limit: 100 },
   },
   relations: {
     unique: [
-      { name: "invoices_tenant_id_id_key", fields: ["tenantId", "id"] },
-      { name: "invoices_tenant_number_key", fields: ["tenantId", "number"] },
-      { name: "invoices_tenant_order_key", fields: ["tenantId", "orderId"] },
+      { fields: ["tenantId", "id"] },
+      { fields: ["tenantId", "number"] },
+      { fields: ["tenantId", "orderId"] },
     ],
     foreignKeys: [{
-      name: "invoices_order_fk",
-      fields: ["tenantId", "orderId"],
-      references: { table: "orders", fields: ["tenantId", "id"] },
+      fields: ["orderId"],
+      references: { table: "orders", fields: ["id"] },
+      scope: ["tenantId"],
     }],
     indexes: [
-      { name: "invoices_tenant_status_idx", fields: ["tenantId", "status"] },
+      { fields: ["tenantId", "status"] },
     ],
   },
 })

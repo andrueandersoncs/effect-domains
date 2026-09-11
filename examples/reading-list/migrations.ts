@@ -1,5 +1,4 @@
-import { Effect, pipe } from "effect"
 import { SqliteMigrations } from "effect-domains/sqlite-migrations"
 import artifact0 from "./migrations/001_initial.json" with { type: "json" }
 
-export const ReadingListMigrations = pipe([artifact0], SqliteMigrations.decodeHistory, Effect.runSync)
+export const ReadingListMigrations = SqliteMigrations.history(artifact0)

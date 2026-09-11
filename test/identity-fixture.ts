@@ -1,21 +1,30 @@
 import { BunServices } from "@effect/platform-bun"
-import { ConfigProvider, Effect, Layer, Redacted, pipe } from "effect"
+import { Duration, Effect, Layer, Redacted, pipe } from "effect"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { CredentialsSchema, IdentityRuntime } from "effect-domains/identity"
+import { SqliteIdentity } from "effect-domains/sqlite-identity"
 
-const provider = ConfigProvider.fromUnknown({
-  EFFECT_DOMAINS_DEMO_PASSWORD: "test-password-only",
-  EFFECT_DOMAINS_IDENTITY_DB: ":memory:",
-  EFFECT_DOMAINS_SESSION_LIFETIME: "8 hours",
-})
-
-const configuration = ConfigProvider.layer(provider)
-const identityDatabase = SqliteClient.layer({ filename: ":memory:" })
-const dependencies = Layer.mergeAll(configuration, identityDatabase, BunServices.layer)
 const password = Redacted.make("test-password-only")
+const identityDatabase = SqliteClient.layer({ filename: ":memory:" })
+const dependencies = Layer.mergeAll(identityDatabase, BunServices.layer)
 
-export const TestIdentity = pipe(ExampleIdentity, Layer.provide(dependencies))
+const sessionLifetime = Duration.hours(8)
+
+export const TestIdentity = pipe(
+  SqliteIdentity.layer({
+    application: "effect-domains-test",
+    accounts: [
+      { username: "alice", subject: { userId: "alice", tenantId: "acme", roles: ["editor"] } },
+      { username: "bob", subject: { userId: "bob", tenantId: "acme", roles: ["reader"] } },
+      { username: "admin", subject: { userId: "admin", tenantId: "acme", roles: ["admin"] } },
+      { username: "outsider", subject: { userId: "alice", tenantId: "other", roles: ["editor"] } },
+    ],
+    password,
+    sessionLifetime,
+    filename: ":memory:",
+  }),
+  Layer.provide(dependencies),
+)
 
 export const sessionFor = Effect.fn("IdentityTest.sessionFor")(function* (username: "alice" | "bob" | "admin" | "outsider") {
   const identity = yield* IdentityRuntime

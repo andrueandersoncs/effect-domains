@@ -1,12 +1,13 @@
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Array, Context, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
+import { Array, Config, Context, DateTime, Effect, Equivalence, FileSystem, Function, HashMap, Layer, Option, Predicate, Record, Ref, Schema, Struct, pipe } from "effect"
 import { SqlClient, SqlError } from "effect/unstable/sql"
 
 import {
   RepositoryError,
   RepositoryStore,
+  UniqueViolation,
   type RepositoryAccess,
 } from "./repository-store.ts"
 
@@ -22,17 +23,160 @@ class InsertReturnedNoRow extends Schema.TaggedError<InsertReturnedNoRow>()(
   {},
 ) {}
 
+class PrivateDatabaseConflict extends Schema.TaggedError<PrivateDatabaseConflict>()(
+  "PrivateDatabaseConflict",
+  { application: Schema.String, execution: Schema.String },
+) {}
+
 const repositoryFailure = (resource: string) => (cause: unknown) =>
   RepositoryError.make({ resource, cause })
 
 const unknownEquals = Equivalence.strictEqual<unknown>()
+const directionEquals = Equivalence.strictEqual<"asc" | "desc">()
+const emptyGuard = Record.empty<string, unknown>()
+
 const absentPolicyValue = Option.none<Readonly<Record<string, unknown>>>()
+
 
 const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
   unknownEquals(value, null) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
-const transactionFailure = (resource: string) => (cause: SqlError.SqlError) =>
-  pipe(cause, repositoryFailure(resource), Effect.fail)
+const constraintColumn = (column: string) => {
+  const segments = column.trim().split(".")
+  const last = Array.get(segments, segments.length - 1)
+  return Option.getOrThrow(last)
+}
+
+const transactionFailure = (cause: SqlError.SqlError) =>
+  pipe(cause, repositoryFailure("transaction"), Effect.fail)
+
+const constraintColumns = (value: string) => {
+  const columns = value.split(",")
+  return Array.map(columns, constraintColumn)
+}
+
+const errorMessage = (value: unknown) => {
+  if (value instanceof Error) return Option.some(value.message)
+  if (!Predicate.isObject(value)) return Option.none<string>()
+
+  const hasMessage = "message" in value
+  if (!hasMessage) return Option.none<string>()
+
+  return pipe(
+    Option.fromNullishOr((value as Readonly<Record<string, unknown>>).message),
+    Option.filter(Predicate.isString),
+  )
+}
+
+const isUniqueViolation = (
+  reason: SqlError.SqlError["reason"],
+): reason is Extract<SqlError.SqlError["reason"], { readonly _tag: "UniqueViolation" }> =>
+  Equivalence.strictEqual<typeof reason._tag>()(reason._tag, "UniqueViolation")
+
+const capturedConstraint = (match: RegExpExecArray) =>
+  Array.get(match, 1)
+
+const uniqueConstraint = (table: Table, cause: SqlError.SqlError) => {
+  const message = pipe(errorMessage(cause.reason.cause), Option.getOrElse(Function.constant(cause.message)))
+  const uniqueReason = isUniqueViolation(cause.reason)
+
+  const source = uniqueReason
+    ? Option.some(cause.reason.constraint)
+    : pipe(
+      /(?:UNIQUE|PRIMARY KEY) constraint failed:\s*(.+)$/i.exec(message),
+      Option.fromNullishOr,
+      Option.flatMap(capturedConstraint),
+    )
+
+  const primaryKey = /PRIMARY KEY constraint failed/i.test(message)
+  const foundSource = Option.isSome(source)
+  const knownUnique = uniqueReason || foundSource
+  const unique = knownUnique || primaryKey
+  if (!unique) return Option.none<UniqueViolation>()
+
+  const sourceValue = pipe(source, Option.getOrElse(Function.constant("unknown")))
+  const unknownSource = Equivalence.strictEqual<string>()(sourceValue, "unknown")
+  const primaryFields = primaryKey ? [table.identifier] : []
+  const fields = unknownSource ? primaryFields : constraintColumns(sourceValue)
+  const relationEntries = table.relations?.unique ?? []
+
+  const matchesFields = (entry: typeof relationEntries[number]) => {
+    const sameSize = Equivalence.strictEqual<number>()(entry.fields.length, fields.length)
+    const containsField = (field: string) => Array.contains(fields, field)
+    const sameFields = Array.every(entry.fields, containsField)
+    return sameSize && sameFields
+  }
+
+  const declared = Array.findFirst(relationEntries, matchesFields)
+  const fieldCount = Array.length(fields)
+  const oneField = Equivalence.strictEqual<number>()(fieldCount, 1)
+  const fieldMatchesIdentifier = pipe(Array.get(fields, 0), Option.exists((field) => unknownEquals(field, table.identifier)))
+  const identifier = oneField && fieldMatchesIdentifier
+  const fallback = identifier || primaryKey ? table.identifier : Array.join(fields, ", ")
+  const constraint = pipe(declared, Option.map(Struct.get("name")), Option.getOrElse(Function.constant(fallback)))
+  const violation = UniqueViolation.make({ resource: table.name, constraint, fields })
+
+  return Option.some(violation)
+}
+
+const persistenceFailure = (table: Table) => (
+  cause: SqlError.SqlError,
+): Effect.Effect<never, RepositoryError | UniqueViolation> => pipe(
+  uniqueConstraint(table, cause),
+  Option.match({
+    onNone: () => pipe(cause, repositoryFailure(table.name), Effect.fail),
+    onSome: Effect.fail,
+  }),
+)
+
+const rangeFragments = (sql: SqlClient.SqlClient) => (
+  range: Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>,
+) => {
+  const entries = Record.toEntries(range)
+
+  return Array.flatMap(entries, ([field, bounds]) => {
+    const hasFrom = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "from")
+    const hasTo = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "to")
+    const lower = hasFrom ? Option.some(sql`${sql(field)} >= ${bounds.from}`) : Option.none()
+    const upper = hasTo ? Option.some(sql`${sql(field)} <= ${bounds.to}`) : Option.none()
+    return Array.getSomes([lower, upper])
+  })
+}
+
+const keysetPreviousClause = (sql: SqlClient.SqlClient) => (
+  after: Readonly<Record<string, unknown>>,
+) => (prior: Readonly<{ field: string }>) => sql`${sql(prior.field)} = ${after[prior.field]}`
+
+const keysetClause = (sql: SqlClient.SqlClient) => (
+  after: Readonly<Record<string, unknown>>,
+) => (entry: Readonly<{ field: string; direction: "asc" | "desc" }>, index: number, order: ReadonlyArray<Readonly<{ field: string; direction: "asc" | "desc" }>>) => {
+  const previous = Array.take(order, index)
+  const before = Array.map(previous, keysetPreviousClause(sql)(after))
+  const ascending = directionEquals(entry.direction, "asc")
+
+  const comparison = ascending
+    ? sql`${sql(entry.field)} > ${after[entry.field]}`
+    : sql`${sql(entry.field)} < ${after[entry.field]}`
+
+  const clauses = Array.append(before, comparison)
+  return sql.and(clauses)
+}
+
+const keysetFragment = (
+  sql: SqlClient.SqlClient,
+  order: ReadonlyArray<Readonly<{ field: string; direction: "asc" | "desc" }>>,
+  after: Readonly<Record<string, unknown>>,
+) => {
+  const count = Array.length(order)
+  const indexes = Array.range(0, count)
+  const indexed = Array.zip(order, indexes)
+
+  const clause = ([entry, index]: readonly [Readonly<{ field: string; direction: "asc" | "desc" }>, number]) =>
+    keysetClause(sql)(after)(entry, index, order)
+
+  const clauses = Array.map(indexed, clause)
+  return sql.or(clauses)
+}
 
 const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClient: SqlClient.SqlClient) {
   const policyBinders = yield* pipe(HashMap.empty<Policy, ReturnType<typeof PolicySql.compile>>(), Ref.make)
@@ -67,19 +211,34 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
   return RepositoryStore.of({
     select: Effect.fn("RepositoryStore.select")(function* (table, query, access) {
       const policy = yield* policyBinding(table, access)
-      const entries = Record.toEntries(query.filter)
-      const predicates = [policy, ...Array.map(entries, whereFragment(sqlClient))]
+      const filterEntries = Record.toEntries(query.filter)
+      const filters = Array.map(filterEntries, whereFragment(sqlClient))
+      const ranges = rangeFragments(sqlClient)(query.range)
+      const predicates = [...filters, ...ranges, policy]
+
+      const withAfter = (after: Readonly<Record<string, unknown>>) => {
+        const keyset = keysetFragment(sqlClient, query.order, after)
+        return Array.append(predicates, keyset)
+      }
 
       const conditions = Option.match(query.after, {
         onNone: Function.constant(predicates),
-        onSome: (key) => Array.append(predicates, sqlClient`${sqlClient(table.identifier)} > ${key}`),
+        onSome: withAfter,
       })
+
+      const renderOrder = ({ field, direction }: Readonly<{ field: string; direction: "asc" | "desc" }>) => {
+        const ascending = directionEquals(direction, "asc")
+        const keyword = ascending ? "ASC" : "DESC"
+        return sqlClient`${sqlClient(field)} ${sqlClient.literal(keyword)}`
+      }
+
+      const order = Array.map(query.order, renderOrder)
 
       return yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           SELECT * FROM ${sqlClient(table.name)}
           WHERE ${sqlClient.and(conditions)}
-          ORDER BY ${sqlClient(table.identifier)} ASC
+          ORDER BY ${sqlClient.csv(order)}
           LIMIT ${query.limit}
         `,
         Effect.mapError(repositoryFailure(table.name)),
@@ -91,7 +250,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
           INSERT INTO ${sqlClient(table.name)} ${sqlClient.insert(value as Record<string, unknown>)}
           RETURNING *
         `,
-        Effect.mapError(repositoryFailure(table.name)),
+        Effect.catchIf(SqlError.isSqlError, persistenceFailure(table)),
       )
 
       const row = Array.get(rows, 0)
@@ -105,18 +264,21 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
 
       return row.value
     }),
-    update: Effect.fn("RepositoryStore.update")(function* (table, value, access) {
+    update: Effect.fn("RepositoryStore.update")(function* (table, value, access, guard = emptyGuard) {
       const key = value[table.identifier]
       const policy = yield* policyBinding(table, access)
+      const guardEntries = Record.toEntries(guard)
+      const guards = Array.map(guardEntries, whereFragment(sqlClient))
+      const conditions = [policy, sqlClient`${sqlClient(table.identifier)} = ${key}`, ...guards]
 
       const rows = yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           UPDATE ${sqlClient(table.name)}
           SET ${sqlClient.update(value as Record<string, unknown>, [table.identifier])}
-          WHERE ${policy} AND ${sqlClient(table.identifier)} = ${key}
+          WHERE ${sqlClient.and(conditions)}
           RETURNING *
         `,
-        Effect.mapError(repositoryFailure(table.name)),
+        Effect.catchIf(SqlError.isSqlError, persistenceFailure(table)),
       )
 
       return pipe(rows, Array.get(0))
@@ -135,10 +297,10 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
 
       return Array.isReadonlyArrayNonEmpty(rows)
     }),
-    transaction: Effect.fn("RepositoryStore.transaction")(function* (table, effect) {
+    transaction: Effect.fn("RepositoryStore.transaction")(function* (effect) {
       return yield* pipe(
         sqlClient.withTransaction(effect),
-        Effect.catchIf(SqlError.isSqlError, transactionFailure(table.name)),
+        Effect.catchIf(SqlError.isSqlError, transactionFailure),
       )
     }),
   })
@@ -179,6 +341,103 @@ const ensureParentDirectory = (filename: string) =>
     mkdirSync(directory, { recursive: true })
   })
 
+const DatabaseFileSchema = Schema.Struct({ name: Schema.String, file: Schema.String })
+const DatabaseFilesSchema = Schema.Array(DatabaseFileSchema)
+
+const mainDatabaseFile = Effect.fn("SqliteBun.mainDatabaseFile")(function* (sql: SqlClient.SqlClient) {
+  const rows = yield* sql`PRAGMA database_list`
+  const databases = yield* Schema.decodeUnknownEffect(DatabaseFilesSchema)(rows)
+  const main = Array.findFirst(databases, ({ name }) => stringEquals(name, "main"))
+
+  return pipe(
+    main,
+    Option.map(({ file }) => file),
+    Option.getOrThrow,
+  )
+})
+
+const assertDistinctDatabases = Effect.fn("SqliteBun.assertDistinctDatabases")(function* (
+  application: SqlClient.SqlClient,
+  execution: SqlClient.SqlClient,
+) {
+  const applicationFile = yield* mainDatabaseFile(application)
+  const executionFile = yield* mainDatabaseFile(execution)
+  const hasApplicationFile = !Equivalence.strictEqual<string>()(applicationFile, "")
+  const hasExecutionFile = !Equivalence.strictEqual<string>()(executionFile, "")
+  const filesOnDisk = hasApplicationFile && hasExecutionFile
+  if (!filesOnDisk) return
+
+  const fs = yield* FileSystem.FileSystem
+  const applicationStats = fs.stat(applicationFile)
+  const executionStats = fs.stat(executionFile)
+  const [left, right] = yield* Effect.all([applicationStats, executionStats])
+
+  const sameInode = pipe(
+    left.ino,
+    Option.zipWith(right.ino, unknownEquals),
+    Option.getOrElse(Function.constant(false)),
+  )
+
+  const sameDevice = unknownEquals(left.dev, right.dev)
+  const sameLocation = sameDevice && sameInode
+  const sameName = stringEquals(applicationFile, executionFile)
+  const sameFile = sameName || sameLocation
+
+  if (sameFile) {
+    return yield* pipe(
+      PrivateDatabaseConflict.make({ application: applicationFile, execution: executionFile }),
+      Effect.fail,
+    )
+  }
+})
+
+export const environmentPrefix = (name: string) => name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")
+
+const privateDatabaseEnvironment = (application: string) => (purpose: string) =>
+  `${environmentPrefix(application)}_${environmentPrefix(purpose)}_DB`
+
+const privateDatabaseConfig = (application: string) => (purpose: string) =>
+  pipe(
+    privateDatabaseEnvironment(application)(purpose),
+    Config.string,
+    Config.withDefault(`data/${application}-${purpose}.sqlite`),
+  )
+
+const privateDatabaseFilename = (
+  application: string,
+  purpose: string,
+  configured: Option.Option<string>,
+) => {
+  const defaultFilename = privateDatabaseConfig(application)(purpose)
+
+  return Option.match(configured, {
+    onSome: Effect.succeed,
+    onNone: Function.constant(defaultFilename),
+  })
+}
+
+const privateClient = (
+  options: Readonly<{ application: string; purpose: string }> & Readonly<Partial<{ filename: string }>>,
+) => pipe(
+  Effect.gen(function* () {
+    const application = yield* SqlClient.SqlClient
+    const configured = Option.fromNullishOr(options.filename)
+    const filename = yield* privateDatabaseFilename(options.application, options.purpose, configured)
+    yield* ensureParentDirectory(filename)
+
+    const verifyDatabase = (context: Context.Context<SqlClient.SqlClient>) => {
+      const execution = Context.get(context, SqlClient.SqlClient)
+      return assertDistinctDatabases(application, execution)
+    }
+
+    return pipe(
+      SqliteClient.layer({ filename }),
+      Layer.tap(verifyDatabase),
+    )
+  }),
+  Layer.unwrap,
+)
+
 const sqlClient = (
   filename: string,
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
@@ -202,6 +461,7 @@ const sqlClient = (
 )
 
 export const SqliteBunRuntime = {
+  privateClient,
   sqlClient,
   values,
 }

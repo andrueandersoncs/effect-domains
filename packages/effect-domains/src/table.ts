@@ -12,18 +12,17 @@ import {
   Record,
   Schema,
   SchemaAST,
+  String,
   Struct,
   flow,
   pipe,
 } from "effect"
 
-import { DomainIdentifier, type StructSchema } from "./domain.ts"
+import { DomainIdentifier, type StructSchema, UuidV7Schema } from "./domain.ts"
 import { ScalarSchema, ownValue, scalarChecks, type ScalarF } from "./schema-algebra.ts"
 
 const isTrue = (value: boolean) => value
 
-const UuidV7Check = Schema.isUUID(7)
-export const DefaultTableIdentifierSchema = Schema.String.check(UuidV7Check)
 const TableScalarSchema = Schema.Literals(["string", "integer", "number"])
 const TableCheckValueSchema = Schema.Union([Schema.String, Schema.Number])
 const TableCheckValuesSchema = Schema.Array(TableCheckValueSchema)
@@ -126,8 +125,26 @@ class TableRelations extends Schema.Class<TableRelations>("TableRelations")({
 type TableRelationFields<Fields extends string> = readonly Fields[]
 
 export type TableRelationsInput<Fields extends string = string> = Readonly<Partial<{
-  [Kind in keyof TableRelations]: ReadonlyArray<
-    Omit<Required<TableRelations>[Kind][number], "fields"> & { readonly fields: TableRelationFields<Fields> }
+  readonly unique: ReadonlyArray<
+    Omit<TableUnique, "name" | "fields">
+    & Partial<Pick<TableUnique, "name">>
+    & { readonly fields: TableRelationFields<Fields> }
+  >
+  readonly foreignKeys: ReadonlyArray<
+    Omit<TableForeignKey, "name" | "fields" | "references">
+    & Partial<Pick<TableForeignKey, "name">>
+    & Partial<Readonly<{ scope: TableRelationFields<Fields> }>>
+    & {
+      readonly fields: TableRelationFields<Fields>
+      readonly references: Omit<TableForeignKey["references"], "fields"> & {
+        readonly fields: TableRelationFields<Fields>
+      }
+    }
+  >
+  readonly indexes: ReadonlyArray<
+    Omit<TableIndex, "name" | "fields">
+    & Partial<Pick<TableIndex, "name">>
+    & { readonly fields: TableRelationFields<Fields> }
   >
 }>>
 
@@ -141,7 +158,7 @@ export class TableSnapshot extends Schema.Class<TableSnapshot>("TableSnapshot")(
   relations: OptionalTableRelationsSchema,
 }) {}
 
-const DefaultIdentifierFields = Record.singleton("id", DefaultTableIdentifierSchema)
+const DefaultIdentifierFields = Record.singleton("id", UuidV7Schema)
 const NoGeneration = Option.none<"uuidv7">()
 const GeneratedIdentifierGeneration = Option.some<"uuidv7">("uuidv7")
 
@@ -364,7 +381,7 @@ const scalarAlgebra = (table: string, field: string) => (
       if (!dateTime) return unsupportedTableScalar(table, field)
       const scalar = Option.some("string" as const)
       const storageCodec = Option.some(Schema.DateTimeUtcFromString)
-      const result = new ScalarCompilation({ ...base, scalar, orderable: false, storageCodec })
+      const result = new ScalarCompilation({ ...base, scalar, storageCodec })
       return Effect.succeed(result)
     }),
     Match.tag("Literal", ({ literal }) => {
@@ -550,7 +567,7 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const rowSchema = implicit ? withImplicitIdentifier(schema) : schema
 
   const key = pipe(identifier, Option.getOrElse(() => new CompiledField({
-    field: DefaultIdentifierField, storageSchema: DefaultTableIdentifierSchema, orderable: true,
+    field: DefaultIdentifierField, storageSchema: UuidV7Schema, orderable: true,
   })))
 
   const storedFields = implicit ? Array.prepend(compiled, key) : compiled
@@ -601,7 +618,57 @@ export interface Table<
 
 export type TableFieldName<S extends StructSchema> = Extract<keyof RowSchema<S>["fields"], string>
 
-const cloneRelations = flow(Schema.decodeUnknownEffect(TableRelations), Effect.runSync)
+// Derive snake_case names because the hand-written histories already follow SQL convention.
+const constraintName = (table: string, fields: ReadonlyArray<string>, suffix: string) => {
+  const segments = Array.map(fields, String.camelToSnake)
+  const joined = Array.join(segments, "_")
+  return `${table}_${joined}_${suffix}`
+}
+
+const cloneRelations = <Fields extends string>(table: string, relations: TableRelationsInput<Fields>) => {
+  const unique = pipe(
+    Option.fromNullishOr(relations.unique),
+    Option.map(Array.map((constraint) => {
+      const name = pipe(
+        Option.fromNullishOr(constraint.name),
+        Option.getOrElse(() => constraintName(table, constraint.fields, "key")),
+      )
+
+      return TableUnique.make({ name, fields: constraint.fields })
+    })),
+  )
+
+  const foreignKeys = pipe(
+    Option.fromNullishOr(relations.foreignKeys),
+    Option.map(Array.map((constraint) => {
+      const scope = pipe(Option.fromNullishOr(constraint.scope), Option.getOrElse(Array.empty))
+      const fields = Array.appendAll(scope, constraint.fields)
+      const referenced = Array.appendAll(scope, constraint.references.fields)
+
+      const name = pipe(
+        Option.fromNullishOr(constraint.name),
+        Option.getOrElse(() => constraintName(table, fields, "fkey")),
+      )
+
+      const references = TableForeignKeyReference.make({ table: constraint.references.table, fields: referenced })
+      return TableForeignKey.make({ name, fields, references })
+    })),
+  )
+
+  const indexes = pipe(
+    Option.fromNullishOr(relations.indexes),
+    Option.map(Array.map((constraint) => {
+      const name = pipe(
+        Option.fromNullishOr(constraint.name),
+        Option.getOrElse(() => constraintName(table, constraint.fields, "idx")),
+      )
+
+      return TableIndex.make({ name, fields: constraint.fields })
+    })),
+  )
+
+  return TableRelations.make(Record.getSomes({ unique, foreignKeys, indexes }))
+}
 
 const make = <const Name extends string, const S extends StructSchema>(
   options: Readonly<{ name: Name; schema: S }> & Readonly<Partial<{ relations: TableRelationsInput<TableFieldName<S>> }>>,
@@ -609,7 +676,7 @@ const make = <const Name extends string, const S extends StructSchema>(
   const compilation = compileTable(options.name, options.schema)
   const result = Effect.runSync(compilation)
   const relations = Option.fromNullishOr(options.relations)
-  const copiedRelations = pipe(relations, Option.map(cloneRelations))
+  const copiedRelations = pipe(relations, Option.map((value) => cloneRelations(result.name, value)))
 
   const validation = pipe(copiedRelations, Option.match({
     onNone: Function.constant(Effect.void),
@@ -777,4 +844,35 @@ const validateRelations = Effect.fn("Table.validateRelations")(function* (
   yield* Effect.forEach(tables, validateForeignKeys(byName))
 })
 
-export const Table = { make, snapshot, validateRelations }
+type ProjectedField<TableDefinition extends Table> = Extract<keyof TableDefinition["rowSchema"]["fields"], string>
+
+const project = <
+  const TableDefinition extends Table,
+  const Fields extends ReadonlyArray<ProjectedField<TableDefinition>>,
+>(table: TableDefinition, fields: Fields) => {
+  const selection = Object.freeze([...fields])
+  const selected = Struct.pick(table.columns, selection)
+  const StorageSchema = Schema.Struct(Record.map(selected, Struct.get("storageSchema")))
+
+  const ProjectionSchema = Schema.make<Schema.Codec<
+    Pick<TableDefinition["rowSchema"]["Type"], Fields[number]>,
+    Readonly<Record<Fields[number], unknown>>,
+    TableDefinition["storageSchema"]["DecodingServices"],
+    TableDefinition["storageSchema"]["EncodingServices"]
+  >>(StorageSchema.ast)
+
+  const object = (sql: import("effect/unstable/sql").SqlClient.SqlClient, alias: string) => {
+    const entry = (field: Fields[number]) => sql`${field}, ${sql(alias)}.${sql(field)}`
+    const entries = Array.map(selection, entry)
+    return sql`json_object(${sql.csv(entries)})`
+  }
+
+  return {
+    fields: selection,
+    schema: ProjectionSchema,
+    json: Schema.fromJsonString(ProjectionSchema),
+    object,
+  }
+}
+
+export const Table = { make, project, snapshot, validateRelations }

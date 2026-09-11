@@ -1,17 +1,13 @@
 import { DateTime, Schema, pipe } from "effect"
 import { ClusterError } from "effect/unstable/cluster"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Forbidden } from "effect-domains/authorization"
+import { SafeIntSchema } from "effect-domains/domain"
 import { EntitlementRequired, EntitlementUnavailable } from "effect-domains/entitlements"
-import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 
 const isReportId = Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 const isLedgerAccountCode = Schema.isPattern(/^[0-9]{4,10}$/)
 
-export const MoneyMinorSchema = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(0),
-  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
-)
+export const MoneyMinorSchema = SafeIntSchema.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const FinancialReportIdSchema = pipe(
   Schema.String.check(isReportId),
@@ -73,7 +69,7 @@ export const ReportArtifactSchema = Schema.Struct({
   currency: CurrencyCodeSchema,
   releasePolicy: ReportReleasePolicySchema,
   releasedBy: Schema.NullOr(Schema.NonEmptyString),
-  lineCount: Schema.Int,
+  lineCount: SafeIntSchema,
   totalDebitMinor: MoneyMinorSchema,
   totalCreditMinor: MoneyMinorSchema,
 })
@@ -108,32 +104,35 @@ export const ReportExportPollResultSchema = Schema.Union([
 
 export const ReportExportRunnerStatusSchema = Schema.Struct({
   host: Schema.String,
-  port: Schema.Int,
+  port: SafeIntSchema,
   healthy: Schema.Boolean,
   groups: Schema.Array(Schema.String),
   weight: Schema.Finite,
 })
 
 export const ReportExportStatusSchema = Schema.Struct({
-  activeEntities: Schema.Int,
+  activeEntities: SafeIntSchema,
   shuttingDown: Schema.Boolean,
   runners: Schema.Array(ReportExportRunnerStatusSchema),
 })
 
-const reportPayloadSchema = Schema.toCodecJson(ReportExportRequestSchema)
-const artifactPayloadSchema = Schema.toCodecJson(ReportArtifactSchema)
-const generationErrorsSchema = Schema.Union([Forbidden, EntitlementRequired, EntitlementUnavailable])
+export class ReportExportUnavailable extends Schema.TaggedError<ReportExportUnavailable>()(
+  "ReportExportUnavailable",
+  {},
+) {}
 
-const generate = Rpc.make("ReportExport.Generate", { payload: reportPayloadSchema, success: artifactPayloadSchema, error: generationErrorsSchema })
-const generateDiscard = Rpc.make("ReportExport.GenerateDiscard", { payload: reportPayloadSchema, success: Schema.String, error: generationErrorsSchema })
-const resume = Rpc.make("ReportExport.GenerateResume", { payload: PollReportExportSchema, success: Schema.Void, error: Forbidden })
-const release = Rpc.make("ReportExport.Release", { payload: ReleaseReportSchema, success: Schema.Void })
-const poll = Rpc.make("ReportExport.Poll", { payload: PollReportExportSchema, success: ReportExportPollResultSchema })
-const status = Rpc.make("ReportExport.Status", { success: ReportExportStatusSchema, error: ClusterError.PersistenceError })
+export const ReportExportGenerationErrorsSchema = Schema.Union([
+  Forbidden,
+  EntitlementRequired,
+  EntitlementUnavailable,
+  ReportExportUnavailable,
+])
 
-export const ReportExportGenerationRpcs = RpcGroup.make(generate, generateDiscard).middleware(AuthorizationRpc)
-export const ReportExportOperatorRpcs = RpcGroup.make(resume, release, poll, status).middleware(AuthorizationRpc)
-export const ReportExportRpcs = ReportExportGenerationRpcs.merge(ReportExportOperatorRpcs)
+export const ReportExportOperatorErrorsSchema = Schema.Union([
+  Forbidden,
+  ClusterError.PersistenceError,
+  ReportExportUnavailable,
+])
 
 export interface ReportExportRequest extends Schema.Schema.Type<typeof ReportExportRequestSchema> {}
 export interface ReportExportJob extends Schema.Schema.Type<typeof ReportExportJobSchema> {}
@@ -144,4 +143,3 @@ interface FinancialReport extends Schema.Schema.Type<typeof FinancialReportSchem
 interface ReportArtifact extends Schema.Schema.Type<typeof ReportArtifactSchema> {}
 interface ReportRelease extends Schema.Schema.Type<typeof ReportReleaseSchema> {}
 interface ReleaseReport extends Schema.Schema.Type<typeof ReleaseReportSchema> {}
-interface PollReportExport extends Schema.Schema.Type<typeof PollReportExportSchema> {}

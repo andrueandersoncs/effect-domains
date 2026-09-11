@@ -1,4 +1,4 @@
-import { BunHttpServer, BunServices } from "@effect/platform-bun"
+import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun"
 import { AdminAssetFiles } from "@effect-domains/admin/assets"
 import { Array, Config, Context, Effect, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
@@ -11,7 +11,7 @@ import { ApplicationTelemetry, type TelemetryOptions } from "./application-telem
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RpcCli } from "./rpc-cli.ts"
 import { RpcMcp } from "./rpc-mcp.ts"
-import { SqliteBunRuntime } from "./sqlite-bun.ts"
+import { environmentPrefix, SqliteBunRuntime } from "./sqlite-bun.ts"
 import { type SqliteMigration } from "./sqlite-migrations.ts"
 import type { MigrationError } from "./migrations.ts"
 
@@ -84,7 +84,6 @@ type RunErrors<
   | Layer.Error<App["handlers"]>
   | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background> | Layer.Error<Routes>
 
-const environmentPrefix = (name: string) => name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")
 
 const databaseFilename = (name: string, configured: Option.Option<string>) => {
   const environment = environmentPrefix(name)

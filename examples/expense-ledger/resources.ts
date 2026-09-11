@@ -6,5 +6,11 @@ export const ExpensesResource = Resource.make({
   authorization: Authorization.public,
   name: "expenses",
   schema: ExpenseSchema,
-  operations: {},
+  operations: {
+    list: {
+      filter: ["category"],
+      range: ["date"],
+      order: [["date", "asc"]],
+    },
+  },
 })

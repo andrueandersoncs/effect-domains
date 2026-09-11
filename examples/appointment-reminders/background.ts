@@ -1,11 +1,14 @@
 import { ClusterCron, Singleton } from "effect/unstable/cluster"
 import { SqlClient } from "effect/unstable/sql"
-import { Array, Config, Cron, DateTime, Effect, Equivalence, Layer, Schedule, Schema, pipe } from "effect"
+import { Config, Cron, DateTime, Effect, Equivalence, Layer, Schedule, pipe } from "effect"
 import { replaceFileAtomically } from "@effect-domains/example-support/files"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { AuthorizationSubject } from "effect-domains/authorization"
 
 import {
   AppointmentReminderDeliveryFailed,
   AppointmentRecipientMismatch,
+  AppointmentInboxNotificationSchema,
   appointmentInboxNotificationId,
   ReminderMustPrecedeAppointment,
 } from "./domain.ts"
@@ -26,56 +29,39 @@ const persistenceFailure = (delivery: AppointmentReminderDelivery) =>
 const reminderPrecedesAppointment = (delivery: AppointmentReminderDelivery) =>
   DateTime.isLessThan(delivery.reminderAt, delivery.appointmentAt)
 
+const operator = ExampleSubjectSchema.make({
+  userId: "admin",
+  tenantId: "acme",
+  roles: ["admin"],
+})
+
 const persistInboxNotification = Effect.fn("AppointmentReminders.persistInboxNotification")(function* (
-  database: SqlClient.SqlClient,
   delivery: AppointmentReminderDelivery,
 ) {
-  const id = appointmentInboxNotificationId(delivery.recipient, delivery.reminderId)
+  const deliveredAt = yield* DateTime.now
 
-  const transaction = Effect.gen(function* () {
-    const deliveredAt = yield* DateTime.now
-    const appointmentAt = DateTime.formatIso(delivery.appointmentAt)
-    const reminderAt = DateTime.formatIso(delivery.reminderAt)
-    const delivered = DateTime.formatIso(deliveredAt)
-
-    yield* database`
-      INSERT OR IGNORE INTO ${database(AppointmentInboxNotificationResource.table.name)}
-      ${database.insert({
-        id,
-        recipient: delivery.recipient,
-        reminderId: delivery.reminderId,
-        appointmentId: delivery.appointmentId,
-        appointmentAt,
-        reminderAt,
-        location: delivery.location,
-        purpose: delivery.purpose,
-        deliveredAt: delivered,
-        archivedAt: null,
-      })}
-    `
-
-    const rows = yield* database<Readonly<Record<string, unknown>>>`
-      SELECT * FROM ${database(AppointmentInboxNotificationResource.table.name)}
-      WHERE ${database("id")} = ${id}
-      LIMIT 1
-    `
-
-    const row = yield* pipe(rows, Array.head, Effect.fromOption, Effect.orDie)
-    return yield* Schema.decodeUnknownEffect(AppointmentInboxNotificationResource.table.storageSchema)(row)
+  const notification = AppointmentInboxNotificationSchema.make({
+    id: appointmentInboxNotificationId(delivery.recipient, delivery.reminderId),
+    recipient: delivery.recipient,
+    reminderId: delivery.reminderId,
+    appointmentId: delivery.appointmentId,
+    appointmentAt: delivery.appointmentAt,
+    reminderAt: delivery.reminderAt,
+    location: delivery.location,
+    purpose: delivery.purpose,
+    deliveredAt,
+    archivedAt: null,
   })
 
   return yield* pipe(
-    transaction,
-    database.withTransaction,
+    AppointmentInboxNotificationResource.repository.ensure(notification),
+    Effect.provideService(AuthorizationSubject, operator),
     Effect.tapError((cause) => Effect.logError("Appointment inbox notification persistence failed", cause)),
     Effect.mapError(() => persistenceFailure(delivery)),
   )
 })
 
 const registerAppointmentRecipient = Effect.gen(function* () {
-  // Capture application SQL because native Sharding carries its private execution SQL context.
-  const database = yield* SqlClient.SqlClient
-
   const handlers = AppointmentRecipientEntity.of({
     ScheduleReminder: Effect.fn("AppointmentReminders.ScheduleReminder")(function* ({ payload, address }) {
       const matchesRecipient = Equivalence.strictEqual<string>()(address.entityId, payload.recipient)
@@ -92,7 +78,7 @@ const registerAppointmentRecipient = Effect.gen(function* () {
         })
       }
 
-      return yield* persistInboxNotification(database, payload)
+      return yield* persistInboxNotification(payload)
     }),
   })
 

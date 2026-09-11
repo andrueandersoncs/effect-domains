@@ -13,12 +13,11 @@ const web = ExampleWeb.layerHttp({
   ...BillingWebAssets,
 })
 
-pipe(
-  ApplicationBun.run(BillingApplication, {
-    database: { migrations: BillingMigrations },
-    services: ExampleIdentity,
-    admin: true,
-    routes: web,
-  }),
-  BunRuntime.runMain,
-)
+const services = ExampleIdentity.layer("orders-invoices")
+
+pipe(ApplicationBun.run(BillingApplication, {
+  database: { migrations: BillingMigrations },
+  services,
+  admin: true,
+  routes: web,
+}), BunRuntime.runMain)

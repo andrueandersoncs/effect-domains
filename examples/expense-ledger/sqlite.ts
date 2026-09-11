@@ -1,16 +1,20 @@
-import { Effect, Option, pipe } from "effect"
+import { Effect, Option, Schema, pipe } from "effect"
+
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { ExpenseLedgerRpcs } from "./contracts.ts"
+
+import { Operation } from "effect-domains/operation"
+import { ResourceNotFound } from "effect-domains/repository-store"
 
 import {
   type Expense,
   type ExpenseIdentifierInput,
-  type ExpenseQueryInput,
   ExpenseIdentifierInputSchema,
   ExpenseLedgerUnavailable,
   ExpenseNotFound,
+  type ExpenseQueryInput,
   ExpenseQueryInputSchema,
   ExpenseTotalSchema,
+  ExpenseSchema,
   InvalidExpenseDateRange,
 } from "./domain.ts"
 
@@ -18,19 +22,15 @@ import { ExpensesResource } from "./resources.ts"
 
 type SqliteRow = Readonly<Record<string, unknown>>
 
-const persistenceFailure = Effect.fn("ExpenseLedger.persistenceFailure")(function* () {
-  return yield* ExpenseLedgerUnavailable.make({})
-})
+const expenseDateRange = (
+  database: SqlClient.SqlClient,
+  input: ExpenseQueryInput,
+) => database`${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}`
 
-const persistenceFailures = {
-  SqlError: persistenceFailure,
-  SchemaError: persistenceFailure,
-}
-
-const expenseDateRange = (database: SqlClient.SqlClient, input: ExpenseQueryInput) =>
-  database`${database("date")} >= ${input.from} AND ${database("date")} <= ${input.through}`
-
-const expenseConditions = (database: SqlClient.SqlClient, input: ExpenseQueryInput) => {
+const expenseConditions = (
+  database: SqlClient.SqlClient,
+  input: ExpenseQueryInput,
+) => {
   const dateRange = expenseDateRange(database, input)
 
   return pipe(
@@ -44,23 +44,6 @@ const expenseConditions = (database: SqlClient.SqlClient, input: ExpenseQueryInp
     }),
   )
 }
-
-const queryExpenses = SqlSchema.findAll({
-  Request: ExpenseQueryInputSchema,
-  Result: ExpensesResource.table.rowSchema,
-  execute: Effect.fn("ExpenseLedger.query.implementation")(function* (input) {
-    const database = yield* SqlClient.SqlClient
-    const limit = input.limit ?? 50
-    const conditions = expenseConditions(database, input)
-
-    return yield* database<SqliteRow>`
-      SELECT * FROM ${database(ExpensesResource.table.name)}
-      WHERE ${database.and(conditions)}
-      ORDER BY ${database("date")} ASC, ${database(ExpensesResource.table.identifier)} ASC
-      LIMIT ${limit}
-    `
-  }),
-})
 
 const calculateTotals = SqlSchema.findAll({
   Request: ExpenseQueryInputSchema,
@@ -80,31 +63,6 @@ const calculateTotals = SqlSchema.findAll({
   }),
 })
 
-const removeExpense = SqlSchema.findOneOption({
-  Request: ExpenseIdentifierInputSchema,
-  Result: ExpensesResource.table.rowSchema,
-  execute: Effect.fn("ExpenseLedger.remove.implementation")(function* (input) {
-    const database = yield* SqlClient.SqlClient
-
-    return yield* database<SqliteRow>`
-      DELETE FROM ${database(ExpensesResource.table.name)}
-      WHERE ${database(ExpensesResource.table.identifier)} = ${input.id}
-      RETURNING *
-    `
-  }),
-})
-
-const requireExpense = Effect.fn("ExpenseLedger.require")(function* (
-  id: (typeof ExpenseIdentifierInputSchema.Type)["id"],
-  expense: Option.Option<typeof ExpensesResource.table.rowSchema.Type>,
-) {
-  if (Option.isNone(expense)) {
-    return yield* ExpenseNotFound.make({ id })
-  }
-
-  return expense.value
-})
-
 const validateDateRange = Effect.fn("ExpenseLedger.validateDateRange")(function* (
   input: ExpenseQueryInput,
 ) {
@@ -116,31 +74,24 @@ const validateDateRange = Effect.fn("ExpenseLedger.validateDateRange")(function*
   }
 })
 
-const record = Effect.fn("ExpenseLedger.record")(function* (input: Expense) {
+const expenseNotFound = (id: ExpenseIdentifierInput["id"]) =>
+  ExpenseNotFound.make({ id })
+
+
+const get = Effect.fn("ExpenseLedger.get")(function* (
+  input: ExpenseIdentifierInput,
+) {
   return yield* pipe(
-    ExpensesResource.repository.create(input),
-    Effect.catchTag("RepositoryError", persistenceFailure),
+    ExpensesResource.repository.get(input.id),
+    Effect.catchTag("ResourceNotFound", () => expenseNotFound(input.id)),
   )
 })
 
-const query = Effect.fn("ExpenseLedger.query")(function* (input: ExpenseQueryInput) {
+const totals = Effect.fn("ExpenseLedger.totals")(function* (
+  input: ExpenseQueryInput,
+) {
   yield* validateDateRange(input)
-  return yield* pipe(queryExpenses(input), Effect.catchTags(persistenceFailures))
-})
-
-const totals = Effect.fn("ExpenseLedger.totals")(function* (input: ExpenseQueryInput) {
-  yield* validateDateRange(input)
-  return yield* pipe(calculateTotals(input), Effect.catchTags(persistenceFailures))
-})
-
-const get = Effect.fn("ExpenseLedger.get")(function* (input: ExpenseIdentifierInput) {
-
-  const found = yield* pipe(
-    ExpensesResource.repository.find(input.id),
-    Effect.catchTag("RepositoryError", persistenceFailure),
-  )
-
-  return yield* requireExpense(input.id, found)
+  return yield* calculateTotals(input)
 })
 
 const update = Effect.fn("ExpenseLedger.update")(function* (
@@ -148,23 +99,79 @@ const update = Effect.fn("ExpenseLedger.update")(function* (
 ) {
   return yield* pipe(
     ExpensesResource.repository.update(input),
-    Effect.catchTags({
-      RepositoryError: persistenceFailure,
-      ResourceNotFound: () => ExpenseNotFound.make({ id: input.id }),
-    }),
+    Effect.catchTag("ResourceNotFound", () => expenseNotFound(input.id)),
   )
 })
 
-const remove = Effect.fn("ExpenseLedger.remove")(function* (input: ExpenseIdentifierInput) {
-  const found = yield* pipe(removeExpense(input), Effect.catchTags(persistenceFailures))
-  return yield* requireExpense(input.id, found)
+const remove = Effect.fn("ExpenseLedger.remove")(function* (
+  input: ExpenseIdentifierInput,
+) {
+  const expense = yield* get(input)
+  yield* ExpensesResource.repository.remove(input.id)
+  return expense
 })
 
-export const ExpenseLedgerSqlite = ExpenseLedgerRpcs.toLayer({
-  "expenses.record": record,
-  "expenses.get": get,
-  "expenses.query": query,
-  "expenses.totals": totals,
-  "expenses.update": update,
-  "expenses.remove": remove,
+const expenseTotalsSuccessSchema = Schema.Array(ExpenseTotalSchema)
+
+const expenseTotalsErrorSchema = Schema.Union([
+  InvalidExpenseDateRange,
+  ExpenseLedgerUnavailable,
+])
+
+const mutationErrorsSchema = Schema.Union([
+  ExpenseNotFound,
+  ExpenseLedgerUnavailable,
+])
+
+const recordExpense = Operation.make({
+  name: "expenses.record",
+  payload: ExpenseSchema,
+  success: ExpensesResource.table.rowSchema,
+  error: ExpenseLedgerUnavailable,
+  unavailable: ExpenseLedgerUnavailable,
+  handler: ExpensesResource.repository.create,
 })
+
+const getExpense = Operation.make({
+  name: "expenses.get",
+  payload: ExpenseIdentifierInputSchema,
+  success: ExpensesResource.table.rowSchema,
+  error: mutationErrorsSchema,
+  unavailable: ExpenseLedgerUnavailable,
+  handler: get,
+})
+
+const expenseTotals = Operation.make({
+  name: "expenses.totals",
+  payload: ExpenseQueryInputSchema,
+  success: expenseTotalsSuccessSchema,
+  error: expenseTotalsErrorSchema,
+  unavailable: ExpenseLedgerUnavailable,
+  handler: totals,
+})
+
+const updateExpense = Operation.make({
+  name: "expenses.update",
+  payload: ExpensesResource.table.rowSchema,
+  success: ExpensesResource.table.rowSchema,
+  error: mutationErrorsSchema,
+  unavailable: ExpenseLedgerUnavailable,
+  handler: update,
+})
+
+const removeExpense = Operation.make({
+  name: "expenses.remove",
+  payload: ExpenseIdentifierInputSchema,
+  success: ExpensesResource.table.rowSchema,
+  error: mutationErrorsSchema,
+  unavailable: ExpenseLedgerUnavailable,
+  handler: remove,
+})
+
+export const ExpenseLedgerOperations = Operation.bundle(
+  recordExpense,
+  getExpense,
+  expenseTotals,
+  updateExpense,
+  removeExpense,
+)

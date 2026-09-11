@@ -1,20 +1,18 @@
-import { Schema, pipe } from "effect"
-const atLeastZero = Schema.isGreaterThanOrEqualTo(0)
-const greaterThanZero = Schema.isGreaterThan(0)
-const atMostSafeInteger = Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+import { identity, Schema, pipe } from "effect"
+import { NonNegativeSafeIntSchema, PositiveSafeIntSchema } from "effect-domains/domain"
+
+export const MinorUnitsSchema = identity(NonNegativeSafeIntSchema)
+export const PositiveMinorUnitsSchema = identity(PositiveSafeIntSchema)
+export const QuantitySchema = identity(PositiveSafeIntSchema)
+export const VersionSchema = identity(PositiveSafeIntSchema)
+export const LineNumberSchema = identity(PositiveSafeIntSchema)
+
 export const TenantIdSchema = pipe(Schema.NonEmptyString, Schema.brand("BillingTenantId"))
 export const OrderNumberSchema = pipe(Schema.NonEmptyString, Schema.brand("OrderNumber"))
 export const InvoiceNumberSchema = pipe(Schema.NonEmptyString, Schema.brand("InvoiceNumber"))
-export const MinorUnitsSchema = Schema.Int.check(atLeastZero, atMostSafeInteger)
-export const PositiveMinorUnitsSchema = MinorUnitsSchema.check(greaterThanZero)
-export const QuantitySchema = Schema.Int.check(greaterThanZero, atMostSafeInteger)
-export const VersionSchema = Schema.Int.check(greaterThanZero, atMostSafeInteger)
-export const LineNumberSchema = Schema.Int.check(greaterThanZero, atMostSafeInteger)
+
 export const OrderStatusSchema = Schema.Literals(["draft", "invoiced"])
 export const InvoiceStatusSchema = Schema.Literals(["issued", "paid"])
-const VersionConflictResourceSchema = Schema.Literals(["order", "invoice"])
-const InvalidOrderActionSchema = Schema.Literals(["addLine", "issueInvoice"])
-const PayInvoiceActionSchema = Schema.Literal("payInvoice")
 
 export const OrderSchema = Schema.Struct({
   tenantId: TenantIdSchema,
@@ -54,7 +52,7 @@ export const CreateOrderInputSchema = Schema.Struct({
   customer: Schema.NonEmptyString,
 })
 
-export interface CreateOrderInput extends Schema.Schema.Type<typeof CreateOrderInputSchema> {}
+interface CreateOrderInput extends Schema.Schema.Type<typeof CreateOrderInputSchema> {}
 
 export const AddLineInputSchema = Schema.Struct({
   orderId: Schema.String,
@@ -65,7 +63,7 @@ export const AddLineInputSchema = Schema.Struct({
   unitAmountMinor: PositiveMinorUnitsSchema,
 })
 
-export interface AddLineInput extends Schema.Schema.Type<typeof AddLineInputSchema> {}
+interface AddLineInput extends Schema.Schema.Type<typeof AddLineInputSchema> {}
 
 export const IssueInvoiceInputSchema = Schema.Struct({
   orderId: Schema.String,
@@ -73,40 +71,30 @@ export const IssueInvoiceInputSchema = Schema.Struct({
   number: InvoiceNumberSchema,
 })
 
-export interface IssueInvoiceInput extends Schema.Schema.Type<typeof IssueInvoiceInputSchema> {}
+interface IssueInvoiceInput extends Schema.Schema.Type<typeof IssueInvoiceInputSchema> {}
 
 export const PayInvoiceInputSchema = Schema.Struct({
   invoiceId: Schema.String,
   expectedVersion: VersionSchema,
 })
 
-export interface PayInvoiceInput extends Schema.Schema.Type<typeof PayInvoiceInputSchema> {}
+interface PayInvoiceInput extends Schema.Schema.Type<typeof PayInvoiceInputSchema> {}
 export const GetOrderInputSchema = Schema.Struct({ orderId: Schema.String })
-export interface GetOrderInput extends Schema.Schema.Type<typeof GetOrderInputSchema> {}
+interface GetOrderInput extends Schema.Schema.Type<typeof GetOrderInputSchema> {}
 
 export class OrderNotFound extends Schema.TaggedError<OrderNotFound>()(
   "OrderNotFound",
   { orderId: Schema.String },
 ) {}
 
+export class OrderNotDraft extends Schema.TaggedError<OrderNotDraft>()(
+  "OrderNotDraft",
+  { orderId: Schema.String, actual: OrderStatusSchema },
+) {}
+
 export class InvoiceNotFound extends Schema.TaggedError<InvoiceNotFound>()(
   "InvoiceNotFound",
   { invoiceId: Schema.String },
-) {}
-
-export class VersionConflict extends Schema.TaggedError<VersionConflict>()(
-  "VersionConflict",
-  { resource: VersionConflictResourceSchema, id: Schema.String, expectedVersion: VersionSchema },
-) {}
-
-export class InvalidOrderTransition extends Schema.TaggedError<InvalidOrderTransition>()(
-  "InvalidOrderTransition",
-  { orderId: Schema.String, action: InvalidOrderActionSchema, actual: OrderStatusSchema },
-) {}
-
-export class InvalidInvoiceTransition extends Schema.TaggedError<InvalidInvoiceTransition>()(
-  "InvalidInvoiceTransition",
-  { invoiceId: Schema.String, action: PayInvoiceActionSchema, actual: InvoiceStatusSchema },
 ) {}
 
 export class InvoiceRequiresLines extends Schema.TaggedError<InvoiceRequiresLines>()(

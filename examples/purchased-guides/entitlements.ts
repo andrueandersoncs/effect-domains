@@ -1,72 +1,85 @@
-import { Array, Effect, Equivalence, Layer, Option, Schema, pipe } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import { EntitlementUnavailable, Entitlements } from "effect-domains/entitlements"
+import { Effect, Equivalence, Record, Schema, pipe } from "effect"
+import { AuthorizationSubject } from "effect-domains/authorization"
+import { Entitlements } from "effect-domains/entitlements"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { GuideIdSchema, GuidePurchaseSchema } from "./domain.ts"
 import { GuidePurchasesResource, GuidesResource } from "./resources.ts"
 
-const PurchaseRowsSchema = Schema.Array(Schema.Struct({ status: Schema.Literals(["granted", "refunded", "revoked"]) }))
-const unavailable = () => EntitlementUnavailable.make({})
+const statusEquals = Equivalence.strictEqual<string>()
 
-const granted = (purchase: typeof PurchaseRowsSchema.Type[number]) => Equivalence.strictEqual<string>()(purchase.status, "granted")
+const entitlementWhere = (subject: Schema.Schema.Type<typeof ExampleSubjectSchema>) =>
+  Record.fromEntries([["tenantId", subject.tenantId], ["userId", subject.userId]])
 
-const entitlementService = Effect.gen(function* () {
-  const database = yield* SqlClient.SqlClient
+const entitlementGrant = (purchase: Schema.Schema.Type<typeof GuidePurchaseSchema>) =>
+  statusEquals(purchase.status, "granted")
 
-  const has = Effect.fn("PurchasedGuides.Entitlements.has")(function* (request: Parameters<Entitlements["Service"]["has"]>[0]) {
-    const supported = Equivalence.strictEqual<string>()(request.name, "guides.read")
-    if (!supported) return yield* Effect.succeed(false)
-
-    const subject = yield* pipe(
-      Schema.decodeUnknownEffect(ExampleSubjectSchema)(request.subject),
-      Effect.mapError(unavailable),
-    )
-
-    const rows = yield* pipe(
-      database`
-        SELECT status
-        FROM ${database(GuidePurchasesResource.table.name)}
-        WHERE tenantId = ${subject.tenantId}
-          AND userId = ${subject.userId}
-          AND guideId = ${request.key}
-        LIMIT 1
-      `,
-      Effect.flatMap(Schema.decodeUnknownEffect(PurchaseRowsSchema)),
-      Effect.mapError(unavailable),
-    )
-
-    return pipe(Array.head(rows), Option.exists(granted))
-  })
-
-  return Entitlements.of({ has })
+const purchasedGuideEntitlement = new Entitlements.Source({
+  name: "guides.read",
+  table: GuidePurchasesResource.table,
+  subject: ExampleSubjectSchema,
+  key: "guideId",
+  where: entitlementWhere,
+  grant: entitlementGrant,
 })
 
-export const PurchasedGuideEntitlements = Layer.effect(Entitlements, entitlementService)
+export const PurchasedGuideEntitlements = Entitlements.fromTable(purchasedGuideEntitlement)
+
+const administrator = ExampleSubjectSchema.make({
+  userId: "admin",
+  tenantId: "acme",
+  roles: ["admin"],
+})
+
+const otherAdministrator = ExampleSubjectSchema.make({
+  userId: "admin",
+  tenantId: "other",
+  roles: ["admin"],
+})
+
+const sqlBasicsId = GuideIdSchema.make("guide-sql-basics")
+const auditTrailsId = GuideIdSchema.make("guide-audit-trails")
+
+const seedEntitlements = Entitlements.of({ has: () => Effect.succeed(true) })
+const otherTenantId = GuideIdSchema.make("guide-other-tenant")
 
 // Insert once because restart must preserve refunds and revoked purchase grants.
-export const seedPurchasedGuides = Effect.fn("PurchasedGuides.seed")(function* () {
-  const database = yield* SqlClient.SqlClient
+export const seedPurchasedGuides = () => pipe(
+  Effect.gen(function* () {
+    yield* GuidesResource.repository.ensure({
+      id: sqlBasicsId,
+      tenantId: "acme",
+      title: "SQL field guide",
+      summary: "A practical guide to safe reporting queries.",
+      body: "Use named columns, constrain tenant visibility, and keep purchase grants separate from report roles.",
+    })
 
-  yield* database`
-    INSERT INTO ${database(GuidesResource.table.name)} (id, tenantId, title, summary, body)
-    SELECT ${"guide-sql-basics"}, ${"acme"}, ${"SQL field guide"}, ${"A practical guide to safe reporting queries."}, ${"Use named columns, constrain tenant visibility, and keep purchase grants separate from report roles."}
-    WHERE NOT EXISTS (SELECT 1 FROM ${database(GuidesResource.table.name)} WHERE id = ${"guide-sql-basics"})
-  `
+    yield* GuidesResource.repository.ensure({
+      id: auditTrailsId,
+      tenantId: "acme",
+      title: "Audit trail guide",
+      summary: "A paid guide with no grant for the demo reader.",
+      body: "This guide stays visible to the tenant policy but requires its own one-time purchase grant.",
+    })
 
-  yield* database`
-    INSERT INTO ${database(GuidesResource.table.name)} (id, tenantId, title, summary, body)
-    SELECT ${"guide-audit-trails"}, ${"acme"}, ${"Audit trail guide"}, ${"A paid guide with no grant for the demo reader."}, ${"This guide stays visible to the tenant policy but requires its own one-time purchase grant."}
-    WHERE NOT EXISTS (SELECT 1 FROM ${database(GuidesResource.table.name)} WHERE id = ${"guide-audit-trails"})
-  `
+    yield* pipe(
+      GuidesResource.repository.ensure({
+        id: otherTenantId,
+        tenantId: "other",
+        title: "Other tenant guide",
+        summary: "A guide hidden from Acme subjects.",
+        body: "Tenant visibility is checked before the guide purchase entitlement.",
+      }),
+      Effect.provideService(AuthorizationSubject, otherAdministrator),
+    )
 
-  yield* database`
-    INSERT INTO ${database(GuidesResource.table.name)} (id, tenantId, title, summary, body)
-    SELECT ${"guide-other-tenant"}, ${"other"}, ${"Other tenant guide"}, ${"A guide hidden from Acme subjects."}, ${"Tenant visibility is checked before the guide purchase entitlement."}
-    WHERE NOT EXISTS (SELECT 1 FROM ${database(GuidesResource.table.name)} WHERE id = ${"guide-other-tenant"})
-  `
-
-  yield* database`
-    INSERT INTO ${database(GuidePurchasesResource.table.name)} (id, tenantId, userId, guideId, status)
-    SELECT ${"purchase-bob-sql-basics"}, ${"acme"}, ${"bob"}, ${"guide-sql-basics"}, ${"granted"}
-    WHERE NOT EXISTS (SELECT 1 FROM ${database(GuidePurchasesResource.table.name)} WHERE id = ${"purchase-bob-sql-basics"})
-  `
-})
+    yield* GuidePurchasesResource.repository.ensure({
+      id: "purchase-bob-sql-basics",
+      tenantId: "acme",
+      userId: "bob",
+      guideId: sqlBasicsId,
+      status: "granted",
+    })
+  }),
+  Effect.provideService(Entitlements, seedEntitlements),
+  Effect.provideService(AuthorizationSubject, administrator),
+)

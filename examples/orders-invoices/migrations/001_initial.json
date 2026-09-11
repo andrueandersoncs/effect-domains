@@ -1,9 +1,5 @@
 {
   "id": "001_initial",
-  "from": {
-    "version": 1,
-    "tables": []
-  },
   "to": {
     "version": 1,
     "tables": [
@@ -17,6 +13,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "Some",
               "value": "uuidv7"
             },
@@ -28,6 +25,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -38,6 +36,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -48,6 +47,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -58,6 +58,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
@@ -76,6 +77,7 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
@@ -95,12 +97,13 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
               {
-                "_tag": "GreaterThan",
-                "value": 0
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
               },
               {
                 "_tag": "LessThanOrEqualTo",
@@ -119,7 +122,7 @@
               ]
             },
             {
-              "name": "orders_tenant_number_key",
+              "name": "orders_tenant_id_number_key",
               "fields": [
                 "tenantId",
                 "number"
@@ -128,7 +131,7 @@
           ],
           "indexes": [
             {
-              "name": "orders_tenant_status_idx",
+              "name": "orders_tenant_id_status_idx",
               "fields": [
                 "tenantId",
                 "status"
@@ -147,6 +150,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "Some",
               "value": "uuidv7"
             },
@@ -158,6 +162,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -168,6 +173,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -178,12 +184,13 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
               {
-                "_tag": "GreaterThan",
-                "value": 0
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
               },
               {
                 "_tag": "LessThanOrEqualTo",
@@ -197,6 +204,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -207,12 +215,13 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
               {
-                "_tag": "GreaterThan",
-                "value": 0
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
               },
               {
                 "_tag": "LessThanOrEqualTo",
@@ -226,20 +235,17 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
               {
                 "_tag": "GreaterThanOrEqualTo",
-                "value": 0
+                "value": 1
               },
               {
                 "_tag": "LessThanOrEqualTo",
                 "value": 9007199254740991
-              },
-              {
-                "_tag": "GreaterThan",
-                "value": 0
               }
             ]
           }
@@ -247,7 +253,7 @@
         "relations": {
           "unique": [
             {
-              "name": "order_lines_tenant_order_line_key",
+              "name": "order_lines_tenant_id_order_id_line_number_key",
               "fields": [
                 "tenantId",
                 "orderId",
@@ -257,7 +263,7 @@
           ],
           "foreignKeys": [
             {
-              "name": "order_lines_order_fk",
+              "name": "order_lines_tenant_id_order_id_fkey",
               "fields": [
                 "tenantId",
                 "orderId"
@@ -283,6 +289,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "Some",
               "value": "uuidv7"
             },
@@ -294,6 +301,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -304,6 +312,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -314,6 +323,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": []
@@ -324,6 +334,7 @@
             "scalar": "string",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
@@ -342,6 +353,7 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
@@ -361,12 +373,13 @@
             "scalar": "integer",
             "nullable": false,
             "generation": {
+              "_id": "Option",
               "_tag": "None"
             },
             "checks": [
               {
-                "_tag": "GreaterThan",
-                "value": 0
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
               },
               {
                 "_tag": "LessThanOrEqualTo",
@@ -385,14 +398,14 @@
               ]
             },
             {
-              "name": "invoices_tenant_number_key",
+              "name": "invoices_tenant_id_number_key",
               "fields": [
                 "tenantId",
                 "number"
               ]
             },
             {
-              "name": "invoices_tenant_order_key",
+              "name": "invoices_tenant_id_order_id_key",
               "fields": [
                 "tenantId",
                 "orderId"
@@ -401,7 +414,7 @@
           ],
           "foreignKeys": [
             {
-              "name": "invoices_order_fk",
+              "name": "invoices_tenant_id_order_id_fkey",
               "fields": [
                 "tenantId",
                 "orderId"
@@ -417,7 +430,7 @@
           ],
           "indexes": [
             {
-              "name": "invoices_tenant_status_idx",
+              "name": "invoices_tenant_id_status_idx",
               "fields": [
                 "tenantId",
                 "status"
@@ -431,449 +444,25 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "orders",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "tenantId",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "number",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "customer",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "status",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": [
-                  "draft",
-                  "invoiced"
-                ]
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "totalMinor",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThanOrEqualTo",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "version",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThan",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          }
-        ],
-        "relations": {
-          "unique": [
-            {
-              "name": "orders_tenant_id_id_key",
-              "fields": [
-                "tenantId",
-                "id"
-              ]
-            },
-            {
-              "name": "orders_tenant_number_key",
-              "fields": [
-                "tenantId",
-                "number"
-              ]
-            }
-          ],
-          "indexes": [
-            {
-              "name": "orders_tenant_status_idx",
-              "fields": [
-                "tenantId",
-                "status"
-              ]
-            }
-          ]
-        }
-      }
+      "table": "orders"
     },
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "order_lines",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "tenantId",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "orderId",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "lineNumber",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThan",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "description",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "quantity",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThan",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "unitAmountMinor",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThanOrEqualTo",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              },
-              {
-                "_tag": "GreaterThan",
-                "value": 0
-              }
-            ]
-          }
-        ],
-        "relations": {
-          "unique": [
-            {
-              "name": "order_lines_tenant_order_line_key",
-              "fields": [
-                "tenantId",
-                "orderId",
-                "lineNumber"
-              ]
-            }
-          ],
-          "foreignKeys": [
-            {
-              "name": "order_lines_order_fk",
-              "fields": [
-                "tenantId",
-                "orderId"
-              ],
-              "references": {
-                "table": "orders",
-                "fields": [
-                  "tenantId",
-                  "id"
-                ]
-              }
-            }
-          ]
-        }
-      }
+      "table": "order_lines"
     },
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "invoices",
-        "identifier": "id",
-        "fields": [
-          {
-            "_tag": "TableField",
-            "name": "id",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "Some",
-              "value": "uuidv7"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "tenantId",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "orderId",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "number",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": []
-          },
-          {
-            "_tag": "TableField",
-            "name": "status",
-            "scalar": "string",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "OneOf",
-                "values": [
-                  "issued",
-                  "paid"
-                ]
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "totalMinor",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThanOrEqualTo",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          },
-          {
-            "_tag": "TableField",
-            "name": "version",
-            "scalar": "integer",
-            "nullable": false,
-            "generation": {
-              "_tag": "None"
-            },
-            "checks": [
-              {
-                "_tag": "GreaterThan",
-                "value": 0
-              },
-              {
-                "_tag": "LessThanOrEqualTo",
-                "value": 9007199254740991
-              }
-            ]
-          }
-        ],
-        "relations": {
-          "unique": [
-            {
-              "name": "invoices_tenant_id_id_key",
-              "fields": [
-                "tenantId",
-                "id"
-              ]
-            },
-            {
-              "name": "invoices_tenant_number_key",
-              "fields": [
-                "tenantId",
-                "number"
-              ]
-            },
-            {
-              "name": "invoices_tenant_order_key",
-              "fields": [
-                "tenantId",
-                "orderId"
-              ]
-            }
-          ],
-          "foreignKeys": [
-            {
-              "name": "invoices_order_fk",
-              "fields": [
-                "tenantId",
-                "orderId"
-              ],
-              "references": {
-                "table": "orders",
-                "fields": [
-                  "tenantId",
-                  "id"
-                ]
-              }
-            }
-          ],
-          "indexes": [
-            {
-              "name": "invoices_tenant_status_idx",
-              "fields": [
-                "tenantId",
-                "status"
-              ]
-            }
-          ]
-        }
-      }
+      "table": "invoices"
     },
     {
       "_tag": "SqliteCreateIndex",
       "table": "orders",
-      "name": "orders_tenant_status_idx",
-      "fields": [
-        "tenantId",
-        "status"
-      ]
+      "name": "orders_tenant_id_status_idx"
     },
     {
       "_tag": "SqliteCreateIndex",
       "table": "invoices",
-      "name": "invoices_tenant_status_idx",
-      "fields": [
-        "tenantId",
-        "status"
-      ]
+      "name": "invoices_tenant_id_status_idx"
     }
   ]
 }

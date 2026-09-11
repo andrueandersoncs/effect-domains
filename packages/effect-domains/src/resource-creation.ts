@@ -5,13 +5,13 @@ import { Value } from "./value.ts"
 type Source = Data.TaggedEnum<{
   Input: {}
   Default: { readonly value: unknown }
-  Generated: { readonly token: "uuidV7" | "now" }
+  Generated: { readonly token: "uuidV7" | "now" | "one" }
   Subject: { readonly field: string }
 }>
 
 const Source = Data.taggedEnum<Source>()
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
-const isGeneration = Equivalence.strictEqual<"uuidV7" | "now">()
+const isGeneration = Equivalence.strictEqual<"uuidV7" | "now" | "one">()
 type ReadValue = (input: Readonly<Record<string, unknown>>, subject: Readonly<Record<string, unknown>>) => Effect.Effect<unknown, never, Value>
 class FieldCompilation extends Data.Class<{ readonly inputSchema: Schema.Constraint; readonly evaluate: ReadValue }> {}
 const equals = Equivalence.strictEqual<unknown>()
@@ -27,7 +27,7 @@ export interface CreationInspection extends Schema.Schema.Type<typeof CreationIn
 const compile = function* <D, E>(
   fields: Schema.Struct.Fields,
   defaults: Readonly<Record<string, unknown>>,
-  generated: Readonly<Record<string, "uuidV7" | "now">>,
+  generated: Readonly<Record<string, "uuidV7" | "now" | "one">>,
   bindings: Readonly<Record<string, { readonly field: string }>>,
   definitionFailure: (reason: string) => D,
   inputFailure: (reason: string) => E,
@@ -82,6 +82,7 @@ const compile = function* <D, E>(
       },
       Generated: ({ token }) => {
         const evaluate = Effect.fn("Creation.generated")(function* () {
+          if (isGeneration(token, "one")) return 1
           const values = yield* Value
           return yield* (isGeneration(token, "uuidV7") ? values.uuidV7() : values.now())
         })

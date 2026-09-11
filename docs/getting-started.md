@@ -56,7 +56,7 @@ The command prints a JSON record like this. Your generated `id` will differ:
 }
 ```
 
-You supplied four fields. The resource supplied an identifier and the two declared creation defaults.
+You supplied four fields. The resource supplied an identifier; nullable `rating` and `notes` default to `null` when omitted.
 
 ## 3. Find your backlog
 
@@ -85,7 +85,7 @@ bun run reading-list books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 
 Both commands return the book with `status: "finished"` and `rating: 5`.
 
-**Update takes the complete row**, including `rating` and `notes`. The creation defaults do not make those fields optional on update. Partial changes require publishing the separate `patch` operation; this example does not publish it.
+**Update takes the complete row**, including `rating` and `notes`. Nullable create defaults do not make fields optional on update. Partial changes require publishing the separate `patch` operation; this example does not publish it.
 
 ## 5. See the same record in the browser
 
@@ -118,7 +118,7 @@ The application has no hand-written CRUD handlers. These files provide the decla
 | File under `examples/reading-list/` | Responsibility |
 | --- | --- |
 | `domain.ts` | Book fields and validation rules |
-| `resources.ts` | Public access, published operations, defaults, and list filters |
+| `resources.ts` | Public access, published operations, nullable create defaults, and list filters |
 | `application.ts` | Registers the resource in an application |
 | `migrations.ts` and `migrations/` | Imports the frozen SQLite history |
 | `main.ts` | Runs the server, CLI, Foldkit page, and optional admin |

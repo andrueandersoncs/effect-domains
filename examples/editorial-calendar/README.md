@@ -20,7 +20,7 @@ export EDITORIAL_CALENDAR_DB="$(mktemp -d)/editorial-calendar.sqlite"
 bun run editorial-calendar:seed-v1
 ```
 
-The seed command creates exactly one version-one document, `Autumn trail guide`, in the old `documents` table. Now leave that terminal free and start the current server against the same path:
+The seed command idempotently ensures exactly one version-one document, `Autumn trail guide`, in the old `documents` table, so rerunning it makes no additional row. Now leave that terminal free and start the current server against the same path:
 
 ```bash
 bun run editorial-calendar:server

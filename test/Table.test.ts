@@ -265,6 +265,7 @@ describe("Table", () => {
       template: Schema.TemplateLiteral([Schema.String, "-", Schema.Number]),
       native: Schema.Boolean,
       authored: Schema.NumberFromString,
+      occurredAt: Schema.DateTimeUtc,
       nullable: Schema.NullOr(Schema.Int),
     })
 
@@ -278,6 +279,7 @@ describe("Table", () => {
       { scalar: "string" },
       { scalar: "integer", checks: [{ _tag: "OneOf", values: [0, 1] }] },
       { scalar: "string" },
+      { scalar: "string" },
       { scalar: "integer", nullable: true },
     ])
 
@@ -286,8 +288,58 @@ describe("Table", () => {
     expect(compiled.columns.template.orderable).toBe(true)
     expect(compiled.columns.native.orderable).toBe(true)
     expect(compiled.columns.authored.orderable).toBe(false)
+    expect(compiled.columns.occurredAt.orderable).toBe(true)
     expect(compiled.columns.nullable.orderable).toBe(false)
   }))
+
+  it.effect("derives relation names and expands scoped foreign keys against unique tuples", () =>
+    Effect.sync(() => {
+      const ParentSchema = Schema.Struct({ tenantId: Schema.String, code: Schema.String })
+      const ChildSchema = Schema.Struct({ tenantId: Schema.String, parentId: Schema.String })
+
+      const parent = Table.make({
+        name: "scoped_parents",
+        schema: ParentSchema,
+        relations: { unique: [{ fields: ["tenantId", "id"] }] },
+      })
+
+      const child = Table.make({
+        name: "scoped_children",
+        schema: ChildSchema,
+        relations: {
+          foreignKeys: [{
+            scope: ["tenantId"],
+            fields: ["parentId"],
+            references: { table: "scoped_parents", fields: ["id"] },
+          }],
+          indexes: [{ fields: ["tenantId", "parentId"] }],
+        },
+      })
+
+      const parentSnapshot = Table.snapshot(parent)
+      const childSnapshot = Table.snapshot(child)
+      const relationSnapshots = [parentSnapshot, childSnapshot]
+      const relationsValidation = Table.validateRelations(relationSnapshots)
+      Effect.runSync(relationsValidation)
+
+      expect(parentSnapshot.relations).toMatchObject({
+        unique: [{ name: "scoped_parents_tenant_id_id_key", fields: ["tenantId", "id"] }],
+      })
+
+      expect(childSnapshot.relations).toMatchObject({
+        foreignKeys: [{
+          name: "scoped_children_tenant_id_parent_id_fkey",
+          fields: ["tenantId", "parentId"],
+          references: { fields: ["tenantId", "id"] },
+        }],
+        indexes: [{ name: "scoped_children_tenant_id_parent_id_idx" }],
+      })
+
+      const invalidParent = Table.make({ name: "scoped_parents", schema: ParentSchema })
+      const invalidParentSnapshot = Table.snapshot(invalidParent)
+      const invalidRelations = Table.validateRelations([invalidParentSnapshot, childSnapshot])
+      expect(() => Effect.runSync(invalidRelations)).toThrow()
+    }))
 
   it.effect("retains every historical check in SQLite DDL", () => Effect.sync(() => {
     const field = TableField.make({
@@ -370,4 +422,29 @@ describe("Table", () => {
       expect(() => Table.make({ name: "nullable_identifier", schema: NullableIdentifierTableSchema })).toThrow()
 
     }))
+
+  it.effect("projects selected fields into decodable SQLite JSON objects", () => pipe(
+    Effect.gen(function* () {
+      const ProjectionEventsSchema = Schema.Struct({
+        id: identifier(Schema.String),
+        active: Schema.Boolean,
+      })
+
+      const Events = Table.make({
+        name: "projection_events",
+        schema: ProjectionEventsSchema,
+      })
+
+      const projection = Table.project(Events, ["id", "active"])
+      const ResultSchema = Schema.Array(Schema.Struct({ body: projection.json }))
+      yield* prepareTables([Events])
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO projection_events (id, active) VALUES ('event-a', 1)`
+      const rows = yield* sql<{ body: string }>`SELECT ${projection.object(sql, "e")} AS body FROM projection_events e`
+      const result = yield* Schema.decodeUnknownEffect(ResultSchema)(rows)
+      expect(result).toEqual([{ body: { id: "event-a", active: true } }])
+    }),
+    Effect.provide(sqlite),
+  ))
+
 })

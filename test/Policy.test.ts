@@ -1,6 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Option, Result, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Option, Ref, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { Authorization, AuthorizationSubject, AuthorizationValues } from "effect-domains/authorization"
+import { Entitlements } from "effect-domains/entitlements"
 import { OperandSchema, Policy, PolicyEnvironment, type Operand } from "effect-domains/policy"
 import { PolicySql } from "effect-domains/policy-sql"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -103,4 +105,48 @@ it.effect("fold evaluation short circuits without turning missing operands or ma
   expect(unknown).toBe(true)
   const invalidScalar = yield* pipe(Schema.decodeUnknownEffect(OperandSchema)({ _tag: "Literal", value: Infinity }), Effect.result, Effect.map(Result.isFailure))
   expect(invalidScalar).toBe(true)
+}))
+
+it.effect("embedded subject policies apply scope and action entitlement requirements", Effect.fn("Policy.embeddedSubjectPolicies")(function* () {
+  const ResourceSchema = Schema.Struct({ tenantId: Schema.String })
+  const SubjectSchema = Schema.Struct({ tenantId: Schema.String })
+  const resource = Authorization.for({ resource: ResourceSchema, subject: SubjectSchema })
+  const subject = Authorization.subject(SubjectSchema)
+  const scopeRequirement = subject.entitlement({ name: "scope", key: subject.subject.tenantId })
+  const actionRequirement = subject.entitlement({ name: "action", key: subject.subject.tenantId })
+  const scopeAccess = subject.all()
+  const actionAccess = subject.all()
+  const scope = subject.policy(scopeAccess, { require: [scopeRequirement] })
+  const allow = subject.policy(actionAccess, { require: [actionRequirement] })
+  const authorization = resource.policy({ scope, allow: { read: allow } })
+  const resourceRow = ResourceSchema.make({ tenantId: "a" })
+  const currentRow = Option.some(resourceRow)
+  const absentNext = Option.none()
+  const values = new AuthorizationValues({ row: currentRow, next: absentNext })
+  const calls = yield* Ref.make<ReadonlyArray<string>>([])
+
+  const entitlements = Entitlements.of({
+    has: ({ name }) => pipe(
+      Ref.update(calls, Array.append(name)),
+      Effect.as(true),
+    ),
+  })
+
+  const activeSubject = SubjectSchema.make({ tenantId: "a" })
+
+  yield* pipe(
+    Authorization.require(authorization, "read", values),
+    Effect.provideService(AuthorizationSubject, activeSubject),
+    Effect.provideService(Entitlements, entitlements),
+  )
+
+  const entitlementCalls = yield* Ref.get(calls)
+  expect(entitlementCalls).toContain("scope")
+  expect(entitlementCalls).toContain("action")
+
+  const OtherSubjectSchema = Schema.Struct({ tenantId: Schema.String })
+  const otherSubject = Authorization.subject(OtherSubjectSchema)
+  const otherAccess = otherSubject.all()
+  const other = otherSubject.policy(otherAccess)
+  expect(() => resource.policy({ scope: other, allow: { read: allow } })).toThrow()
 }))

@@ -1,5 +1,5 @@
 import { Schema, pipe } from "effect"
-import { identifier } from "effect-domains/domain"
+import { identifier, PageLimitSchema } from "effect-domains/domain"
 
 export const WorkshopIdSchema = pipe(Schema.NonEmptyString, identifier)
 export const RepairStatusSchema = Schema.Literals(["queued", "repairing", "ready"])
@@ -26,7 +26,7 @@ export const RepairJobSchema = Schema.Struct({
 
 export const RepairBoardInputSchema = Schema.Struct({
   status: Schema.optionalKey(RepairStatusSchema),
-  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+  limit: Schema.optionalKey(PageLimitSchema),
 })
 
 export class RepairWorkshopUnavailable extends Schema.TaggedError<RepairWorkshopUnavailable>()(

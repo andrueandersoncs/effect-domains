@@ -1,6 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { pipe } from "effect"
+import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { TeamTasksApplication } from "./application.ts"
@@ -13,9 +13,11 @@ const web = ExampleWeb.layerHttp({
   ...TeamTasksWebAssets,
 })
 
+const services = ExampleIdentity.layer("team-tasks")
+
 pipe(ApplicationBun.run(TeamTasksApplication, {
   database: { migrations: TeamTasksMigrations },
-  services: ExampleIdentity,
+  services,
   admin: true,
   routes: web,
 }), BunRuntime.runMain)

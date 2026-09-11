@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Option, Ref, Result, Schema, Struct, pipe } from "effect"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Transitions } from "effect-domains/transitions"
 import { Application } from "effect-domains/application"
 import { ApplicationInspect } from "effect-domains/application-inspect"
 import { Value } from "effect-domains/value"
@@ -207,6 +208,17 @@ const pagedCrudProgram = Effect.gen(function* () {
   const malformedFailed = Result.isFailure(malformed)
   expect(malformedFailed).toBe(true)
 
+  const missingAfterCursor = JSON.stringify({ after: {} })
+  const missingAfterPage = PagedTodos.repository.list({ filter: { completed: false }, limit: 1, cursor: missingAfterCursor })
+  const missingAfter = yield* Effect.result(missingAfterPage)
+  const wrongAfterCursor = JSON.stringify({ after: { id: 1 } })
+  const wrongAfterPage = PagedTodos.repository.list({ filter: { completed: false }, limit: 1, cursor: wrongAfterCursor })
+  const wrongAfterType = yield* Effect.result(wrongAfterPage)
+  const missingAfterFailed = Result.isFailure(missingAfter)
+  const wrongAfterTypeFailed = Result.isFailure(wrongAfterType)
+  expect(missingAfterFailed).toBe(true)
+  expect(wrongAfterTypeFailed).toBe(true)
+
   const redirectedPatchInput = PagedTodoSchema.make({
     title: "alpha",
     id: "other",
@@ -404,3 +416,152 @@ it.effect("creation plans evaluate runtime generators per call and default only 
   }),
   Effect.provide(sqlite),
 ))
+
+const VersionedTodoSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  title: Schema.NonEmptyString,
+  summary: Schema.NullOr(Schema.String),
+  rank: Schema.Int,
+  version: Schema.Int,
+})
+
+const VersionedTodos = Resource.make({
+  authorization: Authorization.public,
+  name: "versioned_todos",
+  schema: VersionedTodoSchema,
+  version: "version",
+  operations: {
+    create: true,
+    update: true,
+    patch: true,
+    list: { range: ["rank"], order: [["rank", "desc"]], limit: 2, publish: false },
+  },
+})
+
+it.effect("nullable create fields default to null, version writes are guarded, and ranged descending pages keyset correctly", () => pipe(
+
+  Effect.gen(function* () {
+    yield* prepareTables([VersionedTodos.table])
+    const first = yield* VersionedTodos.repository.create({ id: "a", title: "a", rank: 3 })
+    yield* VersionedTodos.repository.create({ id: "b", title: "b", rank: 2 })
+    yield* VersionedTodos.repository.create({ id: "c", title: "c", rank: 1 })
+    expect(first).toMatchObject({ summary: null, version: 1 })
+
+    const page = yield* VersionedTodos.repository.list({ range: { rank: { from: 1, to: 3 } } })
+    const pageIdentifiers = Array.map(page.items, Struct.get("id"))
+    expect(pageIdentifiers).toEqual(["a", "b"])
+    const cursor = yield* Effect.fromNullishOr(page.nextCursor)
+    const next = yield* VersionedTodos.repository.list({ range: { rank: { from: 1, to: 3 } }, cursor })
+    const nextIdentifiers = Array.map(next.items, Struct.get("id"))
+    expect(nextIdentifiers).toEqual(["c"])
+
+    const patched = yield* VersionedTodos.repository.patch("a", { title: "patched" }, 1)
+    expect(patched.version).toBe(2)
+    const patchConflictEffect = VersionedTodos.repository.patch("a", { title: "stale" }, 1)
+    const patchConflict = yield* Effect.result(patchConflictEffect)
+    expect(patchConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
+    const updateConflictEffect = VersionedTodos.repository.update({ ...first, title: "stale update" })
+    const updateConflict = yield* Effect.result(updateConflictEffect)
+    expect(updateConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
+  }),
+  Effect.provide(sqlite),
+))
+
+it("rejects Boolean and Number version fields at resource definition time", () => {
+  const booleanVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Boolean })
+  const numberVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Number })
+  expect(() => Resource.make({ authorization: Authorization.public, name: "boolean_version", schema: booleanVersionSchema, version: "version", operations: {} })).toThrow()
+  expect(() => Resource.make({ authorization: Authorization.public, name: "number_version", schema: numberVersionSchema, version: "version", operations: {} })).toThrow()
+})
+
+const EnsuredTodoSchema = Schema.Struct({ id: identifier(Schema.String), title: Schema.String })
+
+const EnsuredTodos = Resource.make({
+  authorization: Authorization.public,
+  name: "ensured_todos",
+  schema: EnsuredTodoSchema,
+  operations: {},
+})
+
+const ImplicitEnsuredTodoSchema = Schema.Struct({ title: Schema.String })
+
+const ImplicitEnsuredTodos = Resource.make({
+  authorization: Authorization.public,
+  name: "implicit_ensured_todos",
+  schema: ImplicitEnsuredTodoSchema,
+  operations: {},
+})
+
+it.effect("ensure returns the first authorized row without a duplicate insert", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([EnsuredTodos.table, VersionedTodos.table, ImplicitEnsuredTodos.table])
+    const inserted = yield* EnsuredTodos.repository.ensure({ id: "same", title: "first" })
+    const repeated = yield* EnsuredTodos.repository.ensure({ id: "same", title: "second" })
+    expect(repeated).toEqual(inserted)
+    const versioned = yield* VersionedTodos.repository.ensure({ id: "versioned", title: "versioned", summary: null, rank: 0, version: 1 })
+    expect(versioned).toMatchObject({ id: "versioned", version: 1 })
+    const implicit = yield* ImplicitEnsuredTodos.repository.ensure({ id: "01890f6e-0000-7000-8000-000000000000", title: "implicit" })
+    expect(implicit).toMatchObject({ id: "01890f6e-0000-7000-8000-000000000000", title: "implicit" })
+  }),
+  Effect.provide(sqlite),
+))
+
+const ReservationStatusSchema = Schema.Literals(["held", "confirmed", "released"])
+
+const ReservationTransitions = Transitions.make({
+  name: "Reservation",
+  field: "status",
+  status: ReservationStatusSchema,
+  transitions: {
+    confirm: { from: ["held"], to: "confirmed" },
+    release: { from: ["held"], to: "released" },
+  },
+})
+
+const ReservationSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  status: ReservationStatusSchema,
+  note: Schema.String,
+  version: Schema.Int,
+})
+
+const Reservations = Resource.make({
+  authorization: Authorization.public,
+  name: "reservations",
+  schema: ReservationSchema,
+  version: "version",
+  transitions: ReservationTransitions,
+  operations: { create: true, transition: true },
+})
+
+it.effect("transitions reject an invalid source state and atomically publish the target state", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([Reservations.table])
+    const held = yield* Reservations.repository.create({ id: "reservation", status: "held", note: "draft" })
+    const procedure = yield* pipe(Reservations.group.requests.get("reservations.transition"), Option.fromUndefinedOr, Effect.fromOption)
+    const decodePayload = Schema.decodeUnknownEffect(procedure.payloadSchema)
+    const prohibitedPayload = decodePayload({ key: held.id, action: "confirm", expectedVersion: held.version, changes: { status: "confirmed" } })
+    const prohibitedStatus = yield* Effect.result(prohibitedPayload)
+    const prohibitedStatusFailed = Result.isFailure(prohibitedStatus)
+    expect(prohibitedStatusFailed).toBe(true)
+    const client = yield* RpcTest.makeClient(Reservations.group)
+    const confirmed = yield* client["reservations.transition"]({ key: held.id, action: "confirm", changes: { note: "confirmed" }, expectedVersion: held.version })
+    expect(confirmed).toMatchObject({ status: "confirmed", note: "confirmed", version: 2 })
+    const rejectedTransition = Reservations.repository.transition(held.id, "release", {}, confirmed.version)
+    const rejected = yield* Effect.result(rejectedTransition)
+    expect(rejected).toMatchObject({ _tag: "Failure", failure: { _tag: "InvalidReservationTransition", actual: "confirmed", action: "release" } })
+  }),
+  Effect.provide(Reservations.handlers),
+  Effect.provide(sqlite),
+  Effect.scoped,
+))
+
+it("resource inspection includes list policy, version, transitions, and implicit defaults", () => {
+  const application = Application.make({ name: "resource-inspection", parts: [VersionedTodos, Reservations] })
+  const inspection = ApplicationInspect.describe(application)
+
+  expect(inspection.resources).toMatchObject([
+    { name: "versioned_todos", creation: { defaults: { summary: null } }, list: { range: ["rank"], order: [["rank", "desc"]], limit: 2 }, version: "version" },
+    { name: "reservations", version: "version", transitions: { field: "status", transitions: ReservationTransitions.transitions } },
+  ])
+})

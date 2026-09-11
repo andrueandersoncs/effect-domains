@@ -23,18 +23,21 @@ export const RepairJobsResource = Resource.make({
   operations: {
     ...Resource.crud,
     patch: true,
-    create: { defaults: { urgent: false, status: "queued", technicianId: null } },
-    list: { filter: ["status", "customerId", "technicianId"] },
+    create: { defaults: { urgent: false, status: "queued" } },
+    list: {
+      filter: ["status", "customerId", "technicianId"],
+      order: [["urgent", "desc"]],
+    },
   },
   relations: {
     foreignKeys: [
-      { name: "repair_jobs_customer", fields: ["customerId"], references: { table: "customers", fields: ["id"] } },
-      { name: "repair_jobs_technician", fields: ["technicianId"], references: { table: "technicians", fields: ["id"] } },
+      { fields: ["customerId"], references: { table: "customers", fields: ["id"] } },
+      { fields: ["technicianId"], references: { table: "technicians", fields: ["id"] } },
     ],
     indexes: [
-      { name: "repair_jobs_status", fields: ["status"] },
-      { name: "repair_jobs_customer_id", fields: ["customerId"] },
-      { name: "repair_jobs_technician_id", fields: ["technicianId"] },
+      { fields: ["status"] },
+      { fields: ["customerId"] },
+      { fields: ["technicianId"] },
     ],
   },
 })

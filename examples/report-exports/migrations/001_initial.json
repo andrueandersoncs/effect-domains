@@ -1,6 +1,5 @@
 {
   "id": "001_initial",
-  "from": { "version": 1, "tables": [] },
   "to": {
     "version": 1,
     "tables": [
@@ -8,10 +7,58 @@
         "name": "report_subscriptions",
         "identifier": "tenantId",
         "fields": [
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["active", "canceled"] }] },
-          { "_tag": "TableField", "name": "validUntilEpochSeconds", "scalar": "integer", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "graceUntilEpochSeconds", "scalar": "integer", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "active",
+                  "canceled"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "validUntil",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "graceUntil",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
         ]
       }
     ]
@@ -19,16 +66,7 @@
   "steps": [
     {
       "_tag": "SqliteCreateTable",
-      "table": {
-        "name": "report_subscriptions",
-        "identifier": "tenantId",
-        "fields": [
-          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["active", "canceled"] }] },
-          { "_tag": "TableField", "name": "validUntilEpochSeconds", "scalar": "integer", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
-          { "_tag": "TableField", "name": "graceUntilEpochSeconds", "scalar": "integer", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
-        ]
-      }
+      "table": "report_subscriptions"
     }
   ]
 }

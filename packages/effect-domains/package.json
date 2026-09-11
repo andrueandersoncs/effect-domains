@@ -15,6 +15,7 @@
     "./domain": "./src/domain.ts",
     "./entitlements": "./src/entitlements.ts",
     "./migrations": "./src/migrations.ts",
+    "./operation": "./src/operation.ts",
     "./policy": "./src/policy.ts",
     "./policy-sql": "./src/policy-sql.ts",
     "./resource": "./src/resource.ts",
@@ -22,9 +23,11 @@
     "./rpc-cli": "./src/rpc-cli.ts",
     "./rpc-mcp": "./src/rpc-mcp.ts",
     "./sqlite-bun": "./src/sqlite-bun.ts",
+    "./sqlite-identity": "./src/sqlite-identity.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",
     "./sqlite-view": "./src/sqlite-view.ts",
     "./table": "./src/table.ts",
+    "./transitions": "./src/transitions.ts",
     "./value": "./src/value.ts"
   },
   "files": [

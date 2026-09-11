@@ -79,7 +79,7 @@ The allowed statuses are `queued`, `repairing`, and `ready`. These are editable 
 | Read | Result and bounds |
 | --- | --- |
 | `workshop.board` | Array; optional `status`; default limit 50, allowed limits 1–100; urgent first, then identifier ascending; no cursor |
-| `repair_jobs.list` | `{ items, nextCursor }`; equality filters on `status`, `customerId`, `technicianId`; default and maximum 50; identifier ascending |
+| `repair_jobs.list` | `{ items, nextCursor }`; equality filters on `status`, `customerId`, `technicianId`; urgent first, then identifier ascending; default and maximum 50 |
 | `customers.list`, `technicians.list` | `{ items, nextCursor }`; default and maximum 50; identifier ascending; no declared field filters |
 
 For example:
@@ -138,10 +138,9 @@ bun run repair-workshop inspect workshop.board
 ## Follow the implementation
 
 - [`domain.ts`](domain.ts): canonical customer, technician, and repair schemas; board input and error.
-- [`resources.ts`](resources.ts): public policies, generated CRUD/patch, creation defaults, foreign keys, and indexes.
+- [`resources.ts`](resources.ts): public policies, generated CRUD/patch, creation defaults, foreign keys, indexes, and urgent-first repair list.
 - [`board.ts`](board.ts): `SqliteView` selects repair fields, inner-joins the required customer, and left-joins the optional technician; selected storage codecs and output aliases are derived.
-- [`contracts.ts`](contracts.ts): native `workshop.board` RPC and its `SqliteView.annotation` dependency declaration.
-- [`sqlite.ts`](sqlite.ts): native `SqlSchema` execution owns filtering, urgent-first ordering, bounds, and error translation.
+- [`sqlite.ts`](sqlite.ts): `Operation.make` declares the board and its `SqliteView` dependency; native `SqlSchema` execution owns filtering, urgent-first ordering, bounds, and error translation.
 - [`application.ts`](application.ts), [`main.ts`](main.ts): resource/native composition, SQLite history, and browser routes.
 - [`web/main.ts`](web/main.ts): authored forms, board, and selector pagination.
 

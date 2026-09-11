@@ -1,8 +1,15 @@
-import { Effect, Option, pipe } from "effect"
+import { Effect, Option, Schema, pipe } from "effect"
+
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { RepairBoard } from "./board.ts"
-import { RepairWorkshopRpcs } from "./contracts.ts"
-import { RepairBoardInputSchema, RepairWorkshopUnavailable } from "./domain.ts"
+
+import { Operation } from "effect-domains/operation"
+
+import { RepairBoard, RepairBoardRowSchema } from "./board.ts"
+
+import {
+  RepairBoardInputSchema,
+  RepairWorkshopUnavailable,
+} from "./domain.ts"
 
 const board = SqlSchema.findAll({
   Request: RepairBoardInputSchema,
@@ -25,15 +32,16 @@ const board = SqlSchema.findAll({
   }),
 })
 
-const unavailable = () => RepairWorkshopUnavailable.make({})
+const repairBoardSuccessSchema = Schema.Array(RepairBoardRowSchema)
 
-const queryBoard = Effect.fn("RepairWorkshop.queryBoard")(
-  function* (input: typeof RepairBoardInputSchema.Type) {
-    return yield* board(input)
-  },
-  Effect.catchTags({ SqlError: unavailable, SchemaError: unavailable }),
-)
-
-export const RepairWorkshopSqlite = RepairWorkshopRpcs.toLayer({
-  "workshop.board": queryBoard,
+const repairBoard = Operation.make({
+  name: "workshop.board",
+  payload: RepairBoardInputSchema,
+  success: repairBoardSuccessSchema,
+  error: RepairWorkshopUnavailable,
+  views: [RepairBoard],
+  unavailable: RepairWorkshopUnavailable,
+  handler: board,
 })
+
+export const RepairWorkshopOperations = Operation.bundle(repairBoard)

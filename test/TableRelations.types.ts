@@ -11,7 +11,7 @@ type ResourceOptions = Parameters<typeof Resource.make<"relation_resources", typ
 const implicitKey: TableOptions = {
   name: "relation_types",
   schema: RelationSchema,
-  relations: { unique: [{ name: "tenant_id", fields: ["tenantId", "id"] }] },
+  relations: { unique: [{ fields: ["tenantId", "id"] }] },
 }
 
 const resourceOptions: ResourceOptions = {
@@ -20,8 +20,8 @@ const resourceOptions: ResourceOptions = {
   authorization: Authorization.public,
   operations: { get: true },
   relations: {
-    indexes: [{ name: "tenant_number", fields: ["tenantId", "number"] }],
-    foreignKeys: [{ name: "tenant_parent", fields: ["tenantId"], references: { table: "tenants", fields: ["id"] } }],
+    indexes: [{ fields: ["tenantId", "number"] }],
+    foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: { table: "tenants", fields: ["id"] } }],
   },
 }
 

@@ -34,6 +34,7 @@ type ScalarOperand = TypedOperand<Scalar, PolicyPhase> | Scalar
 type ScalarCollection = TypedOperand<ReadonlyArray<Scalar>, PolicyPhase> | ReadonlyArray<Scalar>
 type ScalarKind<Value> = Exclude<Value, null> extends string ? "string" : Exclude<Value, null> extends number ? "number" : Exclude<Value, null> extends boolean ? "boolean" : never
 type Comparable<Left, Right> = [Exclude<Left, null>] extends [never] ? unknown : [Exclude<Right, null>] extends [never] ? unknown : ScalarKind<Left> extends ScalarKind<Right> ? unknown : never
+type Included<Collection, Value> = [OperandValue<Value>] extends [CollectionValue<Collection>] ? unknown : never
 
 export type AuthorizationAction = keyof typeof PolicyRulesSchema.fields
 
@@ -122,6 +123,7 @@ export interface SubjectPolicy<Subject extends StructSchema = StructSchema, Requ
   readonly require: Requirements
 }
 
+
 export type AuthorizationDefinition = Schema.Schema.Type<typeof PublicAuthorizationSchema> | Schema.Schema.Type<typeof DenyAuthorizationSchema> | PolicyAuthorization
 
 export interface AuthorizationRuntime {
@@ -175,7 +177,7 @@ const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left,
   expression<OperandPhases<Left> | OperandPhases<Right>>,
 )
 
-const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>>) => pipe(
+const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>> & Included<Collection, Value>) => pipe(
   Policy.Schema.make({ _tag: "Includes", collection: collectionOperand(collection), value: operand(value) }),
   expression<OperandPhases<Collection> | OperandPhases<Value>>,
 )
@@ -193,6 +195,18 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   const subject = policyFields<Subject, "SubjectField", "subject">(schemas.subject, "SubjectField")
   const row = policyFields<Resource, "RowField", "row">(schemas.resource, "RowField")
   const next = policyFields<Resource, "NextField", "next">(schemas.resource, "NextField")
+
+  const sameAs = <Field extends FieldName<Resource> & FieldName<Subject>>(
+    field: Field & (FieldValue<Resource, Field> extends Scalar
+      ? FieldValue<Subject, Field> extends Scalar
+        ? Comparable<FieldValue<Resource, Field>, FieldValue<Subject, Field>>
+        : never
+      : never),
+  ) => pipe(
+    Policy.Schema.make({ _tag: "Equal", left: row[field] as Operand, right: subject[field] as Operand }),
+    expression<"row" | "subject">,
+  )
+
   const unchangedField = (field: ScalarOnlyFieldName<Resource>) => Policy.Schema.make({ _tag: "Equal", left: row[field] as Operand, right: next[field] as Operand })
 
   const unchanged = (...fields: ReadonlyArray<ScalarOnlyFieldName<Resource>>) => {
@@ -201,14 +215,14 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   }
 
   const policy = <Allow extends Partial<{
-    readonly read: PolicyExpression<"row" | "subject">
-    readonly create: PolicyExpression<"next" | "subject">
-    readonly update: PolicyExpression<"row" | "next" | "subject">
-    readonly patch: PolicyExpression<"row" | "next" | "subject">
-    readonly remove: PolicyExpression<"row" | "subject">
-  }>>(definition: Readonly<{ readonly scope: PolicyExpression<"row" | "subject">; readonly allow: Allow }> & Readonly<Partial<{ require: Pick<TypedEntitlementRequirements, Extract<keyof NoInfer<Allow>, AuthorizationAction>> }>>) => constructPolicy(schemas.resource, schemas.subject, definition)
+    readonly read: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>
+    readonly create: PolicyExpression<"next" | "subject"> | SubjectPolicy<Subject>
+    readonly update: PolicyExpression<"row" | "next" | "subject"> | SubjectPolicy<Subject>
+    readonly patch: PolicyExpression<"row" | "next" | "subject"> | SubjectPolicy<Subject>
+    readonly remove: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>
+  }>>(definition: Readonly<{ readonly scope: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>; readonly allow: Allow }> & Readonly<Partial<{ require: Pick<TypedEntitlementRequirements, Extract<keyof NoInfer<Allow>, AuthorizationAction>> }>>) => constructPolicy(schemas.resource, schemas.subject, definition)
 
-  return { subject, row, next, eq, includes: membership, all, any, unchanged, policy, entitlement, literal: literalOperand }
+  return { subject, row, next, eq, includes: membership, all, any, sameAs, unchanged, policy, entitlement, literal: literalOperand }
 }
 
 const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
@@ -436,6 +450,90 @@ type RegisteredSubjectPolicy<Subject extends StructSchema> = SubjectPolicy<Subje
 const isRegisteredSubjectPolicy = <Subject extends StructSchema>(policy: SubjectPolicy<Subject>): policy is RegisteredSubjectPolicy<Subject> =>
   Predicate.hasProperty(policy, RegisteredSubjectPolicy)
 
+const isSubjectPolicy = (value: unknown): value is SubjectPolicy =>
+  Predicate.hasProperty(value, "expression")
+
+/** A scope or action expression together with the entitlements a SubjectPolicy contributed. */
+class ResolvedPolicy extends Data.Class<{
+  readonly expression: PolicySyntax
+  readonly require: ReadonlyArray<EntitlementRequirement>
+}> {}
+
+class ResolvedAction extends Data.Class<{
+  readonly action: AuthorizationAction
+  readonly expression: PolicySyntax
+  readonly requirements: ReadonlyArray<EntitlementRequirement>
+}> {}
+
+class NormalizedDefinition extends Data.Class<{
+  readonly scope: PolicySyntax
+  readonly allow: Partial<Record<AuthorizationAction, PolicySyntax>>
+  readonly require: Option.Option<EntitlementRequirements>
+}> {}
+
+const absentResolvedAction = Option.none<ResolvedAction>()
+const noResolvedAction = Effect.succeed(absentResolvedAction)
+type ResolvedPolicyEffect = Effect.Effect<ResolvedPolicy, AuthorizationDefinitionError>
+const unregisteredSubjectPolicy: ResolvedPolicyEffect = failure("subject policy must be constructed by Authorization.subject")
+const foreignSubjectPolicy: ResolvedPolicyEffect = failure("subject policy subject schema must match the authorization subject schema")
+
+const resolvedPolicy = (expression: PolicySyntax, require: ReadonlyArray<EntitlementRequirement>): ResolvedPolicyEffect =>
+  pipe(new ResolvedPolicy({ expression, require }), Effect.succeed)
+
+const resolveSubjectPolicy = (subject: StructSchema, policy: SubjectPolicy): ResolvedPolicyEffect => {
+  const registered = isRegisteredSubjectPolicy(policy)
+  const sameSubject = equals(policy.subject, subject)
+  const accepted = resolvedPolicy(policy.expression, policy.require)
+  const checked = sameSubject ? accepted : foreignSubjectPolicy
+  return registered ? checked : unregisteredSubjectPolicy
+}
+
+const subjectPolicyExpression = (policy: PolicySyntax | SubjectPolicy, subject: StructSchema) =>
+  isSubjectPolicy(policy) ? resolveSubjectPolicy(subject, policy) : resolvedPolicy(policy, emptyEntitlements)
+
+const actionExpression = (resolved: ResolvedAction) => [resolved.action, resolved.expression] as const
+const actionRequirementsEntry = (resolved: ResolvedAction) => [resolved.action, resolved.requirements] as const
+const hasRequirements = (resolved: ResolvedAction) => Array.isReadonlyArrayNonEmpty(resolved.requirements)
+
+// Merge scope requirements into every allowed action because a hidden row must also fail its gate.
+const normalizePolicyDefinition = Effect.fn("Authorization.normalizePolicyDefinition")(function* (
+  subject: StructSchema,
+  definition: Readonly<{
+    readonly scope: PolicySyntax | SubjectPolicy
+    readonly allow: Partial<Record<AuthorizationAction, PolicySyntax | SubjectPolicy>>
+  }> & Readonly<Partial<{ require: EntitlementRequirements }>>,
+) {
+  const scope = yield* subjectPolicyExpression(definition.scope, subject)
+  const declaredRequirements = definition.require ?? emptyEntitlementRequirements
+
+  const resolveInput = (action: AuthorizationAction) => (input: PolicySyntax | SubjectPolicy) => pipe(
+    subjectPolicyExpression(input, subject),
+    Effect.map((policy) => {
+      const declared = requirementsFor(declaredRequirements, action)
+      const inherited = Array.appendAll(declared, scope.require)
+      const requirements = Array.appendAll(inherited, policy.require)
+      const resolved = new ResolvedAction({ action, expression: policy.expression, requirements })
+      return Option.some(resolved)
+    }),
+  )
+
+  const resolveAction = (action: AuthorizationAction) => pipe(
+    Option.fromNullishOr(definition.allow[action]),
+    Option.match({ onNone: Function.constant(noResolvedAction), onSome: resolveInput(action) }),
+  )
+
+  const resolutions = yield* Effect.forEach(actions, resolveAction)
+  const resolved = Array.getSomes(resolutions)
+  const allowEntries = Array.map(resolved, actionExpression)
+  const allow: Partial<Record<AuthorizationAction, PolicySyntax>> = Record.fromEntries(allowEntries)
+  const requiring = Array.filter(resolved, hasRequirements)
+  const requireEntries = Array.map(requiring, actionRequirementsEntry)
+  const requirements: EntitlementRequirements = Record.fromEntries(requireEntries)
+  const anyRequirements = Array.isReadonlyArrayNonEmpty(requiring)
+  const require = anyRequirements ? Option.some(requirements) : Option.none<EntitlementRequirements>()
+  return new NormalizedDefinition({ scope: scope.expression, allow, require })
+})
+
 const subjectPhases = HashSet.fromIterable<PolicyPhase>(["subject"])
 const absentPolicyRow = Option.none<Readonly<Record<string, unknown>>>()
 
@@ -539,8 +637,22 @@ const makeCheck = (rules: Readonly<Record<string, ReturnType<typeof Policy.evalu
   })
 
 
-const constructPolicy = <Resource extends StructSchema, Subject extends StructSchema>(resource: Resource, subject: Subject, definition: Readonly<{ readonly scope: PolicySyntax; readonly allow: Partial<Record<AuthorizationAction, PolicySyntax>> }> & Readonly<Partial<{ require: EntitlementRequirements }>>): PolicyAuthorization<Resource, Subject> => {
-  const source = PolicyAuthorizationSchema.make({ resource, subject, ...definition })
+const constructPolicy = <Resource extends StructSchema, Subject extends StructSchema>(
+  resource: Resource,
+  subject: Subject,
+  definition: Readonly<{
+    readonly scope: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>
+    readonly allow: Partial<Record<AuthorizationAction, PolicyExpression<PolicyPhase> | SubjectPolicy<Subject>>>
+  }> & Readonly<Partial<{ require: EntitlementRequirements }>>,
+): PolicyAuthorization<Resource, Subject> => {
+  const normalization = normalizePolicyDefinition(subject, definition)
+  const normalized = Effect.runSync(normalization)
+
+  const source = Option.match(normalized.require, {
+    onNone: () => PolicyAuthorizationSchema.make({ resource, subject, scope: normalized.scope, allow: normalized.allow }),
+    onSome: (require) => PolicyAuthorizationSchema.make({ resource, subject, scope: normalized.scope, allow: normalized.allow, require }),
+  })
+
   const resourceFields = describeFields(resource)
   const subjectFields = describeFields(subject)
   const fields = new PolicyFields({ resource: resourceFields, subject: subjectFields })

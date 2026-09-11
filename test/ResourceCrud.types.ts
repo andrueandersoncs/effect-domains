@@ -3,6 +3,7 @@ import { type Effect, Schema } from "effect"
 import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Transitions } from "effect-domains/transitions"
 
 const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}
@@ -93,3 +94,77 @@ const changedPatchKey: Rpc.Payload<PublishedPatch> = { key: "row", changes: { id
 void publishedPatch
 void missingPatchKey
 void changedPatchKey
+
+const VersionedTypeProbeSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  title: Schema.String,
+  summary: Schema.NullOr(Schema.String),
+  version: Schema.Int,
+})
+
+const VersionedTypeProbe = Resource.make({
+  authorization: Authorization.public,
+  name: "versioned_type_probe",
+  schema: VersionedTypeProbeSchema,
+  version: "version",
+  operations: { create: true, patch: true },
+})
+
+const nullableCreate: Parameters<typeof VersionedTypeProbe.repository.create>[0] = { id: "row", title: "required" }
+const versionedPatch: Parameters<typeof VersionedTypeProbe.repository.patch> = ["row", { title: "changed" }, 1]
+void nullableCreate
+void versionedPatch
+// @ts-expect-error because version is framework-managed on create.
+const suppliedVersion: Parameters<typeof VersionedTypeProbe.repository.create>[0] = { id: "row", title: "bad", version: 1 }
+// @ts-expect-error because versioned patches require their expected version.
+const missingExpectedVersion: Parameters<typeof VersionedTypeProbe.repository.patch> = ["row", { title: "changed" }]
+// @ts-expect-error because version may not be changed through patch fields.
+const patchedVersion: Parameters<typeof VersionedTypeProbe.repository.patch> = ["row", { version: 2 }, 1]
+void suppliedVersion
+void missingExpectedVersion
+void patchedVersion
+
+const NullableGeneratedProbeSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  note: Schema.NullOr(Schema.DateTimeUtc),
+})
+
+const NullableGeneratedProbe = Resource.make({
+  authorization: Authorization.public,
+  name: "nullable_generated_probe",
+  schema: NullableGeneratedProbeSchema,
+  operations: { create: { generated: { note: "now" } } },
+})
+
+// @ts-expect-error because a nullable generated field remains protected from create input.
+const generatedNullableOverride: Parameters<typeof NullableGeneratedProbe.repository.create>[0] = { id: "row", note: null }
+void generatedNullableOverride
+
+const TransitionStatusSchema = Schema.Literals(["held", "confirmed"])
+
+const TypeTransitions = Transitions.make({
+  name: "TypeReservation",
+  field: "status",
+  status: TransitionStatusSchema,
+  transitions: { confirm: { from: ["held"], to: "confirmed" } },
+})
+
+const TransitionTypeProbeSchema = Schema.Struct({ id: identifier(Schema.String), status: TransitionStatusSchema, version: Schema.Int })
+
+const TransitionTypeProbe = Resource.make({
+  authorization: Authorization.public,
+  name: "transition_type_probe",
+  schema: TransitionTypeProbeSchema,
+  version: "version",
+  transitions: TypeTransitions,
+  operations: { transition: true },
+})
+
+TypeTransitions.field satisfies "status"
+const appliedTransition = TypeTransitions.apply("confirm", "key")({ status: "held" })
+type AppliedTransition = Effect.Success<typeof appliedTransition>
+const transitionTarget = "confirmed" satisfies AppliedTransition["status"]
+void transitionTarget
+type PublishedTransition = Extract<RpcGroup.Rpcs<typeof TransitionTypeProbe.group>, { readonly _tag: "transition_type_probe.transition" }>
+const transitionPayload: Rpc.Payload<PublishedTransition> = { key: "row", action: "confirm", expectedVersion: 1 }
+void transitionPayload
