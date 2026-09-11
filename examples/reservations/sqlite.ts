@@ -1,6 +1,5 @@
 import {
   Array,
-  DateTime,
   Effect,
   Equivalence,
   Option,
@@ -13,7 +12,6 @@ import {
   InsufficientStock,
   InventoryUnavailable,
   type Reservation,
-  ReservationIdSchema,
   type ReservationInput,
   ReservationNotFound,
   type ReserveStockInput,
@@ -75,21 +73,9 @@ const reserve = Effect.fn("Inventory.reserve")(function* (
       })
     }
 
-    const generatedId = Bun.randomUUIDv7()
-
-    const id = yield* Effect.try({
-      try: () => ReservationIdSchema.make(generatedId),
-      catch: () => InventoryUnavailable.make({}),
-    })
-
-    const createdAt = yield* DateTime.now
-
     return yield* ReservationResource.repository.create({
-      id,
       sku: input.sku,
       quantity: input.quantity,
-      status: "held",
-      createdAt,
     })
   })
 

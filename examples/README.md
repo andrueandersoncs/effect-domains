@@ -31,29 +31,47 @@ bun run build
 bun run reading-list:server
 ```
 
-Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `data/<application>.sqlite`.
+Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `data/<application>.sqlite`; protected examples also need their separate identity database.
 
 Reading-list OTLP export: `bun run reading-list:server:otel` plus `bun run reading-list:otel …` against a collector on `127.0.0.1:4318`. See [reading-list traces](reading-list/README.md#opentelemetry-traces) and the [runtime reference](../docs/reference/runtime.md#opentelemetry-tracing).
 
 Applications apply ordered, frozen JSON migrations imported in `migrations.ts`. Startup preserves rows and rejects untracked databases rather than silently adopting them. Report exports persist account subscriptions in application storage; native Effect manages its separate durable execution storage. The appointment example likewise has separate application and execution stores. Use a fresh database for a walkthrough that assumes seeded or empty state, not an existing database containing work you need to keep.
 
-### Demo authentication
+### Example identity
 
-[Shared authentication](../packages/example-support/src/authentication.ts) resolves exact bearer tokens to server-owned claims. Set tokens on clients:
+Team tasks, field notes, orders/invoices, purchased guides, report exports, and appointment reminders protect their application RPCs with issued sessions. In each protected walkthrough, configure the server with a required bootstrap password and a physically distinct identity database; the account seeds are inserted once, so restarts preserve changed account state:
 
-| Token | User | Tenant | Roles |
-| --- | --- | --- | --- |
-| `alice-demo` | alice | acme | editor |
-| `bob-demo` | bob | acme | reader |
-| `admin-demo` | admin | acme | admin |
-| `outsider-demo` | alice | other | editor |
+```bash
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
+export EFFECT_DOMAINS_IDENTITY_DB="$(mktemp -d)/identity.sqlite"
+```
 
-Team tasks, field notes, orders/invoices, purchased guides, report exports, and appointment reminders use these sessions. Appointment reminders require the admin role; report generation requires an editor and a current subscription, while report operator actions require admin. Other applications explicitly allow public access. Missing or unknown credentials fail authentication on protected operations. These are public demonstration identities, with no login, expiry, revocation, or identity provider. Keep every example on loopback; do not use it as a production deployment template.
+Never set `EFFECT_DOMAINS_IDENTITY_DB` to the application database. The seeded accounts are Alice (Acme editor), Bob (Acme reader), Admin (Acme administrator), and Outsider (Alice in tenant `other`); this is example bootstrap data, not a production user-management or IdP system.
+
+After setting the protected application's `<APPLICATION>_URL`, issue a bearer credential for each user needed by its workflow. This recipe uses the native `identity.login` RPC, safely serializes the password with Bun, and extracts the returned secret without adding a `jq` dependency:
+
+```bash
+export DEMO_PASSWORD='the-server-bootstrap-password'
+export TEAM_TASKS_TOKEN="$(
+  bun run team-tasks identity.login --input-json "$(
+    bun -e 'const password = process.env.DEMO_PASSWORD; if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username: "alice", password }))'
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+)"
+```
+
+Treat the token as a secret. The CLI sends `<APPLICATION>_TOKEN` as a bearer credential on every protected call. `identity.current` returns the verified subject and expiry; `identity.logout` revokes the current session:
+
+```bash
+bun run team-tasks identity.current
+bun run team-tasks identity.logout
+unset TEAM_TASKS_TOKEN
+```
+
+Sessions expire after `EFFECT_DOMAINS_SESSION_LIFETIME` (eight hours by default). Login accounts bootstrap only once; `EFFECT_DOMAINS_DEMO_PASSWORD` is still required at every startup but does not reset passwords, roles, or disabled state. Browser pages likewise begin signed out and keep a successful token only in memory.
 
 Task ownership comes from verified subject claims, not caller-supplied owner/tenant fields. Field notes form a shared global collection: tenant claims do not partition it. Their encryption key is separate from the bearer token. Policy belongs in resource configuration, not canonical schemas.
 
-Appointment scheduling and inbox reads reuse one [subject-only admin policy](appointment-reminders/operator-authorization.ts). Native proxy RPCs install `AuthorizationRpc` and annotate the published group with `AuthorizationRpc.policy`; the middleware checks verified claims before invoking handlers. Billing's authored handlers use `Authorization.requireSubject` for typed read/editor policies. Neither declaration makes persisted execution an authenticated request.
-
+Appointment scheduling and inbox reads are admin-only. Report generation requires an editor and a current subscription, while report polling, release, resume, status, and operator metrics require the administrator role. Other applications explicitly allow public access. Missing, expired, revoked, or unknown credentials fail authentication.
 ### Shared structure
 
 - `domain.ts`: canonical values and domain errors.
@@ -74,13 +92,13 @@ Every generated list returns `{ items, nextCursor }`, defaults to its configured
 
 ## Foldkit frontends
 
-Every application `serve` command also serves a small [Foldkit](https://foldkit.dev/) page at `/`. It is a hand-authored Elm-architecture UI over the same `/rpc/v1` operations as the CLI, not a second API. Authenticated examples expose the public demo bearer tokens in the page; they are still sent per RPC call. Build assets with `bun run build` from the repository root (`apps/admin` plus `packages/example-web`). Missing frontend files fail serve the same way missing admin assets do. Shared shell, RPC helper, and static routes live in [`packages/example-web`](../packages/example-web/).
+Every application `serve` command also serves a small [Foldkit](https://foldkit.dev/) page at `/`. It is a hand-authored Elm-architecture UI over the same native `/rpc/v1` operations as the CLI, not a second API. Protected pages start signed out and provide login/logout; tokens remain in browser memory and roles are enforced by the server. Lists with cursor support append through **Load more** controls, while fixed-limit authored projections state their bound in the individual guide. Filter/query and session changes invalidate old results; forms surface field-specific validation errors. Build assets with `bun run build` from the repository root (`apps/admin` plus `packages/example-web`). Missing frontend files fail serve the same way missing admin assets do. Shared shell, RPC helper, and static routes live in [`packages/example-web`](../packages/example-web/).
 
 ## Generated admin
 
 Reading lists, expenses, tasks, notes, editorial planning, repair workshops, reservations, and billing enable `/admin`. Build assets first with `bun run build`. Equipment, purchased guides, and the durable applications do not enable admin, but still need the build for their Foldkit pages.
 
-Admin uses the same published RPC schemas, handlers, codecs, and authorization as the CLI. It neither infers permissions nor bypasses policy. Enter a demo bearer token when needed; the page keeps it in browser memory only. Generated forms support scalar and structured inputs, a full JSON fallback, declared list filters, and cursor navigation. See the [browser source](../apps/admin/src/client.ts) and [native adapter](../packages/effect-domains/src/application-admin.ts).
+Admin uses the same published RPC schemas, handlers, codecs, and authorization as the CLI. It neither infers permissions nor bypasses policy. For protected applications, paste a real issued bearer credential; the page keeps it in browser memory only. Generated forms support scalar and structured inputs, a full JSON fallback, declared list filters, and cursor navigation. See the [browser source](../apps/admin/src/client.ts) and [native adapter](../packages/effect-domains/src/application-admin.ts).
 
 ## CLI conventions
 
@@ -90,9 +108,7 @@ The endpoint uses Effect JSON RPC, not REST. Use the generated CLI or Effect `Rp
 
 ## MCP server
 
-Every `serve` command also exposes Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`. Configure an MCP client with that URL; `/rpc/v1` remains the separate CLI endpoint. One generated tool corresponds to each published RPC operation.
-
-Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text; void becomes null. Declared failures return `isError: true` and the encoded domain error. Protected tools require the same bearer credentials as RPC on every call; a session is not an identity. Discovery exposes contracts, not protected rows. The [equipment walkthrough](equipment-register/README.md) uses the official SDK.
+Tool arguments are `{ "input": <RPC JSON payload> }`. Successful structured content is `{ "result": <RPC JSON result> }`, also returned as JSON text; void becomes null. Declared failures return `isError: true` and the encoded domain error. Protected tools require a real issued bearer credential on every call; an MCP transport session is not an identity. Discovery exposes contracts, not protected rows. The [equipment walkthrough](equipment-register/README.md) uses the official SDK.
 
 ## Durable execution boundaries
 
@@ -174,7 +190,7 @@ Runtime checks immutable ledger contents and exact table/index definitions, reje
 - [`ApplicationBun`](../packages/effect-domains/src/application-bun.ts): shared HTTP server and CLI runtime.
 - [`Resource`](../packages/effect-domains/src/resource.ts): generated repositories, selected RPC contracts, groups, and handlers.
 - [`Authorization`](../packages/effect-domains/src/authorization.ts): typed resource policy declarations and evaluator.
-- [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): request-local verified identity boundary; [demo implementation](../packages/example-support/src/authentication.ts).
+- [`AuthorizationRpc.Authenticator`](../packages/effect-domains/src/authorization-rpc.ts): subject-only authorization boundary; [`IdentityRpcs`](../packages/effect-domains/src/identity-rpc.ts) and [`example identity`](../packages/example-support/src/identity.ts) provide the issued-session example layer.
 - [Authored SQL](expense-ledger/sqlite.ts): Effect `SqlSchema` request/result codecs and native `SqlClient` access.
 - [`RpcCli`](../packages/effect-domains/src/rpc-cli.ts): native operation subcommands with canonical JSON input.
 - [`SqliteMigrations`](../packages/effect-domains/src/sqlite-migrations.ts): frozen snapshots, explicit migration steps, and verified transactional replay.

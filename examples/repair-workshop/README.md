@@ -110,9 +110,9 @@ This fails the board input schema before execution. Unknown statuses and empty n
 
 ## Use the browser or MCP
 
-At `/`, the **Customers** and **Technicians** forms create records or edit their names and on-call state. **Create repair** uses those records in its selectors. Change a repair's status or technician directly on the board. After a CLI change, choose **Board status** and press **Reload** to fetch current values.
+At `/`, the **Customers** and **Technicians** forms create records or edit their names and on-call state. **Create repair** uses those records in its selectors. Change a repair's status or technician directly on the board. The canonical native client reloads after mutations; changing the board query clears and invalidates old rows until **Reload** fetches the new result. Field-specific validation failures are shown.
 
-The browser requests up to 100 matching repairs. Customer and technician selectors load 50-row resource pages; **Load next customers** and **Load next technicians** append more choices when a cursor exists. These controls do not paginate the repair board.
+The browser requests up to 100 matching repairs; that authored board has no cursor API. Customer and technician selectors load 50-row resource pages; **Load more customers** and **Load more technicians** append choices when a cursor exists.
 
 The generated admin exposes resource operations plus `workshop.board`. MCP uses those same contracts: call `workshop.board` with `{"input":{"status":"queued","limit":25}}` and read the array from `structuredContent.result`. The MCP endpoint is not the CLI's `/rpc/v1` URL. See [shared MCP conventions](../README.md#mcp-server).
 

@@ -1,4 +1,9 @@
 import { DateTime, Schema, pipe } from "effect"
+import { ClusterError } from "effect/unstable/cluster"
+import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { Forbidden } from "effect-domains/authorization"
+import { EntitlementRequired, EntitlementUnavailable } from "effect-domains/entitlements"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 
 const isReportId = Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 const isLedgerAccountCode = Schema.isPattern(/^[0-9]{4,10}$/)
@@ -100,6 +105,35 @@ export const ReportExportPollResultSchema = Schema.Union([
   Schema.TaggedStruct("Succeeded", ReportArtifactSchema.fields),
   Schema.TaggedStruct("Failed", { reason: Schema.String }),
 ])
+
+export const ReportExportRunnerStatusSchema = Schema.Struct({
+  host: Schema.String,
+  port: Schema.Int,
+  healthy: Schema.Boolean,
+  groups: Schema.Array(Schema.String),
+  weight: Schema.Finite,
+})
+
+export const ReportExportStatusSchema = Schema.Struct({
+  activeEntities: Schema.Int,
+  shuttingDown: Schema.Boolean,
+  runners: Schema.Array(ReportExportRunnerStatusSchema),
+})
+
+const reportPayloadSchema = Schema.toCodecJson(ReportExportRequestSchema)
+const artifactPayloadSchema = Schema.toCodecJson(ReportArtifactSchema)
+const generationErrorsSchema = Schema.Union([Forbidden, EntitlementRequired, EntitlementUnavailable])
+
+const generate = Rpc.make("ReportExport.Generate", { payload: reportPayloadSchema, success: artifactPayloadSchema, error: generationErrorsSchema })
+const generateDiscard = Rpc.make("ReportExport.GenerateDiscard", { payload: reportPayloadSchema, success: Schema.String, error: generationErrorsSchema })
+const resume = Rpc.make("ReportExport.GenerateResume", { payload: PollReportExportSchema, success: Schema.Void, error: Forbidden })
+const release = Rpc.make("ReportExport.Release", { payload: ReleaseReportSchema, success: Schema.Void })
+const poll = Rpc.make("ReportExport.Poll", { payload: PollReportExportSchema, success: ReportExportPollResultSchema })
+const status = Rpc.make("ReportExport.Status", { success: ReportExportStatusSchema, error: ClusterError.PersistenceError })
+
+export const ReportExportGenerationRpcs = RpcGroup.make(generate, generateDiscard).middleware(AuthorizationRpc)
+export const ReportExportOperatorRpcs = RpcGroup.make(resume, release, poll, status).middleware(AuthorizationRpc)
+export const ReportExportRpcs = ReportExportGenerationRpcs.merge(ReportExportOperatorRpcs)
 
 export interface ReportExportRequest extends Schema.Schema.Type<typeof ReportExportRequestSchema> {}
 export interface ReportExportJob extends Schema.Schema.Type<typeof ReportExportJobSchema> {}

@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Equivalence, Option, Predicate, Record, Ref, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Option, Predicate, Record, Ref, Schema, Struct, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"

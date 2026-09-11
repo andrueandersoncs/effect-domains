@@ -14,19 +14,29 @@ Run these commands from the repository root. The server and its generated fronte
 bun install
 bun run build
 export ORDERS_INVOICES_DB="$PWD/orders-invoices-walkthrough-$(date +%s).sqlite"
+export EFFECT_DOMAINS_IDENTITY_DB="$PWD/orders-invoices-identity-$(date +%s).sqlite"
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3001 bun run orders-invoices:server
 ```
 
-The server is loopback-only at `http://127.0.0.1:3001`. It exposes Effect JSON RPC at `/rpc/v1`, Streamable HTTP MCP at `/mcp`, the application page at `/`, and generated admin at `/admin`.
+The identity database must be distinct from `ORDERS_INVOICES_DB`. `EFFECT_DOMAINS_DEMO_PASSWORD` is required on each startup, but account bootstrap inserts only once and does not reset account changes. The server is loopback-only at `http://127.0.0.1:3001`. It exposes Effect JSON RPC at `/rpc/v1`, Streamable HTTP MCP at `/mcp`, the application page at `/`, and generated admin at `/admin`.
 
 **Client terminal**
 
 ```bash
 export ORDERS_INVOICES_URL=http://127.0.0.1:3001/rpc/v1
-export ORDERS_INVOICES_TOKEN=alice-demo
+export DEMO_PASSWORD='choose-a-local-bootstrap-password' # same value used by the server
+issue_billing_token() {
+  bun run orders-invoices identity.login --input-json "$(
+    bun -e 'const [username, password] = process.argv.slice(2); if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username, password }))' "$1" "$DEMO_PASSWORD"
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+}
+export ORDERS_INVOICES_TOKEN="$(issue_billing_token alice)"
+export BOB_TOKEN="$(issue_billing_token bob)"
+export OUTSIDER_TOKEN="$(issue_billing_token outsider)"
 ```
 
-`alice-demo` resolves on the server to Acme user `alice` with the `editor` role. The CLI supplies that token as a bearer credential; neither tenant nor role is accepted in operation JSON. The public demo tokens have no login, expiry, revocation, or identity provider, so keep this loopback-only example out of production.
+Tokens are secret bearer credentials for every protected call, not request data. `identity.current` reports their verified subject and expiry; `identity.logout` revokes the current `ORDERS_INVOICES_TOKEN`. Sessions expire and accounts bootstrap only once as described in [example identity](../README.md#example-identity).
 
 Create an order. The input has exactly `number` and `customer`; its response is the complete order row. Copy the returned `id` into the quoted assignment before continuing.
 
@@ -79,17 +89,17 @@ bun run orders-invoices billing.payInvoice --input-json "{\"invoiceId\":\"$INVOI
 
 The first request reports `VersionConflict` for the order. The second reports `InvalidOrderTransition` with action `addLine` and actual state `invoiced`; the third reports `InvalidInvoiceTransition` with action `payInvoice` and actual state `paid`. Do not retry a stale mutation blindly: fetch the current summary, choose a new action, and submit its current version.
 
-Mutations require an `editor` or `admin` subject. For example, `bob-demo` is an Acme `reader`, so this request reports `Forbidden`:
+Mutations require an `editor` or `admin` subject. For example, the issued Bob session is an Acme `reader`, so this request reports `Forbidden`:
 
 ```bash
-ORDERS_INVOICES_TOKEN=bob-demo bun run orders-invoices billing.createOrder --input-json '{"number":"SO-READER-1","customer":"Blocked reader"}'
+ORDERS_INVOICES_TOKEN="$BOB_TOKEN" bun run orders-invoices billing.createOrder --input-json '{"number":"SO-READER-1","customer":"Blocked reader"}'
 ```
 
-Rows are tenant-scoped before generated reads and before authored summary lookups. `outsider-demo` is user `alice` in tenant `other`: it may create an order in its own tenant, and may reuse `SO-WALKTHROUGH-1` there, but it cannot read Acme's `ORDER_ID`. Its `billing.getOrder` reports `OrderNotFound`; `orders.get` hides the same row as `ResourceNotFound`.
+Rows are tenant-scoped before generated reads and before authored summary lookups. The issued `outsider` session is user `alice` in tenant `other`: it may create an order in its own tenant, and may reuse `SO-WALKTHROUGH-1` there, but it cannot read Acme's `ORDER_ID`. Its `billing.getOrder` reports `OrderNotFound`; `orders.get` hides the same row as `ResourceNotFound`.
 
 ```bash
-ORDERS_INVOICES_TOKEN=outsider-demo bun run orders-invoices billing.getOrder --input-json "{\"orderId\":\"$ORDER_ID\"}"
-ORDERS_INVOICES_TOKEN=outsider-demo bun run orders-invoices orders.get --input-json "{\"id\":\"$ORDER_ID\"}"
+ORDERS_INVOICES_TOKEN="$OUTSIDER_TOKEN" bun run orders-invoices billing.getOrder --input-json "{\"orderId\":\"$ORDER_ID\"}"
+ORDERS_INVOICES_TOKEN="$OUTSIDER_TOKEN" bun run orders-invoices orders.get --input-json "{\"id\":\"$ORDER_ID\"}"
 ```
 
 ## Data and operation limits
@@ -110,9 +120,9 @@ The mutations use server-derived tenant identity and database transactions. Orde
 
 ## Browser, admin, and MCP
 
-At `http://127.0.0.1:3001/`, the Foldkit page starts with `alice-demo` and walks through create, add line, issue, reload, and record payment. Selecting `bob-demo` disables its mutation controls; the server remains the authority. A version conflict is presented as a prompt to reload.
+At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the shared login form. It uses the canonical native RPC client, holds the issued credential only in memory, and clears draft/loaded order state on login, logout, or expiry. An editor can create, add a line, issue, reload, and record payment; field-specific form errors include invalid numeric inputs, while a version conflict prompts a reload. Roles are enforced by the server, not a client-side role switch.
 
-`http://127.0.0.1:3001/admin` is available because this application enables generated admin. Build assets first, enter a demo bearer token, and expect its generated reads to use the same tenant policy. MCP is available at `http://127.0.0.1:3001/mcp`; each published RPC is a tool with arguments `{ "input": <operation JSON> }`. Protected calls still require a bearer credential for every request. The CLI and MCP are RPC interfaces, not REST endpoints.
+`http://127.0.0.1:3001/admin` is available because this application enables generated admin. Build assets first, paste a real issued bearer credential, and expect its generated reads to use the same tenant policy and cursor navigation. MCP is available at `http://127.0.0.1:3001/mcp`; each published RPC is a tool with arguments `{ "input": <operation JSON> }`. Protected calls still require a bearer credential for every request. The CLI and MCP are RPC interfaces, not REST endpoints.
 
 ## Storage and source map
 
@@ -122,14 +132,16 @@ At `http://127.0.0.1:3001/`, the Foldkit page starts with `alice-demo` and walks
 | `PORT` | `3000` | Loopback server port |
 | `ORDERS_INVOICES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `ORDERS_INVOICES_TOKEN` | unset | CLI bearer token |
+| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | Server identity database; must differ from billing data |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | required | Bootstrap password for seeded example accounts |
 
 Startup decodes and applies the frozen [migration history](migrations.ts); it preserves data and rejects an untracked or drifted database rather than resetting/adopting it. Use a fresh database path when repeating this walkthrough. The checked-in [initial artifact](migrations/001_initial.json) records the indexes, uniqueness, and composite foreign keys.
 
 - [`domain.ts`](domain.ts): canonical rows, inputs, checked minor-unit/version fields, states, and named errors.
 - [`resources.ts`](resources.ts): tenant-scoped generated reads and relational declarations.
 - [`contracts.ts`](contracts.ts): authored billing RPC names, payloads, summaries, and error unions.
-- [`sqlite.ts`](sqlite.ts): trusted-subject role checks, tenant lookups, transactions, version guards, and transitions.
-- [`main.ts`](main.ts): authentication service, generated admin, frontend route, migrations, and runner.
-- [`web/main.ts`](web/main.ts): the actual browser workflow and its client-side reader controls.
+- [`sqlite.ts`](sqlite.ts): trusted-subject role checks, tenant lookups, transactions, version guards, and transitions; its example-local [`NestedRow`](projection.ts) helper derives compiled-schema JSON projection fields, not an ORM relation planner.
+- [`main.ts`](main.ts): identity service, generated admin, frontend route, migrations, and runner.
+- [`web/main.ts`](web/main.ts): the actual browser workflow and its native client reader controls.
 - [Resource reference](../../docs/reference/resources.md): generated list/page and entitlement-independent resource contracts.
 - [Runtime reference](../../docs/reference/runtime.md): loopback runtime, CLI, RPC, and migration behavior.

@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./authentication": "./src/authentication.ts",
+    "./identity": "./src/identity.ts",
+    "./subject": "./src/subject.ts",
     "./databases": "./src/databases.ts",
     "./files": "./src/files.ts"
   },

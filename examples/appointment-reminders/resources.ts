@@ -1,6 +1,6 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { AppointmentInboxNotificationSchema } from "./domain.ts"
 import { AppointmentReminderOperatorAuthorization } from "./operator-authorization.ts"
 

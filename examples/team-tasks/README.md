@@ -13,22 +13,32 @@ bun install
 bun run build
 ```
 
-Use a fresh database for this walkthrough. It avoids collisions with another local example and makes the expected list results reproducible. In the **server terminal**, start the loopback server:
+Use fresh, separate databases for the task data and example identity state. They avoid collisions with another local example and make the expected list results reproducible. In the **server terminal**, start the loopback server:
 
 ```bash
 export PORT=3001
 export TEAM_TASKS_DB="$(mktemp -d)/team-tasks.sqlite"
+export EFFECT_DOMAINS_IDENTITY_DB="$(mktemp -d)/team-tasks-identity.sqlite"
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 bun run team-tasks:server
 ```
 
-`PORT` changes only the server. In a separate **client terminal**, point the CLI at that server and select Alice's demo session:
+`EFFECT_DOMAINS_DEMO_PASSWORD` is required on every start, and `EFFECT_DOMAINS_IDENTITY_DB` must not be `TEAM_TASKS_DB`. The seed accounts are inserted only once; the setting does not reset changed credentials, roles, or disabled state. In a separate **client terminal**, point the CLI at that server and issue the credentials the walkthrough needs:
 
 ```bash
 export TEAM_TASKS_URL=http://127.0.0.1:3001/rpc/v1
-export TEAM_TASKS_TOKEN=alice-demo
+export DEMO_PASSWORD='choose-a-local-bootstrap-password' # same value used by the server
+issue_team_token() {
+  bun run team-tasks identity.login --input-json "$(
+    bun -e 'const [username, password] = process.argv.slice(2); if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username, password }))' "$1" "$DEMO_PASSWORD"
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+}
+export TEAM_TASKS_TOKEN="$(issue_team_token alice)"
+export BOB_TOKEN="$(issue_team_token bob)"
+export ADMIN_TOKEN="$(issue_team_token admin)"
 ```
 
-The public demo sessions resolve to server-owned claims: `alice-demo` is Acme user `alice` with `editor`; `bob-demo` is Acme user `bob` with `reader`; `admin-demo` is Acme user `admin` with `admin`; and `outsider-demo` is an editor named Alice in tenant `other`. They demonstrate policy only—there is no login, issuance, expiry, revocation, or identity provider. Keep this loopback-only example local; the shared [authentication fixture](../../packages/example-support/src/authentication.ts) is not a production identity system.
+The token is a per-call bearer credential; do not print or commit it. `bun run team-tasks identity.current` displays the verified subject and expiry, and `identity.logout` revokes the token currently in `TEAM_TASKS_TOKEN`. Sessions expire (eight hours by default); see [example identity](../README.md#example-identity) for the shared lifecycle and bootstrap details.
 
 ## Run it
 
@@ -84,18 +94,18 @@ bun run team-tasks todos.patch --input-json "{\"key\":\"$TASK_ID\",\"changes\":{
 This exits nonzero with `Forbidden` and leaves the completed task unchanged. A reader in the same tenant is also not an owner. Bob's list has no matching visible row, and a direct lookup reports `ResourceNotFound` rather than revealing Alice's task:
 
 ```bash
-TEAM_TASKS_TOKEN=bob-demo bun run team-tasks todos.list --input-json '{"filter":{"project":"North Yard pump inspection"}}'
-TEAM_TASKS_TOKEN=bob-demo bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks todos.list --input-json '{"filter":{"project":"North Yard pump inspection"}}'
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
 ```
 
-The list response has an empty `items` array; the get command exits nonzero. `outsider-demo` is similarly outside the tenant scope. Missing or unknown bearer credentials fail with `Unauthenticated`.
+The list response has an empty `items` array; the get command exits nonzero. An issued credential for `outsider` is similarly outside the tenant scope. Missing, expired, revoked, or unknown bearer credentials fail with `Unauthenticated`.
 
 An Acme administrator can read every Acme task, reopen a completed task, and remove it. `update` is replacement, so it requires the complete canonical row, including `id`, `tenantId`, and `ownerId`:
 
 ```bash
-TEAM_TASKS_TOKEN=admin-demo bun run team-tasks todos.update --input-json "{\"id\":\"$TASK_ID\",\"project\":\"North Yard pump inspection\",\"title\":\"Attach pressure-test photo\",\"detail\":\"Use the calibrated 0-200 psi gauge record from the site tablet.\",\"priority\":\"high\",\"dueDate\":\"2026-09-18\",\"completed\":false,\"tenantId\":\"acme\",\"ownerId\":\"alice\"}"
-TEAM_TASKS_TOKEN=admin-demo bun run team-tasks todos.patch --input-json "{\"key\":\"$TASK_ID\",\"changes\":{\"ownerId\":\"bob\"}}"
-TEAM_TASKS_TOKEN=admin-demo bun run team-tasks todos.remove --input-json "{\"id\":\"$TASK_ID\"}"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks todos.update --input-json "{\"id\":\"$TASK_ID\",\"project\":\"North Yard pump inspection\",\"title\":\"Attach pressure-test photo\",\"detail\":\"Use the calibrated 0-200 psi gauge record from the site tablet.\",\"priority\":\"high\",\"dueDate\":\"2026-09-18\",\"completed\":false,\"tenantId\":\"acme\",\"ownerId\":\"alice\"}"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks todos.patch --input-json "{\"key\":\"$TASK_ID\",\"changes\":{\"ownerId\":\"bob\"}}"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks todos.remove --input-json "{\"id\":\"$TASK_ID\"}"
 ```
 
 The update reopens the task. The attempted transfer exits nonzero with `Forbidden`: administrators may edit a task but cannot move it between tenants or change its owner. The final remove succeeds and returns no value. Owners and readers cannot remove a task.
@@ -110,11 +120,11 @@ The example intentionally does not add scheduling, reminders, dependencies, reas
 
 ## Browser, admin, and MCP
 
-With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/) for the hand-authored Foldkit task page. It starts as Alice and offers the four demo-token chips plus a bearer-token field. Create tasks, filter by exact project/priority/status, select **Edit**, and save the form; the browser sends `todos.create` for a new task and a full `todos.update` for an edited task. The task table shows project, title, priority, due date, and completion—not tenant or owner—although successful RPC rows contain both server-owned fields.
+With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/) for the hand-authored Foldkit task page. It starts signed out; use the login form with a seeded account password. The page uses the same native RPC client as the CLI and keeps the resulting bearer token only in memory. Create tasks, filter by exact project/priority/status, select **Edit**, and save the form; the browser sends `todos.create` for a new task and a full `todos.update` for an edited task. The task table shows project, title, priority, due date, and completion—not tenant or owner—although successful RPC rows contain both server-owned fields.
 
-The Foldkit list requests up to 25 tasks and retains a returned cursor internally, but renders no **next page** control. Use the CLI or admin page to traverse later pages. Its **Remove** button is rendered independently of permission; choosing Bob or Alice still leaves the server to reject removal. After completion, an Alice edit likewise surfaces the server error in the page notice.
+**Load more** appends a returned cursor page. Changing a filter or signing in/out clears prior rows and invalidates in-flight work. Form and server failures, including an attempted completion edit or forbidden removal, appear in the notice or the relevant field; typed username never supplies a role.
 
-The same server also provides the generated browser admin at [http://127.0.0.1:3001/admin](http://127.0.0.1:3001/admin) and Streamable HTTP MCP at `http://127.0.0.1:3001/mcp`. Admin uses the same operations and per-call bearer authentication, including declared filters and cursor navigation. MCP tool arguments wrap the RPC payload as `{ "input": <payload> }`; it does not bypass the task policy.
+The same server also provides the generated browser admin at [http://127.0.0.1:3001/admin](http://127.0.0.1:3001/admin) and Streamable HTTP MCP at `http://127.0.0.1:3001/mcp`. Admin uses the same operations and per-call issued bearer authentication, including declared filters and cursor navigation. MCP tool arguments wrap the RPC payload as `{ "input": <payload> }`; it does not bypass the task policy.
 
 ## Settings, persistence, and inspection
 

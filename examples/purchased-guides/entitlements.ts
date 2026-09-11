@@ -1,7 +1,7 @@
 import { Array, Effect, Equivalence, Layer, Option, Schema, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { EntitlementUnavailable, Entitlements } from "effect-domains/entitlements"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { GuidePurchasesResource, GuidesResource } from "./resources.ts"
 
 const PurchaseRowsSchema = Schema.Array(Schema.Struct({ status: Schema.Literals(["granted", "refunded", "revoked"]) }))

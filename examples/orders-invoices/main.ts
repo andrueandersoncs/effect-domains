@@ -2,7 +2,7 @@ import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
 import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { BillingApplication } from "./application.ts"
 import { BillingMigrations } from "./migrations.ts"
 import { BillingWebAssets } from "./web/assets.ts"
@@ -16,7 +16,7 @@ const web = ExampleWeb.layerHttp({
 pipe(
   ApplicationBun.run(BillingApplication, {
     database: { migrations: BillingMigrations },
-    services: ExampleAuthentication,
+    services: ExampleIdentity,
     admin: true,
     routes: web,
   }),

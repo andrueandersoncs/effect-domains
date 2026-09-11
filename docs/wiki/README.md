@@ -8,8 +8,8 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 
 - [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, declared joined projections, imported migrations, and native execution composition.
-- [Validation Strategy](validation-strategy.md) — slice criteria, repair-workshop baseline/cutover evidence, prior validation, and dated evidence limits.
-- [Research Agenda](research-agenda.md) — current framework contract, implemented join/dependency slice, next identity direction, and remaining evidence.
+- [Validation Strategy](validation-strategy.md) — slice criteria, current native identity/browser evidence, repair-workshop baseline/cutover evidence, prior validation, and dated evidence limits.
+- [Research Agenda](research-agenda.md) — current framework contract, identity boundary, join/dependency slice, and remaining evidence.
 
 ## Wiki Operations and Sources
 
@@ -26,13 +26,15 @@ Files under `raw/` are immutable source material. Maintained pages synthesize th
 
 ## Current Status
 
-On 2026-09-11 the remaining research questions were sequenced: stay SQLite with more domains; declare joins and query dependencies next; keep explicit per-field storage transforms; prove identity issuance and revocation next; add encoded shapes only when a slice cannot avoid them; defer migration-authoring changes until a history hurts; prove interruption with a failure slice. See [current direction](research-agenda.md#current-direction).
+On 2026-09-11 the remaining research questions were sequenced: stay SQLite with more domains; declare joins and query dependencies; keep explicit per-field storage transforms; implement verified identity issuance and revocation; add encoded shapes only when a slice cannot avoid them; defer migration-authoring changes until a history hurts; prove interruption with a failure slice. The identity slice is now complete as a bounded example credential store, while production IdP work remains outside the claim. See [current direction](research-agenda.md#current-direction).
 
 The [repair-workshop slice](../../examples/repair-workshop/README.md) now supplies the first join/dependency evidence from that direction. A runnable handwritten board came first; `SqliteView` then removed repeated storage codecs and SQL aliases/joins while leaving native query execution and policy explicit. [Final verification](validation-strategy.md#2026-09-11-repair-workshop-joined-projections) covers CLI equivalence, current joined values, null and codec boundaries, dependency rejection, MCP results, and the actual Foldkit surface. Broader joins and production identity remain unproven.
 
 Automatic [RPC telemetry](../reference/runtime.md#opentelemetry-tracing) now installs native Effect OTLP tracing across Bun command lifetimes when an endpoint is configured. Runtime options expose export configuration declaratively; no endpoint means no collector traffic. [Live verification](validation-strategy.md#2026-09-11-automatic-rpc-telemetry) covers generated/native RPCs, CLI propagation, admin/MCP parent isolation, export formats, configuration precedence, and graceful flushing; it also records unrelated workspace lint failures.
 
 The examples now model concrete applications rather than framework features: reading lists, expenses, team tasks, field notes, editorial calendars, equipment registers, reservations, orders/invoices, report exports, and appointment reminders. Each `serve` command also hosts a hand-authored Foldkit page at `/` over the same `/rpc/v1` operations as the CLI. See the [application guide](../../examples/README.md) for current contracts and runnable scenarios, and the [domain-example verification](validation-strategy.md#2026-09-10-domain-first-example-applications) for live CLI/MCP, migration, encryption, browser, and durable-restart evidence. Earlier dated verification records describe their original fixtures, even where source links now point to successor applications.
+
+The current identity/browser cutover keeps portable schemas and `IdentityRuntime` separate from the native identity RPC group and handlers. Example clients use existing native RPC groups rather than handwritten browser envelopes; their request ownership and in-memory session helpers discard stale replies and keep credentials out of browser storage. The separate SQLite credential store issues expiring, revocable opaque credentials while checking current account state, but does not claim production IdP capability. [Current evidence](validation-strategy.md#2026-09-11-native-identity-and-browser-client-cutover) records the exercised boundaries.
 
 Authorization now supports [declarative entitlement gating](tables-and-queries.md#entitlement-gating) through an application-provided Effect service, with distinct missing-grant and unavailable-resolver errors. Account-level report subscriptions and per-resource purchased guides exercise the same enforcement through native RPCs and generated repositories. Requirements remain separate from row visibility, canonical schemas, and payment processing. [Verification](validation-strategy.md#2026-09-10-entitlement-gating) records 90 passing tests, live entitlement-state changes and restart persistence, account-bound report artifacts, and the limits of those observations.
 
@@ -52,7 +54,7 @@ HTTP RPC, MCP, and opt-in prebuilt browser admin remain native adapters over the
 
 The [verification record](validation-strategy.md#verification-record) preserves earlier CLI, browser, MCP, migration, billing, and durable-restart observations with their original dates and limits. The [research agenda](research-agenda.md) distinguishes implemented boundaries from broader claims that remain unproven. The [application guide](../../examples/README.md) contains the current walkthroughs.
 
-Each of the twelve applications now has a standalone README for setup, runnable workflows, observable failures, runtime settings, and source navigation. The [example index](../../examples/README.md) and [documentation catalogue](../examples.md) link to those guides; shared transport and migration conventions remain in the index rather than being maintained as duplicate application walkthroughs. The [documentation smoke record](validation-strategy.md#2026-09-11-standalone-example-guides) covers all twelve CLI workflows and records observed reading-list browser loading and report-interruption limitations separately.
+Each of the twelve applications has a standalone README for setup, runnable workflows, observable failures, runtime settings, and source navigation. The [example index](../../examples/README.md) and [documentation catalogue](../examples.md) link to those guides; shared transport and migration conventions remain in the index rather than being maintained as duplicate application walkthroughs. The [historical documentation smoke record](validation-strategy.md#2026-09-11-standalone-example-guides) covers all twelve CLI workflows and records its earlier reading-list browser limitation; the [current identity/browser record](validation-strategy.md#2026-09-11-native-identity-and-browser-client-cutover) supersedes that browser observation.
 
 ## Development
 

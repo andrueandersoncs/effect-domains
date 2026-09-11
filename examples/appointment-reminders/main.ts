@@ -4,7 +4,7 @@ import { Layer, pipe } from "effect"
 import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { privateSqlite } from "@effect-domains/example-support/databases"
 import { ApplicationBun } from "effect-domains/application-bun"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { AppointmentRemindersApplication } from "./application.ts"
 import { AppointmentReminderBackground } from "./background.ts"
 import { AppointmentReminderMigrations } from "./migrations.ts"
@@ -17,7 +17,7 @@ const executionDatabase =
 const executionSql = privateSqlite(executionDatabase)
 
 const execution = pipe(SingleRunner.layer(), Layer.provide(executionSql))
-const services = Layer.mergeAll(ExampleAuthentication, execution)
+const services = Layer.mergeAll(ExampleIdentity, execution)
 
 const web = ExampleWeb.layerHttp({
   title: "Appointment reminders",

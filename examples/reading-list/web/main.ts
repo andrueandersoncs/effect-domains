@@ -1,6 +1,7 @@
-import { Array, Effect, Option, Schema, pipe } from "effect"
+import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
+import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Command, Runtime, type Update } from "foldkit"
-import { type Document, type HtmlBuilder } from "foldkit/html"
+import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import {
@@ -13,51 +14,25 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
-import { rpcCall } from "@effect-domains/example-web/rpc"
-import {
-  BookFormatSchema,
-  RatingSchema,
-  ReadingListBookSchema,
-  ReadingStatusSchema,
-} from "../domain.ts"
+import { Form } from "@effect-domains/example-web/form"
+import { Page } from "@effect-domains/example-web/page"
+import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
+import { browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { BookFormatSchema, RatingSchema, ReadingListBookSchema, ReadingStatusSchema } from "../domain.ts"
+import { ReadingListResource } from "../resources.ts"
 
-const BookRowSchema = Schema.Struct({
-  id: Schema.String,
-  title: ReadingListBookSchema.fields.title,
-  author: ReadingListBookSchema.fields.author,
-  status: ReadingStatusSchema,
-  format: BookFormatSchema,
-  rating: Schema.NullOr(RatingSchema),
-  notes: Schema.NullOr(Schema.String),
-})
-
-const cursorFromUnknown = (value: unknown) => {
-  if (value === null || value === undefined) return null
-  if (typeof value === "string" && value.length > 0) return value
-  if (typeof value === "object" && value !== null && "_tag" in value) {
-    const tagged = value as { _tag: unknown; value?: unknown }
-    if (tagged._tag === "Some" && typeof tagged.value === "string") return tagged.value
-  }
-  return null
+const BookRowSchema = ReadingListResource.table.rowSchema
+const BookPageSchema = Page.schema(BookRowSchema)
+export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof ReadingListResource.group, RpcClientError.RpcClientError>>()("reading-list/WebClient") {
+  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(ReadingListResource.group)), Layer.provide(browserProtocol))
 }
-
-const BookPageSchema = Schema.Struct({
-  items: Schema.Array(BookRowSchema),
-  nextCursor: Schema.Unknown,
-})
 
 const statuses = ["planned", "reading", "finished"] as const
 const formats = ["paperback", "hardcover", "ebook", "audiobook"] as const
-const statusChoices = [
-  { value: "", label: "Any status" },
-  ...Array.map(statuses, (status) => ({ value: status, label: status })),
-]
-const formatChoices = [
-  { value: "", label: "Any format" },
-  ...Array.map(formats, (format) => ({ value: format, label: format })),
-]
-const formStatusChoices = Array.map(statuses, (status) => ({ value: status, label: status }))
-const formFormatChoices = Array.map(formats, (format) => ({ value: format, label: format }))
+const statusChoices = [{ value: "", label: "Any status" }, ...Array.map(statuses, (value) => ({ value, label: value }))]
+const formatChoices = [{ value: "", label: "Any format" }, ...Array.map(formats, (value) => ({ value, label: value }))]
+const formStatusChoices = Array.map(statuses, (value) => ({ value, label: value }))
+const formFormatChoices = Array.map(formats, (value) => ({ value, label: value }))
 
 export const Model = Schema.Struct({
   books: Schema.Array(BookRowSchema),
@@ -71,11 +46,9 @@ export const Model = Schema.Struct({
   rating: Schema.String,
   notes: Schema.String,
   selectedId: Schema.NullOr(Schema.String),
-  busy: Schema.Boolean,
-  notice: Schema.NullOr(Schema.Struct({
-    kind: Schema.Literals(["info", "error", "success"]),
-    text: Schema.String,
-  })),
+  requests: RequestStateSchema,
+  fieldErrors: Schema.Record(Schema.String, Schema.String),
+  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
 })
 export type Model = typeof Model.Type
 
@@ -89,244 +62,157 @@ export const Message = defineMessageUnion({
   ChangedRating: { value: Schema.String },
   ChangedNotes: { value: Schema.String },
   ClickedReload: {},
+  ClickedNext: {},
   ClickedSave: {},
   ClickedNew: {},
   ClickedSelect: { id: Schema.String },
   ClickedRemove: { id: Schema.String },
-  SucceededList: { items: Schema.Array(BookRowSchema), nextCursor: Schema.NullOr(Schema.String) },
-  SucceededSave: { book: BookRowSchema, created: Schema.Boolean },
-  SucceededRemove: { id: Schema.String },
-  Failed: { error: Schema.String },
+  SucceededList: { page: BookPageSchema, append: Schema.Boolean, request: RequestTokenSchema },
+  SucceededSave: { book: BookRowSchema, created: Schema.Boolean, request: RequestTokenSchema },
+  SucceededRemove: { id: Schema.String, request: RequestTokenSchema },
+  Failed: { request: RequestTokenSchema, error: Schema.String, field: Schema.NullOr(Schema.String) },
 })
 export type Message = typeof Message.Type
+type UpdateReturn = Update.Return<Model, Message, WebClient>
 
-type UpdateReturn = Update.Return<Model, Message>
+type FormFailure = Readonly<{ _tag: "FormFailure"; field: string; error: string }>
+const formFailure = (field: string) => (error: Schema.SchemaError): FormFailure => ({
+  _tag: "FormFailure",
+  field,
+  error: Form.errors(error)["$"] ?? error.message,
+})
+const isFormFailure = (error: unknown): error is FormFailure =>
+  typeof error === "object" && error !== null && "_tag" in error && error._tag === "FormFailure"
+const failed = (request: RequestToken, error: unknown) => Message.Failed({
+  request,
+  error: isFormFailure(error) ? error.error : formatRpcError(error),
+  field: isFormFailure(error) ? error.field : null,
+})
 
-const emptyForm = {
-  title: "",
-  author: "",
-  status: "planned" as const,
-  format: "paperback" as const,
-  rating: "",
-  notes: "",
-  selectedId: null as string | null,
-}
-
+const emptyForm = { title: "", author: "", status: "planned" as const, format: "paperback" as const, rating: "", notes: "", selectedId: null as string | null }
 
 export const ListBooks = Command.define("ListBooks", {
-  args: {
-    filterStatus: Schema.String,
-    filterFormat: Schema.String,
-  },
+  args: { filterStatus: Schema.String, filterFormat: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean, request: RequestTokenSchema },
   messages: [Message.SucceededList, Message.Failed],
-  execute: ({ filterStatus, filterFormat }) =>
-    pipe(
-      rpcCall({
-        tag: "books.list",
-        payload: {
-          filter: {
-            ...(filterStatus === "" ? {} : { status: filterStatus }),
-            ...(filterFormat === "" ? {} : { format: filterFormat }),
-          },
-          limit: 25,
-        },
-        token: null,
-        success: BookPageSchema,
-      }),
-      Effect.match({
-        onSuccess: (page) => Message.SucceededList({
-          items: page.items,
-          nextCursor: cursorFromUnknown(page.nextCursor),
-        }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
-      }),
-    ),
+  execute: (args) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const page = yield* client["books.list"]({
+      filter: {
+        ...(args.filterStatus === "" ? {} : { status: args.filterStatus as typeof ReadingStatusSchema.Type }),
+        ...(args.filterFormat === "" ? {} : { format: args.filterFormat as typeof BookFormatSchema.Type }),
+      },
+      limit: 25,
+      ...Page.input(args.cursor),
+    })
+    return Message.SucceededList({ page, append: args.append, request: args.request })
+  }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))),
 })
 
 export const SaveBook = Command.define("SaveBook", {
-  args: {
-    selectedId: Schema.NullOr(Schema.String),
-    title: Schema.String,
-    author: Schema.String,
-    status: ReadingStatusSchema,
-    format: BookFormatSchema,
-    rating: Schema.String,
-    notes: Schema.String,
-  },
+  args: { selectedId: Schema.NullOr(Schema.String), title: Schema.String, author: Schema.String, status: ReadingStatusSchema, format: BookFormatSchema, rating: Schema.String, notes: Schema.String, request: RequestTokenSchema },
   messages: [Message.SucceededSave, Message.Failed],
-  execute: (args) => {
-    const rating = args.rating.trim() === "" ? null : Number.parseInt(args.rating, 10)
-    const notes = args.notes.trim() === "" ? null : args.notes.trim()
-    const book = {
-      title: args.title.trim(),
-      author: args.author.trim(),
-      status: args.status,
-      format: args.format,
-      rating,
-      notes,
-    }
-    const creating = args.selectedId === null
-    return pipe(
-      rpcCall({
-        tag: creating ? "books.create" : "books.update",
-        payload: creating ? book : { id: args.selectedId, ...book },
-        token: null,
-        success: BookRowSchema,
-      }),
-      Effect.match({
-        onSuccess: (saved) => Message.SucceededSave({ book: saved, created: creating }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
-      }),
-    )
-  },
+  execute: (args) => Effect.gen(function*() {
+    const title = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.title)(args.title.trim()).pipe(Effect.mapError(formFailure("title")))
+    const author = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.author)(args.author.trim()).pipe(Effect.mapError(formFailure("author")))
+    const rating = args.rating.trim() === ""
+      ? null
+      : yield* Schema.decodeUnknownEffect(Form.integer(RatingSchema))(args.rating).pipe(Effect.mapError(formFailure("rating")))
+    const notes = yield* Schema.decodeUnknownEffect(Form.nullableText(Schema.NonEmptyString))(args.notes).pipe(Effect.mapError(formFailure("notes")))
+    const client = yield* WebClient
+    const book = { title, author, status: args.status, format: args.format, rating, notes }
+    const created = args.selectedId === null
+    const saved = yield* (created ? client["books.create"](book) : client["books.update"]({ id: args.selectedId, ...book }))
+    return Message.SucceededSave({ book: saved, created, request: args.request })
+  }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))),
 })
 
 export const RemoveBook = Command.define("RemoveBook", {
-  args: { id: Schema.String },
+  args: { id: Schema.String, request: RequestTokenSchema },
   messages: [Message.SucceededRemove, Message.Failed],
-  execute: ({ id }) =>
-    pipe(
-      rpcCall({
-        tag: "books.remove",
-        payload: { id },
-        token: null,
-        success: Schema.Unknown,
-      }),
-      Effect.match({
-        onSuccess: () => Message.SucceededRemove({ id }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
-      }),
-    ),
+  execute: ({ id, request }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    yield* client["books.remove"]({ id })
+    return Message.SucceededRemove({ id, request })
+  }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))),
 })
 
-const reload = (model: Model) => ListBooks({
-  filterStatus: model.filterStatus,
-  filterFormat: model.filterFormat,
-})
+const listCommand = (model: Model, request: RequestToken, cursor: string | null, append: boolean) =>
+  ListBooks({ filterStatus: model.filterStatus, filterFormat: model.filterFormat, cursor, append, request })
+const beginList = (model: Model, cursor: string | null, append: boolean) => {
+  const started = Requests.start(model.requests, "books.list")
+  return { state: started.state, command: listCommand(model, started.request, cursor, append) }
+}
+const begin = (model: Model, key: string) => Requests.start(model.requests, key)
+const withError = <M>(h: HtmlBuilder<M>, child: Html, error: string | undefined) =>
+  h.div([], [child, error === undefined ? h.empty : h.p([h.Class("field-error")], [error])])
 
-export const update = (model: Model, message: Message) =>
-  Message.match<UpdateReturn>(message, {
-    ChangedFilterStatus: ({ value }) => {
-      const next = evo(model, { filterStatus: () => value, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
-    ChangedFilterFormat: ({ value }) => {
-      const next = evo(model, { filterFormat: () => value, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
-    ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
-    ChangedAuthor: ({ value }) => ({ model: evo(model, { author: () => value }) }),
-    ChangedStatus: ({ value }) => ({
-      model: evo(model, { status: () => value as Model["status"] }),
-    }),
-    ChangedFormat: ({ value }) => ({
-      model: evo(model, { format: () => value as Model["format"] }),
-    }),
-    ChangedRating: ({ value }) => ({ model: evo(model, { rating: () => value }) }),
-    ChangedNotes: ({ value }) => ({ model: evo(model, { notes: () => value }) }),
-    ClickedReload: () => ({
-      model: evo(model, { busy: () => true }),
-      commands: [reload(model)],
-    }),
-    ClickedSave: () => ({
-      model: evo(model, { busy: () => true, notice: () => null }),
-      commands: [SaveBook({
-        selectedId: model.selectedId,
-        title: model.title,
-        author: model.author,
-        status: model.status,
-        format: model.format,
-        rating: model.rating,
-        notes: model.notes,
-      })],
-    }),
-    ClickedNew: () => ({
-      model: evo(model, {
-        title: () => "",
-        author: () => "",
-        status: () => "planned",
-        format: () => "paperback",
-        rating: () => "",
-        notes: () => "",
-        selectedId: () => null,
-        notice: () => null,
-      }),
-    }),
-    ClickedSelect: ({ id }) =>
-      Option.match(Array.findFirst(model.books, (item) => item.id === id), {
-        onNone: () => ({ model }),
-        onSome: (book) => ({
-          model: evo(model, {
-            selectedId: () => book.id,
-            title: () => book.title,
-            author: () => book.author,
-            status: () => book.status,
-            format: () => book.format,
-            rating: () => book.rating === null ? "" : String(book.rating),
-            notes: () => book.notes ?? "",
-            notice: () => null,
-          }),
-        }),
-      }),
-    ClickedRemove: ({ id }) => ({
-      model: evo(model, { busy: () => true, notice: () => null }),
-      commands: [RemoveBook({ id })],
-    }),
-    SucceededList: ({ items, nextCursor }) => ({
-      model: evo(model, {
-        books: () => items,
-        nextCursor: () => nextCursor,
-        busy: () => false,
-      }),
-    }),
-    SucceededSave: ({ book, created }) => ({
-      model: evo(model, {
-        selectedId: () => book.id,
-        title: () => book.title,
-        author: () => book.author,
-        status: () => book.status,
-        format: () => book.format,
-        rating: () => book.rating === null ? "" : String(book.rating),
-        notes: () => book.notes ?? "",
-        busy: () => true,
-        notice: () => ({ kind: "success" as const, text: created ? "Added to the list." : "Updated." }),
-      }),
-      commands: [ListBooks({ filterStatus: model.filterStatus, filterFormat: model.filterFormat })],
-    }),
-    SucceededRemove: ({ id }) => ({
-      model: evo(model, {
-        busy: () => true,
-        title: () => model.selectedId === id ? "" : model.title,
-        author: () => model.selectedId === id ? "" : model.author,
-        status: () => model.selectedId === id ? "planned" : model.status,
-        format: () => model.selectedId === id ? "paperback" : model.format,
-        rating: () => model.selectedId === id ? "" : model.rating,
-        notes: () => model.selectedId === id ? "" : model.notes,
-        selectedId: () => model.selectedId === id ? null : model.selectedId,
-        notice: () => ({ kind: "success" as const, text: "Removed." }),
-      }),
-      commands: [ListBooks({ filterStatus: model.filterStatus, filterFormat: model.filterFormat })],
-    }),
-    Failed: ({ error }) => ({
-      model: evo(model, {
-        busy: () => false,
-        notice: () => ({ kind: "error" as const, text: error }),
-      }),
-    }),
-  })
-
-export const init: Runtime.ApplicationInit<Model, Message> = () => ({
-  model: {
-    books: [],
-    nextCursor: null,
-    filterStatus: "",
-    filterFormat: "",
-    ...emptyForm,
-    busy: true,
-    notice: null,
+export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
+  ChangedFilterStatus: ({ value }) => {
+    const next = evo(model, { filterStatus: () => value })
+    const listing = beginList(next, null, false)
+    return { model: evo(next, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
   },
-  commands: [ListBooks({ filterStatus: "", filterFormat: "" })],
+  ChangedFilterFormat: ({ value }) => {
+    const next = evo(model, { filterFormat: () => value })
+    const listing = beginList(next, null, false)
+    return { model: evo(next, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
+  },
+  ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
+  ChangedAuthor: ({ value }) => ({ model: evo(model, { author: () => value }) }),
+  ChangedStatus: ({ value }) => ({ model: evo(model, { status: () => value as Model["status"] }) }),
+  ChangedFormat: ({ value }) => ({ model: evo(model, { format: () => value as Model["format"] }) }),
+  ChangedRating: ({ value }) => ({ model: evo(model, { rating: () => value }) }),
+  ChangedNotes: ({ value }) => ({ model: evo(model, { notes: () => value }) }),
+  ClickedReload: () => {
+    const listing = beginList(model, null, false)
+    return { model: evo(model, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
+  },
+  ClickedNext: () => {
+    if (model.nextCursor === null || Requests.pending(model.requests, "books.list")) return { model }
+    const listing = beginList(model, model.nextCursor, true)
+    return { model: evo(model, { requests: () => listing.state }), commands: [listing.command] }
+  },
+  ClickedSave: () => {
+    const started = begin(model, "books.save")
+    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [SaveBook({ ...model, request: started.request })] }
+  },
+  ClickedNew: () => ({ model: evo(model, { title: () => "", author: () => "", status: () => "planned", format: () => "paperback", rating: () => "", notes: () => "", selectedId: () => null, fieldErrors: () => ({}), notice: () => null }) }),
+  ClickedSelect: ({ id }) => Option.match(Array.findFirst(model.books, (book) => book.id === id), {
+    onNone: () => ({ model }),
+    onSome: (book) => ({ model: evo(model, { selectedId: () => book.id, title: () => book.title, author: () => book.author, status: () => book.status, format: () => book.format, rating: () => book.rating === null ? "" : String(book.rating), notes: () => book.notes ?? "", fieldErrors: () => ({}), notice: () => null }) }),
+  }),
+  ClickedRemove: ({ id }) => {
+    const started = begin(model, "books.remove")
+    return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveBook({ id, request: started.request })] }
+  },
+  SucceededList: ({ page, append, request }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    const received = Page.receive({ items: model.books, nextCursor: model.nextCursor }, page, append)
+    return { model: evo(model, { books: () => received.items, nextCursor: () => received.nextCursor, requests: () => Requests.succeed(model.requests, request) }) }
+  },
+  SucceededSave: ({ book, created, request }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    const listing = beginList(evo(model, { requests: () => Requests.succeed(model.requests, request) }), null, false)
+    return { model: evo(model, { selectedId: () => book.id, title: () => book.title, author: () => book.author, status: () => book.status, format: () => book.format, rating: () => book.rating === null ? "" : String(book.rating), notes: () => book.notes ?? "", books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: created ? "Added to the list." : "Updated." }) }), commands: [listing.command] }
+  },
+  SucceededRemove: ({ id, request }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    const base = evo(model, { requests: () => Requests.succeed(model.requests, request) })
+    const listing = beginList(base, null, false)
+    const selected = model.selectedId === id
+    return { model: evo(model, { title: () => selected ? "" : model.title, author: () => selected ? "" : model.author, status: () => selected ? "planned" : model.status, format: () => selected ? "paperback" : model.format, rating: () => selected ? "" : model.rating, notes: () => selected ? "" : model.notes, selectedId: () => selected ? null : model.selectedId, books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: "Removed." }) }), commands: [listing.command] }
+  },
+  Failed: ({ request, error, field }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    return { model: evo(model, { requests: () => Requests.fail(model.requests, request, error), fieldErrors: () => field === null ? model.fieldErrors : { ...model.fieldErrors, [field]: error }, notice: () => ({ kind: "error" as const, text: error }) }) }
+  },
 })
+
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
+  const model: Model = { books: [], nextCursor: null, filterStatus: "", filterFormat: "", ...emptyForm, requests: Requests.empty(), fieldErrors: {}, notice: null }
+  const listing = beginList(model, null, false)
+  return { model: evo(model, { requests: () => listing.state }), commands: [listing.command] }
+}
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
   title: "Reading list",
@@ -335,157 +221,26 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
     lede: "Keep a personal backlog, record progress, and rate finished books. This page talks to the same published RPC as the CLI.",
     notice: model.notice,
     session: null,
-    children: [
-      h.div(
-        [h.Class("split")],
-        [
-          h.section(
-            [h.Class("panel stack")],
-            [
-              h.div(
-                [h.Class("actions")],
-                [
-                  field(h, {
-                    id: "filter-status",
-                    label: "Status",
-                    children: selectInput(h, {
-                      id: "filter-status",
-                      value: model.filterStatus,
-                      onChange: (value) => Message.ChangedFilterStatus({ value }),
-                      choices: statusChoices,
-                    }),
-                  }),
-                  field(h, {
-                    id: "filter-format",
-                    label: "Format",
-                    children: selectInput(h, {
-                      id: "filter-format",
-                      value: model.filterFormat,
-                      onChange: (value) => Message.ChangedFilterFormat({ value }),
-                      choices: formatChoices,
-                    }),
-                  }),
-                  primaryButton(h, {
-                    label: model.busy ? "Loading…" : "Reload",
-                    message: Option.some(Message.ClickedReload()),
-                    type: "button",
-                    disabled: model.busy,
-                  }),
-                ],
-              ),
-              dataTable(h, {
-                caption: "Books",
-                columns: ["Title", "Author", "Status", "Format", "Rating", ""],
-                rows: model.books,
-                key: (book) => book.id,
-                cells: (book) => [
-                  book.title,
-                  book.author,
-                  book.status,
-                  book.format,
-                  book.rating === null ? "—" : String(book.rating),
-                  h.div(
-                    [h.Class("row-actions")],
-                    [
-                      quietButton(h, { label: "Edit", message: Message.ClickedSelect({ id: book.id }), disabled: false }),
-                      quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: book.id }), disabled: model.busy }),
-                    ],
-                  ),
-                ],
-              }),
-            ],
-          ),
-          h.section(
-            [h.Class("panel")],
-            [
-              h.form(
-                [h.Class("stack"), h.OnSubmit(Message.ClickedSave())],
-                [
-                  h.h2([], [model.selectedId === null ? "Add a book" : "Edit book"]),
-                  field(h, {
-                    id: "title",
-                    label: "Title",
-                    children: textInput(h, {
-                      id: "title",
-                      value: model.title,
-                      onInput: (value) => Message.ChangedTitle({ value }),
-                      type: "text",
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  field(h, {
-                    id: "author",
-                    label: "Author",
-                    children: textInput(h, {
-                      id: "author",
-                      value: model.author,
-                      onInput: (value) => Message.ChangedAuthor({ value }),
-                      type: "text",
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  field(h, {
-                    id: "status",
-                    label: "Status",
-                    children: selectInput(h, {
-                      id: "status",
-                      value: model.status,
-                      onChange: (value) => Message.ChangedStatus({ value }),
-                      choices: formStatusChoices,
-                    }),
-                  }),
-                  field(h, {
-                    id: "format",
-                    label: "Format",
-                    children: selectInput(h, {
-                      id: "format",
-                      value: model.format,
-                      onChange: (value) => Message.ChangedFormat({ value }),
-                      choices: formFormatChoices,
-                    }),
-                  }),
-                  field(h, {
-                    id: "rating",
-                    label: "Rating (1–5)",
-                    children: textInput(h, {
-                      id: "rating",
-                      value: model.rating,
-                      type: "number",
-                      placeholder: "",
-                      autocomplete: "off",
-                      onInput: (value) => Message.ChangedRating({ value }),
-                    }),
-                  }),
-                  field(h, {
-                    id: "notes",
-                    label: "Notes",
-                    children: textareaInput(h, {
-                      id: "notes",
-                      value: model.notes,
-                      rows: 4,
-                      onInput: (value) => Message.ChangedNotes({ value }),
-                    }),
-                  }),
-                  h.div(
-                    [h.Class("actions")],
-                    [
-                      primaryButton(h, {
-                        label: model.selectedId === null ? "Add book" : "Save changes",
-                        message: Option.none(),
-                        type: "submit",
-                        disabled: model.busy,
-                      }),
-                      quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false }),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ],
+    children: [h.div([h.Class("split")], [
+      h.section([h.Class("panel stack")], [
+        h.div([h.Class("actions")], [
+          field(h, { id: "filter-status", label: "Status", children: selectInput(h, { id: "filter-status", value: model.filterStatus, onChange: (value) => Message.ChangedFilterStatus({ value }), choices: statusChoices }) }),
+          field(h, { id: "filter-format", label: "Format", children: selectInput(h, { id: "filter-format", value: model.filterFormat, onChange: (value) => Message.ChangedFilterFormat({ value }), choices: formatChoices }) }),
+          primaryButton(h, { label: Requests.pending(model.requests, "books.list") ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: Requests.pending(model.requests, "books.list") }),
+        ]),
+        dataTable(h, { caption: "Books", columns: ["Title", "Author", "Status", "Format", "Rating", ""], rows: model.books, key: (book) => book.id, cells: (book) => [book.title, book.author, book.status, book.format, book.rating === null ? "—" : String(book.rating), h.div([h.Class("row-actions")], [quietButton(h, { label: "Edit", message: Message.ClickedSelect({ id: book.id }), disabled: false }), quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: book.id }), disabled: Requests.pending(model.requests, "books.remove") })])] }),
+        model.nextCursor === null ? h.p([], ["All book pages loaded."]) : quietButton(h, { label: "Load more books", message: Message.ClickedNext(), disabled: Requests.pending(model.requests, "books.list") }),
+      ]),
+      h.section([h.Class("panel")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSave())], [
+        h.h2([], [model.selectedId === null ? "Add a book" : "Edit book"]),
+        field(h, { id: "title", label: "Title", children: withError(h, textInput(h, { id: "title", value: model.title, onInput: (value) => Message.ChangedTitle({ value }), type: "text", placeholder: "", autocomplete: "off" }), model.fieldErrors.title) }),
+        field(h, { id: "author", label: "Author", children: withError(h, textInput(h, { id: "author", value: model.author, onInput: (value) => Message.ChangedAuthor({ value }), type: "text", placeholder: "", autocomplete: "off" }), model.fieldErrors.author) }),
+        field(h, { id: "status", label: "Status", children: selectInput(h, { id: "status", value: model.status, onChange: (value) => Message.ChangedStatus({ value }), choices: formStatusChoices }) }),
+        field(h, { id: "format", label: "Format", children: selectInput(h, { id: "format", value: model.format, onChange: (value) => Message.ChangedFormat({ value }), choices: formFormatChoices }) }),
+        field(h, { id: "rating", label: "Rating (1–5)", children: withError(h, textInput(h, { id: "rating", value: model.rating, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedRating({ value }) }), model.fieldErrors.rating) }),
+        field(h, { id: "notes", label: "Notes", children: withError(h, textareaInput(h, { id: "notes", value: model.notes, rows: 4, onInput: (value) => Message.ChangedNotes({ value }) }), model.fieldErrors.notes) }),
+        h.div([h.Class("actions")], [primaryButton(h, { label: model.selectedId === null ? "Add book" : "Save changes", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests, "books.save") }), quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false })]),
+      ])]),
+    ])],
   }),
 })

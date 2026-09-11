@@ -1,151 +1,146 @@
-import { Effect, Option, Schema, pipe } from "effect"
+import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
+import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
-import {
-  dataTable,
-  field,
-  primaryButton,
-  quietButton,
-  selectInput,
-  shell,
-} from "@effect-domains/example-web/html"
-import { rpcCall } from "@effect-domains/example-web/rpc"
-const GuideViewSchema = Schema.Struct({
-  id: Schema.String,
-  tenantId: Schema.String,
-  title: Schema.String,
-  summary: Schema.String,
-  body: Schema.String,
-})
+import { dataTable, field, primaryButton, quietButton, selectInput, shell } from "@effect-domains/example-web/html"
+import { Page } from "@effect-domains/example-web/page"
+import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { EntitlementRequired } from "effect-domains/entitlements"
+import { IdentityRpcs } from "effect-domains/identity-rpc"
+import { GuidesResource } from "../resources.ts"
 
-const GuidePageSchema = Schema.Struct({
-  items: Schema.Array(GuideViewSchema),
-  nextCursor: Schema.Unknown,
-})
+const PurchasedGuidesRpcs = IdentityRpcs.merge(GuidesResource.group)
+const GuideSchema = GuidesResource.table.rowSchema
+const GuidePageSchema = Page.schema(GuideSchema)
+type Guide = typeof GuideSchema.Type
+
+export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof PurchasedGuidesRpcs, RpcClientError.RpcClientError>>()(
+  "purchased-guides/WebClient",
+) {
+  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(PurchasedGuidesRpcs)), Layer.provide(browserProtocol))
+}
 
 const guideChoices = [
   { value: "guide-sql-basics", label: "SQL field guide" },
-  { value: "guide-audit-trails", label: "Audit trail guide (locked)" },
-  { value: "guide-other-tenant", label: "Other tenant guide (hidden)" },
+  { value: "guide-audit-trails", label: "Audit trail guide" },
 ]
+const errorText = (error: unknown) => error instanceof EntitlementRequired || (
+  typeof error === "object" && error !== null && "_tag" in error && error._tag === "EntitlementRequired"
+)
+  ? "This guide requires an active purchase entitlement."
+  : formatRpcError(error)
 
 export const Model = Schema.Struct({
-  token: Schema.String,
+  session: SessionModel,
+  requests: RequestStateSchema,
   selectedGuideId: Schema.String,
-  guide: Schema.NullOr(GuideViewSchema),
-  guides: Schema.Array(GuideViewSchema),
-  detailBusy: Schema.Boolean,
-  listBusy: Schema.Boolean,
-  guideError: Schema.NullOr(Schema.String),
-  listError: Schema.NullOr(Schema.String),
+  guide: Schema.NullOr(GuideSchema),
+  guides: GuidePageSchema,
+  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
 })
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  ChangedToken: { value: Schema.String },
-  SelectedDemo: { token: Schema.String },
+  SessionChanged: { message: SessionMessage },
   SelectedGuide: { id: Schema.String },
   ClickedLoad: {},
   ClickedList: {},
-  SucceededGuide: { guide: GuideViewSchema, token: Schema.String },
-  SucceededList: { guides: Schema.Array(GuideViewSchema), token: Schema.String },
-  FailedGuide: { error: Schema.String, token: Schema.String },
-  FailedList: { error: Schema.String, token: Schema.String },
+  ClickedMore: {},
+  SucceededGuide: { request: RequestTokenSchema, guide: GuideSchema },
+  SucceededList: { request: RequestTokenSchema, append: Schema.Boolean, page: GuidePageSchema },
+  Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
-
-type UpdateReturn = Update.Return<Model, Message>
-
-const resetSession = (model: Model, token: string) => evo(model, {
-  token: () => token,
-  guide: () => null,
-  guides: () => [],
-  detailBusy: () => false,
-  listBusy: () => false,
-  guideError: () => null,
-  listError: () => null,
-})
+type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 export const GetGuide = Command.define("GetGuide", {
-  args: { id: Schema.String, token: Schema.String },
-  messages: [Message.SucceededGuide, Message.FailedGuide],
-  execute: ({ id, token }) => pipe(
-    rpcCall({
-      tag: "guides.get",
-      payload: { id },
-      token,
-      success: GuideViewSchema,
+  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
+  messages: [Message.SucceededGuide, Message.Failed],
+  execute: ({ request, token, id }) => pipe(
+    Effect.gen(function*() {
+      const client = yield* WebClient
+      return yield* client["guides.get"]({ id }, bearer(token))
     }),
     Effect.match({
-      onSuccess: (guide) => Message.SucceededGuide({ guide, token }),
-      onFailure: (error) => Message.FailedGuide({ error: error.message, token }),
+      onSuccess: (guide) => Message.SucceededGuide({ request, guide }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
 
 export const ListGuides = Command.define("ListGuides", {
-  args: { token: Schema.String },
-  messages: [Message.SucceededList, Message.FailedList],
-  execute: ({ token }) => pipe(
-    rpcCall({
-      tag: "guides.list",
-      payload: {},
-      token,
-      success: GuidePageSchema,
+  args: { request: RequestTokenSchema, token: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
+  messages: [Message.SucceededList, Message.Failed],
+  execute: ({ request, token, cursor, append }) => pipe(
+    Effect.gen(function*() {
+      const client = yield* WebClient
+      return yield* client["guides.list"]({ limit: 25, ...Page.input(cursor) }, bearer(token))
     }),
     Effect.match({
-      onSuccess: (page) => Message.SucceededList({ guides: page.items, token }),
-      onFailure: (error) => Message.FailedList({ error: error.message, token }),
+      onSuccess: (page) => Message.SucceededList({ request, append, page }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
 
-export const update = (model: Model, message: Message) =>
-  Message.match<UpdateReturn>(message, {
-    ChangedToken: ({ value }) => ({ model: value === model.token ? model : resetSession(model, value) }),
-    SelectedDemo: ({ token }) => ({ model: token === model.token ? model : resetSession(model, token) }),
-    SelectedGuide: ({ id }) => ({
-      model: evo(model, { selectedGuideId: () => id, guide: () => null, guideError: () => null }),
-    }),
-    ClickedLoad: () => ({
-      model: evo(model, { detailBusy: () => true, guide: () => null, guideError: () => null }),
-      commands: [GetGuide({ id: model.selectedGuideId, token: model.token })],
-    }),
-    ClickedList: () => ({
-      model: evo(model, { listBusy: () => true, listError: () => null }),
-      commands: [ListGuides({ token: model.token })],
-    }),
-    SucceededGuide: ({ guide, token }) => token !== model.token
-      ? { model }
-      : { model: evo(model, { guide: () => guide, detailBusy: () => false }) },
-    SucceededList: ({ guides, token }) => token !== model.token
-      ? { model }
-      : { model: evo(model, { guides: () => guides, listBusy: () => false }) },
-    FailedGuide: ({ error, token }) => token !== model.token
-      ? { model }
-      : { model: evo(model, { detailBusy: () => false, guideError: () => error }) },
-    FailedList: ({ error, token }) => token !== model.token
-      ? { model }
-      : { model: evo(model, { listBusy: () => false, listError: () => error }) },
-  })
+const list = (model: Model, cursor: string | null, append: boolean) => {
+  const token = Session.token(model.session)
+  if (token === null) return {
+    model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before listing guides." }) }),
+    commands: [],
+  }
+  const started = Requests.start(model.requests, "guides.list")
+  return {
+    model: evo(model, { requests: () => started.state, guides: () => append ? model.guides : Page.empty<Guide>(), notice: () => null }),
+    commands: [ListGuides({ request: started.request, token, cursor, append })],
+  }
+}
 
-export const init: Runtime.ApplicationInit<Model, Message> = () => ({
+export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
+  SessionChanged: ({ message }) => {
+    const child = Session.update(model.session, message)
+    const changed = Session.generation(child.model) !== Session.generation(model.session)
+    const next = changed
+      ? evo(model, { session: () => child.model, requests: () => Requests.reset(model.requests), guide: () => null, guides: () => Page.empty<Guide>(), notice: () => null })
+      : evo(model, { session: () => child.model })
+    const commands = Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message }))
+    if (!changed || Session.token(next.session) === null) return { model: next, commands }
+    const listing = list(next, null, false)
+    return { model: listing.model, commands: [...commands, ...listing.commands] }
+  },
+  SelectedGuide: ({ id }) => ({ model: evo(model, { requests: () => Requests.invalidate(model.requests, "guides.get"), selectedGuideId: () => id, guide: () => null, notice: () => null }) }),
+  ClickedLoad: () => {
+    const token = Session.token(model.session)
+    if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before loading a guide." }) }) }
+    const started = Requests.start(model.requests, "guides.get")
+    return { model: evo(model, { requests: () => started.state, guide: () => null, notice: () => null }), commands: [GetGuide({ request: started.request, token, id: model.selectedGuideId })] }
+  },
+  ClickedList: () => list(model, null, false),
+  ClickedMore: () => model.guides.nextCursor === null || Requests.pending(model.requests, "guides.list") ? { model } : list(model, model.guides.nextCursor, true),
+  SucceededGuide: ({ request, guide }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.succeed(model.requests, request), guide: () => guide }),
+  },
+  SucceededList: ({ request, append, page }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.succeed(model.requests, request), guides: () => Page.receive(model.guides, page, append) }),
+  },
+  Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
+  },
+})
+
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
   model: {
-    token: "bob-demo",
+    session: Session.empty(),
+    requests: Requests.empty(),
     selectedGuideId: "guide-sql-basics",
     guide: null,
-    guides: [],
-    detailBusy: true,
-    listBusy: true,
-    guideError: null,
-    listError: null,
+    guides: Page.empty<Guide>(),
+    notice: null,
   },
-  commands: [
-    GetGuide({ id: "guide-sql-basics", token: "bob-demo" }),
-    ListGuides({ token: "bob-demo" }),
-  ],
 })
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
@@ -153,79 +148,26 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
   body: shell(h, {
     title: "Purchased guides",
     lede: "Read guides granted to this account. The same entitlement checks apply to every RPC request.",
-    notice: model.listError === null
-      ? model.guideError === null ? null : { kind: "error", text: model.guideError }
-      : { kind: "error", text: `Guide list failed: ${model.listError}` },
-    session: {
-      token: model.token,
-      onInput: (value) => Message.ChangedToken({ value }),
-      onSelect: (token) => Message.SelectedDemo({ token }),
-    },
-    children: [
-      h.div(
-        [h.Class("split")],
-        [
-          h.section(
-            [h.Class("panel stack")],
-            [
-              h.h2([], ["Open a guide"]),
-              field(h, {
-                id: "guide-id",
-                label: "Guide",
-                children: selectInput(h, {
-                  id: "guide-id",
-                  value: model.selectedGuideId,
-                  choices: guideChoices,
-                  onChange: (id) => Message.SelectedGuide({ id }),
-                }),
-              }),
-              h.div(
-                [h.Class("actions")],
-                [
-                  primaryButton(h, {
-                    label: model.detailBusy ? "Loading…" : "Load guide",
-                    message: Option.some(Message.ClickedLoad()),
-                    type: "button",
-                    disabled: model.detailBusy,
-                  }),
-                  quietButton(h, {
-                    label: model.listBusy ? "Listing…" : "List guides",
-                    message: Message.ClickedList(),
-                    disabled: model.listBusy,
-                  }),
-                ],
-              ),
-              model.guideError === null
-                ? h.empty
-                : h.p([h.Class("notice notice-error"), h.Role("status")], [`Guide unavailable: ${model.guideError}`]),
-              model.guide === null
-                ? h.p([h.Class("empty")], [model.detailBusy ? "Loading guide…" : "Choose a guide to read."])
-                : h.div(
-                  [h.Class("stack")],
-                  [
-                    h.h3([], [model.guide.title]),
-                    h.p([], [model.guide.summary]),
-                    h.p([], [model.guide.body]),
-                  ],
-                ),
-            ],
-          ),
-          h.section(
-            [h.Class("panel stack")],
-            [
-              h.h2([], ["Available guides"]),
-              h.p([], ["Listing is all-or-nothing: a visible guide without a purchase grant returns an error."]),
-              dataTable(h, {
-                caption: "Guides returned by guides.list",
-                columns: ["Title", "Summary"],
-                rows: model.guides,
-                key: (guide) => guide.id,
-                cells: (guide) => [guide.title, guide.summary],
-              }),
-            ],
-          ),
-        ],
-      ),
-    ],
+    notice: model.notice,
+    session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
+    children: [h.div([h.Class("split")], [
+      h.section([h.Class("panel stack")], [
+        h.h2([], ["Open a guide"]),
+        field(h, { id: "guide-id", label: "Guide", children: selectInput(h, { id: "guide-id", value: model.selectedGuideId, choices: guideChoices, onChange: (id) => Message.SelectedGuide({ id }) }) }),
+        h.div([h.Class("actions")], [
+          primaryButton(h, { label: Requests.pending(model.requests, "guides.get") ? "Loading…" : "Load guide", message: Option.some(Message.ClickedLoad()), type: "button", disabled: Requests.pending(model.requests, "guides.get") }),
+          quietButton(h, { label: Requests.pending(model.requests, "guides.list") ? "Listing…" : "List guides", message: Message.ClickedList(), disabled: Requests.pending(model.requests, "guides.list") }),
+        ]),
+        model.guide === null ? h.p([h.Class("empty")], ["Choose a guide to read."]) : h.div([h.Class("stack")], [h.h3([], [model.guide.title]), h.p([], [model.guide.summary]), h.p([], [model.guide.body])]),
+      ]),
+      h.section([h.Class("panel stack")], [
+        h.h2([], ["Available guides"]),
+        h.p([], ["Each returned guide is entitlement-checked; unavailable entries fail rather than being silently hidden."]),
+        dataTable(h, { caption: "Guides returned by guides.list", columns: ["Title", "Summary", ""], rows: model.guides.items, key: (guide) => guide.id, cells: (guide) => [
+          guide.title, guide.summary, quietButton(h, { label: "Open", message: Message.SelectedGuide({ id: guide.id }), disabled: false }),
+        ] }),
+        model.guides.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: Requests.pending(model.requests, "guides.list") }),
+      ]),
+    ])],
   }),
 })

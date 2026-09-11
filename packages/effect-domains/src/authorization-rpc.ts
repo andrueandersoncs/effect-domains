@@ -3,13 +3,14 @@ import type { Headers } from "effect/unstable/http"
 import { RpcMiddleware } from "effect/unstable/rpc"
 import { Authorization, AuthorizationSubject, Forbidden, Unauthenticated, type SubjectPolicy } from "./authorization.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
+import { IdentityUnavailable } from "./identity.ts"
 
 class Authenticator extends Context.Service<Authenticator, {
-  readonly authenticate: (headers: Headers.Headers) => Effect.Effect<Readonly<Record<string, unknown>>, Unauthenticated>
+  readonly authenticate: (headers: Headers.Headers) => Effect.Effect<AuthorizationSubject["Service"], Unauthenticated | IdentityUnavailable>
 }>()("@effect-domains/Authenticator") {}
 
 class RpcSubjectPolicy extends Context.Service<RpcSubjectPolicy, SubjectPolicy>()("@effect-domains/RpcSubjectPolicy") {}
-const authenticationErrorsSchema = Schema.Union([Unauthenticated, Forbidden, EntitlementRequired, EntitlementUnavailable])
+const authenticationErrorsSchema = Schema.Union([Unauthenticated, IdentityUnavailable, Forbidden, EntitlementRequired, EntitlementUnavailable])
 
 export class AuthorizationRpc extends RpcMiddleware.Service<AuthorizationRpc, {
   provides: AuthorizationSubject
@@ -21,7 +22,7 @@ export class AuthorizationRpc extends RpcMiddleware.Service<AuthorizationRpc, {
     Effect.fn("AuthorizationRpc.authenticate")(function* (effect, metadata) {
       const authenticator = yield* Effect.serviceOption(Authenticator)
       if (Option.isNone(authenticator)) return yield* Unauthenticated.make({})
-      const subject = yield* authenticator.value.authenticate(metadata.headers)
+      const authenticated = yield* authenticator.value.authenticate(metadata.headers)
       const policy = Context.getOption(metadata.rpc.annotations, RpcSubjectPolicy)
 
       const authorized = Option.match(policy, {
@@ -29,7 +30,10 @@ export class AuthorizationRpc extends RpcMiddleware.Service<AuthorizationRpc, {
         onSome: (policy) => pipe(Authorization.requireSubject(policy), Effect.andThen(effect)),
       })
 
-      return yield* Effect.provideService(authorized, AuthorizationSubject, subject)
+      return yield* pipe(
+        authorized,
+        Effect.provideService(AuthorizationSubject, authenticated),
+      )
     }),
   ))
 }

@@ -101,7 +101,7 @@ The first three calls return the selected row (the remove call returns the delet
 
 - Storage and result-codec failures are translated to `ExpenseLedgerUnavailable`. That includes a database failure and a total that cannot satisfy the declared safe-integer result schema; no silently rounded or unrepresentable total is returned.
 - A missing row from `get`, `update`, or `remove` is `ExpenseNotFound`. Invalid dates, categories, currencies, UUIDs, and query limits are rejected by their request schemas before the handler can perform the operation.
-- The Foldkit page at `/` has date/category controls, a bounded expense table, a totals-by-category-and-currency table, and record/edit/remove controls. `/admin` is the separate generated RPC admin. Neither surface is an accounting workflow.
+- The Foldkit page at `/` uses the canonical native client with date/category controls, a bounded expense table, a totals-by-category-and-currency table, and record/edit/remove controls. Changing the query invalidates prior rows and totals; saves/removals refresh both. Invalid amount or date inputs produce field-specific errors. `/admin` is the separate generated RPC admin. Neither surface is an accounting workflow.
 
 This is a local expense register. It does not implement double-entry accounting, exchange rates, reimbursement review, taxes, production identity, or a payment-provider workflow.
 

@@ -5,6 +5,10 @@
   "exports": {
     "./html": "./src/html.ts",
     "./rpc": "./src/rpc.ts",
+    "./requests": "./src/requests.ts",
+    "./page": "./src/page.ts",
+    "./form": "./src/form.ts",
+    "./session": "./src/session.ts",
     "./serve": "./src/serve.ts"
   },
   "scripts": {
@@ -14,6 +18,7 @@
   },
   "dependencies": {
     "effect": "catalog:",
+    "effect-domains": "workspace:*",
     "foldkit": "0.158.2"
   }
 }

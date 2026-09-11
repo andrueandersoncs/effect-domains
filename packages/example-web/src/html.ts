@@ -1,15 +1,9 @@
 import { Array, Equivalence, Option } from "effect"
 import type { Html, HtmlBuilder } from "foldkit/html"
 
-const sameString = Equivalence.strictEqual<string>()
 const sameBoolean = Equivalence.strictEqual<boolean>()
+const sameString = Equivalence.strictEqual<string>()
 
-export const DemoSessions = [
-  { token: "alice-demo", label: "alice · editor" },
-  { token: "bob-demo", label: "bob · reader" },
-  { token: "admin-demo", label: "admin" },
-  { token: "outsider-demo", label: "outsider · other tenant" },
-] as const
 
 export const notice = <Message>(
   h: HtmlBuilder<Message>,
@@ -164,11 +158,7 @@ export const shell = <Message>(
     title: string
     lede: string
     notice: Readonly<{ kind: "info" | "error" | "success"; text: string }> | null
-    session: Readonly<{
-      token: string
-      onInput: (value: string) => Message
-      onSelect: (token: string) => Message
-    }> | null
+    session: Html | null
   }> & { children: ReadonlyArray<Html> },
 ) => {
   const shellClass = h.Class("shell")
@@ -181,7 +171,7 @@ export const shell = <Message>(
   const lede = h.p([ledeClass], [options.lede])
   const identity = h.div([identityClass], [eyebrow, heading, lede])
   const session = options.session
-  const sessionView = session === null ? h.empty : sessionPanel(h, session)
+  const sessionView = session === null ? h.empty : session
   const header = h.header([mastheadClass], [identity, sessionView])
   const banner = options.notice === null ? h.empty : notice(h, options.notice.kind, options.notice.text)
   const mainClass = h.Class("workspace")
@@ -189,35 +179,3 @@ export const shell = <Message>(
   return h.div([shellClass], [header, banner, main])
 }
 
-const sessionPanel = <Message>(
-  h: HtmlBuilder<Message>,
-  session: Readonly<{
-    token: string
-    onInput: (value: string) => Message
-    onSelect: (token: string) => Message
-  }>,
-) => {
-  const className = h.Class("session")
-  const tokenInput = textInput(h, {
-    id: "session-token",
-    value: session.token,
-    type: "text",
-    placeholder: "",
-    autocomplete: "off",
-    onInput: session.onInput,
-  })
-  const tokenField = field(h, {
-    id: "session-token",
-    label: "Bearer token",
-    children: tokenInput,
-  })
-  const chipClass = (token: string) => h.Class(sameString(token, session.token) ? "chip chip-active" : "chip")
-  const chip = (choice: typeof DemoSessions[number]) => {
-    const type = h.Type("button")
-    const click = h.OnClick(session.onSelect(choice.token))
-    return h.button([chipClass(choice.token), type, click], [choice.label])
-  }
-  const chipsClass = h.Class("session-tokens")
-  const chips = h.div([chipsClass], Array.map(DemoSessions, chip))
-  return h.div([className], [tokenField, chips])
-}

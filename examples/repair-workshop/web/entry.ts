@@ -1,5 +1,5 @@
 import { Runtime } from "foldkit"
-import { Model, init, update, view } from "./main.ts"
+import { Model, init, update, view, WebClient } from "./main.ts"
 
 const application = Runtime.makeApplication({
   Model,
@@ -7,6 +7,7 @@ const application = Runtime.makeApplication({
   update,
   view,
   container: document.getElementById("root"),
+  resources: WebClient.layer,
 })
 
 Runtime.run(application)

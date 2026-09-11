@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import { Array, Deferred, Effect, Equivalence, Fiber, Layer, Option, Ref, Schema, Struct, pipe } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Application } from "effect-domains/application"
 import { ApplicationAdmin } from "effect-domains/application-admin"
@@ -59,13 +59,15 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
 
     const application = Application.make({ name: "identity", parts: [{ group: identityGroup, handlers }] })
     const capturedSubject = Layer.succeed(AuthorizationSubject, { userId: "captured" })
+    const authenticator = yield* AuthorizationRpc.Authenticator
+    const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
 
     const routes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
       Layer.provide(AuthorizationRpc.layer),
-      Layer.provide(ExampleAuthentication),
       Layer.provide(capturedSubject),
+      Layer.provide(authentication),
     )
 
     const handler = yield* serverFor(routes)
@@ -73,8 +75,10 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
     expect(denied.status).toBe(422)
     expect(denied.body).toEqual({ error: { _tag: "Unauthenticated" } })
 
-    const alice = HeaderValuesSchema.make({ authorization: "Bearer alice-demo", origin: "http://localhost" })
-    const bob = HeaderValuesSchema.make({ authorization: "Bearer bob-demo", origin: "http://localhost" })
+    const aliceSession = yield* sessionFor("alice")
+    const bobSession = yield* sessionFor("bob")
+    const alice = HeaderValuesSchema.make({ ...aliceSession, origin: "http://localhost" })
+    const bob = HeaderValuesSchema.make({ ...bobSession, origin: "http://localhost" })
     const aliceIdentity = call(handler, "identity", null, alice)
     const bobIdentity = call(handler, "identity", null, bob)
 
@@ -100,7 +104,7 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: "Bearer alice-demo",
+        authorization: aliceSession.authorization,
         origin: "http://rebound.example",
       },
       body: reboundBody,
@@ -122,6 +126,7 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
     expect(finalWrites).toBe(1)
   }),
   Effect.scoped,
+  Effect.provide(TestIdentity),
 ))
 
 class TooEarly extends Schema.TaggedError<TooEarly>()("TooEarly", { at: Schema.Date }) {}

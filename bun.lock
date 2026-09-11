@@ -170,6 +170,7 @@
       "name": "@effect-domains/example-web",
       "dependencies": {
         "effect": "catalog:",
+        "effect-domains": "workspace:*",
         "foldkit": "0.158.2",
       },
     },

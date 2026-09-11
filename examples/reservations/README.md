@@ -106,7 +106,7 @@ Consequently, a successful reserve cannot make stored available stock negative, 
 
 While the server is running on port 3001:
 
-- [http://127.0.0.1:3001/](http://127.0.0.1:3001/) loads the seeded `book` count, reserves a quantity, retrieves a reservation by ID, and exposes Confirm/Release only for a loaded held reservation.
+- [http://127.0.0.1:3001/](http://127.0.0.1:3001/) uses the canonical native client to load the seeded `book` count, reserve a quantity, retrieve a reservation by ID, and expose Confirm/Release only for a loaded held reservation. Numeric field errors are shown in the form; every successful reservation refreshes the relevant stock and hold state.
 - [http://127.0.0.1:3001/admin](http://127.0.0.1:3001/admin) is the generated admin over the same two reads and three authored commands.
 - `http://127.0.0.1:3001/mcp` is Streamable HTTP MCP. Its tools use `{ "input": <the same JSON payload> }`; `/rpc/v1` is Effect JSON RPC rather than REST.
 
@@ -131,7 +131,7 @@ bun run reservations inspect reserve
 ```
 
 - [`domain.ts`](domain.ts): stock/quantity schemas, statuses, typed errors, and valid transitions.
-- [`resources.ts`](resources.ts): the intentionally narrow generated `stock.get` and `reservations.get` surface.
+- [`resources.ts`](resources.ts): the intentionally narrow generated `stock.get` and `reservations.get` surface; private reservation creation supplies held status plus UUIDv7 and current-time defaults, while public `reserve` owns the stock policy.
 - [`contracts.ts`](contracts.ts) and [`sqlite.ts`](sqlite.ts): authored RPC contracts, transactions, and idempotent seed behavior.
 - [`migrations.ts`](migrations.ts) and [`migrations/`](migrations/): ordered imported history and historical timestamp conversion.
 - [`main.ts`](main.ts): server initialization, generated admin, and Foldkit routes.

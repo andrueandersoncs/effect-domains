@@ -1,4 +1,5 @@
-import { Array, Effect, Option, Schema, pipe } from "effect"
+import { Array, Context, Effect, Layer, Option, Schema, pipe } from "effect"
+import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -13,57 +14,38 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
-import { rpcCall } from "@effect-domains/example-web/rpc"
+import { Page } from "@effect-domains/example-web/page"
+import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { TaskPrioritySchema, TaskSchema } from "../domain.ts"
+import { TasksResource } from "../resources.ts"
 
-const TaskRowSchema = Schema.Struct({
-  id: Schema.String,
-  project: TaskSchema.fields.project,
-  title: TaskSchema.fields.title,
-  detail: TaskSchema.fields.detail,
-  priority: TaskPrioritySchema,
-  dueDate: TaskSchema.fields.dueDate,
-  completed: TaskSchema.fields.completed,
-  tenantId: TaskSchema.fields.tenantId,
-  ownerId: TaskSchema.fields.ownerId,
-})
+const TeamTasksRpcs = IdentityRpcs.merge(TasksResource.group)
+const TaskRowSchema = TasksResource.table.rowSchema
+const TaskPageSchema = Page.schema(TaskRowSchema)
+type TaskRow = typeof TaskRowSchema.Type
 
-const cursorFromUnknown = (value: unknown) => {
-  if (value === null || value === undefined) return null
-  if (typeof value === "string" && value.length > 0) return value
-  if (typeof value === "object" && value !== null && "_tag" in value) {
-    const tagged = value as { _tag: unknown; value?: unknown }
-    if (tagged._tag === "Some" && typeof tagged.value === "string") return tagged.value
-  }
-  return null
+export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof TeamTasksRpcs, RpcClientError.RpcClientError>>()(
+  "team-tasks/WebClient",
+) {
+  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(TeamTasksRpcs)), Layer.provide(browserProtocol))
 }
 
-const TaskPageSchema = Schema.Struct({
-  items: Schema.Array(TaskRowSchema),
-  nextCursor: Schema.Unknown,
-})
-
 const priorities = ["low", "normal", "high", "urgent"] as const
-const priorityChoices = [
-  { value: "", label: "Any priority" },
-  ...Array.map(priorities, (priority) => ({ value: priority, label: priority })),
-]
-const formPriorityChoices = Array.map(priorities, (priority) => ({ value: priority, label: priority }))
+const priorityChoices = [{ value: "", label: "Any priority" }, ...Array.map(priorities, (value) => ({ value, label: value }))]
 const completedChoices = [
   { value: "", label: "Any completion state" },
   { value: "false", label: "Open" },
   { value: "true", label: "Completed" },
 ]
-const formCompletedChoices = [
-  { value: "false", label: "Open" },
-  { value: "true", label: "Completed" },
-]
+const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 
 export const Model = Schema.Struct({
-  token: Schema.String,
-  requestId: Schema.Number,
-  todos: Schema.Array(TaskRowSchema),
-  nextCursor: Schema.NullOr(Schema.String),
+  session: SessionModel,
+  requests: RequestStateSchema,
+  tasks: TaskPageSchema,
   filterProject: Schema.String,
   filterPriority: Schema.String,
   filterCompleted: Schema.String,
@@ -76,39 +58,34 @@ export const Model = Schema.Struct({
   completed: Schema.Boolean,
   tenantId: Schema.String,
   ownerId: Schema.String,
-  busy: Schema.Boolean,
-  notice: Schema.NullOr(Schema.Struct({
-    kind: Schema.Literals(["info", "error", "success"]),
-    text: Schema.String,
-  })),
+  notice: noticeSchema,
 })
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  ChangedSession: { value: Schema.String },
-  SelectedSession: { token: Schema.String },
+  SessionChanged: { message: SessionMessage },
   ChangedFilterProject: { value: Schema.String },
   ChangedFilterPriority: { value: Schema.String },
   ChangedFilterCompleted: { value: Schema.String },
   ChangedProject: { value: Schema.String },
   ChangedTitle: { value: Schema.String },
   ChangedDetail: { value: Schema.String },
-  ChangedPriority: { value: Schema.String },
+  ChangedPriority: { value: TaskPrioritySchema },
   ChangedDueDate: { value: Schema.String },
-  ChangedCompleted: { value: Schema.String },
+  ChangedCompleted: { value: Schema.Boolean },
   ClickedReload: {},
+  ClickedMore: {},
   ClickedSave: {},
   ClickedNew: {},
   ClickedSelect: { id: Schema.String },
   ClickedRemove: { id: Schema.String },
-  SucceededList: { requestId: Schema.Number, items: Schema.Array(TaskRowSchema), nextCursor: Schema.NullOr(Schema.String) },
-  SucceededSave: { todo: TaskRowSchema, created: Schema.Boolean },
-  SucceededRemove: { id: Schema.String },
-  Failed: { error: Schema.String },
+  SucceededList: { request: RequestTokenSchema, append: Schema.Boolean, page: TaskPageSchema },
+  SucceededSave: { request: RequestTokenSchema, task: TaskRowSchema, created: Schema.Boolean },
+  SucceededRemove: { request: RequestTokenSchema, id: Schema.String },
+  Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
-
-type UpdateReturn = Update.Return<Model, Message>
+type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 const emptyForm = {
   selectedId: null as string | null,
@@ -122,283 +99,218 @@ const emptyForm = {
   ownerId: "",
 }
 
+const taskInput = (model: Model) => ({
+  project: model.project.trim(),
+  title: model.title.trim(),
+  detail: model.detail.trim() === "" ? null : model.detail.trim(),
+  priority: model.priority,
+  dueDate: model.dueDate.trim() === "" ? null : model.dueDate.trim(),
+})
+
 export const ListTasks = Command.define("ListTasks", {
   args: {
+    request: RequestTokenSchema,
     token: Schema.String,
-    requestId: Schema.Number,
     filterProject: Schema.String,
     filterPriority: Schema.String,
     filterCompleted: Schema.String,
+    cursor: Schema.NullOr(Schema.String),
+    append: Schema.Boolean,
   },
   messages: [Message.SucceededList, Message.Failed],
-  execute: ({ token, requestId, filterProject, filterPriority, filterCompleted }) =>
+  execute: ({ request, token, filterProject, filterPriority, filterCompleted, cursor, append }) =>
     pipe(
-      rpcCall({
-        tag: "todos.list",
-        payload: {
+      Effect.gen(function*() {
+        const client = yield* WebClient
+        return yield* client["todos.list"]({
           filter: {
             ...(filterProject === "" ? {} : { project: filterProject }),
             ...(filterPriority === "" ? {} : { priority: filterPriority }),
             ...(filterCompleted === "" ? {} : { completed: filterCompleted === "true" }),
           },
           limit: 25,
-        },
-        token,
-        success: TaskPageSchema,
+          ...Page.input(cursor),
+        }, bearer(token))
       }),
       Effect.match({
-        onSuccess: (page) => Message.SucceededList({
-          requestId,
-          items: page.items,
-          nextCursor: cursorFromUnknown(page.nextCursor),
-        }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
+        onSuccess: (page) => Message.SucceededList({ request, append, page }),
+        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
       }),
     ),
 })
 
 export const SaveTask = Command.define("SaveTask", {
-  args: {
-    token: Schema.String,
-    selectedId: Schema.NullOr(Schema.String),
-    project: Schema.String,
-    title: Schema.String,
-    detail: Schema.String,
-    priority: TaskPrioritySchema,
-    dueDate: Schema.String,
-    completed: Schema.Boolean,
-    tenantId: Schema.String,
-    ownerId: Schema.String,
-  },
+  args: { request: RequestTokenSchema, token: Schema.String, selectedId: Schema.NullOr(Schema.String), task: TaskSchema },
   messages: [Message.SucceededSave, Message.Failed],
-  execute: (args) => {
-    const creating = args.selectedId === null
-    const todo = {
-      project: args.project.trim(),
-      title: args.title.trim(),
-      detail: args.detail.trim() === "" ? null : args.detail.trim(),
-      priority: args.priority,
-      dueDate: args.dueDate.trim() === "" ? null : args.dueDate.trim(),
-    }
-    return pipe(
-      rpcCall({
-        tag: creating ? "todos.create" : "todos.update",
-        payload: creating
-          ? todo
-          : {
-            id: args.selectedId,
-            ...todo,
-            completed: args.completed,
-            tenantId: args.tenantId,
-            ownerId: args.ownerId,
-          },
-        token: args.token,
-        success: TaskRowSchema,
-      }),
-      Effect.match({
-        onSuccess: (saved) => Message.SucceededSave({ todo: saved, created: creating }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
-      }),
-    )
-  },
-})
-
-export const RemoveTask = Command.define("RemoveTask", {
-  args: { token: Schema.String, id: Schema.String },
-  messages: [Message.SucceededRemove, Message.Failed],
-  execute: ({ token, id }) =>
+  execute: ({ request, token, selectedId, task }) =>
     pipe(
-      rpcCall({
-        tag: "todos.remove",
-        payload: { id },
-        token,
-        success: Schema.Unknown,
+      Effect.gen(function*() {
+        const client = yield* WebClient
+        return selectedId === null
+          ? yield* client["todos.create"]({
+            project: task.project,
+            title: task.title,
+            detail: task.detail,
+            priority: task.priority,
+            dueDate: task.dueDate,
+          }, bearer(token))
+          : yield* client["todos.update"]({ id: selectedId, ...task }, bearer(token))
       }),
       Effect.match({
-        onSuccess: () => Message.SucceededRemove({ id }),
-        onFailure: (error) => Message.Failed({ error: error.message }),
+        onSuccess: (task) => Message.SucceededSave({ request, task, created: selectedId === null }),
+        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
       }),
     ),
 })
 
-const reload = (model: Model) => ListTasks({
-  token: model.token,
-  requestId: model.requestId,
-  filterProject: model.filterProject,
-  filterPriority: model.filterPriority,
-  filterCompleted: model.filterCompleted,
+export const RemoveTask = Command.define("RemoveTask", {
+  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
+  messages: [Message.SucceededRemove, Message.Failed],
+  execute: ({ request, token, id }) =>
+    pipe(
+      Effect.gen(function*() {
+        const client = yield* WebClient
+        yield* client["todos.remove"]({ id }, bearer(token))
+      }),
+      Effect.match({
+        onSuccess: () => Message.SucceededRemove({ request, id }),
+        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
+      }),
+    ),
 })
 
-export const update = (model: Model, message: Message) =>
-  Message.match<UpdateReturn>(message, {
-    ChangedSession: ({ value }) => ({
-      model: evo(model, {
-        token: () => value,
-        requestId: () => model.requestId + 1,
-        todos: () => [],
-        nextCursor: () => null,
-        selectedId: () => null,
-        project: () => "",
-        title: () => "",
-        detail: () => "",
-        priority: () => "normal",
-        dueDate: () => "",
-        completed: () => false,
-        tenantId: () => "",
-        ownerId: () => "",
-        busy: () => false,
-        notice: () => null,
-      }),
+const beginList = (model: Model, cursor: string | null, append: boolean) => {
+  const token = Session.token(model.session)
+  if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before listing tasks." }) }), commands: [] }
+  const started = Requests.start(model.requests, "tasks.list")
+  return {
+    model: evo(model, {
+      requests: () => started.state,
+      tasks: () => append ? model.tasks : Page.empty<TaskRow>(),
+      notice: () => null,
     }),
-    SelectedSession: ({ token }) => {
-      const next = evo(model, {
-        token: () => token,
-        requestId: () => model.requestId + 1,
-        todos: () => [],
-        nextCursor: () => null,
-        selectedId: () => null,
-        project: () => "",
-        title: () => "",
-        detail: () => "",
-        priority: () => "normal",
-        dueDate: () => "",
-        completed: () => false,
-        tenantId: () => "",
-        ownerId: () => "",
-        busy: () => true,
-        notice: () => null,
-      })
-      return { model: next, commands: [reload(next)] }
+    commands: [ListTasks({
+      request: started.request,
+      token,
+      filterProject: model.filterProject,
+      filterPriority: model.filterPriority,
+      filterCompleted: model.filterCompleted,
+      cursor,
+      append,
+    })],
+  }
+}
+
+const resetIdentity = (model: Model, session: typeof SessionModel.Type): Model => ({
+  ...model,
+  ...emptyForm,
+  session,
+  requests: Requests.reset(model.requests),
+  tasks: Page.empty<TaskRow>(),
+  filterProject: "",
+  filterPriority: "",
+  filterCompleted: "",
+  notice: null,
+})
+
+export const update = (model: Model, message: Message): UpdateReturn =>
+  Message.match<UpdateReturn>(message, {
+    SessionChanged: ({ message }) => {
+      const child = Session.update(model.session, message)
+      const changed = Session.generation(child.model) !== Session.generation(model.session)
+      const next = changed ? resetIdentity(model, child.model) : evo(model, { session: () => child.model })
+      const commands = Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message }))
+      if (!changed || Session.token(next.session) === null) return { model: next, commands }
+      const listing = beginList(next, null, false)
+      return { model: listing.model, commands: [...commands, ...listing.commands] }
     },
-    ChangedFilterProject: ({ value }) => {
-      const next = evo(model, { filterProject: () => value, requestId: () => model.requestId + 1, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
-    ChangedFilterPriority: ({ value }) => {
-      const next = evo(model, { filterPriority: () => value, requestId: () => model.requestId + 1, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
-    ChangedFilterCompleted: ({ value }) => {
-      const next = evo(model, { filterCompleted: () => value, requestId: () => model.requestId + 1, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
+    ChangedFilterProject: ({ value }) => beginList(evo(model, { filterProject: () => value }), null, false),
+    ChangedFilterPriority: ({ value }) => beginList(evo(model, { filterPriority: () => value }), null, false),
+    ChangedFilterCompleted: ({ value }) => beginList(evo(model, { filterCompleted: () => value }), null, false),
     ChangedProject: ({ value }) => ({ model: evo(model, { project: () => value }) }),
     ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
     ChangedDetail: ({ value }) => ({ model: evo(model, { detail: () => value }) }),
-    ChangedPriority: ({ value }) => ({ model: evo(model, { priority: () => value as Model["priority"] }) }),
+    ChangedPriority: ({ value }) => ({ model: evo(model, { priority: () => value }) }),
     ChangedDueDate: ({ value }) => ({ model: evo(model, { dueDate: () => value }) }),
-    ChangedCompleted: ({ value }) => ({ model: evo(model, { completed: () => value === "true" }) }),
-    ClickedReload: () => {
-      const next = evo(model, { requestId: () => model.requestId + 1, busy: () => true })
-      return { model: next, commands: [reload(next)] }
-    },
-    ClickedSave: () => ({
-      model: evo(model, { busy: () => true, notice: () => null }),
-      commands: [SaveTask({
-        token: model.token,
-        selectedId: model.selectedId,
-        project: model.project,
-        title: model.title,
-        detail: model.detail,
-        priority: model.priority,
-        dueDate: model.dueDate,
-        completed: model.completed,
+    ChangedCompleted: ({ value }) => ({ model: evo(model, { completed: () => value }) }),
+    ClickedReload: () => beginList(model, null, false),
+    ClickedMore: () => model.tasks.nextCursor === null ? { model } : beginList(model, model.tasks.nextCursor, true),
+    ClickedSave: () => {
+      const token = Session.token(model.session)
+      if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before saving a task." }) }) }
+      if (model.project.trim() === "" || model.title.trim() === "") {
+        return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Project and title are required." }) }) }
+      }
+      const started = Requests.start(model.requests, "tasks.save")
+      const base = taskInput(model)
+      const task = {
+        completed: model.selectedId === null ? false : model.completed,
         tenantId: model.tenantId,
         ownerId: model.ownerId,
-      })],
-    }),
-    ClickedNew: () => ({
-      model: evo(model, {
-        selectedId: () => null,
-        project: () => "",
-        title: () => "",
-        detail: () => "",
-        priority: () => "normal",
-        dueDate: () => "",
-        completed: () => false,
-        tenantId: () => "",
-        ownerId: () => "",
-      }),
-    }),
-    ClickedSelect: ({ id }) =>
-      Option.match(Array.findFirst(model.todos, (item) => item.id === id), {
-        onNone: () => ({ model }),
-        onSome: (todo) => ({
-          model: evo(model, {
-            selectedId: () => todo.id,
-            project: () => todo.project,
-            title: () => todo.title,
-            detail: () => todo.detail ?? "",
-            priority: () => todo.priority,
-            dueDate: () => todo.dueDate ?? "",
-            completed: () => todo.completed,
-            tenantId: () => todo.tenantId,
-            ownerId: () => todo.ownerId,
-            notice: () => null,
-          }),
+        ...base,
+      }
+      return {
+        model: evo(model, { requests: () => started.state, notice: () => null }),
+        commands: [SaveTask({ request: started.request, token, selectedId: model.selectedId, task })],
+      }
+    },
+    ClickedNew: () => ({ model: { ...model, ...emptyForm, requests: Requests.invalidate(model.requests, "tasks.save"), notice: null } }),
+    ClickedSelect: ({ id }) => Option.match(Array.findFirst(model.tasks.items, (task) => task.id === id), {
+      onNone: () => ({ model }),
+      onSome: (task) => ({
+        model: evo(model, {
+          requests: () => Requests.invalidate(model.requests, "tasks.save"),
+          selectedId: () => task.id, project: () => task.project, title: () => task.title,
+          detail: () => task.detail ?? "", priority: () => task.priority, dueDate: () => task.dueDate ?? "",
+          completed: () => task.completed, tenantId: () => task.tenantId, ownerId: () => task.ownerId, notice: () => null,
         }),
       }),
-    ClickedRemove: ({ id }) => ({
-      model: evo(model, { busy: () => true, notice: () => null }),
-      commands: [RemoveTask({ token: model.token, id })],
     }),
-    SucceededList: ({ requestId, items, nextCursor }) =>
-      requestId === model.requestId
-        ? { model: evo(model, { todos: () => items, nextCursor: () => nextCursor, busy: () => false }) }
-        : { model },
-    SucceededSave: ({ todo, created }) => {
+    ClickedRemove: ({ id }) => {
+      const token = Session.token(model.session)
+      if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before removing a task." }) }) }
+      const started = Requests.start(model.requests, "tasks.remove")
+      return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveTask({ request: started.request, token, id })] }
+    },
+    SucceededList: ({ request, append, page }) => !Requests.accepts(model.requests, request)
+      ? { model }
+      : { model: evo(model, { requests: () => Requests.succeed(model.requests, request), tasks: () => Page.receive(model.tasks, page, append) }) },
+    SucceededSave: ({ request, task, created }) => {
+      if (!Requests.accepts(model.requests, request)) return { model }
       const next = evo(model, {
-        requestId: () => model.requestId + 1,
-        selectedId: () => todo.id,
-        project: () => todo.project,
-        title: () => todo.title,
-        detail: () => todo.detail ?? "",
-        priority: () => todo.priority,
-        dueDate: () => todo.dueDate ?? "",
-        completed: () => todo.completed,
-        tenantId: () => todo.tenantId,
-        ownerId: () => todo.ownerId,
-        busy: () => true,
+        requests: () => Requests.succeed(model.requests, request),
+        selectedId: () => task.id, project: () => task.project, title: () => task.title, detail: () => task.detail ?? "",
+        priority: () => task.priority, dueDate: () => task.dueDate ?? "", completed: () => task.completed,
+        tenantId: () => task.tenantId, ownerId: () => task.ownerId,
         notice: () => ({ kind: "success" as const, text: created ? "Task created." : "Task updated." }),
       })
-      return { model: next, commands: [reload(next)] }
+      return beginList(next, null, false)
     },
-    SucceededRemove: ({ id }) => {
+    SucceededRemove: ({ request, id }) => {
+      if (!Requests.accepts(model.requests, request)) return { model }
       const next = evo(model, {
-        requestId: () => model.requestId + 1,
-        selectedId: () => model.selectedId === id ? null : model.selectedId,
-        project: () => model.selectedId === id ? "" : model.project,
-        title: () => model.selectedId === id ? "" : model.title,
-        detail: () => model.selectedId === id ? "" : model.detail,
-        priority: () => model.selectedId === id ? "normal" : model.priority,
-        dueDate: () => model.selectedId === id ? "" : model.dueDate,
-        completed: () => model.selectedId === id ? false : model.completed,
-        tenantId: () => model.selectedId === id ? "" : model.tenantId,
-        ownerId: () => model.selectedId === id ? "" : model.ownerId,
-        busy: () => true,
+        requests: () => Requests.succeed(model.requests, request),
+        ...(model.selectedId === id ? Object.fromEntries(Object.entries(emptyForm).map(([key, value]) => [key, () => value])) : {}),
         notice: () => ({ kind: "success" as const, text: "Task removed." }),
       })
-      return { model: next, commands: [reload(next)] }
+      return beginList(next, null, false)
     },
-    Failed: ({ error }) => ({
-      model: evo(model, { busy: () => false, notice: () => ({ kind: "error" as const, text: error }) }),
-    }),
+    Failed: ({ request, error }) => !Requests.accepts(model.requests, request)
+      ? { model }
+      : { model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }) },
   })
 
-export const init: Runtime.ApplicationInit<Model, Message> = () => ({
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
   model: {
-    token: "alice-demo",
-    requestId: 0,
-    todos: [],
-    nextCursor: null,
+    session: Session.empty(),
+    requests: Requests.empty(),
+    tasks: Page.empty<TaskRow>(),
     filterProject: "",
     filterPriority: "",
     filterCompleted: "",
     ...emptyForm,
-    busy: true,
     notice: null,
   },
-  commands: [ListTasks({ token: "alice-demo", requestId: 0, filterProject: "", filterPriority: "", filterCompleted: "" })],
 })
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
@@ -407,174 +319,41 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
     title: "Team tasks",
     lede: "Organize work for your team and track what is ready to close.",
     notice: model.notice,
-    session: {
-      token: model.token,
-      onInput: (value) => Message.ChangedSession({ value }),
-      onSelect: (token) => Message.SelectedSession({ token }),
-    },
+    session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
     children: [
-      h.div(
-        [h.Class("split")],
-        [
-          h.section(
-            [h.Class("panel stack")],
-            [
-              h.div(
-                [h.Class("actions")],
-                [
-                  field(h, {
-                    id: "filter-project",
-                    label: "Project",
-                    children: textInput(h, {
-                      id: "filter-project",
-                      value: model.filterProject,
-                      onInput: (value) => Message.ChangedFilterProject({ value }),
-                      type: "text",
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  field(h, {
-                    id: "filter-priority",
-                    label: "Priority",
-                    children: selectInput(h, {
-                      id: "filter-priority",
-                      value: model.filterPriority,
-                      onChange: (value) => Message.ChangedFilterPriority({ value }),
-                      choices: priorityChoices,
-                    }),
-                  }),
-                  field(h, {
-                    id: "filter-completed",
-                    label: "Status",
-                    children: selectInput(h, {
-                      id: "filter-completed",
-                      value: model.filterCompleted,
-                      onChange: (value) => Message.ChangedFilterCompleted({ value }),
-                      choices: completedChoices,
-                    }),
-                  }),
-                  primaryButton(h, {
-                    label: model.busy ? "Loading…" : "Reload",
-                    message: Option.some(Message.ClickedReload()),
-                    type: "button",
-                    disabled: model.busy,
-                  }),
-                ],
-              ),
-              dataTable(h, {
-                caption: "Tasks",
-                columns: ["Project", "Task", "Priority", "Due", "Status", ""],
-                rows: model.todos,
-                key: (todo) => todo.id,
-                cells: (todo) => [
-                  todo.project,
-                  todo.title,
-                  todo.priority,
-                  todo.dueDate ?? "—",
-                  todo.completed ? "Completed" : "Open",
-                  h.div(
-                    [h.Class("row-actions")],
-                    [
-                      quietButton(h, { label: "Edit", message: Message.ClickedSelect({ id: todo.id }), disabled: false }),
-                      quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: todo.id }), disabled: model.busy }),
-                    ],
-                  ),
-                ],
-              }),
-            ],
-          ),
-          h.section(
-            [h.Class("panel")],
-            [
-              h.form(
-                [h.Class("stack"), h.OnSubmit(Message.ClickedSave())],
-                [
-                  h.h2([], [model.selectedId === null ? "Create task" : "Edit task"]),
-                  field(h, {
-                    id: "project",
-                    label: "Project",
-                    children: textInput(h, {
-                      id: "project",
-                      value: model.project,
-                      onInput: (value) => Message.ChangedProject({ value }),
-                      type: "text",
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  field(h, {
-                    id: "title",
-                    label: "Title",
-                    children: textInput(h, {
-                      id: "title",
-                      value: model.title,
-                      onInput: (value) => Message.ChangedTitle({ value }),
-                      type: "text",
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  field(h, {
-                    id: "detail",
-                    label: "Detail",
-                    children: textareaInput(h, {
-                      id: "detail",
-                      value: model.detail,
-                      rows: 4,
-                      onInput: (value) => Message.ChangedDetail({ value }),
-                    }),
-                  }),
-                  field(h, {
-                    id: "priority",
-                    label: "Priority",
-                    children: selectInput(h, {
-                      id: "priority",
-                      value: model.priority,
-                      onChange: (value) => Message.ChangedPriority({ value }),
-                      choices: formPriorityChoices,
-                    }),
-                  }),
-                  field(h, {
-                    id: "due-date",
-                    label: "Due date",
-                    children: textInput(h, {
-                      id: "due-date",
-                      type: "date",
-                      value: model.dueDate,
-                      onInput: (value) => Message.ChangedDueDate({ value }),
-                      placeholder: "",
-                      autocomplete: "off",
-                    }),
-                  }),
-                  ...(model.selectedId === null ? [] : [field(h, {
-                    id: "completed",
-                    label: "Status",
-                    children: selectInput(h, {
-                      id: "completed",
-                      value: String(model.completed),
-                      onChange: (value) => Message.ChangedCompleted({ value }),
-                      choices: formCompletedChoices,
-                    }),
-                  })]),
-                  h.div(
-                    [h.Class("actions")],
-                    [
-                      primaryButton(h, {
-                        label: model.selectedId === null ? "Create task" : "Save changes",
-                        message: Option.none(),
-                        type: "submit",
-                        disabled: model.busy,
-                      }),
-                      quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false }),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
+      h.div([h.Class("split")], [
+        h.section([h.Class("panel stack")], [
+          h.div([h.Class("actions")], [
+            field(h, { id: "filter-project", label: "Project", children: textInput(h, { id: "filter-project", value: model.filterProject, onInput: (value) => Message.ChangedFilterProject({ value }), type: "text", placeholder: "", autocomplete: "off" }) }),
+            field(h, { id: "filter-priority", label: "Priority", children: selectInput(h, { id: "filter-priority", value: model.filterPriority, onChange: (value) => Message.ChangedFilterPriority({ value: value as Model["filterPriority"] }), choices: priorityChoices }) }),
+            field(h, { id: "filter-completed", label: "Status", children: selectInput(h, { id: "filter-completed", value: model.filterCompleted, onChange: (value) => Message.ChangedFilterCompleted({ value }), choices: completedChoices }) }),
+            primaryButton(h, { label: Requests.pending(model.requests, "tasks.list") ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: Requests.pending(model.requests, "tasks.list") }),
+          ]),
+          dataTable(h, { caption: "Tasks", columns: ["Project", "Task", "Priority", "Due", "Status", ""], rows: model.tasks.items, key: (task) => task.id, cells: (task) => [
+            task.project, task.title, task.priority, task.dueDate ?? "—", task.completed ? "Completed" : "Open",
+            h.div([h.Class("row-actions")], [
+              quietButton(h, { label: "Edit", message: Message.ClickedSelect({ id: task.id }), disabled: false }),
+              quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: task.id }), disabled: Requests.pending(model.requests) }),
+            ]),
+          ] }),
+          model.tasks.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: Requests.pending(model.requests, "tasks.list") }),
+        ]),
+        h.section([h.Class("panel")], [
+          h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSave())], [
+            h.h2([], [model.selectedId === null ? "Create task" : "Edit task"]),
+            field(h, { id: "project", label: "Project", children: textInput(h, { id: "project", value: model.project, onInput: (value) => Message.ChangedProject({ value }), type: "text", placeholder: "", autocomplete: "off" }) }),
+            field(h, { id: "title", label: "Title", children: textInput(h, { id: "title", value: model.title, onInput: (value) => Message.ChangedTitle({ value }), type: "text", placeholder: "", autocomplete: "off" }) }),
+            field(h, { id: "detail", label: "Detail", children: textareaInput(h, { id: "detail", value: model.detail, rows: 4, onInput: (value) => Message.ChangedDetail({ value }) }) }),
+            field(h, { id: "priority", label: "Priority", children: selectInput(h, { id: "priority", value: model.priority, onChange: (value) => Message.ChangedPriority({ value: value as Model["priority"] }), choices: Array.map(priorities, (value) => ({ value, label: value })) }) }),
+            field(h, { id: "due-date", label: "Due date", children: textInput(h, { id: "due-date", type: "date", value: model.dueDate, onInput: (value) => Message.ChangedDueDate({ value }), placeholder: "", autocomplete: "off" }) }),
+            ...(model.selectedId === null ? [] : [field(h, { id: "completed", label: "Status", children: selectInput(h, { id: "completed", value: String(model.completed), onChange: (value) => Message.ChangedCompleted({ value: value === "true" }), choices: completedChoices.slice(1) }) })]),
+            h.div([h.Class("actions")], [
+              primaryButton(h, { label: model.selectedId === null ? "Create task" : "Save changes", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests) }),
+              quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false }),
+            ]),
+          ]),
+        ]),
+      ]),
     ],
   }),
 })

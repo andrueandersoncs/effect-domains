@@ -83,7 +83,7 @@ bun run equipment-register assets.get --input-json "{\"id\":\"$ASSET_ID\"}"
 
 Create, get, and update return complete asset rows. Generated `remove` succeeds with `null`; the final get exits nonzero with `ResourceNotFound`.
 
-The generated `assets.list` accepts equality filters only for `assetTag`, `location`, and `condition`. Its configured limit is both the default and maximum: 100 rows. It returns a cursor when more rows exist, but the Foldkit page asks for the first 100 matching rows and has no next-page control; use the CLI with the returned `nextCursor` and the same filter if you need the next page.
+The generated `assets.list` accepts equality filters only for `assetTag`, `location`, and `condition`. Its configured limit is both the default and maximum: 100 rows. The Foldkit page uses the canonical native client and **Load more** appends a returned cursor page; changing a filter clears the prior page and invalidates its request.
 
 ## Input rules and expected failures
 
@@ -95,7 +95,7 @@ The generated `assets.list` accepts equality filters only for `assetTag`, `locat
 | Missing UUID | `assets.get`, `assets.update`, and `assets.remove` report `ResourceNotFound` for a well-formed ID with no row. |
 | Lists | An undeclared filter, invalid limit, or invalid cursor is rejected as `RepositoryError`. Limits run from 1 through 100; preserve a non-null cursor exactly with the same encoded filter. |
 
-At `http://127.0.0.1:3000/`, the Foldkit UI offers filters by tag, location, and condition; a first-page table; and controls to register, edit, or remove a record. Empty serial input is sent as `null`. It is an equipment register, not a checkout, maintenance-ticket, depreciation, staffing, or production identity system.
+At `http://127.0.0.1:3000/`, the Foldkit UI offers filters by tag, location, and condition; a pageable table; and controls to register, edit, or remove a record. Empty serial input is sent as `null`, and field-specific validation errors are displayed. It is an equipment register, not a checkout, maintenance-ticket, depreciation, staffing, or production identity system.
 
 ## Read next
 

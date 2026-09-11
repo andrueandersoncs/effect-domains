@@ -49,6 +49,11 @@ The prefix comes from `application.name`: uppercase, with each non-alphanumeric 
 | `<PREFIX>_DB` | Server / worker, unless `database.filename` is set | `data/<application-name>.sqlite` |
 | `<PREFIX>_URL` | Remote CLI | `http://127.0.0.1:3000/rpc/v1` |
 | `<PREFIX>_TOKEN` | Remote CLI | Absent; when set, sent as a bearer token |
+| `EFFECT_DOMAINS_IDENTITY_DB` | Protected example identity store | `data/identity.sqlite` |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | Protected example account bootstrap | Required; no fallback |
+| `EFFECT_DOMAINS_SESSION_LIFETIME` | Protected example issued-session lifetime | `8 hours`; must be positive and finite |
+
+The protected examples require `EFFECT_DOMAINS_DEMO_PASSWORD` on every process start. Their identity store must be separate from the application database; use disposable explicit paths in walkthroughs. Account seeds insert only missing accounts, preserving changed passwords, roles, and disabled state.
 
 `PORT` does **not** change the client URL. Example, in separate terminals:
 
@@ -127,6 +132,28 @@ For a custom runtime or independently composed RPC adapter, import `ApplicationT
 
 Help and inspection do not need a running server. Inspection does not execute handlers or prove that a database matches the declared schema.
 
+## Identity services and RPC
+
+`effect-domains/identity` is the portable identity boundary. It exports `CredentialsSchema`, `IssuedSessionSchema`, `CurrentSessionSchema`, `SubjectSchema`, `IdentityUnavailable`, and the narrow `IdentityRuntime` service. `IdentityRuntime` verifies credentials, authenticates an opaque token into a session ID, expiry, and current subject, and revokes a session ID.
+
+`effect-domains/identity-rpc` is the native RPC adapter, not part of that portable interface. `IdentityRpcs` and `IdentityHandlers` publish `identity.login`, `identity.current`, and `identity.logout`; `authenticateIdentity(headers)` parses and verifies a bearer credential. Applications compose that group and handler layer explicitly in `Application.parts`. `current` and `logout` use native RPC metadata headers and authenticate every call. Their failures are `Unauthenticated` and `IdentityUnavailable`.
+
+`AuthorizationRpc.Authenticator` remains intentionally narrower: `authenticate(headers)` yields only an `AuthorizationSubject`. It neither requires nor exposes opaque-session data, so applications can supply a verified custom IdP adapter.
+
+The protected examples provide `ExampleIdentity`. It maintains a separate SQLite store with a frozen v1 migration ledger and seeded `alice`, `bob`, `admin`, and `outsider` accounts. It hashes the configured bootstrap password with Argon2id (64 MiB, time cost 2), issues random 32-byte Base64URL credentials, and persists only SHA-256 credential digests. Authentication joins current account claims and disabled state on every call, and rejects expired or revoked sessions. Password verification has two non-queueing permits, retains its permit while native Argon2 is uninterruptible, uses a dummy hash for unknown or disabled accounts, and reports generic invalid credentials. This is an example credential store, not a production user-management system or IdP.
+
+The CLI uses the normal `<APP>_URL` and `<APP>_TOKEN` variables. `identity.login` returns canonical JSON containing a secret token, ISO `expiresAt`, and subject; handle the token as a secret. `identity.current` returns the expiry and subject, and `identity.logout` revokes the presented credential.
+
+```bash
+bun run team-tasks identity.login --input-json '{"username":"alice","password":"…"}'
+```
+
+Use `--input-json`, not `--input`. When a password comes from an environment variable, construct the payload with `JSON.stringify` rather than shell interpolation. A captured login result can be reduced to the token with:
+
+```bash
+bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+```
+
 ## Remote CLI operations
 
 ```bash
@@ -165,13 +192,30 @@ Each published RPC operation becomes a tool. Arguments wrap the canonical payloa
 
 Successful structured content is `{ "result": <operation result> }`, also returned as JSON text; void results become `null`. Declared failures return `isError: true` with the encoded error.
 
+No-payload identity tools still require the MCP wrapper: call `identity.current` and `identity.logout` with `{ "input": null }`. Read the issued token from `identity.login`'s structured content at `result.token`.
+
 Protected tools require bearer credentials on every call. Tool discovery exposes contracts, not authorization to read protected rows. The [equipment example](/examples#equipment-register) includes an SDK client.
+
+### Example Foldkit clients
+
+Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `packages/example-web/src/rpc.ts` lazily builds the same-origin `/rpc/v1` protocol with native `FetchHttpClient` and JSON serialization, supplies bearer call options, and formats errors only for display; it does not use handwritten envelopes, `rpcCall`, or `matchRpc`.
+
+The optional helpers are deliberately small:
+
+- `requests.ts` owns keyed monotonic request tokens, per-key pending/error state, session epochs, key-specific invalidation, and guarded success/failure. A refresh supersedes only its own key; stale successes and failures are ignored without cancelling unrelated mutations.
+- `page.ts` uses canonical item schemas with explicit replace/append and cursor input. Query, filter, or session changes clear previous rows and cursors; fixed-limit custom projections disclose their limit rather than pretending to have cursors.
+- `form.ts` decodes strict integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths. It does not truncate with `parseInt` or use implicit truthiness conversion.
+- `session.ts` is optional shared login/logout/expiry state. Pages begin signed out; submission clears the password immediately, issued credentials stay only in memory and are never rendered or stored in local/session storage, and identity generation clears application data and drafts. Servers, not typed usernames or credential chips, enforce roles.
+
+Applications keep their own mutation refresh policy and business semantics; these helpers infer neither authorization nor invalidation dependencies.
 
 ### Browser admin
 
 Run `bun run build` before starting an admin-enabled server. Runtime loads prebuilt JavaScript and CSS; it does not compile the browser application on startup.
 
 The interface provides operation forms, resource lists, declared filters, cursor paging, and a full-JSON input fallback. It uses the same handlers and authorization as other clients. Tokens entered in the UI remain in browser memory.
+
+The generated admin is a generic bearer-entry surface: it accepts a real issued credential and does not bypass authentication. It uses the same per-call identity verification as RPC, CLI, MCP, and operator metrics; an MCP transport session is not an identity.
 
 `allowedOrigins` names exact origins permitted by the admin’s origin check when using a non-loopback host. It is not a CORS configuration, authentication policy, or permission grant.
 
@@ -187,3 +231,7 @@ The runner composes native Effect layers; it does not supply its own job system.
 - [CLI adapter](../../packages/effect-domains/src/rpc-cli.ts)
 - [MCP adapter](../../packages/effect-domains/src/rpc-mcp.ts)
 - [Admin adapter](../../packages/effect-domains/src/application-admin.ts)
+- [Portable identity interface](../../packages/effect-domains/src/identity.ts)
+- [Native identity RPC adapter](../../packages/effect-domains/src/identity-rpc.ts)
+- [Example identity store](../../packages/example-support/src/identity.ts)
+- [Example browser helpers](../../packages/example-web/src/)

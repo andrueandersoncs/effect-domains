@@ -6,7 +6,7 @@ description: Choose a runnable application for CRUD, authorization, migrations, 
 
 Each of the twelve applications has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
 
-Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: every application needs its prebuilt Foldkit frontend, and some also enable generated admin. Keep demonstration servers on loopback; public access and fixed demo tokens are not production authentication.
+Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: every application needs its prebuilt Foldkit frontend, and some also enable generated admin. Keep demonstration servers on loopback. Example pages begin signed out; protected examples issue credentials through the example identity store, which is not a production authentication service.
 
 ## Start with records
 

@@ -11,18 +11,30 @@ bun install
 bun run build
 ```
 
-In the first terminal, start a fresh loopback server. `mktemp -d` makes the SQLite path disposable; leave this terminal running.
+In the first terminal, start fresh application and identity stores. `EFFECT_DOMAINS_DEMO_PASSWORD` is required to seed the example accounts; keep the identity database physically separate from the application database.
 
 ```bash
 DEMO_DIR="$(mktemp -d)"
-PORT=3001 TEAM_TASKS_DB="$DEMO_DIR/team-tasks.sqlite" bun run team-tasks:server
+export EFFECT_DOMAINS_DEMO_PASSWORD='correct-horse-battery-staple'
+PORT=3001 \
+  TEAM_TASKS_DB="$DEMO_DIR/team-tasks.sqlite" \
+  EFFECT_DOMAINS_IDENTITY_DB="$DEMO_DIR/identity.sqlite" \
+  bun run team-tasks:server
 ```
 
-In a second terminal at the repository root, configure the CLI for that server and authenticate as Alice. The tokens below are public demo fixtures, not production credentials: they have no login flow, expiry, revocation, or identity-provider verification.
+In a second terminal at the repository root, configure the CLI and obtain Alice's issued credential. Examples start signed out. The helper constructs JSON with Bun rather than interpolating the password into shell JSON, and captures the secret credential instead of printing it:
 
 ```bash
 export TEAM_TASKS_URL=http://127.0.0.1:3001/rpc/v1
-export TEAM_TASKS_TOKEN=alice-demo
+export EFFECT_DOMAINS_DEMO_PASSWORD='correct-horse-battery-staple'
+login_input() {
+  bun -e 'console.log(JSON.stringify({ username: process.argv[1], password: process.env.EFFECT_DOMAINS_DEMO_PASSWORD }))' "$1"
+}
+login_token() {
+  bun run team-tasks identity.login --input-json "$(login_input "$1")" |
+    bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+}
+export TEAM_TASKS_TOKEN="$(login_token alice)"
 bun run team-tasks todos.create --input-json '{"project":"North Yard pump inspection","title":"Attach pressure-test photo","detail":"Use the calibrated 0-200 psi gauge record from the site tablet.","priority":"high","dueDate":"2026-09-18"}'
 ```
 
@@ -35,14 +47,14 @@ bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
 The following requests exit nonzero with `ResourceNotFound`: Bob is in the same tenant but is not the owner, and the outsider has Alice's user ID but belongs to a different tenant. Reads hide rows outside the policy's visibility rather than revealing that a protected row exists.
 
 ```bash
-TEAM_TASKS_TOKEN=bob-demo bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
-TEAM_TASKS_TOKEN=outsider-demo bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
+TEAM_TASKS_TOKEN="$(login_token bob)" bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
+TEAM_TASKS_TOKEN="$(login_token outsider)" bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
 ```
 
-A missing or unknown token instead fails authentication with `Unauthenticated` before a policy is evaluated:
+A missing or unknown credential instead fails authentication with `Unauthenticated` before a policy is evaluated:
 
 ```bash
-TEAM_TASKS_TOKEN= bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
+TEAM_TASKS_TOKEN=not-a-session bun run team-tasks todos.get --input-json "{\"id\":\"$TASK_ID\"}"
 ```
 
 Finally, show the change rule. Alice may complete her incomplete task, but may not edit it afterward:
@@ -61,7 +73,7 @@ The task resource defines its policy with the resource schema and the authentica
 ```ts
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { TaskSchema } from "./domain.ts"
 
 const p = Authorization.for({ resource: TaskSchema, subject: ExampleSubjectSchema })
@@ -104,17 +116,17 @@ export const TasksResource = Resource.make({
 
 `scope` constrains every row-bearing action to the subject's tenant. `read` determines visibility; `create` sees the candidate `next` row; `update` and `patch` can compare both the stored row and candidate. `fromSubject` is a trusted server-side binding: generated create input does not accept `tenantId` or `ownerId`, and the resource validates that each binding is a compatible subject-field reference. It is not a permission grant; the `create` rule still authorizes the candidate row.
 
-The server must provide authenticated claims to the runtime. The example installs its request authenticator as an application service:
+The server must provide authenticated claims to the runtime. This example installs its identity runtime as an application service:
 
 ```ts
 pipe(ApplicationBun.run(TeamTasksApplication, {
   database: { migrations: TeamTasksMigrations },
-  services: ExampleAuthentication,
+  services: ExampleIdentity,
   admin: true,
 }), BunRuntime.runMain)
 ```
 
-`ExampleAuthentication` maps exact `Authorization: Bearer ...` values to the typed `{ userId, tenantId, roles }` subject. Replace that adapter with your application's verified session, token, or identity-provider boundary; do not trust identity or tenant fields supplied in an RPC payload. See the [demo authenticator](../../packages/example-support/src/authentication.ts) and the [team-task resource](../../examples/team-tasks/resources.ts).
+`ExampleIdentity` supplies the example credential store and the generic `AuthorizationRpc.Authenticator`. The authenticator's contract remains only the verified `{ userId, tenantId, roles }` subject used by this resource; it is not an opaque-session facade. The application separately composes the native `IdentityRpcs` group and `IdentityHandlers`, so `identity.login`, `identity.current`, and `identity.logout` verify credentials or credentials-on-every-call at that boundary. Do not trust identity or tenant fields supplied in an RPC payload. See the [identity service](../../packages/example-support/src/identity.ts), [identity RPC group](../../packages/effect-domains/src/identity-rpc.ts), and [team-task resource](../../examples/team-tasks/resources.ts).
 
 ## Deny an action by leaving it out
 

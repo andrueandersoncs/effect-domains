@@ -70,6 +70,8 @@ A field may have exactly one source: caller input, `defaults`, `generated`, or `
 
 The create result is the complete canonical row. For public resources its declared generated errors are `RepositoryError` and `ResourceNotFound`; policy resources can additionally produce `Unauthenticated`, `Forbidden`, `EntitlementRequired`, and `EntitlementUnavailable`.
 
+For example, the reservation resource retains a local-only generated create policy with `status: "held"`, `id: "uuidV7"`, `createdAt: "now"`, and `publish: false`. The authored public reserve handler calls that repository create after its stock checks; `reservations.create` is not a public CLI or RPC endpoint. This is an application-specific reservation boundary, not a generalized workflow API. ([Resource](../../examples/reservations/resources.ts); [handler](../../examples/reservations/sqlite.ts))
+
 ## Read, update, remove, and patch contracts
 
 | Operation | RPC payload | Success result | Missing/error behavior |

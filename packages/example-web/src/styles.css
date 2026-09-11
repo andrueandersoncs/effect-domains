@@ -64,24 +64,11 @@ h2 { margin: 0 0 .85rem; font-size: 1.15rem; }
 .lede { max-width: 62ch; margin: .55rem 0 0; color: var(--muted); font-size: 1.02rem; }
 
 .session { display: grid; gap: .65rem; }
-.session-tokens { display: flex; flex-wrap: wrap; gap: .4rem; }
 
-.chip, .button, .input {
+.button, .input {
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
-.chip {
-  padding: .3rem .55rem;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  background: transparent;
-  font-size: .78rem;
-}
-.chip-active, .chip:hover, .chip:focus-visible {
-  border-color: var(--accent);
-  color: var(--accent);
-  outline: none;
-}
 
 .workspace {
   display: grid;

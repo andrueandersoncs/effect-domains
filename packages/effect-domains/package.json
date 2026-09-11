@@ -10,6 +10,8 @@
     "./application-telemetry": "./src/application-telemetry.ts",
     "./authorization": "./src/authorization.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",
+    "./identity": "./src/identity.ts",
+    "./identity-rpc": "./src/identity-rpc.ts",
     "./domain": "./src/domain.ts",
     "./entitlements": "./src/entitlements.ts",
     "./migrations": "./src/migrations.ts",

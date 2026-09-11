@@ -14,19 +14,26 @@ Run the commands from the repository root. The server serves a Foldkit frontend,
 bun install
 bun run build
 export PURCHASED_GUIDES_DB="$PWD/purchased-guides-walkthrough-$(date +%s).sqlite"
+export EFFECT_DOMAINS_IDENTITY_DB="$PWD/purchased-guides-identity-$(date +%s).sqlite"
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3003 bun run purchased-guides:server
 ```
 
-The loopback server is now at `http://127.0.0.1:3003`: its RPC endpoint is `/rpc/v1`, its Streamable HTTP MCP endpoint is `/mcp`, and the frontend is at `/`. There is no `/admin` route for this application.
+The loopback server is now at `http://127.0.0.1:3003`: its RPC endpoint is `/rpc/v1`, its Streamable HTTP MCP endpoint is `/mcp`, and the frontend is at `/`. There is no `/admin` route for this application. `EFFECT_DOMAINS_IDENTITY_DB` must be distinct from `PURCHASED_GUIDES_DB`; the required bootstrap password does not reset the accounts when the server restarts.
 
 **Client terminal**
 
 ```bash
 export PURCHASED_GUIDES_URL=http://127.0.0.1:3003/rpc/v1
-export PURCHASED_GUIDES_TOKEN=bob-demo
+export DEMO_PASSWORD='choose-a-local-bootstrap-password' # same value used by the server
+export PURCHASED_GUIDES_TOKEN="$(
+  bun run purchased-guides identity.login --input-json "$(
+    bun -e 'const password = process.env.DEMO_PASSWORD; if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username: "bob", password }))'
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+)"
 ```
 
-`bob-demo` is the server-resolved Acme subject `{ "userId": "bob", "tenantId": "acme", "roles": ["reader"] }`. It is the only seeded purchase holder. The token is bearer authentication, not an input field; `tenantId` and `userId` in a request cannot create or change access. These public demo credentials have no login, expiry, revocation, or identity provider—use this example only on loopback.
+Bob is the seeded purchase holder in Acme. The issued value is a secret bearer credential, not an input field; `tenantId` and `userId` in a request cannot create or change access. `identity.current` shows the verified subject and expiry, and `identity.logout` revokes the active credential. Sessions expire and accounts bootstrap once; see [example identity](../README.md#example-identity).
 
 ## Read the seeded guide
 
@@ -36,7 +43,7 @@ The fresh database seeds three guides and one purchase: Bob in Acme has a `grant
 bun run purchased-guides guides.get --input-json '{"id":"guide-sql-basics"}'
 ```
 
-The response is the complete guide object with keys `id`, `tenantId`, `title`, `summary`, and `body`. It identifies the SQL field guide in tenant `acme`. This success proves both the role/tenant read policy and the per-guide entitlement passed.
+The response is the complete guide object with keys `id`, `tenantId`, `title`, `summary`, and `body`. It identifies the SQL field guide in tenant `acme`. This success proves tenant visibility and the persisted per-guide entitlement passed; roles alone do not grant a purchase.
 
 The two neighboring requests show the order of the checks:
 
@@ -56,7 +63,7 @@ Now request the only generated list operation:
 bun run purchased-guides guides.list --input-json '{}'
 ```
 
-This request fails with `EntitlementRequired`. Both Acme guides enter Bob's tenant-visible page, but `guide-audit-trails` lacks Bob's grant. Entitlements are checked for every row in the page; the list is not silently filtered down to the guide that Bob can open. `guides.list` accepts only the standard optional `limit` and `cursor` fields—no equality filters—and its configured limit is 25 as both default and maximum. It returns `{ "items": [...], "nextCursor": string | null }` only when every row in that page passes. If a future page produces a non-null cursor, return it unchanged; the current frontend has no next-page control.
+This request fails with `EntitlementRequired`. Both Acme guides enter Bob's tenant-visible page, but `guide-audit-trails` lacks Bob's grant. Entitlements are checked for every row in the page; the list is not silently filtered down to the guide that Bob can open. `guides.list` accepts only the standard optional `limit` and `cursor` fields—no equality filters—and its configured limit is 25 as both default and maximum. It returns `{ "items": [...], "nextCursor": string | null }` only when every row in that page passes. A non-null cursor can be returned unchanged; the browser appends it with **Load more**.
 
 ## How access is resolved
 
@@ -76,13 +83,13 @@ The seed contains the following initial facts:
 | Guide | `guide-audit-trails` | `acme` | Audit trail guide; no seeded grant for Bob |
 | Guide | `guide-other-tenant` | `other` | Hidden from Acme subjects |
 
-`alice-demo` is Acme `alice` with `editor`; `admin-demo` is Acme `admin` with `admin`; neither receives a seeded purchase. `outsider-demo` is `alice` in tenant `other` with `editor`; it can pass role/tenant policy for the other-tenant guide but has no seeded grant, so its read fails with `EntitlementRequired`.
+Alice and Admin have valid issued Acme credentials but no seeded purchase; neither can open a guide solely by role. The issued `outsider` session is Alice in tenant `other`; it can pass role/tenant policy for the other-tenant guide but has no seeded grant, so its read fails with `EntitlementRequired`.
 
 ## Browser and MCP
 
-Open `http://127.0.0.1:3003/` to use the frontend. It begins with `bob-demo`, automatically loads the unlocked SQL field guide and tries the list, and offers the unlocked, locked, and hidden guide ids. Switching the visible demo token clears its prior result. The page explicitly presents a list as all-or-nothing and shows server errors rather than treating a locked row as absent.
+Open `http://127.0.0.1:3003/` to use the frontend. It starts signed out; use the login UI with a seeded account password. The page uses the canonical native client and retains the issued bearer token only in memory. After sign-in, select an unlocked, locked, or hidden guide ID and load it; list errors remain visible rather than treating a locked row as absent. **Load more** appends a returned cursor page. Changing identity clears the prior guide, list, and stale request state.
 
-There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`. The only generated tools are the read-only `guides.get` and `guides.list`; pass tool arguments as `{ "input": <operation JSON> }`. A protected MCP call needs the same bearer credential on every request. `/rpc/v1` and `/mcp` are RPC endpoints, not REST APIs.
+There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`. The generated resource tools are the read-only `guides.get` and `guides.list`; the composed identity group also exposes `identity.login`, `identity.current`, and `identity.logout`. Pass tool arguments as `{ "input": <operation JSON> }`, using `{ "input": null }` for current/logout. A protected MCP call needs the same issued bearer credential on every request. `/rpc/v1` and `/mcp` are RPC endpoints, not REST APIs.
 
 ## Storage and source map
 
@@ -92,6 +99,8 @@ There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`
 | `PORT` | `3000` | Loopback server port |
 | `PURCHASED_GUIDES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `PURCHASED_GUIDES_TOKEN` | unset | CLI bearer token |
+| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | Server identity database; must differ from guide data |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | required | Bootstrap password for seeded example accounts |
 
 Startup decodes and applies the frozen [migration history](migrations.ts), then runs the idempotent seed routine. It preserves rows; restarts do not reset entitlement state. The runtime rejects an untracked or drifted database rather than adopting it, so choose a fresh `PURCHASED_GUIDES_DB` for a clean walkthrough. The [initial artifact](migrations/001_initial.json) defines the `guides` and private `guide_purchases` tables.
 
@@ -99,7 +108,7 @@ Startup decodes and applies the frozen [migration history](migrations.ts), then 
 - [`resources.ts`](resources.ts): role/tenant policy, `guides.read` requirement, read-only guide operations, and the private purchase resource.
 - [`entitlements.ts`](entitlements.ts): current-status lookup and restart-safe seed facts.
 - [`application.ts`](application.ts): the two registered resources.
-- [`main.ts`](main.ts): authentication, entitlement service, initialization, frontend route, migrations, and runner.
-- [`web/main.ts`](web/main.ts): actual frontend requests, tokens, guide choices, and lack of cursor navigation.
+- [`main.ts`](main.ts): identity, entitlement service, initialization, frontend route, migrations, and runner.
+- [`web/main.ts`](web/main.ts): native frontend requests, signed-in guide choices, and cursor navigation.
 - [Resource reference](../../docs/reference/resources.md): protected generated reads, all-or-nothing entitlement pages, and cursor/list rules.
 - [Runtime reference](../../docs/reference/runtime.md): loopback runtime, CLI, RPC, and migration behavior.

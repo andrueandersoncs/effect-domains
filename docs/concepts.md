@@ -74,9 +74,9 @@ A useful rule: use generated operations when they express the whole intended act
 
 ## One contract, several clients
 
-The CLI, MCP tools, and admin use the application's published operation schemas and handlers. An admin form is not a privileged route. An MCP session is not an identity. Authorization and trusted request subjects must still be provided and enforced.
+The CLI, MCP tools, generated admin, and example Foldkit pages use the application's published operation schemas and handlers. An admin form is not a privileged route, an MCP session is not an identity, and browser pages do not invent a second RPC envelope. Authorization and trusted request subjects must still be provided and enforced.
 
-The HTTP endpoint is **Effect JSON RPC**, not REST. A resource named `books` does not create `/books` routes. Use the generated CLI, an Effect RPC client, or the generated MCP tools rather than inventing HTTP request envelopes.
+The HTTP endpoint is **Effect JSON RPC**, not REST. A resource named `books` does not create `/books` routes. Use the generated CLI, a native Effect `RpcClient`, or the generated MCP tools rather than inventing HTTP request envelopes.
 
 ## Current scope
 

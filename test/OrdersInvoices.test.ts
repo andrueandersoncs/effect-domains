@@ -5,20 +5,20 @@ import { SqlClient } from "effect/unstable/sql"
 import { Application } from "effect-domains/application"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { BillingApplication } from "../examples/orders-invoices/application.ts"
 import { BillingMigrations } from "../examples/orders-invoices/migrations.ts"
 import { InvoiceNumberSchema, OrderNumberSchema } from "../examples/orders-invoices/domain.ts"
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: BillingMigrations })
-const alice = { authorization: "Bearer alice-demo" }
-const reader = { authorization: "Bearer bob-demo" }
-const outsider = { authorization: "Bearer outsider-demo" }
 const orderNumber = OrderNumberSchema.make("SO-1")
 const invoiceNumber = InvoiceNumberSchema.make("INV-1")
 
 const billingTest = Effect.gen(function* () {
   yield* Application.prepare(BillingApplication)
   const client = yield* RpcTest.makeClient(BillingApplication.group)
+  const alice = yield* sessionFor("alice")
+  const reader = yield* sessionFor("bob")
+  const outsider = yield* sessionFor("outsider")
   const database = yield* SqlClient.SqlClient
   const aliceOrder = yield* client["billing.createOrder"]({ number: orderNumber, customer: "Alice customer" }, { headers: alice })
   const outsiderOrder = yield* client["billing.createOrder"]({ number: orderNumber, customer: "Other customer" }, { headers: outsider })
@@ -164,6 +164,6 @@ it.effect("keeps tenant-scoped billing lifecycle, foreign keys, transactions, an
   billingTest,
   Effect.provide(BillingApplication.handlers),
   Effect.provide(AuthorizationRpc.layer),
-  Effect.provide(ExampleAuthentication),
+  Effect.provide(TestIdentity),
   Effect.provide(sqlite),
 ))

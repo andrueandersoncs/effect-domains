@@ -19,20 +19,31 @@ mkdir -p "$PWD/.tmp"
 export APPOINTMENT_REMINDERS_DB="$PWD/.tmp/appointment-reminders-$RUN_ID.sqlite"
 export APPOINTMENT_REMINDERS_EXECUTION_DB="$PWD/.tmp/appointment-reminders-execution-$RUN_ID.sqlite"
 export APPOINTMENT_REMINDERS_PROJECTION_FILE="$PWD/.tmp/appointment-reminders-$RUN_ID.notifications.json"
+export EFFECT_DOMAINS_IDENTITY_DB="$PWD/.tmp/appointment-reminders-identity-$RUN_ID.sqlite"
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 ```
 
-Start the server in one terminal:
+The application, execution, and identity stores must be separate. Start the server in one terminal:
 
 ```bash
 PORT=3002 bun run appointment-reminders:server
 ```
 
-In another terminal, configure the remote CLI with the only demo role allowed to schedule and read the inbox:
+In another terminal, configure the remote CLI and issue the administrator credential used to schedule and read an inbox:
 
 ```bash
 export APPOINTMENT_REMINDERS_URL=http://127.0.0.1:3002/rpc/v1
-export APPOINTMENT_REMINDERS_TOKEN=admin-demo
+export DEMO_PASSWORD='choose-a-local-bootstrap-password' # same value used by the server
+issue_reminder_token() {
+  bun run appointment-reminders identity.login --input-json "$(
+    bun -e 'const [username, password] = process.argv.slice(2); if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username, password }))' "$1" "$DEMO_PASSWORD"
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+}
+export APPOINTMENT_REMINDERS_TOKEN="$(issue_reminder_token admin)"
+export ALICE_TOKEN="$(issue_reminder_token alice)"
 ```
+
+Credentials are secret and sent as bearer tokens on each call. `identity.current` returns the verified subject and expiry; `identity.logout` revokes the current `APPOINTMENT_REMINDERS_TOKEN`. The required password bootstraps seed accounts only once, and sessions expire; see [example identity](../README.md#example-identity).
 
 ## Run it
 
@@ -100,13 +111,13 @@ Both calls exit nonzero without inserting a notification. The first returns `App
 
 ## Access, web, and MCP
 
-Both scheduling and the inbox resource use the admin-role expression. `admin-demo` may schedule and read any recipient's inbox. For `alice-demo` and the other authenticated non-admin sessions, scheduling fails with `Forbidden`; inbox lists return an empty page, and direct gets return `ResourceNotFound` because those rows are outside their visibility scope. Missing or unknown credentials fail authentication. The recipient is data, not the authenticated subject, so an admin can schedule and query Alice's inbox.
+Both scheduling and the inbox resource use the admin-role expression. The issued administrator credential may schedule and read any recipient's inbox. With `APPOINTMENT_REMINDERS_TOKEN="$ALICE_TOKEN"`, the non-admin Alice session is valid but scheduling fails with `Forbidden`; inbox lists return an empty page, and direct gets return `ResourceNotFound` because those rows are outside its visibility scope. Missing, expired, revoked, or unknown credentials fail authentication. The recipient is data, not the authenticated subject, so an admin can schedule and query Alice's inbox.
 
-At `http://127.0.0.1:3002/`, the Foldkit page starts with `admin-demo`, generates UUIDv7 IDs, and offers an inbox reload and scheduling form. With a non-admin token its button is disabled; server authorization remains authoritative. The page displays the first list response only: it does not implement a **Load next** control even if `nextCursor` is present. The resource's configured list limit is both the default and maximum of 100 notifications.
+At `http://127.0.0.1:3002/`, the Foldkit page starts signed out and offers the shared login UI. It uses the canonical native client, generates UUIDv7 IDs, and retains an issued bearer token only in memory. An administrator can reload an inbox or schedule a reminder; field errors and authorization failures are shown rather than hidden by client role controls. **Load more** appends cursor pages. Changing recipient or session clears the prior inbox, form values, and stale requests.
 
 `appointment_notifications.get` takes `{ "id": <the notification's full id string> }`. Lists support equality filters on `recipient`, `appointmentId`, and `reminderId`; use `cursor` with an unchanged filter to traverse further pages from the CLI or MCP.
 
-For MCP, connect to `http://127.0.0.1:3002/mcp` and provide an admin bearer token on each call. Each published RPC is one MCP tool; wrap the exact payload in `{ "input": <RPC payload> }`. Successful structured tool output is `{ "result": <RPC result> }`; declared failures have `isError: true`. MCP discovery reveals contracts, not permission to access this inbox.
+For MCP, connect to `http://127.0.0.1:3002/mcp` and provide an issued administrator bearer token on each call. Each published RPC is one MCP tool; wrap the exact payload in `{ "input": <RPC payload> }`. Successful structured tool output is `{ "result": <RPC result> }`; declared failures have `isError: true`. MCP discovery reveals contracts, not permission to access this inbox.
 
 ## Projection, retention, and recovery
 
@@ -119,6 +130,8 @@ A singleton rewrites `APPOINTMENT_REMINDERS_PROJECTION_FILE` every five seconds 
 The `notifications` array contains every current row ordered by identifier, including delivered and archived rows with their `archivedAt` values; it is empty only before any deliveries. This is a projection, not a second inbox store. The default UTC cron expression `0 0 * * *` marks notifications whose `deliveredAt` is more than 90 days old by setting `archivedAt`. It does not delete them. Set `APPOINTMENT_REMINDERS_RETENTION_CRON` to a valid cron expression only when intentionally replacing that schedule.
 
 Application data defaults to `data/appointment-reminders.sqlite`; the native execution store defaults to `data/appointment-reminders.execution.sqlite`; the projection defaults to `data/appointment-reminders.notifications.json`. The application and execution stores have separate transaction boundaries. Back up both databases for recovery, but do not infer a cross-database transaction, automatic outbox, or exactly-once delivery guarantee for arbitrary external systems. Inbox insertion is deduplicated in the application database; the scope of that behavior is the durable in-app row described here.
+
+`EFFECT_DOMAINS_DEMO_PASSWORD` is required for each server start and `EFFECT_DOMAINS_IDENTITY_DB` defaults to `data/identity.sqlite`; never point it at the application or execution database.
 
 A given execution store has one native `SingleRunner`: run **either** `appointment-reminders:server` or `appointment-reminders:worker` with it, never both concurrently. To continue an accepted future reminder, the projection loop, and retention without HTTP, stop the server and start a worker with the same database and projection environment:
 

@@ -12,7 +12,7 @@ import { prepareTables } from "./prepare-tables.ts"
 import { FieldReportsResource } from "../examples/field-notes/resources.ts"
 import { FieldNoteEncryption, makeFieldNoteEncryption } from "../examples/field-notes/storage.ts"
 import { FieldReportIdSchema } from "../examples/field-notes/domain.ts"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { RpcTest } from "effect/unstable/rpc"
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })

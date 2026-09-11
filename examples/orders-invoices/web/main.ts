@@ -1,60 +1,51 @@
-import { Effect, Option, Schema, pipe } from "effect"
+import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
+import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
+import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
+import { Form } from "@effect-domains/example-web/form"
+import { bearer, browserProtocol, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { IdentityRpcs } from "effect-domains/identity-rpc"
+import { OrderSummary, BillingRpcs } from "../contracts.ts"
 import {
-  dataTable,
-  field,
-  primaryButton,
-  quietButton,
-  shell,
-  textInput,
-} from "@effect-domains/example-web/html"
-import { rpcCall } from "@effect-domains/example-web/rpc"
+  CreateOrderInputSchema,
+  InvoiceNumberSchema,
+  LineNumberSchema,
+  PositiveMinorUnitsSchema,
+  QuantitySchema,
+  VersionConflict,
+} from "../domain.ts"
+import { OrdersResource } from "../resources.ts"
+const BillingBrowserRpcs = IdentityRpcs.merge(BillingRpcs)
+const OrderSchema = OrdersResource.table.rowSchema
 
-const OrderSchema = Schema.Struct({
-  id: Schema.String,
-  tenantId: Schema.String,
-  number: Schema.String,
-  customer: Schema.String,
-  status: Schema.Literals(["draft", "invoiced"]),
-  totalMinor: Schema.Int,
-  version: Schema.Int,
+export class WebClient extends Context.Service<WebClient, RpcClient.FromGroup<typeof BillingBrowserRpcs, RpcClientError.RpcClientError>>()(
+  "orders-invoices/WebClient",
+) {
+  static readonly layer = pipe(Layer.effect(WebClient, RpcClient.make(BillingBrowserRpcs)), Layer.provide(browserProtocol))
+}
+
+const integerFields = Schema.Struct({
+  lineNumber: Form.integer(LineNumberSchema),
+  quantity: Form.integer(QuantitySchema),
+  unitAmountMinor: Form.integer(PositiveMinorUnitsSchema),
 })
-
-const OrderLineSchema = Schema.Struct({
-  id: Schema.String,
-  tenantId: Schema.String,
-  orderId: Schema.String,
-  lineNumber: Schema.Int,
-  description: Schema.String,
-  quantity: Schema.Int,
-  unitAmountMinor: Schema.Int,
-})
-
-const InvoiceSchema = Schema.Struct({
-  id: Schema.String,
-  tenantId: Schema.String,
-  orderId: Schema.String,
-  number: Schema.String,
-  status: Schema.Literals(["issued", "paid"]),
-  totalMinor: Schema.Int,
-  version: Schema.Int,
-})
-
-const OrderSummarySchema = Schema.Struct({
-  order: OrderSchema,
-  lines: Schema.Array(OrderLineSchema),
-  invoice: Schema.NullOr(InvoiceSchema),
-})
-
-type OrderSummary = typeof OrderSummarySchema.Type
+const fieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
+const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
+const errorText = (error: unknown) => error instanceof VersionConflict || (
+  typeof error === "object" && error !== null && "_tag" in error && error._tag === "VersionConflict"
+)
+  ? "Version conflict: this order or invoice changed. Reload it and try again."
+  : formatRpcError(error)
 
 export const Model = Schema.Struct({
-  token: Schema.String,
-  sessionGeneration: Schema.Int,
-  summary: Schema.NullOr(OrderSummarySchema),
+  session: SessionModel,
+  requests: RequestStateSchema,
+  summary: Schema.NullOr(OrderSummary),
   orderNumber: Schema.String,
   customer: Schema.String,
   lineNumber: Schema.String,
@@ -62,17 +53,13 @@ export const Model = Schema.Struct({
   quantity: Schema.String,
   unitAmountMinor: Schema.String,
   invoiceNumber: Schema.String,
-  busy: Schema.Boolean,
-  notice: Schema.NullOr(Schema.Struct({
-    kind: Schema.Literals(["info", "error", "success"]),
-    text: Schema.String,
-  })),
+  fieldErrors: fieldErrorsSchema,
+  notice: noticeSchema,
 })
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  ChangedToken: { value: Schema.String },
-  SelectedToken: { token: Schema.String },
+  SessionChanged: { message: SessionMessage },
   ChangedOrderNumber: { value: Schema.String },
   ChangedCustomer: { value: Schema.String },
   ChangedLineNumber: { value: Schema.String },
@@ -85,408 +72,270 @@ export const Message = defineMessageUnion({
   ClickedIssue: {},
   ClickedPay: {},
   ClickedReload: {},
-  SucceededCreate: { generation: Schema.Int, order: OrderSchema },
-  SucceededSummary: { generation: Schema.Int, summary: OrderSummarySchema },
-  SucceededAction: { generation: Schema.Int, text: Schema.String },
-  Failed: { generation: Schema.Int, error: Schema.String },
+  SucceededCreate: { request: RequestTokenSchema, order: OrderSchema },
+  SucceededSummary: { request: RequestTokenSchema, summary: OrderSummary },
+  SucceededAction: { request: RequestTokenSchema, text: Schema.String },
+  InvalidLine: { request: RequestTokenSchema, errors: fieldErrorsSchema },
+  Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
-
-type UpdateReturn = Update.Return<Model, Message>
-
-const asPositiveInteger = (value: string) => Number.parseInt(value, 10)
-
-const describeError = (error: string) =>
-  error.includes("VersionConflict")
-    ? "Version conflict: this order or invoice changed. Reload it and try again."
-    : error
+type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 export const LoadOrder = Command.define("LoadOrder", {
-  args: { token: Schema.String, generation: Schema.Int, orderId: Schema.String },
+  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String },
   messages: [Message.SucceededSummary, Message.Failed],
-  execute: ({ token, generation, orderId }) => pipe(
-    rpcCall({
-      tag: "billing.getOrder",
-      payload: { orderId },
-      token,
-      success: OrderSummarySchema,
+  execute: ({ request, token, orderId }) => pipe(
+    Effect.gen(function*() {
+      const client = yield* WebClient
+      return yield* client["billing.getOrder"]({ orderId }, bearer(token))
     }),
     Effect.match({
-      onSuccess: (summary) => Message.SucceededSummary({ generation, summary }),
-      onFailure: (error) => Message.Failed({ generation, error: describeError(error.message) }),
+      onSuccess: (summary) => Message.SucceededSummary({ request, summary }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
-
 export const CreateOrder = Command.define("CreateOrder", {
-  args: { token: Schema.String, generation: Schema.Int, number: Schema.String, customer: Schema.String },
+  args: { request: RequestTokenSchema, token: Schema.String, number: Schema.String, customer: Schema.String },
   messages: [Message.SucceededCreate, Message.Failed],
-  execute: ({ token, generation, number, customer }) => pipe(
-    rpcCall({
-      tag: "billing.createOrder",
-      payload: { number: number.trim(), customer: customer.trim() },
-      token,
-      success: OrderSchema,
-    }),
+  execute: ({ request, token, number, customer }) => pipe(
+    Schema.decodeUnknownEffect(CreateOrderInputSchema)({ number: number.trim(), customer: customer.trim() }),
+    Effect.flatMap((input) => Effect.gen(function*() {
+      const client = yield* WebClient
+      return yield* client["billing.createOrder"](input, bearer(token))
+    })),
     Effect.match({
-      onSuccess: (order) => Message.SucceededCreate({ generation, order }),
-      onFailure: (error) => Message.Failed({ generation, error: describeError(error.message) }),
+      onSuccess: (order) => Message.SucceededCreate({ request, order }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
-
 export const AddLine = Command.define("AddLine", {
-  args: {
-    token: Schema.String,
-    generation: Schema.Int,
-    orderId: Schema.String,
-    expectedVersion: Schema.Int,
-    lineNumber: Schema.String,
-    description: Schema.String,
-    quantity: Schema.String,
-    unitAmountMinor: Schema.String,
-  },
-  messages: [Message.SucceededSummary, Message.Failed],
+  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String, expectedVersion: Schema.Int, lineNumber: Schema.String, description: Schema.String, quantity: Schema.String, unitAmountMinor: Schema.String },
+  messages: [Message.SucceededSummary, Message.InvalidLine, Message.Failed],
   execute: (args) => pipe(
-    rpcCall({
-      tag: "billing.addLine",
-      payload: {
-        orderId: args.orderId,
-        expectedVersion: args.expectedVersion,
-        lineNumber: asPositiveInteger(args.lineNumber),
-        description: args.description.trim(),
-        quantity: asPositiveInteger(args.quantity),
-        unitAmountMinor: asPositiveInteger(args.unitAmountMinor),
-      },
-      token: args.token,
-      success: OrderSummarySchema,
+    Schema.decodeUnknownEffect(integerFields)({
+      lineNumber: args.lineNumber,
+      quantity: args.quantity,
+      unitAmountMinor: args.unitAmountMinor,
     }),
-    Effect.match({
-      onSuccess: (summary) => Message.SucceededSummary({ generation: args.generation, summary }),
-      onFailure: (error) => Message.Failed({ generation: args.generation, error: describeError(error.message) }),
+    Effect.matchEffect({
+      onFailure: (error) => Effect.succeed(Message.InvalidLine({ request: args.request, errors: Form.errors(error) })),
+      onSuccess: (numbers) => pipe(
+        Effect.gen(function*() {
+          const client = yield* WebClient
+          return yield* client["billing.addLine"]({
+            orderId: args.orderId,
+            expectedVersion: args.expectedVersion,
+            lineNumber: numbers.lineNumber,
+            description: args.description.trim(),
+            quantity: numbers.quantity,
+            unitAmountMinor: numbers.unitAmountMinor,
+          }, bearer(args.token))
+        }),
+        Effect.match({
+          onSuccess: (summary) => Message.SucceededSummary({ request: args.request, summary }),
+          onFailure: (error) => Message.Failed({ request: args.request, error: errorText(error) }),
+        }),
+      ),
     }),
   ),
 })
-
 export const IssueInvoice = Command.define("IssueInvoice", {
-  args: { token: Schema.String, generation: Schema.Int, orderId: Schema.String, expectedVersion: Schema.Int, number: Schema.String },
+  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String, expectedVersion: Schema.Int, number: Schema.String },
   messages: [Message.SucceededAction, Message.Failed],
-  execute: ({ token, generation, orderId, expectedVersion, number }) => pipe(
-    rpcCall({
-      tag: "billing.issueInvoice",
-      payload: { orderId, expectedVersion, number: number.trim() },
-      token,
-      success: InvoiceSchema,
-    }),
+  execute: ({ request, token, orderId, expectedVersion, number }) => pipe(
+    Schema.decodeUnknownEffect(InvoiceNumberSchema)(number.trim()),
+    Effect.flatMap((number) => Effect.gen(function*() {
+      const client = yield* WebClient
+      yield* client["billing.issueInvoice"]({ orderId, expectedVersion, number }, bearer(token))
+    })),
     Effect.match({
-      onSuccess: () => Message.SucceededAction({ generation, text: "Invoice issued." }),
-      onFailure: (error) => Message.Failed({ generation, error: describeError(error.message) }),
+      onSuccess: () => Message.SucceededAction({ request, text: "Invoice issued." }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
-
 export const PayInvoice = Command.define("PayInvoice", {
-  args: { token: Schema.String, generation: Schema.Int, invoiceId: Schema.String, expectedVersion: Schema.Int },
+  args: { request: RequestTokenSchema, token: Schema.String, invoiceId: Schema.String, expectedVersion: Schema.Int },
   messages: [Message.SucceededAction, Message.Failed],
-  execute: ({ token, generation, invoiceId, expectedVersion }) => pipe(
-    rpcCall({
-      tag: "billing.payInvoice",
-      payload: { invoiceId, expectedVersion },
-      token,
-      success: InvoiceSchema,
+  execute: ({ request, token, invoiceId, expectedVersion }) => pipe(
+    Effect.gen(function*() {
+      const client = yield* WebClient
+      yield* client["billing.payInvoice"]({ invoiceId, expectedVersion }, bearer(token))
     }),
     Effect.match({
-      onSuccess: () => Message.SucceededAction({ generation, text: "Invoice paid." }),
-      onFailure: (error) => Message.Failed({ generation, error: describeError(error.message) }),
+      onSuccess: () => Message.SucceededAction({ request, text: "Invoice paid." }),
+      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
     }),
   ),
 })
 
-const loadCurrentOrder = (model: Model) =>
-  model.summary === null ? [] : [LoadOrder({
-    token: model.token,
-    generation: model.sessionGeneration,
-    orderId: model.summary.order.id,
-  })]
+const start = (model: Model, key: string) => Requests.start(model.requests, key)
+const loadCurrent = (model: Model, notice = model.notice) => {
+  const token = Session.token(model.session)
+  if (token === null || model.summary === null) return { model }
+  const started = start(model, "billing.load")
+  return {
+    model: evo(model, { requests: () => started.state, notice: () => notice }),
+    commands: [LoadOrder({ request: started.request, token, orderId: model.summary.order.id })],
+  }
+}
 
-export const update = (model: Model, message: Message) =>
-  Message.match<UpdateReturn>(message, {
-    ChangedToken: ({ value }) => ({
-      model: evo(model, {
-        token: () => value,
-        sessionGeneration: (generation) => generation + 1,
+export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
+  SessionChanged: ({ message }) => {
+    const child = Session.update(model.session, message)
+    const changed = Session.generation(child.model) !== Session.generation(model.session)
+    const next = changed
+      ? evo(model, {
+        session: () => child.model,
+        requests: () => Requests.reset(model.requests),
         summary: () => null,
-        busy: () => false,
+        orderNumber: () => "",
+        customer: () => "",
+        lineNumber: () => "1",
+        description: () => "",
+        quantity: () => "1",
+        unitAmountMinor: () => "",
+        invoiceNumber: () => "",
+        fieldErrors: () => ({}),
         notice: () => null,
-      }),
-    }),
-    SelectedToken: ({ token }) => ({
+      })
+      : evo(model, { session: () => child.model })
+    return { model: next, commands: Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message })) }
+  },
+  ChangedOrderNumber: ({ value }) => ({ model: evo(model, { orderNumber: () => value, fieldErrors: () => ({}) }) }),
+  ChangedCustomer: ({ value }) => ({ model: evo(model, { customer: () => value, fieldErrors: () => ({}) }) }),
+  ChangedLineNumber: ({ value }) => ({ model: evo(model, { lineNumber: () => value, fieldErrors: () => ({}) }) }),
+  ChangedDescription: ({ value }) => ({ model: evo(model, { description: () => value, fieldErrors: () => ({}) }) }),
+  ChangedQuantity: ({ value }) => ({ model: evo(model, { quantity: () => value, fieldErrors: () => ({}) }) }),
+  ChangedUnitAmountMinor: ({ value }) => ({ model: evo(model, { unitAmountMinor: () => value, fieldErrors: () => ({}) }) }),
+  ChangedInvoiceNumber: ({ value }) => ({ model: evo(model, { invoiceNumber: () => value, fieldErrors: () => ({}) }) }),
+  ClickedCreate: () => {
+    const token = Session.token(model.session)
+    if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before creating an order." }) }) }
+    const started = start(model, "billing.create")
+    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [CreateOrder({ request: started.request, token, number: model.orderNumber, customer: model.customer })] }
+  },
+  ClickedAddLine: () => {
+    const token = Session.token(model.session)
+    if (token === null || model.summary === null) return { model }
+    const started = start(model, "billing.addLine")
+    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [AddLine({ request: started.request, token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, lineNumber: model.lineNumber, description: model.description, quantity: model.quantity, unitAmountMinor: model.unitAmountMinor })] }
+  },
+  ClickedIssue: () => {
+    const token = Session.token(model.session)
+    if (token === null || model.summary === null) return { model }
+    const started = start(model, "billing.issue")
+    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [IssueInvoice({ request: started.request, token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, number: model.invoiceNumber })] }
+  },
+  ClickedPay: () => {
+    const token = Session.token(model.session)
+    const invoice = model.summary?.invoice
+    if (token === null || invoice === null || invoice === undefined) return { model }
+    const started = start(model, "billing.pay")
+    return {
+      model: evo(model, { requests: () => started.state, notice: () => null }),
+      commands: [PayInvoice({ request: started.request, token, invoiceId: invoice.id, expectedVersion: invoice.version })],
+    }
+  },
+  ClickedReload: () => loadCurrent(model, null),
+  SucceededCreate: ({ request, order }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    const afterCreate = Requests.succeed(model.requests, request)
+    const token = Session.token(model.session)
+    if (token === null) return { model: evo(model, { requests: () => afterCreate }) }
+    const started = Requests.start(afterCreate, "billing.load")
+    return {
       model: evo(model, {
-        token: () => token,
-        sessionGeneration: (generation) => generation + 1,
+        requests: () => started.state,
         summary: () => null,
-        busy: () => false,
-        notice: () => null,
+        orderNumber: () => "",
+        customer: () => "",
+        notice: () => ({ kind: "success" as const, text: "Order created." }),
       }),
-    }),
-    ChangedOrderNumber: ({ value }) => ({ model: evo(model, { orderNumber: () => value }) }),
-    ChangedCustomer: ({ value }) => ({ model: evo(model, { customer: () => value }) }),
-    ChangedLineNumber: ({ value }) => ({ model: evo(model, { lineNumber: () => value }) }),
-    ChangedDescription: ({ value }) => ({ model: evo(model, { description: () => value }) }),
-    ChangedQuantity: ({ value }) => ({ model: evo(model, { quantity: () => value }) }),
-    ChangedUnitAmountMinor: ({ value }) => ({ model: evo(model, { unitAmountMinor: () => value }) }),
-    ChangedInvoiceNumber: ({ value }) => ({ model: evo(model, { invoiceNumber: () => value }) }),
-    ClickedCreate: () => ({
-      model: evo(model, { busy: () => true, notice: () => null }),
-      commands: [CreateOrder({
-        token: model.token,
-        generation: model.sessionGeneration,
-        number: model.orderNumber,
-        customer: model.customer,
-      })],
-    }),
-    ClickedAddLine: () => {
-      if (model.summary === null) return { model }
-      return {
-        model: evo(model, { busy: () => true, notice: () => null }),
-        commands: [AddLine({
-          token: model.token,
-          generation: model.sessionGeneration,
-          orderId: model.summary.order.id,
-          expectedVersion: model.summary.order.version,
-          lineNumber: model.lineNumber,
-          description: model.description,
-          quantity: model.quantity,
-          unitAmountMinor: model.unitAmountMinor,
-        })],
-      }
-    },
-    ClickedIssue: () => {
-      if (model.summary === null) return { model }
-      return {
-        model: evo(model, { busy: () => true, notice: () => null }),
-        commands: [IssueInvoice({
-          token: model.token,
-          generation: model.sessionGeneration,
-          orderId: model.summary.order.id,
-          expectedVersion: model.summary.order.version,
-          number: model.invoiceNumber,
-        })],
-      }
-    },
-    ClickedPay: () => {
-      const invoice = model.summary?.invoice
-      if (invoice === null || invoice === undefined) return { model }
-      return {
-        model: evo(model, { busy: () => true, notice: () => null }),
-        commands: [PayInvoice({
-          token: model.token,
-          generation: model.sessionGeneration,
-          invoiceId: invoice.id,
-          expectedVersion: invoice.version,
-        })],
-      }
-    },
-    ClickedReload: () => ({
-      model: evo(model, { busy: () => model.summary !== null, notice: () => null }),
-      commands: loadCurrentOrder(model),
-    }),
-    SucceededCreate: ({ generation, order }) => {
-      if (generation !== model.sessionGeneration) return { model }
-      return {
-        model: evo(model, {
-          busy: () => true,
-          orderNumber: () => "",
-          customer: () => "",
-          notice: () => ({ kind: "success" as const, text: "Order created." }),
-        }),
-        commands: [LoadOrder({ token: model.token, generation, orderId: order.id })],
-      }
-    },
-    SucceededSummary: ({ generation, summary }) => {
-      if (generation !== model.sessionGeneration) return { model }
-      return {
-        model: evo(model, {
-          summary: () => summary,
-          lineNumber: () => String(summary.lines.length + 1),
-          description: () => "",
-          quantity: () => "1",
-          unitAmountMinor: () => "",
-          busy: () => false,
-        }),
-      }
-    },
-    SucceededAction: ({ generation, text }) => {
-      if (generation !== model.sessionGeneration) return { model }
-      return {
-        model: evo(model, { busy: () => true, notice: () => ({ kind: "success" as const, text }) }),
-        commands: loadCurrentOrder(model),
-      }
-    },
-    Failed: ({ generation, error }) => {
-      if (generation !== model.sessionGeneration) return { model }
-      return {
-        model: evo(model, { busy: () => false, notice: () => ({ kind: "error" as const, text: error }) }),
-      }
-    },
-  })
-
-export const init: Runtime.ApplicationInit<Model, Message> = () => ({
-  model: {
-    token: "alice-demo",
-    sessionGeneration: 0,
-    summary: null,
-    orderNumber: "",
-    customer: "",
-    lineNumber: "1",
-    description: "",
-    quantity: "1",
-    unitAmountMinor: "",
-    invoiceNumber: "",
-    busy: false,
-    notice: { kind: "info", text: "Create an order, add lines, then issue and pay its invoice." },
+      commands: [LoadOrder({ request: started.request, token, orderId: order.id })],
+    }
+  },
+  SucceededSummary: ({ request, summary }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.succeed(model.requests, request), summary: () => summary, lineNumber: () => String(summary.lines.length + 1), description: () => "", quantity: () => "1", unitAmountMinor: () => "" }),
+  },
+  SucceededAction: ({ request, text }) => {
+    if (!Requests.accepts(model.requests, request)) return { model }
+    return loadCurrent(evo(model, { requests: () => Requests.succeed(model.requests, request) }), { kind: "success", text })
+  },
+  InvalidLine: ({ request, errors }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.succeed(model.requests, request), fieldErrors: () => errors, notice: () => ({ kind: "error" as const, text: "Correct the highlighted line fields." }) }),
+  },
+  Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
   },
 })
 
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
+  model: {
+    session: Session.empty(), requests: Requests.empty(), summary: null,
+    orderNumber: "", customer: "", lineNumber: "1", description: "", quantity: "1", unitAmountMinor: "", invoiceNumber: "",
+    fieldErrors: {}, notice: { kind: "info", text: "Create an order, add lines, then issue and pay its invoice." },
+  },
+})
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`
+const fieldError = (h: HtmlBuilder<Message>, model: Model, name: string) =>
+  model.fieldErrors[name] === undefined ? h.empty : h.p([h.Class("notice notice-error")], [model.fieldErrors[name]!])
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const summary = model.summary
   const invoice = summary?.invoice
-  const canMutate = model.token !== "bob-demo"
   const isDraft = summary?.order.status === "draft"
-
+  const pending = Requests.pending(model.requests)
   return {
     title: "Orders and invoices",
     body: shell(h, {
       title: "Orders and invoices",
       lede: "Create a draft order, add priced lines, issue an invoice, and record payment with optimistic versions.",
       notice: model.notice,
-      session: {
-        token: model.token,
-        onInput: (value) => Message.ChangedToken({ value }),
-        onSelect: (token) => Message.SelectedToken({ token }),
-      },
-      children: [
-        h.div(
-          [h.Class("split")],
-          [
-            h.section(
-              [h.Class("panel stack")],
-              [
-                h.div([h.Class("actions")], [
-                  h.h2([], ["Current order"]),
-                  quietButton(h, {
-                    label: model.busy ? "Loading…" : "Reload",
-                    message: Message.ClickedReload(),
-                    disabled: model.busy || summary === null,
-                  }),
-                ]),
-                summary === null
-                  ? h.p([h.Class("empty")], ["No order selected. Create one to begin the billing flow."])
-                  : h.div([h.Class("stack")], [
-                    dataTable(h, {
-                      caption: "Order summary",
-                      columns: ["Number", "Customer", "Status", "Total", "Version"],
-                      rows: [summary.order],
-                      key: (order) => order.id,
-                      cells: (order) => [order.number, order.customer, order.status, money(order.totalMinor), String(order.version)],
-                    }),
-                    dataTable(h, {
-                      caption: "Order lines",
-                      columns: ["#", "Description", "Quantity", "Unit amount", "Line total"],
-                      rows: summary.lines,
-                      key: (line) => line.id,
-                      cells: (line) => [
-                        String(line.lineNumber),
-                        line.description,
-                        String(line.quantity),
-                        money(line.unitAmountMinor),
-                        money(line.quantity * line.unitAmountMinor),
-                      ],
-                    }),
-                    dataTable(h, {
-                      caption: "Invoice",
-                      columns: ["Number", "Status", "Total", "Version"],
-                      rows: invoice === null || invoice === undefined ? [] : [invoice],
-                      key: (item) => item.id,
-                      cells: (item) => [item.number, item.status, money(item.totalMinor), String(item.version)],
-                    }),
-                    invoice?.status === "issued"
-                      ? primaryButton(h, {
-                        label: "Record payment",
-                        message: Option.some(Message.ClickedPay()),
-                        type: "button",
-                        disabled: model.busy || !canMutate,
-                      })
-                      : h.empty,
-                  ]),
-              ],
-            ),
-            h.section(
-              [h.Class("panel stack")],
-              [
-                h.form(
-                  [h.Class("stack"), h.OnSubmit(Message.ClickedCreate())],
-                  [
-                    h.h2([], ["1. Create order"]),
-                    field(h, {
-                      id: "order-number",
-                      label: "Order number",
-                      children: textInput(h, { id: "order-number", value: model.orderNumber, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedOrderNumber({ value }) }),
-                    }),
-                    field(h, {
-                      id: "customer",
-                      label: "Customer",
-                      children: textInput(h, { id: "customer", value: model.customer, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedCustomer({ value }) }),
-                    }),
-                    primaryButton(h, { label: "Create order", message: Option.none(), type: "submit", disabled: model.busy || !canMutate }),
-                  ],
-                ),
-                h.form(
-                  [h.Class("stack"), h.OnSubmit(Message.ClickedAddLine())],
-                  [
-                    h.h2([], ["2. Add line"]),
-                    field(h, {
-                      id: "line-number",
-                      label: "Line number",
-                      children: textInput(h, { id: "line-number", value: model.lineNumber, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedLineNumber({ value }) }),
-                    }),
-                    field(h, {
-                      id: "description",
-                      label: "Description",
-                      children: textInput(h, { id: "description", value: model.description, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedDescription({ value }) }),
-                    }),
-                    field(h, {
-                      id: "quantity",
-                      label: "Quantity",
-                      children: textInput(h, { id: "quantity", value: model.quantity, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedQuantity({ value }) }),
-                    }),
-                    field(h, {
-                      id: "unit-amount",
-                      label: "Unit amount (minor units)",
-                      children: textInput(h, { id: "unit-amount", value: model.unitAmountMinor, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedUnitAmountMinor({ value }) }),
-                    }),
-                    primaryButton(h, { label: "Add line", message: Option.none(), type: "submit", disabled: model.busy || !canMutate || !isDraft }),
-                  ],
-                ),
-                h.form(
-                  [h.Class("stack"), h.OnSubmit(Message.ClickedIssue())],
-                  [
-                    h.h2([], ["3. Issue invoice"]),
-                    field(h, {
-                      id: "invoice-number",
-                      label: "Invoice number",
-                      children: textInput(h, { id: "invoice-number", value: model.invoiceNumber, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedInvoiceNumber({ value }) }),
-                    }),
-                    primaryButton(h, { label: "Issue invoice", message: Option.none(), type: "submit", disabled: model.busy || !canMutate || !isDraft }),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ],
+      session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
+      children: [h.div([h.Class("split")], [
+        h.section([h.Class("panel stack")], [
+          h.div([h.Class("actions")], [h.h2([], ["Current order"]), quietButton(h, { label: pending ? "Loading…" : "Reload", message: Message.ClickedReload(), disabled: pending || summary === null })]),
+          summary === null ? h.p([h.Class("empty")], ["No order selected. Create one to begin the billing flow."]) : h.div([h.Class("stack")], [
+            dataTable(h, { caption: "Order summary", columns: ["Number", "Customer", "Status", "Total", "Version"], rows: [summary.order], key: (order) => order.id, cells: (order) => [order.number, order.customer, order.status, money(order.totalMinor), String(order.version)] }),
+            dataTable(h, { caption: "Order lines", columns: ["#", "Description", "Quantity", "Unit amount", "Line total"], rows: summary.lines, key: (line) => line.id, cells: (line) => [String(line.lineNumber), line.description, String(line.quantity), money(line.unitAmountMinor), money(line.quantity * line.unitAmountMinor)] }),
+            dataTable(h, { caption: "Invoice", columns: ["Number", "Status", "Total", "Version"], rows: invoice === null || invoice === undefined ? [] : [invoice], key: (item) => item.id, cells: (item) => [item.number, item.status, money(item.totalMinor), String(item.version)] }),
+            invoice?.status === "issued" ? primaryButton(h, { label: "Record payment", message: Option.some(Message.ClickedPay()), type: "button", disabled: pending }) : h.empty,
+          ]),
+        ]),
+        h.section([h.Class("panel stack")], [
+          h.form([h.Class("stack"), h.OnSubmit(Message.ClickedCreate())], [
+            h.h2([], ["1. Create order"]),
+            field(h, { id: "order-number", label: "Order number", children: textInput(h, { id: "order-number", value: model.orderNumber, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedOrderNumber({ value }) }) }),
+            field(h, { id: "customer", label: "Customer", children: textInput(h, { id: "customer", value: model.customer, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedCustomer({ value }) }) }),
+            primaryButton(h, { label: "Create order", message: Option.none(), type: "submit", disabled: pending }),
+          ]),
+          h.form([h.Class("stack"), h.OnSubmit(Message.ClickedAddLine())], [
+            h.h2([], ["2. Add line"]),
+            h.div([h.Class("stack")], [
+              field(h, { id: "line-number", label: "Line number", children: textInput(h, { id: "line-number", value: model.lineNumber, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedLineNumber({ value }) }) }),
+              fieldError(h, model, "lineNumber"),
+            ]),
+            field(h, { id: "description", label: "Description", children: textInput(h, { id: "description", value: model.description, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedDescription({ value }) }) }),
+            h.div([h.Class("stack")], [
+              field(h, { id: "quantity", label: "Quantity", children: textInput(h, { id: "quantity", value: model.quantity, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedQuantity({ value }) }) }),
+              fieldError(h, model, "quantity"),
+            ]),
+            h.div([h.Class("stack")], [
+              field(h, { id: "unit-amount", label: "Unit amount (minor units)", children: textInput(h, { id: "unit-amount", value: model.unitAmountMinor, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedUnitAmountMinor({ value }) }) }),
+              fieldError(h, model, "unitAmountMinor"),
+            ]),
+            primaryButton(h, { label: "Add line", message: Option.none(), type: "submit", disabled: pending || !isDraft }),
+          ]),
+          h.form([h.Class("stack"), h.OnSubmit(Message.ClickedIssue())], [
+            h.h2([], ["3. Issue invoice"]),
+            field(h, { id: "invoice-number", label: "Invoice number", children: textInput(h, { id: "invoice-number", value: model.invoiceNumber, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedInvoiceNumber({ value }) }) }),
+            primaryButton(h, { label: "Issue invoice", message: Option.none(), type: "submit", disabled: pending || !isDraft }),
+          ]),
+        ]),
+      ])],
     }),
   }
 }

@@ -2,7 +2,7 @@ import { Config, Effect, Layer, pipe } from "effect"
 import { ClusterWorkflowEngine, ShardingConfig, SingleRunner, SqlRunnerStorage } from "effect/unstable/cluster"
 import { PersistedQueue } from "effect/unstable/persistence"
 import { DurableQueue } from "effect/unstable/workflow"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ReportArtifactOutput } from "./output.ts"
 import { ReportExportEntitlements } from "./subscriptions.ts"
 import { ReportArtifactQueue, FinancialReportExport, executeFinancialReportExport } from "./workflow.ts"
@@ -11,7 +11,7 @@ import { writeReportArtifact } from "./writer.ts"
 const configuredServices = Effect.gen(function* () {
   const directory = yield* Config.string("REPORT_EXPORTS_OUTPUT_DIR")
   const output = Layer.succeed(ReportArtifactOutput, { directory })
-  return Layer.mergeAll(output, ExampleAuthentication, ReportExportEntitlements)
+  return Layer.mergeAll(output, ExampleIdentity, ReportExportEntitlements)
 })
 
 export const ReportExportServices = Layer.unwrap(configuredServices)

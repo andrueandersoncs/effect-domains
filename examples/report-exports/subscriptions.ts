@@ -4,7 +4,7 @@ import { Authorization } from "effect-domains/authorization"
 import { EntitlementUnavailable, Entitlements } from "effect-domains/entitlements"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 
 const TenantIdSchema = pipe(Schema.NonEmptyString, identifier)
 const SubscriptionStatusSchema = Schema.Literals(["active", "canceled"])

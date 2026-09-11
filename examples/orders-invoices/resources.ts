@@ -1,4 +1,4 @@
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 import { Schema } from "effect"

@@ -7,8 +7,8 @@ import { ReportExportOperatorAuthorization } from "./authorization.ts"
 
 const metrics = Effect.fn("ReportExports.metrics")(function* (request: HttpServerRequest.HttpServerRequest) {
   const authenticator = yield* AuthorizationRpc.Authenticator
-  const subject = yield* authenticator.authenticate(request.headers)
-  yield* pipe(Authorization.requireSubject(ReportExportOperatorAuthorization), Effect.provideService(AuthorizationSubject, subject))
+  const authenticated = yield* authenticator.authenticate(request.headers)
+  yield* pipe(Authorization.requireSubject(ReportExportOperatorAuthorization), Effect.provideService(AuthorizationSubject, authenticated))
 
   const body = yield* PrometheusMetrics.format({ prefix: "report_exports" })
 
@@ -20,6 +20,7 @@ const metrics = Effect.fn("ReportExports.metrics")(function* (request: HttpServe
 const metricsHandler = flow(metrics, Effect.catchTags({
   Unauthenticated: () => Effect.sync(() => HttpServerResponse.empty({ status: 401 })),
   Forbidden: () => Effect.sync(() => HttpServerResponse.empty({ status: 403 })),
+  IdentityUnavailable: () => Effect.sync(() => HttpServerResponse.empty({ status: 503 })),
 }))
 
 export const ReportExportRoutes = HttpRouter.add("GET", "/operator/metrics", metricsHandler)

@@ -19,22 +19,33 @@ Generate one new 32-byte key in unpadded Base64URL form. Save the resulting valu
 export FIELD_NOTES_ENCRYPTION_KEY="$(bun -e 'console.log(Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"))')"
 ```
 
-Start a disposable instance in the **server terminal**. The key must be in this server process's environment:
+Start a disposable instance in the **server terminal**. The encryption key and required bootstrap identity settings must be in this process's environment; keep the identity database physically separate from the field-notes database:
 
 ```bash
 export PORT=3002
 export FIELD_NOTES_DB="$(mktemp -d)/field-notes.sqlite"
+export EFFECT_DOMAINS_IDENTITY_DB="$(mktemp -d)/field-notes-identity.sqlite"
+export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 bun run field-notes:server
 ```
 
-In a separate **client terminal**, configure only the RPC endpoint and the demo bearer token:
+In a separate **client terminal**, configure the endpoint and issue the editor, reader, outsider, and administrator credentials used below:
 
 ```bash
 export FIELD_NOTES_URL=http://127.0.0.1:3002/rpc/v1
-export FIELD_NOTES_TOKEN=alice-demo
+export DEMO_PASSWORD='choose-a-local-bootstrap-password' # same value used by the server
+issue_notes_token() {
+  bun run field-notes identity.login --input-json "$(
+    bun -e 'const [username, password] = process.argv.slice(2); if (!password) throw new Error("DEMO_PASSWORD is required"); console.log(JSON.stringify({ username, password }))' "$1" "$DEMO_PASSWORD"
+  )" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).token)'
+}
+export FIELD_NOTES_TOKEN="$(issue_notes_token alice)"
+export BOB_TOKEN="$(issue_notes_token bob)"
+export OUTSIDER_TOKEN="$(issue_notes_token outsider)"
+export ADMIN_TOKEN="$(issue_notes_token admin)"
 ```
 
-The client does not receive the encryption key; the server's storage codec encrypts and decrypts bodies. The public tokens are demonstration credentials, not a production login system: `alice-demo` is an editor, `bob-demo` a reader, `admin-demo` an administrator, and `outsider-demo` an editor in another tenant. Their exact server-owned claims are in the shared [authentication fixture](../../packages/example-support/src/authentication.ts).
+The client does not receive the encryption key; the server's storage codec encrypts and decrypts bodies. Tokens are secret, per-call bearer credentials. `identity.current` reports the verified subject and expiry; `identity.logout` revokes the selected session. Accounts bootstrap only once and sessions expire after the configured lifetime; see [example identity](../README.md#example-identity).
 
 ## Run it
 
@@ -58,18 +69,18 @@ The command exits nonzero and does not create a report.
 Bob is a reader. He can read the report Alice created even though he is not its owner—reports have no owner field—and he can see it regardless of tenant-based partitioning:
 
 ```bash
-FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
-FIELD_NOTES_TOKEN=bob-demo bun run field-notes reports.create --input-json '{"id":"report_northyardsurvey","title":"Denied survey","site":"North Yard","body":"A reader cannot file reports."}'
-FIELD_NOTES_TOKEN=outsider-demo bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
+FIELD_NOTES_TOKEN="$BOB_TOKEN" bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
+FIELD_NOTES_TOKEN="$BOB_TOKEN" bun run field-notes reports.create --input-json '{"id":"report_northyardsurvey","title":"Denied survey","site":"North Yard","body":"A reader cannot file reports."}'
+FIELD_NOTES_TOKEN="$OUTSIDER_TOKEN" bun run field-notes reports.get --input-json '{"id":"report_pump7handover"}'
 ```
 
-Both get commands return the full report, including plaintext body. The attempted reader create exits nonzero with `Forbidden`. `outsider-demo` is an editor in a different tenant but can also list, get, create, and update this global collection. Editors and administrators have create/update access; only administrators have remove access. Missing or unknown bearer credentials fail with `Unauthenticated`.
+Both get commands return the full report, including plaintext body. The attempted reader create exits nonzero with `Forbidden`. The issued `outsider` session is an editor in a different tenant but can also list, get, create, and update this global collection. Editors and administrators have create/update access; only administrators have remove access. Missing, expired, revoked, or unknown bearer credentials fail with `Unauthenticated`.
 
 The exported mutation for an existing report is **`reports.update`**, not `reports.patch`. Update requires a complete replacement record, including the unchanged identifier:
 
 ```bash
 bun run field-notes reports.update --input-json '{"id":"report_pump7handover","title":"Pump 7 pressure-test handover","site":"North Yard","body":"Gauge held 180 psi for ten minutes. Photo attached to the work order."}'
-FIELD_NOTES_TOKEN=admin-demo bun run field-notes reports.remove --input-json '{"id":"report_pump7handover"}'
+FIELD_NOTES_TOKEN="$ADMIN_TOKEN" bun run field-notes reports.remove --input-json '{"id":"report_pump7handover"}'
 ```
 
 The update succeeds for Alice; the administrator remove succeeds and returns no value. `reports.get`, `.list`, `.create`, `.update`, and `.remove` are the published generated operations. The resource's local repository has a patch method, but this application does **not** export `reports.patch`; do not assume a generic partial-update endpoint.
@@ -97,11 +108,11 @@ An undeclared filter (including `title`), a malformed cursor, a cursor made for 
 
 ## Browser, admin, and MCP
 
-Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Foldkit report page. It starts with Alice's token and offers the four demo-token chips and a bearer-token field. The page lists title, site, and identifier; **Open** fetches the full report and fills the edit form, while **File report** calls `reports.create` and **Save changes** calls full `reports.update`. Its form trims the identifier, title, site, and body before sending them.
+Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Foldkit report page. It starts signed out; use its login form with a seeded account password. The page uses the canonical native RPC client and retains the issued bearer token only in memory. It lists title, site, and identifier; **Open** fetches the full report and fills the edit form, while **File report** calls `reports.create` and **Save changes** calls full `reports.update`. Its form trims the identifier, title, site, and body, and shows field-specific validation failures.
 
-The browser lists by exact site with a fixed request limit of 25. It stores a returned cursor but renders no next-page control, so use the CLI or generated admin to walk later pages. **Remove** is visible regardless of role; with a reader token it fails in the page's error notice because server policy remains authoritative.
+**Load more** appends later site-filtered pages. Changing the site filter or identity clears rows and invalidates stale requests; server authorization remains authoritative.
 
-The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Admin uses the same generated contracts, per-call bearer authentication, declared site filter, and cursor navigation. MCP tools likewise use the same policy; supply arguments as `{ "input": <RPC payload> }`.
+The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Paste a real issued credential into admin; MCP tools likewise use the same policy and arguments `{ "input": <RPC payload> }`.
 
 ## Encryption, persistence, and settings
 
@@ -119,6 +130,8 @@ This is field-level at-rest protection for bodies only. It is not whole-database
 | --- | --- | --- | --- |
 | `FIELD_NOTES_ENCRYPTION_KEY` | required | server | unpadded Base64URL encoding of exactly 32 bytes for AES-256-GCM |
 | `FIELD_NOTES_DB` | `data/field-notes.sqlite` | server | SQLite database path |
+| `EFFECT_DOMAINS_IDENTITY_DB` | `data/identity.sqlite` | server | Separate SQLite identity store |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | required | server | Bootstrap password for the seed accounts |
 | `PORT` | `3000` | server | loopback HTTP port |
 | `FIELD_NOTES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |
 | `FIELD_NOTES_TOKEN` | unset | CLI | bearer token sent to each RPC call |

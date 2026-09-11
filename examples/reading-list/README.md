@@ -112,9 +112,7 @@ Remove has a void result, not a deleted book. The following get exits nonzero wi
 
 ## Use the browser or MCP
 
-At `/`, use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors filter the list. **Reload** fetches current data after CLI changes. This hand-authored page requests 25 rows and has no next-page control; use the CLI cursor workflow or `/admin` for subsequent pages.
-
-Verification caveat (2026-09-11): the documentation smoke rendered this page, but its initial list remained **Loading…** in headless Chromium while the CLI workflow passed. Browser mutations were not verified in that run. See the [verification record](../../docs/wiki/validation-strategy.md#2026-09-11-standalone-example-guides); the CLI steps above remain the exercised walkthrough.
+At `/`, use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors refresh through the canonical native client and invalidate the prior query. **Reload** fetches current data after CLI changes, and **Load more books** appends a returned cursor page. Form validation, including invalid rating or notes, appears beside the relevant field; saves and removals refresh the list.
 
 The generated admin exposes the same five operations and their schemas. The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
 

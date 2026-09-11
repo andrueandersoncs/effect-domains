@@ -45,7 +45,7 @@ The result is a page with `items` and `nextCursor`. Its historical item retains 
 }
 ```
 
-The generated list orders identifiers ascending. Its `limit` maximum is 50 (and is also the default); a non-null `nextCursor` can be supplied unchanged with the same filters to fetch another page. The application’s Foldkit page deliberately requests one 50-item page and has no next-page control.
+The generated list orders identifiers ascending. Its `limit` maximum is 50 (and is also the default); a non-null `nextCursor` can be supplied unchanged with the same filters to fetch another page. The Foldkit page appends later pages with **Load more**.
 
 ### What the upgrade changed
 
@@ -105,7 +105,7 @@ bun run editorial-calendar inspect documents.create
 
 With the server above:
 
-- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the Foldkit planning page. It loads up to 50 articles, lets you add, edit, and remove one, and sends blank summary/publication inputs as `null`.
+- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the Foldkit planning page. Its native client loads and appends up to 50 articles per page; **Load more** follows a returned cursor. Add, edit, and remove one article; blank summary/publication inputs become `null`, and field-specific validation errors are displayed. Saving or removing refreshes the list.
 - [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) is the generated admin for the same operations. It needs the earlier `bun run build`.
 - `http://127.0.0.1:3000/mcp` is Streamable HTTP MCP. Its generated tools wrap the same canonical payload as `{ "input": <payload> }`; `/rpc/v1` is Effect JSON RPC, not REST.
 

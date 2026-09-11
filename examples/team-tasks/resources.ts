@@ -1,6 +1,6 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { ExampleSubjectSchema } from "@effect-domains/example-support/authentication"
+import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { TaskSchema } from "./domain.ts"
 
 const p = Authorization.for({ resource: TaskSchema, subject: ExampleSubjectSchema })

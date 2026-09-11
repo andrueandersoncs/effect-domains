@@ -3,4 +3,18 @@ import { Resource } from "effect-domains/resource"
 import { ReservationSchema, StockSchema } from "./domain.ts"
 
 export const StockResource = Resource.make({ authorization: Authorization.public, name: "stock", schema: StockSchema, operations: { get: true } })
-export const ReservationResource = Resource.make({ authorization: Authorization.public, name: "reservations", schema: ReservationSchema, operations: { get: true } })
+
+// Creation stays private because reserve owns the stock check and transaction.
+export const ReservationResource = Resource.make({
+  authorization: Authorization.public,
+  name: "reservations",
+  schema: ReservationSchema,
+  operations: {
+    get: true,
+    create: {
+      defaults: { status: "held" },
+      generated: { id: "uuidV7", createdAt: "now" },
+      publish: false,
+    },
+  },
+})

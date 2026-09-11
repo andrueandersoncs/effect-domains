@@ -1,6 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { Layer, pipe } from "effect"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { PurchasedGuidesApplication } from "./application.ts"
@@ -8,7 +8,7 @@ import { PurchasedGuideEntitlements, seedPurchasedGuides } from "./entitlements.
 import { PurchasedGuidesMigrations } from "./migrations.ts"
 import { PurchasedGuidesWebAssets } from "./web/assets.ts"
 
-const services = Layer.mergeAll(ExampleAuthentication, PurchasedGuideEntitlements)
+const services = Layer.mergeAll(ExampleIdentity, PurchasedGuideEntitlements)
 const initialize = seedPurchasedGuides()
 
 const web = ExampleWeb.layerHttp({

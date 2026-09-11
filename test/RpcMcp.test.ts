@@ -3,7 +3,7 @@ import { Array, Effect, Equivalence, Layer, Option, Ref, Schema, type Types, pip
 import { McpSchema } from "effect/unstable/ai"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
@@ -200,16 +200,20 @@ const identityRoutes = pipe(
 
 it.effect("MCP authenticates each call rather than trusting sessions or captured identity", () => pipe(
   Effect.gen(function* () {
-    const routes = Layer.provide(identityRoutes, ExampleAuthentication)
+    const authenticator = yield* AuthorizationRpc.Authenticator
+    const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
+    const routes = pipe(identityRoutes, Layer.provide(authentication))
     const server = yield* makeServer(routes)
     const headers = yield* openSession(server.handler)
     const anonymous = yield* call(server.handler, headers, 2, "identity.subject", null)
     expect(anonymous.result.isError).toBe(true)
     expect(anonymous.result.content).toEqual([{ type: "text", text: '{"_tag":"Unauthenticated"}' }])
+    const aliceSession = yield* sessionFor("alice")
+    const bobSession = yield* sessionFor("bob")
     const alice = new globalThis.Headers(headers)
-    alice.set("authorization", "Bearer alice-demo")
+    alice.set("authorization", aliceSession.authorization)
     const bob = new globalThis.Headers(headers)
-    bob.set("authorization", "Bearer bob-demo")
+    bob.set("authorization", bobSession.authorization)
 
     const aliceCall = call(server.handler, alice, 3, "identity.subject", null)
     const bobCall = call(server.handler, bob, 4, "identity.subject", null)
@@ -221,11 +225,12 @@ it.effect("MCP authenticates each call rather than trusting sessions or captured
     expect(unauthenticatedAgain.result.isError).toBe(true)
     const unconfigured = yield* makeServer(identityRoutes)
     const unconfiguredHeaders = yield* openSession(unconfigured.handler)
-    unconfiguredHeaders.set("authorization", "Bearer alice-demo")
+    unconfiguredHeaders.set("authorization", aliceSession.authorization)
     const missingAuthenticator = yield* call(unconfigured.handler, unconfiguredHeaders, 2, "identity.subject", null)
     expect(missingAuthenticator.result.content).toEqual([{ type: "text", text: '{"_tag":"Unauthenticated"}' }])
   }),
   Effect.scoped,
+  Effect.provide(TestIdentity),
 ))
 
 it.effect("MCP closes handler scopes after success and failure without closing the session", () => pipe(

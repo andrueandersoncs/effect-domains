@@ -2,7 +2,7 @@ import { BunRuntime } from "@effect/platform-bun"
 import { Config, Effect, Layer, pipe } from "effect"
 import { ExampleWeb } from "@effect-domains/example-web/serve"
 import { ApplicationBun } from "effect-domains/application-bun"
-import { ExampleAuthentication } from "@effect-domains/example-support/authentication"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { FieldNotesApplication } from "./application.ts"
 import { FieldNotesMigrations } from "./migrations.ts"
 import { FieldNoteEncryption, makeFieldNoteEncryption } from "./storage.ts"
@@ -13,7 +13,7 @@ const encryption = pipe(Effect.gen(function* () {
   return yield* makeFieldNoteEncryption(encodedKey)
 }), Layer.effect(FieldNoteEncryption))
 
-const services = Layer.mergeAll(encryption, ExampleAuthentication)
+const services = Layer.mergeAll(encryption, ExampleIdentity)
 
 const web = ExampleWeb.layerHttp({
   title: "Field notes",

@@ -1,4 +1,4 @@
-import { Array, Effect, Option, Schema, pipe } from "effect"
+import { Array, Effect, Function, Match, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { Authorization } from "effect-domains/authorization"
 import { BillingRpcs, OrderSummary } from "./contracts.ts"
@@ -20,14 +20,18 @@ import {
   InvalidOrderTransition,
   InvoiceNotFound,
   InvoiceRequiresLines,
+  InvoiceSchema,
   MinorUnitsSchema,
   OrderNotFound,
+  OrderSchema,
+  OrderLineSchema,
   TenantIdSchema,
   TotalOverflow,
   VersionConflict,
 } from "./domain.ts"
 
 import { BillingReadAuthorization, BillingWriteAuthorization, InvoicesResource, OrderLinesResource, OrdersResource } from "./resources.ts"
+import { NestedRow } from "./projection.ts"
 type SqliteRow = Readonly<Record<string, unknown>>
 
 const ScopedOrderInputSchema = Schema.Struct({
@@ -72,15 +76,50 @@ const PayInvoiceRecordSchema = Schema.Struct({
   tenantId: TenantIdSchema,
 })
 
-const OrderSummaryStorageSchema = Schema.Struct({
-  ...OrdersResource.table.rowSchema.fields,
-  lines: Schema.fromJsonString(Schema.Array(OrderLinesResource.table.storageSchema)),
-  invoice: Schema.NullOr(Schema.fromJsonString(InvoicesResource.table.storageSchema)),
-})
+const OrderProjection = NestedRow.make({ table: OrdersResource.table, fields: [
+  "id",
+  "tenantId",
+  "number",
+  "customer",
+  "status",
+  "totalMinor",
+  "version",
+] as const })
 
-interface OrderSummaryStorage extends Schema.Schema.Type<typeof OrderSummaryStorageSchema> {}
+const OrderLineProjection = NestedRow.make({ table: OrderLinesResource.table, fields: [
+  "id",
+  "tenantId",
+  "orderId",
+  "lineNumber",
+  "description",
+  "quantity",
+  "unitAmountMinor",
+] as const })
+
+const InvoiceProjection = NestedRow.make({ table: InvoicesResource.table, fields: [
+  "id",
+  "tenantId",
+  "orderId",
+  "number",
+  "status",
+  "totalMinor",
+  "version",
+] as const })
+
+const OrderSummaryProjectionSchema = pipe(
+  Schema.Struct({
+    order: OrderProjection.json,
+    lines: Schema.fromJsonString(Schema.Array(OrderLineProjection.schema)),
+    invoice: Schema.NullOr(InvoiceProjection.json),
+  }),
+  Schema.decodeTo(OrderSummary),
+)
 
 const IdRowSchema = Schema.Struct({ id: Schema.String })
+// Use encoded constructors because SqlSchema encodes request fields before execute.
+const OrderInsertSchema = Schema.toEncoded(OrderSchema)
+const OrderLineInsertSchema = Schema.toEncoded(OrderLineSchema)
+const InvoiceInsertSchema = Schema.toEncoded(InvoiceSchema)
 
 
 const createOrderRecord = SqlSchema.findOne({
@@ -89,10 +128,17 @@ const createOrderRecord = SqlSchema.findOne({
   execute: Effect.fn("Billing.createOrder.record")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
+    const value = OrderInsertSchema.make({
+      tenantId: input.tenantId,
+      number: input.number,
+      customer: input.customer,
+      status: "draft",
+      totalMinor: 0,
+      version: 1,
+    })
+
     return yield* sql<SqliteRow>`
-      INSERT INTO ${sql(OrdersResource.table.name)}
-        (${sql("tenantId")}, ${sql("number")}, ${sql("customer")}, ${sql("status")}, ${sql("totalMinor")}, ${sql("version")})
-      VALUES (${input.tenantId}, ${input.number}, ${input.customer}, ${"draft"}, ${0}, ${1})
+      INSERT INTO ${sql(OrdersResource.table.name)} ${sql.insert(value)}
       RETURNING *
     `
 
@@ -154,10 +200,17 @@ const insertLineRecord = SqlSchema.findOne({
   execute: Effect.fn("Billing.insertLineRecord")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
+    const value = OrderLineInsertSchema.make({
+      tenantId: input.tenantId,
+      orderId: input.orderId,
+      lineNumber: input.lineNumber,
+      description: input.description,
+      quantity: input.quantity,
+      unitAmountMinor: input.unitAmountMinor,
+    })
+
     return yield* sql<SqliteRow>`
-      INSERT INTO ${sql(OrderLinesResource.table.name)}
-        (${sql("tenantId")}, ${sql("orderId")}, ${sql("lineNumber")}, ${sql("description")}, ${sql("quantity")}, ${sql("unitAmountMinor")})
-      VALUES (${input.tenantId}, ${input.orderId}, ${input.lineNumber}, ${input.description}, ${input.quantity}, ${input.unitAmountMinor})
+      INSERT INTO ${sql(OrderLinesResource.table.name)} ${sql.insert(value)}
       RETURNING *
     `
 
@@ -170,10 +223,17 @@ const issueInvoiceRecord = SqlSchema.findOne({
   execute: Effect.fn("Billing.issueInvoice.record")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
+    const value = InvoiceInsertSchema.make({
+      tenantId: input.tenantId,
+      orderId: input.orderId,
+      number: input.number,
+      status: "issued",
+      totalMinor: input.totalMinor,
+      version: 1,
+    })
+
     return yield* sql<SqliteRow>`
-      INSERT INTO ${sql(InvoicesResource.table.name)}
-        (${sql("tenantId")}, ${sql("orderId")}, ${sql("number")}, ${sql("status")}, ${sql("totalMinor")}, ${sql("version")})
-      VALUES (${input.tenantId}, ${input.orderId}, ${input.number}, ${"issued"}, ${input.totalMinor}, ${1})
+      INSERT INTO ${sql(InvoicesResource.table.name)} ${sql.insert(value)}
       RETURNING *
     `
 
@@ -220,18 +280,14 @@ const markInvoicePaid = SqlSchema.findOneOption({
 
 const orderSummaryForTenant = SqlSchema.findOneOption({
   Request: ScopedOrderInputSchema,
-  Result: OrderSummaryStorageSchema,
+  Result: OrderSummaryProjectionSchema,
   execute: Effect.fn("Billing.orderSummaryForTenant")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
     return yield* sql<SqliteRow>`
-      SELECT o.*,
+      SELECT ${OrderProjection.object(sql, "o")} AS ${sql("order")},
         COALESCE((
-          SELECT json_group_array(json_object(
-            'id', l.id, 'tenantId', l.tenantId, 'orderId', l.orderId,
-            'lineNumber', l.lineNumber, 'description', l.description,
-            'quantity', l.quantity, 'unitAmountMinor', l.unitAmountMinor
-          ))
+          SELECT json_group_array(${OrderLineProjection.object(sql, "l")})
           FROM (
             SELECT * FROM ${sql(OrderLinesResource.table.name)}
             WHERE ${sql("tenantId")} = o.${sql("tenantId")} AND ${sql("orderId")} = o.${sql("id")}
@@ -239,10 +295,7 @@ const orderSummaryForTenant = SqlSchema.findOneOption({
           ) l
         ), '[]') AS ${sql("lines")},
         (
-          SELECT json_object(
-            'id', i.id, 'tenantId', i.tenantId, 'orderId', i.orderId,
-            'number', i.number, 'status', i.status, 'totalMinor', i.totalMinor, 'version', i.version
-          )
+          SELECT ${InvoiceProjection.object(sql, "i")}
           FROM ${sql(InvoicesResource.table.name)} i
           WHERE i.${sql("tenantId")} = o.${sql("tenantId")} AND i.${sql("orderId")} = o.${sql("id")}
           LIMIT 1
@@ -269,23 +322,6 @@ const invoiceForTenant = SqlSchema.findOneOption({
   }),
 })
 
-const summaryFromStorage = Effect.fn("Billing.summaryFromStorage")(function* (
-  stored: OrderSummaryStorage,
-) {
-  return OrderSummary.make({
-    order: {
-      id: stored.id,
-      tenantId: stored.tenantId,
-      number: stored.number,
-      customer: stored.customer,
-      status: stored.status,
-      totalMinor: stored.totalMinor,
-      version: stored.version,
-    },
-    lines: stored.lines,
-    invoice: stored.invoice,
-  })
-})
 
 
 const requireOrder = Effect.fn("Billing.requireOrder")(function* (
@@ -341,15 +377,15 @@ const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
   const transaction = Effect.gen(function* () {
     const current = yield* requireOrder(input.orderId, subject.tenantId)
 
-    if (current.version !== input.expectedVersion) {
+    if (current.order.version !== input.expectedVersion) {
       return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
     }
 
-    if (current.status !== "draft") {
-      return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "addLine", actual: current.status })
+    if (current.order.status !== "draft") {
+      return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "addLine", actual: current.order.status })
     }
 
-    const totalMinor = current.totalMinor + lineTotal
+    const totalMinor = current.order.totalMinor + lineTotal
     if (!Number.isSafeInteger(totalMinor)) return yield* TotalOverflow.make({ orderId: input.orderId })
 
     const record = AddLineRecordSchema.make({ ...input, tenantId: subject.tenantId, totalMinor })
@@ -360,8 +396,7 @@ const addLine = Effect.fn("Billing.addLine")(function* (input: AddLineInput) {
     }
 
     yield* insertLineRecord(record)
-    const summary = yield* requireOrder(input.orderId, subject.tenantId)
-    return yield* summaryFromStorage(summary)
+    return yield* requireOrder(input.orderId, subject.tenantId)
   })
 
   return yield* pipe(sql.withTransaction(transaction), Effect.catchTags(requiredRowFailures))
@@ -374,17 +409,22 @@ const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueIn
   const transaction = Effect.gen(function* () {
     const current = yield* requireOrder(input.orderId, subject.tenantId)
 
-    if (current.version !== input.expectedVersion) {
+    if (current.order.version !== input.expectedVersion) {
       return yield* VersionConflict.make({ resource: "order", id: input.orderId, expectedVersion: input.expectedVersion })
     }
 
-    if (current.status !== "draft") {
-      return yield* InvalidOrderTransition.make({ orderId: input.orderId, action: "issueInvoice", actual: current.status })
-    }
+    const invalidTransition = (actual: typeof current.order.status) => pipe(
+      InvalidOrderTransition.make({ orderId: input.orderId, action: "issueInvoice", actual }),
+      Effect.fail,
+    )
 
-    const summary = yield* summaryFromStorage(current)
+    yield* pipe(
+      Match.value(current.order.status),
+      Match.when("draft", Function.constant(Effect.void)),
+      Match.orElse(invalidTransition),
+    )
 
-    if (Array.isReadonlyArrayEmpty(summary.lines)) {
+    if (Array.isReadonlyArrayEmpty(current.lines)) {
       return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
     }
 
@@ -395,7 +435,7 @@ const issueInvoice = Effect.fn("Billing.issueInvoice")(function* (input: IssueIn
     const record = IssueInvoiceRecordSchema.make({
       ...input,
       tenantId: subject.tenantId,
-      totalMinor: summary.order.totalMinor,
+      totalMinor: current.order.totalMinor,
     })
 
     const changed = yield* markOrderInvoiced(record)
@@ -443,8 +483,7 @@ const getOrder = Effect.fn("Billing.getOrder")(function* (input: GetOrderInput) 
   yield* SqlClient.SqlClient
 
   const operation = Effect.gen(function* () {
-    const stored = yield* requireOrder(input.orderId, subject.tenantId)
-    return yield* summaryFromStorage(stored)
+    return yield* requireOrder(input.orderId, subject.tenantId)
   })
 
   return yield* pipe(operation, Effect.catchTags(persistenceFailures))
