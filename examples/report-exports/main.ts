@@ -11,7 +11,7 @@ import { ReportExportBackground, ReportExportExecution, ReportExportServices } f
 import { seedReportExportSubscriptions } from "./subscriptions.ts"
 
 const program = Effect.gen(function* () {
-  const executionDatabase = yield* pipe(Config.string("REPORT_EXPORTS_EXECUTION_DB"), Config.withDefault("report-exports-execution.sqlite"),)
+  const executionDatabase = yield* pipe(Config.string("REPORT_EXPORTS_EXECUTION_DB"), Config.withDefault("data/report-exports-execution.sqlite"),)
   const executionSql = privateSqlite(executionDatabase)
   const execution = pipe(ReportExportExecution, Layer.provide(executionSql))
   const services = Layer.mergeAll(ReportExportServices, execution)

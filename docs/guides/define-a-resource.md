@@ -134,7 +134,7 @@ pipe(
 )
 ```
 
-`ApplicationBun.run` supplies the `serve` command and generated CLI. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `library.sqlite` in the current directory.
+`ApplicationBun.run` supplies the `serve` command and generated CLI. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
 
 ## 4. Run and exercise the resource
 

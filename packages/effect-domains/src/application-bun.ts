@@ -90,7 +90,7 @@ const databaseFilename = (name: string, configured: Option.Option<string>) => {
   const environment = environmentPrefix(name)
 
   return Option.match(configured, {
-    onNone: () => pipe(Config.schema(Schema.NonEmptyString, `${environment}_DB`), Config.withDefault(`${name}.sqlite`)),
+    onNone: () => pipe(Config.schema(Schema.NonEmptyString, `${environment}_DB`), Config.withDefault(`data/${name}.sqlite`)),
     onSome: Effect.succeed,
   })
 }

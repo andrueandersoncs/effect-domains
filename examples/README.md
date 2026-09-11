@@ -31,7 +31,7 @@ bun run build
 bun run reading-list:server
 ```
 
-Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `<application>.sqlite` in the working directory.
+Use the generated CLI in another terminal: `bun run reading-list --help`. Servers default to `http://127.0.0.1:3000`; CLIs use `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and the matching `<APPLICATION>_URL` on the client when running multiple examples. Environment prefixes are uppercase with underscores: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Databases default to `data/<application>.sqlite`.
 
 Reading-list OTLP export: `bun run reading-list:server:otel` plus `bun run reading-list:otel …` against a collector on `127.0.0.1:4318`. See [reading-list traces](reading-list/README.md#opentelemetry-traces) and the [runtime reference](../docs/reference/runtime.md#opentelemetry-tracing).
 

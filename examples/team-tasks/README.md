@@ -120,7 +120,7 @@ The same server also provides the generated browser admin at [http://127.0.0.1:3
 
 | Setting | Default | Used by | Meaning |
 | --- | --- | --- | --- |
-| `TEAM_TASKS_DB` | `team-tasks.sqlite` | server | SQLite database path |
+| `TEAM_TASKS_DB` | `data/team-tasks.sqlite` | server | SQLite database path |
 | `PORT` | `3000` | server | loopback HTTP port |
 | `TEAM_TASKS_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |
 | `TEAM_TASKS_TOKEN` | unset | CLI | bearer token sent to each RPC call |

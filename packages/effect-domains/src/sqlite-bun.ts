@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Array, Context, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Record, Ref, Schema, pipe } from "effect"
 import { SqlClient, SqlError } from "effect/unstable/sql"
@@ -162,23 +164,42 @@ const enableForeignKeys = (context: Context.Context<SqlClient.SqlClient>) => {
   )
 }
 
+const stringEquals = Equivalence.strictEqual<string>()
+const relativeParents = HashMap.make([".", true], ["", true])
+
+const ensureParentDirectory = (filename: string) =>
+  Effect.sync(() => {
+    const memory = stringEquals(filename, ":memory:")
+    if (memory) return
+
+    const directory = dirname(filename)
+    const relative = HashMap.has(relativeParents, directory)
+    if (relative) return
+
+    mkdirSync(directory, { recursive: true })
+  })
+
 const sqlClient = (
   filename: string,
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
-) => {
-  const repositoryStore = Effect.flatMap(SqlClient.SqlClient, makeRepositoryStore)
-  const migrationStoreEffect = Effect.map(SqlClient.SqlClient, migrationStore(options))
-  const repositoryLayer = Layer.effect(RepositoryStore, repositoryStore)
-  const schemaStoreLayer = Layer.effect(SchemaStore, migrationStoreEffect)
-  const stores = Layer.mergeAll(repositoryLayer, schemaStoreLayer, values)
+) => pipe(
+  ensureParentDirectory(filename),
+  Effect.map(() => {
+    const repositoryStore = Effect.flatMap(SqlClient.SqlClient, makeRepositoryStore)
+    const migrationStoreEffect = Effect.map(SqlClient.SqlClient, migrationStore(options))
+    const repositoryLayer = Layer.effect(RepositoryStore, repositoryStore)
+    const schemaStoreLayer = Layer.effect(SchemaStore, migrationStoreEffect)
+    const stores = Layer.mergeAll(repositoryLayer, schemaStoreLayer, values)
 
-  const database = pipe(
-    SqliteClient.layer({ filename }),
-    Layer.tap(enableForeignKeys),
-  )
+    const database = pipe(
+      SqliteClient.layer({ filename }),
+      Layer.tap(enableForeignKeys),
+    )
 
-  return Layer.provideMerge(stores, database)
-}
+    return Layer.provideMerge(stores, database)
+  }),
+  Layer.unwrap,
+)
 
 export const SqliteBunRuntime = {
   sqlClient,

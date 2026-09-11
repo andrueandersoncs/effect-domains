@@ -120,7 +120,7 @@ The generated admin exposes resource operations plus `workshop.board`. MCP uses 
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `REPAIR_WORKSHOP_DB` | `repair-workshop.sqlite` | Application SQLite file; the walkthrough overrides it with a disposable path |
+| `REPAIR_WORKSHOP_DB` | `data/repair-workshop.sqlite` | Application SQLite file; the walkthrough overrides it with a disposable path |
 | `PORT` | `3000` | Loopback server port |
 | `REPAIR_WORKSHOP_URL` | `http://127.0.0.1:3000/rpc/v1` | Remote CLI endpoint |
 

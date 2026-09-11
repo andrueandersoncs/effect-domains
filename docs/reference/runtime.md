@@ -46,7 +46,7 @@ The prefix comes from `application.name`: uppercase, with each non-alphanumeric 
 | Variable | Used by | Default |
 | --- | --- | --- |
 | `PORT` | Server | `3000` |
-| `<PREFIX>_DB` | Server / worker, unless `database.filename` is set | `<application-name>.sqlite` in the working directory |
+| `<PREFIX>_DB` | Server / worker, unless `database.filename` is set | `data/<application-name>.sqlite` |
 | `<PREFIX>_URL` | Remote CLI | `http://127.0.0.1:3000/rpc/v1` |
 | `<PREFIX>_TOKEN` | Remote CLI | Absent; when set, sent as a bearer token |
 

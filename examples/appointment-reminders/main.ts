@@ -12,7 +12,7 @@ import { AppointmentRemindersWebAssets } from "./web/assets.ts"
 
 const executionDatabase =
   process.env.APPOINTMENT_REMINDERS_EXECUTION_DB
-  ?? "appointment-reminders.execution.sqlite"
+  ?? "data/appointment-reminders.execution.sqlite"
 
 const executionSql = privateSqlite(executionDatabase)
 

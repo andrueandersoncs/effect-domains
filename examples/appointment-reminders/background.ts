@@ -104,7 +104,7 @@ const writeInboxProjection = Effect.gen(function* () {
 
   const destination = yield* pipe(
     Config.string("APPOINTMENT_REMINDERS_PROJECTION_FILE"),
-    Config.withDefault("appointment-reminders.notifications.json"),
+    Config.withDefault("data/appointment-reminders.notifications.json"),
   )
 
   const notifications = yield* database<Readonly<Record<string, unknown>>>`

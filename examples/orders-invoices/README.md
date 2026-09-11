@@ -118,7 +118,7 @@ At `http://127.0.0.1:3001/`, the Foldkit page starts with `alice-demo` and walks
 
 | Setting | Default | Use |
 | --- | --- | --- |
-| `ORDERS_INVOICES_DB` | `orders-invoices.sqlite` | Server SQLite database |
+| `ORDERS_INVOICES_DB` | `data/orders-invoices.sqlite` | Server SQLite database |
 | `PORT` | `3000` | Loopback server port |
 | `ORDERS_INVOICES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `ORDERS_INVOICES_TOKEN` | unset | CLI bearer token |

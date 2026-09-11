@@ -115,7 +115,7 @@ All three surfaces are public for this example and bind only to `127.0.0.1`; no 
 
 | Setting | Default | Use |
 | --- | --- | --- |
-| `EDITORIAL_CALENDAR_DB` | `editorial-calendar.sqlite` | SQLite path used by both the legacy seed and current server |
+| `EDITORIAL_CALENDAR_DB` | `data/editorial-calendar.sqlite` | SQLite path used by both the legacy seed and current server |
 | `PORT` | `3000` | Loopback server port |
 | `EDITORIAL_CALENDAR_URL` | `http://127.0.0.1:3000/rpc/v1` | Remote CLI endpoint |
 

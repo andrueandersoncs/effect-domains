@@ -88,7 +88,7 @@ There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`
 
 | Setting | Default | Use |
 | --- | --- | --- |
-| `PURCHASED_GUIDES_DB` | `purchased-guides.sqlite` | Server SQLite database |
+| `PURCHASED_GUIDES_DB` | `data/purchased-guides.sqlite` | Server SQLite database |
 | `PORT` | `3000` | Loopback server port |
 | `PURCHASED_GUIDES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI RPC endpoint |
 | `PURCHASED_GUIDES_TOKEN` | unset | CLI bearer token |

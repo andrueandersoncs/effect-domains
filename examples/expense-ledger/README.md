@@ -34,7 +34,7 @@ PORT=3001 bun run expense-ledger:server
 export EXPENSE_LEDGER_URL=http://127.0.0.1:3001/rpc/v1
 ```
 
-`EXPENSE_LEDGER_DB` otherwise defaults to `expense-ledger.sqlite`; `EXPENSE_LEDGER_URL` otherwise defaults to the port-3000 RPC URL. A server restart with the same database retains rows and checks the ordered, frozen migration history rather than resetting the ledger.
+`EXPENSE_LEDGER_DB` otherwise defaults to `data/expense-ledger.sqlite`; `EXPENSE_LEDGER_URL` otherwise defaults to the port-3000 RPC URL. A server restart with the same database retains rows and checks the ordered, frozen migration history rather than resetting the ledger.
 
 ## Run it
 

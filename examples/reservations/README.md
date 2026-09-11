@@ -120,7 +120,7 @@ On later starts, the seed adds `book: 5` only if the SKU does not exist; it neve
 
 | Setting | Default | Use |
 | --- | --- | --- |
-| `RESERVATIONS_DB` | `reservations.sqlite` | SQLite database used by server startup and seed |
+| `RESERVATIONS_DB` | `data/reservations.sqlite` | SQLite database used by server startup and seed |
 | `PORT` | `3000` | Loopback server port |
 | `RESERVATIONS_URL` | `http://127.0.0.1:3000/rpc/v1` | Remote CLI endpoint |
 

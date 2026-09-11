@@ -28,7 +28,7 @@ bun run reading-list:server
 
 `build` compiles the Foldkit application and browser admin assets. Leave the server running, then open [http://127.0.0.1:3000/](http://127.0.0.1:3000/) for the reading list and [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) for generated operation forms.
 
-The server creates `reading-list.sqlite` in your working directory and applies the example’s checked-in migrations. Restarting preserves your books.
+The server creates `data/reading-list.sqlite` and applies the example’s checked-in migrations. Restarting preserves your books.
 
 ::: tip Port 3000 already in use?
 Start with `PORT=3001 bun run reading-list:server`, open port 3001 in the browser, and run `export READING_LIST_URL=http://127.0.0.1:3001/rpc/v1` in the second terminal before the commands below. The client does not read the server’s `PORT` variable.
@@ -137,4 +137,4 @@ The [reading-list source](../examples/reading-list/) is small enough to read end
 | CLI connection fails | Keep the server running. Match `READING_LIST_URL` to its port, including `/rpc/v1`. |
 | Startup reports missing admin assets | Run `bun run build` from the repository root, then restart. |
 | `ResourceNotFound` after copying a command | Use the identifier returned by your own create command. |
-| Startup reports migration or schema drift | Don’t delete an existing database to silence the error. Use `READING_LIST_DB=reading-list-tutorial.sqlite bun run reading-list:server` for a separate tutorial database; use the [migration guide](/guides/migrations) for data you need to retain. |
+| Startup reports migration or schema drift | Don’t delete an existing database to silence the error. Use `READING_LIST_DB=data/reading-list-tutorial.sqlite bun run reading-list:server` for a separate tutorial database; use the [migration guide](/guides/migrations) for data you need to retain. |

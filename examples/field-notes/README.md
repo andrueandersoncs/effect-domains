@@ -118,7 +118,7 @@ This is field-level at-rest protection for bodies only. It is not whole-database
 | Setting | Default | Used by | Meaning |
 | --- | --- | --- | --- |
 | `FIELD_NOTES_ENCRYPTION_KEY` | required | server | unpadded Base64URL encoding of exactly 32 bytes for AES-256-GCM |
-| `FIELD_NOTES_DB` | `field-notes.sqlite` | server | SQLite database path |
+| `FIELD_NOTES_DB` | `data/field-notes.sqlite` | server | SQLite database path |
 | `PORT` | `3000` | server | loopback HTTP port |
 | `FIELD_NOTES_URL` | `http://127.0.0.1:3000/rpc/v1` | CLI | RPC endpoint |
 | `FIELD_NOTES_TOKEN` | unset | CLI | bearer token sent to each RPC call |

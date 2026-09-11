@@ -26,7 +26,7 @@ const initialMigration = pipe(
 const seedVersionOneDraft = Effect.gen(function* () {
   const filename = yield* pipe(
     Config.schema(Schema.NonEmptyString, "EDITORIAL_CALENDAR_DB"),
-    Config.withDefault("editorial-calendar.sqlite"),
+    Config.withDefault("data/editorial-calendar.sqlite"),
   )
 
   const runtime = SqliteBunRuntime.sqlClient(filename, {

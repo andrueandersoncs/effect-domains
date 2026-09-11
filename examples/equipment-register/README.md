@@ -33,7 +33,7 @@ export EQUIPMENT_REGISTER_URL=http://127.0.0.1:3001/rpc/v1
 export EQUIPMENT_REGISTER_MCP_URL=http://127.0.0.1:3001/mcp
 ```
 
-Without overrides, the database is `equipment-register.sqlite`, the CLI URL is `http://127.0.0.1:3000/rpc/v1`, and the MCP client URL is `http://127.0.0.1:3000/mcp`. Reusing the same database across restarts preserves its rows and verifies its frozen imported migration history; choose a new database path for a clean repeat.
+Without overrides, the database is `data/equipment-register.sqlite`, the CLI URL is `http://127.0.0.1:3000/rpc/v1`, and the MCP client URL is `http://127.0.0.1:3000/mcp`. Reusing the same database across restarts preserves its rows and verifies its frozen imported migration history; choose a new database path for a clean repeat.
 
 ## Run it with the MCP SDK
 

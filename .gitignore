@@ -35,6 +35,7 @@ docs/.vitepress/cache/
 .DS_Store
 
 # example application data
+/data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
