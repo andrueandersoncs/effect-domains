@@ -4,10 +4,10 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
-import { Form } from "@effect-domains/example-web/form"
+import { Form } from "effect-domains/form"
 import { formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { ExpenseQueryInputSchema, ExpenseSchema, ExpenseTotalSchema } from "../domain.ts"
 import { ExpensesResource } from "../resources.ts"
 import { ExpenseLedgerOperations } from "../sqlite.ts"
@@ -105,7 +105,7 @@ const reload = (model: Model) => {
   const totaled = Requests.start(listed.state, "totals")
   return { state: totaled.state, commands: [ListExpenses({ request: listed.request, from: model.from, through: model.through, filterCategory: model.filterCategory }), LoadTotals({ request: totaled.request, from: model.from, through: model.through, filterCategory: model.filterCategory })] }
 }
-const pending = (model: Model, key?: string) => Requests.pending(model.requests, key)
+const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
 const clearQuery = (model: Model) => evo(model, {
   expenses: () => [],
   totals: () => [],

@@ -32,6 +32,8 @@ const SessionsSchema = Schema.Struct({
   revoked_at: Schema.NullOr(Schema.Int),
 })
 
+const AccountsUsernameReference = Table.reference(Accounts, [Accounts.identifier])
+
 const Sessions = Table.make({
   name: "identity_sessions",
   schema: SessionsSchema,
@@ -40,7 +42,7 @@ const Sessions = Table.make({
     foreignKeys: [{
       name: "identity_sessions_username_fkey",
       fields: ["username"],
-      references: { table: Accounts.name, fields: [Accounts.identifier] },
+      references: AccountsUsernameReference,
     }],
     indexes: [{ name: "identity_sessions_active", fields: ["token_digest", "expires_at"] }],
   },

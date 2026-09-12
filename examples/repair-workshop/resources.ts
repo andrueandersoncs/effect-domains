@@ -1,5 +1,6 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
+import { Table } from "effect-domains/table"
 import { CustomerSchema, RepairJobSchema, RepairJobTransitions, TechnicianSchema } from "./domain.ts"
 
 export const CustomersResource = Resource.make({
@@ -15,6 +16,9 @@ export const TechniciansResource = Resource.make({
   authorization: Authorization.public,
   operations: { ...Resource.crud, patch: true },
 })
+
+const CustomerIdReference = Table.reference(CustomersResource.table, ["id"])
+const TechnicianIdReference = Table.reference(TechniciansResource.table, ["id"])
 
 export const RepairJobsResource = Resource.make({
   name: "repair_jobs",
@@ -33,8 +37,8 @@ export const RepairJobsResource = Resource.make({
   },
   relations: {
     foreignKeys: [
-      { fields: ["customerId"], references: { table: "customers", fields: ["id"] } },
-      { fields: ["technicianId"], references: { table: "technicians", fields: ["id"] } },
+      { fields: ["customerId"], references: CustomerIdReference },
+      { fields: ["technicianId"], references: TechnicianIdReference },
     ],
     indexes: [
       { fields: ["status"] },

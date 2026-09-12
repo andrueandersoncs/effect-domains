@@ -10,10 +10,10 @@ import {
   shell,
   textInput,
 } from "@effect-domains/example-web/html"
-import { Form } from "@effect-domains/example-web/form"
+import { Form } from "effect-domains/form"
 import { formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { InventoryOperations } from "../sqlite.ts"
 import { QuantitySchema, ReservationSchema, StockSchema } from "../domain.ts"
 import { ReservationResource, StockResource } from "../resources.ts"
@@ -120,7 +120,7 @@ export const Confirm = transition("confirm", "Reservation confirmed.")
 export const Release = transition("release", "Reservation released and stock restored.")
 
 const starts = (model: Model, key: string) => Requests.start(model.requests, key)
-const requestPending = (model: Model, key?: string) => Requests.pending(model.requests, key)
+const requestPending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
 
 export const update = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {

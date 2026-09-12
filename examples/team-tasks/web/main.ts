@@ -15,7 +15,7 @@ import {
 } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
 import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
@@ -24,7 +24,7 @@ import { TasksResource } from "../resources.ts"
 
 const TeamTasksRpcs = IdentityRpcs.merge(TasksResource.group)
 const TaskRowSchema = TasksResource.table.rowSchema
-const TaskPageSchema = Page.schema(TaskRowSchema)
+const TaskPageSchema = TasksResource.contracts.list.successSchema
 type TaskRow = typeof TaskRowSchema.Type
 
 export const WebClient = RpcService.make({ name: "team-tasks/WebClient", group: TeamTasksRpcs })

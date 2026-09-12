@@ -23,6 +23,8 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
     relations: { unique: [{ name: "relational_parent_code", fields: ["code"] }] },
   })
 
+  const ConstrainedParentIdReference = Table.reference(constrainedParent, ["id"])
+
   const constrainedChild = Table.make({
     name: "relational_children",
     schema: ChildSchema,
@@ -30,7 +32,7 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
       foreignKeys: [{
         name: "relational_child_parent",
         fields: ["parentId"],
-        references: { table: "relational_parents", fields: ["id"] },
+        references: ConstrainedParentIdReference,
       }],
     },
   })
@@ -42,7 +44,7 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
       foreignKeys: [{
         name: "relational_child_parent",
         fields: ["parentId"],
-        references: { table: "relational_parents", fields: ["id"] },
+        references: ConstrainedParentIdReference,
       }],
       indexes: [{ name: "relational_child_parent_idx", fields: ["parentId"] }],
     },
@@ -127,6 +129,8 @@ const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebu
   interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
   const sourceParent = Table.make({ name: "rebuild_parents", schema: RelationalParentSchema })
 
+  const SourceParentIdReference = Table.reference(sourceParent, ["id"])
+
   const sourceChild = Table.make({
     name: "rebuild_children",
     schema: ChildSchema,
@@ -134,7 +138,7 @@ const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebu
       foreignKeys: [{
         name: "rebuild_child_parent",
         fields: ["parentId"],
-        references: { table: "rebuild_parents", fields: ["id"] },
+        references: SourceParentIdReference,
       }],
     },
   })

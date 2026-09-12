@@ -70,6 +70,7 @@ const PolicyRulesSchema = Schema.Struct({
   create: OptionalPolicySchema,
   update: OptionalPolicySchema,
   patch: OptionalPolicySchema,
+  transition: OptionalPolicySchema,
   remove: OptionalPolicySchema,
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
 
@@ -90,6 +91,7 @@ export const EntitlementRequirementsSchema = Schema.Struct({
   create: OptionalEntitlementListSchema,
   update: OptionalEntitlementListSchema,
   patch: OptionalEntitlementListSchema,
+  transition: OptionalEntitlementListSchema,
   remove: OptionalEntitlementListSchema,
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
 
@@ -219,6 +221,7 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
     readonly create: PolicyExpression<"next" | "subject"> | SubjectPolicy<Subject>
     readonly update: PolicyExpression<"row" | "next" | "subject"> | SubjectPolicy<Subject>
     readonly patch: PolicyExpression<"row" | "next" | "subject"> | SubjectPolicy<Subject>
+    readonly transition: PolicyExpression<"row" | "next" | "subject"> | SubjectPolicy<Subject>
     readonly remove: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>
   }>>(definition: Readonly<{ readonly scope: PolicyExpression<"row" | "subject"> | SubjectPolicy<Subject>; readonly allow: Allow }> & Readonly<Partial<{ require: Pick<TypedEntitlementRequirements, Extract<keyof NoInfer<Allow>, AuthorizationAction>> }>>) => constructPolicy(schemas.resource, schemas.subject, definition)
 
@@ -556,7 +559,7 @@ const actionRequirements = (action: AuthorizationAction) => pipe(
   Match.value(action),
   Match.whenOr("read", "remove", Function.constant(readRequirements)),
   Match.when("create", Function.constant(createRequirements)),
-  Match.whenOr("update", "patch", Function.constant(changeRequirements)),
+  Match.whenOr("update", "patch", "transition", Function.constant(changeRequirements)),
   Match.exhaustive,
 )
 

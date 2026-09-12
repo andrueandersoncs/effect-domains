@@ -124,6 +124,11 @@ class TableRelations extends Schema.Class<TableRelations>("TableRelations")({
 
 type TableRelationFields<Fields extends string> = readonly Fields[]
 
+interface TableReference {
+  readonly table: Table
+  readonly fields: ReadonlyArray<string>
+}
+
 export type TableRelationsInput<Fields extends string = string> = Readonly<Partial<{
   readonly unique: ReadonlyArray<
     Omit<TableUnique, "name" | "fields">
@@ -136,9 +141,7 @@ export type TableRelationsInput<Fields extends string = string> = Readonly<Parti
     & Partial<Readonly<{ scope: TableRelationFields<Fields> }>>
     & {
       readonly fields: TableRelationFields<Fields>
-      readonly references: Omit<TableForeignKey["references"], "fields"> & {
-        readonly fields: TableRelationFields<Fields>
-      }
+      readonly references: TableReference
     }
   >
   readonly indexes: ReadonlyArray<
@@ -614,6 +617,7 @@ export interface Table<
   readonly identifierStorageSchema: IdentifierStorage
   readonly fields: ReadonlyArray<TableField>
   readonly columns: Columns
+  readonly relationTargets: ReadonlyArray<Table>
 }
 
 export type TableFieldName<S extends StructSchema> = Extract<keyof RowSchema<S>["fields"], string>
@@ -650,7 +654,7 @@ const cloneRelations = <Fields extends string>(table: string, relations: TableRe
         Option.getOrElse(() => constraintName(table, fields, "fkey")),
       )
 
-      const references = TableForeignKeyReference.make({ table: constraint.references.table, fields: referenced })
+      const references = TableForeignKeyReference.make({ table: constraint.references.table.name, fields: referenced })
       return TableForeignKey.make({ name, fields, references })
     })),
   )
@@ -670,12 +674,26 @@ const cloneRelations = <Fields extends string>(table: string, relations: TableRe
   return TableRelations.make(Record.getSomes({ unique, foreignKeys, indexes }))
 }
 
+const foreignKeyTarget = flow(
+  Struct.get<{ readonly references: TableReference }, "references">("references"),
+  Struct.get<TableReference, "table">("table"),
+)
+
 const make = <const Name extends string, const S extends StructSchema>(
   options: Readonly<{ name: Name; schema: S }> & Readonly<Partial<{ relations: TableRelationsInput<TableFieldName<S>> }>>,
 ): Table<Name, RowSchema<S>, InsertSchema<S>, StoredRowSchema<RowSchema<S>>, [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>, IdentifierSchema<S>, IdentifierStorageSchema<IdentifierSchema<S>>, TableColumns<RowSchema<S>["fields"]>> => {
   const compilation = compileTable(options.name, options.schema)
   const result = Effect.runSync(compilation)
   const relations = Option.fromNullishOr(options.relations)
+
+  const relationTargets = pipe(
+    relations,
+    Option.flatMap(flow(Struct.get("foreignKeys"), Option.fromNullishOr)),
+    Option.map(Array.map(foreignKeyTarget)),
+    Option.map(Array.dedupeWith(Equivalence.strictEqual<Table>())),
+    Option.getOrElse((): ReadonlyArray<Table> => []),
+  )
+
   const copiedRelations = pipe(relations, Option.map((value) => cloneRelations(result.name, value)))
 
   const validation = pipe(copiedRelations, Option.match({
@@ -688,9 +706,11 @@ const make = <const Name extends string, const S extends StructSchema>(
 
   Effect.runSync(validation)
 
+  const withTargets = Struct.assign(result, { relationTargets })
+
   return pipe(copiedRelations, Option.match({
-    onNone: Function.constant(result),
-    onSome: (value) => Struct.assign(result, { relations: value }),
+    onNone: Function.constant(withTargets),
+    onSome: (value) => Struct.assign(withTargets, { relations: value }),
   })) as typeof result & Table<Name, RowSchema<S>, InsertSchema<S>, StoredRowSchema<RowSchema<S>>, [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>, IdentifierSchema<S>, IdentifierStorageSchema<IdentifierSchema<S>>, TableColumns<RowSchema<S>["fields"]>>
 }
 
@@ -846,6 +866,15 @@ const validateRelations = Effect.fn("Table.validateRelations")(function* (
 
 type ProjectedField<TableDefinition extends Table> = Extract<keyof TableDefinition["rowSchema"]["fields"], string>
 
+const reference = <
+  const Target extends Table,
+  const Fields extends ReadonlyArray<Extract<keyof Target["rowSchema"]["fields"], string>>,
+>(table: Target, fields: Fields): TableReference => {
+  const copiedFields = Array.copy(fields)
+  const frozenFields = Object.freeze(copiedFields)
+  return Object.freeze({ table, fields: frozenFields })
+}
+
 const project = <
   const TableDefinition extends Table,
   const Fields extends ReadonlyArray<ProjectedField<TableDefinition>>,
@@ -875,4 +904,4 @@ const project = <
   }
 }
 
-export const Table = { make, project, snapshot, validateRelations }
+export const Table = { make, reference, project, snapshot, validateRelations }

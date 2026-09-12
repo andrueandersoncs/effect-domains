@@ -5,6 +5,7 @@ import { Table, type TableField, type TableFieldName, type TableRelationsInput, 
 import { Creation, type CreationInspection } from "./resource-creation.ts"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier, PageLimitSchema, type StructSchema } from "./domain.ts"
+import { Page } from "./page.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
@@ -12,7 +13,6 @@ import type { TransitionMachine } from "./transitions.ts"
 const OptionalLimitSchema = Schema.optionalKey(PageLimitSchema)
 const OptionalCursorSchema = Schema.optionalKey(Schema.String)
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
-const NextCursorSchema = Schema.NullOr(Schema.String)
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch" | "transition"
 
@@ -98,7 +98,7 @@ type RangeInput<S extends StructSchema, Policy extends ListPolicy<S>> = Policy["
   ? Partial<{ readonly [Key in Extract<Field, keyof S["Type"]>]: Readonly<Partial<{ from: S["Type"][Key]; to: S["Type"][Key] }>> }>
   : Readonly<Record<string, never>>
 
-type ListInput<S extends StructSchema, Policy extends ListPolicy<S>> = Readonly<Partial<{
+type ResourceListRequest<S extends StructSchema, Policy extends ListPolicy<S>> = Readonly<Partial<{
   filter: Policy["filter"] extends ReadonlyArray<infer Field>
     ? Partial<Pick<S["Type"], Extract<Field, keyof S["Type"]>>>
     : Readonly<Record<string, never>>
@@ -234,6 +234,7 @@ export type Resource = RpcBundle & Readonly<{
   authorization: AuthorizationDefinition
   creation: CreationInspection
   list: ListPolicy<StructSchema>
+  contracts: Readonly<Record<ResourceOperation, Rpc.Any>>
 }> & Readonly<Partial<{
   version: string
   transitions: TransitionMachine
@@ -683,27 +684,14 @@ export const Resource = {
 
     const cursorEntries = Array.map(order, cursorEntry)
     const CursorAfterSchema = Schema.Struct(Record.fromEntries(cursorEntries))
-
-
-    const ResourceCursorSchema = Schema.Struct({
-      resource: Schema.Literal(table.name),
-      filter: UnknownRecordSchema,
-      range: UnknownRecordSchema,
-      after: CursorAfterSchema,
-    }).annotate({ parseOptions: { onExcessProperty: "error" } })
-
-    const ResourceCursorJsonSchema = pipe(Schema.fromJsonString(Schema.Json), Schema.decodeTo(ResourceCursorSchema))
-    const parseCursor = Schema.decodeUnknownEffect(ResourceCursorJsonSchema)
-    const renderCursor = flow(Schema.encodeUnknownEffect(ResourceCursorJsonSchema), Effect.mapError(repositoryFailure))
+    const { parse: parseCursor, render: encodeCursor } = Page.cursor(table.name, CursorAfterSchema)
+    const renderCursor = flow(encodeCursor, Effect.mapError(repositoryFailure))
     const MaximumPageLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(maximum))
     const isLimit = Schema.is(MaximumPageLimitSchema)
     const cursorFailure = inputFailure("invalid list cursor")
 
-
-
-
     const listAuthorized = Effect.fn("Repository.list")(function* (
-      store: RepositoryStore["Service"], permission: RepositoryAccess, input: ListInput<S, List> = {},
+      store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceListRequest<S, List> = {},
     ) {
       if (!orderableIdentifier) return yield* inputFailure("list identifier must preserve canonical ordering in storage")
       const limit = input.limit ?? maximum
@@ -759,7 +747,7 @@ export const Resource = {
           const cursorEntry = (entry: RepositoryOrder) => [entry.field, row[entry.field]] as const
           const entries = Array.map(order, cursorEntry)
           const after = Record.fromEntries(entries)
-          return renderCursor({ resource: table.name, filter, range, after })
+          return renderCursor({ filter, range, after })
         },
       })
 
@@ -830,7 +818,7 @@ export const Resource = {
       const currentValue = Option.some(current)
       const nextValue = Option.some(versioned.next)
       const guard = Struct.assign(statusGuard, versionGuard)
-      yield* authorize("patch", permission.subject, currentValue, nextValue)
+      yield* authorize("transition", permission.subject, currentValue, nextValue)
       const updated = yield* store.update(table, encoded, permission, guard)
       if (Option.isSome(updated)) return yield* readable(permission.subject, updated.value)
 
@@ -856,7 +844,7 @@ export const Resource = {
     const update = withAccess("update", updateAuthorized)
     const patch = withAccess("patch", patchAuthorized)
     const remove = withAccess("remove", removeAuthorized)
-    const transitionRepository = withAccess("patch", transitionAuthorized)
+    const transitionRepository = withAccess("transition", transitionAuthorized)
 
 
 
@@ -889,7 +877,7 @@ export const Resource = {
     const canonicalRowWireSchema = Schema.toCodecJson(canonicalRowSchema)
     const createWireSchema = Schema.toCodecJson(createInputSchema)
     const identifierWireSchema = Schema.toCodecJson(identifierRequestSchema)
-    const rowsWireSchema = Schema.Array(canonicalRowWireSchema)
+    const PageSchema = Page.schema(canonicalRowWireSchema)
 
     const isCanonicalFilterField = (_schema: Schema.Constraint, field: string) =>
       Array.contains(filterFields, field)
@@ -905,9 +893,8 @@ export const Resource = {
     const optionalCanonicalRangeFields = Record.map(canonicalRangeFields, optionalRangeField)
     const CanonicalRangeSchema = Schema.Struct(optionalCanonicalRangeFields).annotate({ parseOptions: { onExcessProperty: "error" } })
     const ListShapeSchema = Schema.Struct({ filter: Schema.optionalKey(CanonicalFilterSchema), range: Schema.optionalKey(CanonicalRangeSchema), limit: OptionalLimitSchema, cursor: OptionalCursorSchema })
-    const listInputSchema = Schema.make<Schema.Codec<ListInput<S, List>, unknown, S["DecodingServices"], S["EncodingServices"]>>(ListShapeSchema.ast)
+    const listInputSchema = Schema.make<Schema.Codec<ResourceListRequest<S, List>, unknown, S["DecodingServices"], S["EncodingServices"]>>(ListShapeSchema.ast)
     const listWireSchema = Schema.toCodecJson(listInputSchema)
-    const PageSchema = Schema.Struct({ items: rowsWireSchema, nextCursor: NextCursorSchema })
     const canonicalMutableFields = Record.remove(options.schema.fields, table.identifier)
 
     const mutableFields = Predicate.isUndefined(version)
@@ -1008,12 +995,26 @@ export const Resource = {
     const removeRpc = Rpc.make(`${options.name}.remove`, { payload: identifierWireSchema, success: Schema.Void, error: errorSchema })
     const transitionRpc = Rpc.make(`${options.name}.transition`, { payload: transitionInputSchema, success: canonicalRowWireSchema, error: transitionErrorSchema })
 
+    const contracts = Object.freeze({
+      get: getRpc,
+      list: listRpc,
+      create: createRpc,
+      update: updateRpc,
+      patch: patchRpc,
+      remove: removeRpc,
+      transition: transitionRpc,
+    })
+
 
 
     const definitions = new Data.Class({
-
-      get: { rpc: getRpc, handler: getHandler }, list: { rpc: listRpc, handler: repository.list }, create: { rpc: createRpc, handler: repository.create },
-      update: { rpc: updateRpc, handler: repository.update }, patch: { rpc: patchRpc, handler: patchHandler }, remove: { rpc: removeRpc, handler: removeHandler }, transition: { rpc: transitionRpc, handler: transitionHandler },
+      get: { rpc: contracts.get, handler: getHandler },
+      list: { rpc: contracts.list, handler: repository.list },
+      create: { rpc: contracts.create, handler: repository.create },
+      update: { rpc: contracts.update, handler: repository.update },
+      patch: { rpc: contracts.patch, handler: patchHandler },
+      remove: { rpc: contracts.remove, handler: removeHandler },
+      transition: { rpc: contracts.transition, handler: transitionHandler },
     })
 
     type Operation = PublishedOperation<Operations>
@@ -1035,6 +1036,7 @@ export const Resource = {
       version,
       transitions: transition,
       createInputSchema,
+      contracts,
       repository,
       group,
       handlers,

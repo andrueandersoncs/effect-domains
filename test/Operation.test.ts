@@ -12,8 +12,6 @@ class DeclaredFailure extends Schema.TaggedError<DeclaredFailure>()("DeclaredFai
 class OperationUnavailable extends Schema.TaggedError<OperationUnavailable>()("OperationUnavailable", {}) {}
 class UnexpectedHandlerFailure extends Schema.TaggedError<UnexpectedHandlerFailure>()("UnexpectedHandlerFailure", {}) {}
 
-
-const ErrorSchema = Schema.Union([DeclaredFailure, OperationUnavailable])
 const FailurePayloadSchema = Schema.Literals(["declared", "unexpected"])
 const isDeclared = Equivalence.strictEqual<Schema.Schema.Type<typeof FailurePayloadSchema>>()
 
@@ -27,7 +25,7 @@ const failures = Operation.make({
   name: "operation.failures",
   payload: FailurePayloadSchema,
   success: Schema.String,
-  error: ErrorSchema,
+  errors: DeclaredFailure,
   unavailable: OperationUnavailable,
   handler: makeFailures,
 })
@@ -46,7 +44,6 @@ const authenticatedUserId = (_input: void, authenticated: Subject) => Effect.suc
 const protectedOperation = Operation.make({
   name: "operation.protected",
   success: Schema.String,
-  error: ErrorSchema,
   policy: aliceOnly,
   unavailable: OperationUnavailable,
   handler: authenticatedUserId,
@@ -59,7 +56,6 @@ const denyInside = (_input: void, _authenticated: Subject) => Effect.fail(forbid
 const deniedInside = Operation.make({
   name: "operation.deniedInside",
   success: Schema.String,
-  error: ErrorSchema,
   policy: aliceOnly,
   unavailable: OperationUnavailable,
   handler: denyInside,
@@ -68,7 +64,7 @@ const deniedInside = Operation.make({
 const transactional = Operation.make({
   name: "operation.transactional",
   success: Schema.Void,
-  error: ErrorSchema,
+  errors: DeclaredFailure,
   transaction: true,
   unavailable: OperationUnavailable,
   handler: Effect.fn("Operation.test.transactional")(function* () {

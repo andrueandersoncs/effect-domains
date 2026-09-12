@@ -20,14 +20,6 @@ export interface TransitionMachine {
   readonly inspection: unknown
 }
 
-interface TransitionError<Name extends string = string> {
-  readonly _tag: `Invalid${Name}Transition`
-  readonly key: string
-  readonly action: string
-  readonly actual: string
-  readonly message: string
-}
-
 class TransitionDefinitionError extends Schema.TaggedError<TransitionDefinitionError>()(
   "TransitionDefinitionError",
   { name: Schema.String, reason: Schema.String },
@@ -109,7 +101,15 @@ const make = <
   const validDeclarations = validateDeclarations(input.name, isStatus, input.transitions)
   Effect.runSync(validDeclarations)
   const tag = `Invalid${input.name}Transition` as const
-  const ErrorSchema = Schema.TaggedError<TransitionError<Name>>()(tag, TransitionErrorFields)
+
+  const ErrorSchema = Schema.TaggedError<Readonly<{
+    _tag: `Invalid${Name}Transition`
+    key: string
+    action: string
+    actual: string
+    message: string
+  }>>()(tag, TransitionErrorFields)
+
   const frozenTransitions = Record.map(input.transitions, freezeDeclaration)
   const transitions = Object.freeze(frozenTransitions) as Declarations
   const actions = Record.keys(transitions) as Array<Action>

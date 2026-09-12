@@ -6,7 +6,7 @@ import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
 import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { EntitlementRequired } from "effect-domains/entitlements"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
@@ -15,7 +15,7 @@ import { GuidesResource } from "../resources.ts"
 
 const PurchasedGuidesRpcs = IdentityRpcs.merge(GuidesResource.group)
 const GuideSchema = GuidesResource.table.rowSchema
-const GuidePageSchema = Page.schema(GuideSchema)
+const GuidePageSchema = GuidesResource.contracts.list.successSchema
 type Guide = typeof GuideSchema.Type
 
 export const WebClient = RpcService.make({ name: "purchased-guides/WebClient", group: PurchasedGuidesRpcs })

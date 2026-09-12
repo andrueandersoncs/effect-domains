@@ -23,4 +23,11 @@ export const RepairBoard = SqliteView.make({
   },
 })
 
+export const RepairBoardList = SqliteView.list({
+  view: RepairBoard,
+  filter: ["status"],
+  order: [["urgent", "desc"], ["id", "asc"]],
+  limit: 50,
+})
+
 export const RepairBoardRowSchema = Schema.toType(RepairBoard.schema)

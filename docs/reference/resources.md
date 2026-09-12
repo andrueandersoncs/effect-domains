@@ -8,6 +8,7 @@
 import { Schema } from "effect"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
+import { Table } from "effect-domains/table"
 
 const Books = Resource.make({
   name: "books",
@@ -36,7 +37,7 @@ const Books = Resource.make({
 | `version` | Optional integer version-field name. Create writes `1`; updates and patches require the read version and increment it. |
 | `transitions` | Optional `Transitions.make(...)` declaration used by local and published transition operations. |
 
-A resource exposes `table`, `repository`, `group`, and `handlers`. `Application.make({ name, parts })` rejects duplicate table and operation names.
+A resource exposes `table`, `repository`, `contracts`, `group`, and `handlers`. `contracts` contains every generated RPC descriptor even when an operation is not published; for example, `Books.contracts.list.payloadSchema` and `.successSchema` are the authoritative request and page schemas. `Application.make({ name, parts })` rejects duplicate table and operation names.
 
 ## Operations and repository
 
@@ -52,7 +53,7 @@ Published names are `${name}.get`, `${name}.list`, `${name}.create`, `${name}.up
 | `transition` | `{ key, action, changes? }`, or `{ key, action, expectedVersion, changes? }` with `version` | Complete row |
 | `repository.ensure(row)` | Complete row | Inserts if its identifier is absent; otherwise returns the existing read-authorized row. |
 
-`repository.find(key)` is local-only and returns `Option`. `repository.transition(key, action, changes?, expectedVersion?)` checks the declared graph, applies the status change, and uses optimistic version checking when configured. A transition declaration also exposes `apply(action, key)(row)` for a guarded in-memory status change.
+`repository.find(key)` is local-only and returns `Option`. `repository.transition(key, action, changes?, expectedVersion?)` checks the declared graph, applies the status change, and uses optimistic version checking when configured. A transition declaration also exposes `apply(action, key)(row)` for a guarded in-memory status change. Policy resources authorize transition through the distinct `allow.transition` rule, with current and candidate values; patch permission never grants transition permission.
 
 A `version` field is not caller-controlled in create or patch changes. A stale mutation fails with `VersionConflict { resource, key, expectedVersion }`. A declared unique constraint can fail with `UniqueViolation { resource, constraint, fields }`; translate that error in an authored operation only when the domain needs a distinct error name.
 
@@ -75,7 +76,7 @@ operations: {
 }
 ```
 
-A list request accepts `filter?`, `range?`, `limit?`, and `cursor?` and returns `{ items, nextCursor }`.
+A list request accepts `filter?`, `range?`, `limit?`, and `cursor?` and returns the shared `Page` contract `{ items, nextCursor }`. Import `Page` from `effect-domains/page` when defining another paged contract, or reuse `resource.contracts.list.successSchema` for a generated resource list.
 
 - `filter` is equality-only and accepts declared fields only.
 - `range` accepts declared fields as `{ range: { publishedAt: { from?, to? } } }`; both bounds are inclusive.
@@ -91,7 +92,7 @@ Relation names are optional. `Table` derives them as `<table>_<snake_case fields
 relations: {
   foreignKeys: [{
     fields: ["orderId"],
-    references: { table: "orders", fields: ["id"] },
+    references: Table.reference(OrdersResource.table, ["id"]),
     scope: ["tenantId"],
   }],
 }
@@ -101,7 +102,7 @@ This creates a foreign key over `(tenantId, orderId)` to `(tenantId, id)`. Keep 
 
 `Table.project(table, ["id", "number"])` provides selected `fields`, `schema`, JSON codec, and `object(sql, alias)` for an authored projection. Use it to compose native SQL without restating table fields.
 
-`SqliteView.make` remains the option for a declared joined projection. It supplies a selected row codec, a quoted SQL prefix, columns, and dependency metadata; filtering, grouping, ordering, pagination, authorization, and transaction policy remain authored. See the [repair board](../../examples/repair-workshop/board.ts).
+`SqliteView.make` declares a joined projection and supplies its selected row codec, quoted SQL prefix, columns, and dependency metadata. `SqliteView.list({ view, filter?, range?, order, limit? })` derives a bounded equality/range/keyset executor with `payload`, `success`, `errors`, `dependencies`, and `handler`; pass those members to `Operation.make`. Ordering and range fields must preserve non-null storage ordering, and the declared ordering must end in fields that form a total order. Authorization and transaction policy remain explicit on the authored operation. See the [repair board](../../examples/repair-workshop/board.ts).
 
 ## Errors and limits
 

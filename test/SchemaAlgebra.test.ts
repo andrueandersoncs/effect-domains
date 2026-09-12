@@ -82,7 +82,8 @@ it.effect("native table snapshots copy relation and check containers", () => Eff
   const ChoiceSchema = Schema.Struct({ choice: Schema.Literals(["a", "b"]) })
   interface Choice extends Schema.Schema.Type<typeof ChoiceSchema> {}
   const fields = ["choice"] as const
-  const references = new Data.Class({ table: "choices", fields })
+  const referencedTable = Table.make({ name: "choice_targets", schema: ChoiceSchema })
+  const references = Table.reference(referencedTable, fields)
 
   const relations = new Data.Class({
     unique: [{ name: "choice_unique", fields }],

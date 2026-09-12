@@ -1,10 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Schema, pipe } from "effect"
+import { Effect, Layer, Schema, Types, pipe } from "effect"
 import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc"
 import { RpcService } from "effect-domains/rpc-service"
-
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
-  (<T>() => T extends B ? 1 : 2) ? true : false
 
 class EchoUnavailable extends Schema.TaggedError<EchoUnavailable>()("EchoUnavailable", {}) {}
 
@@ -32,13 +29,13 @@ const handlers = group.toLayer({
 
 const echoRuntime = pipe(Echo.layer, Layer.provide(handlers))
 
-const protocolRequiresProtocol = true satisfies Equal<
+const protocolRequiresProtocol = true satisfies Types.Equals<
   Extract<Layer.Services<typeof Echo.layerProtocol>, RpcClient.Protocol>,
   RpcClient.Protocol
 >
 void protocolRequiresProtocol
 
-const inProcessOmitsProtocol = true satisfies Equal<
+const inProcessOmitsProtocol = true satisfies Types.Equals<
   Extract<Layer.Services<typeof Echo.layer>, RpcClient.Protocol>,
   never
 >

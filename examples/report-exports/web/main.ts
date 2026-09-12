@@ -4,10 +4,10 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
-import { Form } from "@effect-domains/example-web/form"
+import { Form } from "effect-domains/form"
 import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { FinancialReportLineSchema, ReportExportPollResultSchema, ReportExportRequestSchema, ReportExportStatusSchema } from "../contracts.ts"
 import { ReportExportRpcs } from "../workflow.ts"
@@ -61,7 +61,7 @@ export const Release = Command.define("Release", { args: { request: RequestToken
 export const Status = Command.define("Status", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String) }, messages: [Message.SucceededStatus, Message.Failed], execute: ({ request, token }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Status"](undefined, bearer(token)))), (status) => Message.SucceededStatus({ request, status })) })
 
 const start = (model: Model, key: string) => Requests.start(model.requests, key)
-const pending = (model: Model, key?: string) => Requests.pending(model.requests, key)
+const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
 const emptyForm = {
   reportId: "monthly-pnl-2026-01",
   startsAt: "2026-01-01T00:00:00.000Z",

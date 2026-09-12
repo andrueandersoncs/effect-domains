@@ -4,7 +4,7 @@ import type { RpcBundle } from "./rpc-contract.ts"
 import { SchemaStore } from "./migrations.ts"
 import type { Resource } from "./resource.ts"
 import { Table } from "./table.ts"
-import { SqliteView } from "./sqlite-view.ts"
+import { OperationDependencies } from "./operation.ts"
 
 type HandlerLayer<Bundle> = Bundle extends {
   readonly handlers: infer Handlers extends Layer.Layer<never, any, any>
@@ -15,7 +15,7 @@ type PartResources<Part> = Part extends Resource ? Part
   : never
 
 const isApplication = (part: RpcBundle): part is Application => "resources" in part
-const isResource = (part: RpcBundle): part is Resource => "table" in part
+const isResource = (part: RpcBundle): part is Resource => "table" in part && "contracts" in part
 const noResources = Function.constant<ReadonlyArray<Resource>>([])
 
 const resourcesFrom = (part: RpcBundle) => pipe(
@@ -53,23 +53,35 @@ const make = <const Parts extends ReadonlyArray<RpcBundle> = typeof emptyParts>(
       return HashSet.add(names, table.name)
     }))
 
+    yield* Effect.forEach(tables, Effect.fn("Application.validateRelationTargets")(function* (table) {
+      yield* Effect.forEach(table.relationTargets, Effect.fn("Application.validateRelationTarget")(function* (target) {
+        if (!Array.contains(tables, target)) {
+          return yield* ApplicationDefinitionError.make({
+            reason: `Resource table ${table.name} references unregistered table ${target.name}; use the registered resource's table`,
+          })
+        }
+      }))
+    }))
+
     const snapshots = Array.map(tables, Table.snapshot)
     yield* Table.validateRelations(snapshots)
 
     const proceduresForGroup = (group: RpcBundle["group"]) => pipe(group.requests.values(), Array.fromIterable)
     const procedures = Array.flatMap(groups, proceduresForGroup)
 
-    yield* Effect.forEach(procedures, Effect.fn("Application.validateViewDependencies")(function* (procedure) {
-      const views = pipe(Context.getOption(procedure.annotations, SqliteView.annotation), Option.getOrElse(() => []))
+    yield* Effect.forEach(procedures, Effect.fn("Application.validateOperationDependencies")(function* (procedure) {
+      const dependencies = pipe(
+        Context.getOption(procedure.annotations, OperationDependencies),
+        Option.map(Struct.get("tables")),
+        Option.getOrElse(() => []),
+      )
 
-      yield* Effect.forEach(views, Effect.fn("Application.validateView")(function* (view) {
-        yield* Effect.forEach(view.dependencies, Effect.fn("Application.validateViewTable")(function* (dependency) {
-          if (!Array.contains(tables, dependency)) {
-            return yield* ApplicationDefinitionError.make({
-              reason: `Operation ${procedure._tag} reads unregistered table ${dependency.name}; use the registered resource's table`,
-            })
-          }
-        }))
+      yield* Effect.forEach(dependencies, Effect.fn("Application.validateOperationTable")(function* (dependency) {
+        if (!Array.contains(tables, dependency)) {
+          return yield* ApplicationDefinitionError.make({
+            reason: `Operation ${procedure._tag} reads unregistered table ${dependency.name}; use the registered resource's table`,
+          })
+        }
       }))
     }))
 

@@ -1,5 +1,6 @@
 {
   "commands": [
-    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] }
+    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] },
+    { "type": "add_exclusions", "files": "src/resource-editor.ts", "rules": ["parameter-bag", "prefer-effect-schema-constructor"] }
   ]
 }

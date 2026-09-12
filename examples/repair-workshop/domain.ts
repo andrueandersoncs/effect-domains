@@ -1,5 +1,5 @@
 import { Schema, pipe } from "effect"
-import { identifier, PageLimitSchema } from "effect-domains/domain"
+import { identifier } from "effect-domains/domain"
 import { Transitions } from "effect-domains/transitions"
 
 export const WorkshopIdSchema = pipe(Schema.NonEmptyString, identifier)
@@ -36,10 +36,6 @@ export const RepairJobTransitions = Transitions.make({
   },
 })
 
-export const RepairBoardInputSchema = Schema.Struct({
-  status: Schema.optionalKey(RepairStatusSchema),
-  limit: Schema.optionalKey(PageLimitSchema),
-})
 
 export class RepairWorkshopUnavailable extends Schema.TaggedError<RepairWorkshopUnavailable>()(
   "RepairWorkshopUnavailable",

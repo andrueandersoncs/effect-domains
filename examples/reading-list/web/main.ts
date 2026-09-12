@@ -13,16 +13,16 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
-import { Form } from "@effect-domains/example-web/form"
+import { Form } from "effect-domains/form"
 import { Page } from "@effect-domains/example-web/page"
-import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
 import { formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { BookFormatSchema, RatingSchema, ReadingListBookSchema, ReadingStatusSchema } from "../domain.ts"
 import { ReadingListResource } from "../resources.ts"
 
 const BookRowSchema = ReadingListResource.table.rowSchema
-const BookPageSchema = Page.schema(BookRowSchema)
+const BookPageSchema = ReadingListResource.contracts.list.successSchema
 export const WebClient = RpcService.make({ name: "reading-list/WebClient", group: ReadingListResource.group })
 export type WebClient = Type<typeof WebClient>
 

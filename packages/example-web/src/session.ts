@@ -7,7 +7,7 @@ import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { field, notice, primaryButton, quietButton, textInput } from "./html.ts"
 import { bearer, formatRpcError } from "./rpc.ts"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "./requests.ts"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 
 export const SessionClient = RpcService.make({ name: "example-web/SessionClient", group: IdentityRpcs })
 export type SessionClient = Type<typeof SessionClient>

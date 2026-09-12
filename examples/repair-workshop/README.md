@@ -39,7 +39,7 @@ Each command returns the record you supplied. Customer and technician `id` value
 ```bash
 bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Cargo bike","fault":"Brake rub","urgent":true,"technicianId":"sam"}'
 bun run repair-workshop repair_jobs.create --input-json '{"customerId":"river","item":"Commuter bike","fault":"Wheel wobble"}'
-bun run repair-workshop workshop.board --input-json '{"status":"queued","limit":25}'
+bun run repair-workshop workshop.board --input-json '{"filter":{"status":"queued"},"limit":25}'
 ```
 
 Repairs receive generated UUIDv7 identifiers. Copy the cargo bike's returned `id` into a variable for later steps:
@@ -48,7 +48,7 @@ Repairs receive generated UUIDv7 identifiers. Copy the cargo bike's returned `id
 REPAIR_ID='paste-the-cargo-bike-id-here'
 ```
 
-The omitted fields on creation default to `urgent: false`, `status: "queued"`, and `technicianId: null`. The board returns an array with the urgent cargo bike first, followed by the commuter bike. On this fresh database, both have `customerName: "River Cycles"`; the cargo bike has `technicianName: "Sam"` and `technicianOnCall: true`. The unassigned row has `null` for all three technician fields.
+The omitted fields on creation default to `urgent: false`, `status: "queued"`, and `technicianId: null`. The board returns a page whose `items` place the urgent cargo bike first, followed by the commuter bike. On this fresh database, both have `customerName: "River Cycles"`; the cargo bike has `technicianName: "Sam"` and `technicianOnCall: true`. The unassigned row has `null` for all three technician fields.
 
 The board includes `id`, `customerId`, `customerName`, `item`, `fault`, `urgent`, `status`, `technicianId`, `technicianName`, and `technicianOnCall`. Boolean values are canonical JSON booleans, not SQLite integers. Customer and technician names are read from their current records, not copied into repair rows.
 
@@ -66,7 +66,7 @@ Now advance and unassign the cargo bike:
 
 ```bash
 bun run repair-workshop repair_jobs.patch --input-json "{\"key\":\"$REPAIR_ID\",\"changes\":{\"status\":\"repairing\",\"technicianId\":null}}"
-bun run repair-workshop workshop.board --input-json '{"status":"repairing"}'
+bun run repair-workshop workshop.board --input-json '{"filter":{"status":"repairing"}}'
 bun run repair-workshop repair_jobs.get --input-json "{\"id\":\"$REPAIR_ID\"}"
 ```
 
@@ -74,11 +74,11 @@ The filtered board contains the cargo bike with null technician fields. The ordi
 
 The allowed statuses are `queued`, `repairing`, and `ready`. These are editable record values: nothing prevents moving from ready back to queued or assigning a technician who is not on call. A joined read does not implement scheduling policy or guarded business transitions.
 
-## Understand the two list shapes
+## Understand the list contracts
 
 | Read | Result and bounds |
 | --- | --- |
-| `workshop.board` | Array; optional `status`; default limit 50, allowed limits 1–100; urgent first, then identifier ascending; no cursor |
+| `workshop.board` | `{ items, nextCursor }`; equality filter on `status`; urgent first, then identifier ascending; default and maximum 50 |
 | `repair_jobs.list` | `{ items, nextCursor }`; equality filters on `status`, `customerId`, `technicianId`; urgent first, then identifier ascending; default and maximum 50 |
 | `customers.list`, `technicians.list` | `{ items, nextCursor }`; default and maximum 50; identifier ascending; no declared field filters |
 
@@ -89,7 +89,7 @@ bun run repair-workshop repair_jobs.list --input-json '{"filter":{"customerId":"
 bun run repair-workshop workshop.board --input-json '{"limit":1}'
 ```
 
-A board limit truncates the matching array; it does not provide a way to request the next board page. For generated lists, pass a non-null `nextCursor` back unchanged as `cursor`, with the same filters. See [generated lists](../README.md#generated-lists).
+Both generated resource lists and the derived board list use opaque keyset cursors. Pass a non-null `nextCursor` back unchanged as `cursor`, with the same filter and range. See [generated lists](../README.md#generated-lists).
 
 ## Observe referential and validation failures
 
@@ -103,18 +103,18 @@ bun run repair-workshop customers.remove --input-json '{"id":"river"}'
 The first cannot reference a nonexistent customer. The second cannot delete a customer still referenced by repairs. Both surface repository failures, not a successful partial write. Nonexistent technicians and deletion of an assigned technician are likewise rejected by foreign keys. There are no cascades.
 
 ```bash
-bun run repair-workshop workshop.board --input-json '{"limit":101}'
+bun run repair-workshop workshop.board --input-json '{"limit":51}'
 ```
 
-This fails the board input schema before execution. Unknown statuses and empty names also fail validation. Missing generated-resource rows produce `ResourceNotFound`; generated storage failures produce `RepositoryError`. The authored board translates SQL/result-codec errors to `RepairWorkshopUnavailable`.
+This fails the board input schema before execution. Unknown statuses and empty names also fail validation. A malformed cursor or one reused with a different filter fails as `SqliteViewListInputError`. Missing generated-resource rows produce `ResourceNotFound`; generated storage failures produce `RepositoryError`. The authored board translates SQL/result-codec failures to `RepairWorkshopUnavailable`.
 
 ## Use the browser or MCP
 
 At `/`, the **Customers** and **Technicians** forms create records or edit their names and on-call state. **Create repair** uses those records in its selectors. Change a repair's status or technician directly on the board. The canonical native client reloads after mutations; changing the board query clears and invalidates old rows until **Reload** fetches the new result. Field-specific validation failures are shown.
 
-The browser requests up to 100 matching repairs; that authored board has no cursor API. Customer and technician selectors load 50-row resource pages; **Load more customers** and **Load more technicians** append choices when a cursor exists.
+The browser requests the first page of up to 50 matching repairs. Customer and technician selectors load 50-row resource pages; **Load more customers** and **Load more technicians** append choices when a cursor exists.
 
-The generated admin exposes resource operations plus `workshop.board`. MCP uses those same contracts: call `workshop.board` with `{"input":{"status":"queued","limit":25}}` and read the array from `structuredContent.result`. The MCP endpoint is not the CLI's `/rpc/v1` URL. See [shared MCP conventions](../README.md#mcp-server).
+The generated admin exposes resource operations plus `workshop.board`. MCP uses those same contracts: call `workshop.board` with `{"input":{"filter":{"status":"queued"},"limit":25}}` and read the page from `structuredContent.result`. The MCP endpoint is not the CLI's `/rpc/v1` URL. See [shared MCP conventions](../README.md#mcp-server).
 
 ## Runtime and persistence
 

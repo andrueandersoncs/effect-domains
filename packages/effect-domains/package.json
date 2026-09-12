@@ -14,8 +14,12 @@
     "./identity-rpc": "./src/identity-rpc.ts",
     "./domain": "./src/domain.ts",
     "./entitlements": "./src/entitlements.ts",
+    "./form": "./src/form.ts",
     "./migrations": "./src/migrations.ts",
     "./operation": "./src/operation.ts",
+    "./page": "./src/page.ts",
+    "./requests": "./src/requests.ts",
+    "./resource-editor": "./src/resource-editor.ts",
     "./policy": "./src/policy.ts",
     "./policy-sql": "./src/policy-sql.ts",
     "./resource": "./src/resource.ts",
@@ -42,7 +46,8 @@
     "@effect-domains/admin": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "foldkit": "0.158.2"
   },
   "peerDependencies": {
     "typescript": "^7"

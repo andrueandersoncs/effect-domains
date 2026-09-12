@@ -6,7 +6,8 @@ import { CreationInspectionSchema } from "./resource-creation.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
-import { SqliteView, SqliteViewDescriptionSchema } from "./sqlite-view.ts"
+import { SqliteViewDescriptionSchema } from "./sqlite-view.ts"
+import { OperationDependencies } from "./operation.ts"
 
 type InspectableApplication = Readonly<{
   name: string
@@ -97,6 +98,8 @@ const resource = (definition: Resource) => {
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
   const authorization = inspectAuthorization(definition.authorization)
   const version = Option.fromNullishOr(definition.version) as Option.Option<unknown>
+  const hasContract = (operation: Resource["operations"][number]) => Record.has(definition.contracts, operation)
+  const operations = Array.filter(definition.operations, hasContract)
 
   const transitions = pipe(
     Option.fromNullishOr(definition.transitions),
@@ -107,7 +110,7 @@ const resource = (definition: Resource) => {
 
   return ResourceInspectionSchema.make({
     name: definition.name,
-    operations: definition.operations,
+    operations,
     schema,
     creation: definition.creation,
     list: definition.list,
@@ -142,8 +145,8 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
   const subjectPolicy = Option.map(policy, inspectSubjectPolicy)
 
   const views = pipe(
-    Context.getOption(procedure.annotations, SqliteView.annotation),
-    Option.map(Array.map(Struct.get("description"))),
+    Context.getOption(procedure.annotations, OperationDependencies),
+    Option.map(flow(Struct.get("views"), Array.map(Struct.get("description")))),
   )
 
   return OperationInspectionSchema.make({

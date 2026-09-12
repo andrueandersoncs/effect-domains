@@ -43,7 +43,6 @@ const issueInvoice = Operation.make({
   name: "billing.issueInvoice",
   payload: Schema.Struct({ orderId: Schema.String }),
   success: Schema.Struct({ invoiceId: Schema.String }),
-  error: BillingUnavailable,
   unavailable: BillingUnavailable,
   handler: (input) => Effect.succeed({ invoiceId: input.orderId }),
 })
@@ -51,7 +50,7 @@ const issueInvoice = Operation.make({
 export const BillingOperations = Operation.bundle(issueInvoice)
 ```
 
-`Operation.make` takes one definition with a `name`, JSON-codecs its payload, success, and error schemas, and translates undeclared infrastructure or untagged failures to `unavailable`; a domain-tagged failure the handler can raise but `error` omits is a compile error, so nothing a client should see is silently hidden. With a `SubjectPolicy`, its handler also receives a typed subject; `transaction: true` wraps it in `RepositoryStore.transaction`, and `views` records `SqliteView` dependencies.
+`Operation.make` takes one definition, applies JSON codecs, and derives its public error schema by unioning declared domain `errors` with the required `unavailable` schema. Undeclared infrastructure or untagged failures become `unavailable`; a domain-tagged failure the handler can raise but `errors` omits is a compile error, so nothing a client should see is silently hidden. With a `SubjectPolicy`, its handler also receives a typed subject; `transaction: true` wraps it in `RepositoryStore.transaction`. `dependencies` accepts Resource, Table, and `SqliteView` descriptors and application composition validates their exact registered tables.
 
 Use an authored operation when an action preserves a cross-record invariant, calculates an aggregate, invokes an external system, or has a domain-specific failure boundary. For example, reservations can use declared state transitions while their inventory accounting remains an authored transactional operation.
 

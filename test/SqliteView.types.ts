@@ -29,6 +29,17 @@ const noService = SqliteView.make({ tables: { t: Technicians }, from: "t", joins
 const omittedService = true satisfies Types.Equals<typeof noService.schema.DecodingServices, never>
 const nonnullable = true satisfies Types.Equals<typeof noService.schema.Type, { readonly id: string }>
 
+const listing = SqliteView.list({ view, filter: ["urgent"], order: [["urgent", "desc"]] })
+const listInput: typeof listing.payload.Type = { filter: { urgent: true }, limit: 10 }
+// @ts-expect-error because only declared filters are accepted.
+const invalidFilter: typeof listing.payload.Type = { filter: { name: "Sam" } }
+
+SqliteView.list({
+  view,
+  // @ts-expect-error because list ordering must use selected output fields.
+  order: [["missing", "asc"]],
+})
+
 declare const sql: SqlClient.SqlClient
 // @ts-expect-error because fields must exist in the selected table.
 view.column(sql, ["j", "missing"])
@@ -53,3 +64,5 @@ void decoderService
 void encoderService
 void omittedService
 void nonnullable
+void listInput
+void invalidFilter

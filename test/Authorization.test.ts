@@ -4,6 +4,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { Authorization, AuthorizationSubject, AuthorizationValues, type PolicyAuthorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Transitions } from "effect-domains/transitions"
 import { Policy, type Policy as PolicySyntax } from "effect-domains/policy"
 import { RepositoryStore } from "effect-domains/repository-store"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -317,6 +318,53 @@ it.effect("concurrent transfers cannot both authorize against the previous owner
     const success = yield* pipe(Array.findFirst(results, Result.isSuccess), Effect.fromOption)
     expect(final.ownerId).toBe(success.success.ownerId)
   }), Effect.provide(sqlite),
+))
+
+const AuthorizedTransitionStatusSchema = Schema.Literals(["draft", "published"])
+
+const AuthorizedTransitions = Transitions.make({
+  name: "AuthorizedPublication",
+  field: "state",
+  status: AuthorizedTransitionStatusSchema,
+  transitions: { publish: { from: ["draft"], to: "published" } },
+})
+
+const AuthorizedTransitionSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  state: AuthorizedTransitionStatusSchema,
+})
+
+const transitionPolicyDsl = Authorization.for({ resource: AuthorizedTransitionSchema, subject: SubjectSchema })
+const transitionPublisher = transitionPolicyDsl.includes(transitionPolicyDsl.subject.roles, "publisher")
+const transitionScope = transitionPolicyDsl.all()
+
+const authorizedTransitionPolicy = transitionPolicyDsl.policy({
+  scope: transitionScope,
+  allow: { read: transitionPublisher, transition: transitionPublisher },
+})
+
+const AuthorizedTransitionResource = Resource.make({
+  name: "authorized_transitions",
+  schema: AuthorizedTransitionSchema,
+  authorization: authorizedTransitionPolicy,
+  transitions: AuthorizedTransitions,
+  operations: { transition: true },
+})
+
+it.effect("transitions use their own authorization action rather than patch permission", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([AuthorizedTransitionResource.table])
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO authorized_transitions (id, state) VALUES ('publication', 'draft')`
+    const subject = SubjectSchema.make({ userId: "publisher", tenantId: "a", roles: ["publisher"] })
+
+    const published = yield* pipe(
+      AuthorizedTransitionResource.repository.transition("publication", "publish"),
+      Effect.provideService(AuthorizationSubject, subject),
+    )
+    expect(published).toEqual({ id: "publication", state: "published" })
+  }),
+  Effect.provide(sqlite),
 ))
 
 const FeaturePermissionSchema = Schema.Struct({ id: identifier(Schema.String), enabled: Schema.NullOr(Schema.Boolean) })

@@ -6,6 +6,7 @@ import { Application } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
+import { Operation } from "effect-domains/operation"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqliteView } from "effect-domains/sqlite-view"
 import { Table } from "effect-domains/table"
@@ -25,6 +26,25 @@ const TechnicianSchema = Schema.Struct({
 const Jobs = Table.make({ name: "jobs.work", schema: JobSchema })
 const Technicians = Table.make({ name: 'people"records', schema: TechnicianSchema })
 const database = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
+
+const JobListView = SqliteView.make({
+  tables: { job: Jobs },
+  from: "job",
+  joins: [],
+  select: {
+    id: ["job", "id"],
+    tenant: ["job", "tenant"],
+    urgent: ["job", "is.urgent"],
+  },
+})
+
+const JobList = SqliteView.list({
+  view: JobListView,
+  filter: ["tenant"],
+  range: ["id"],
+  order: [["urgent", "desc"], ["id", "asc"]],
+  limit: 2,
+})
 
 it.effect("decodes composite left joins without losing booleans, service codecs, or unmatched rows", () => pipe(
   Effect.gen(function* () {
@@ -71,6 +91,41 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
   Effect.provideService(StoragePrefix, { value: "stored:" }),
 ))
 
+it.effect("derives bounded filtered keyset pages for compiled views", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([Jobs])
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES
+      ('a', 'acme', NULL, 1),
+      ('b', 'acme', NULL, 0),
+      ('c', 'acme', NULL, 1),
+      ('d', 'other', NULL, 1)`
+
+    const first = yield* JobList.handler({ filter: { tenant: "acme" }, limit: 2 })
+
+    expect(first.items).toEqual([
+      { id: "a", tenant: "acme", urgent: true },
+      { id: "c", tenant: "acme", urgent: true },
+    ])
+
+    const cursor = yield* Effect.fromNullishOr(first.nextCursor)
+    const second = yield* JobList.handler({ filter: { tenant: "acme" }, cursor, limit: 2 })
+
+    expect(second).toEqual({
+      items: [{ id: "b", tenant: "acme", urgent: false }],
+      nextCursor: null,
+    })
+
+    const mismatch = yield* pipe(
+      JobList.handler({ filter: { tenant: "other" }, cursor, limit: 2 }),
+      Effect.flip,
+    )
+
+    expect(mismatch._tag).toBe("SqliteViewListInputError")
+  }),
+  Effect.provide(database),
+))
+
 it.effect("snapshots selections so caller mutation cannot redirect a compiled read", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
@@ -104,7 +159,12 @@ it("rejects an operation whose joined table is absent or replaced by a different
   const view = SqliteView.make({ tables: { p: People.table }, from: "p", joins: [], select: { name: ["p", "name"] } })
   const RowSchema = Schema.toType(view.schema)
   const RowsSchema = Schema.Array(RowSchema)
-  const rpc = Rpc.make("people.names", { success: RowsSchema }).annotate(SqliteView.annotation, [view])
+  const dependencies = Operation.dependencies([view])
+
+  const rpc = Rpc.make("people.names", { success: RowsSchema }).annotate(
+    Operation.annotation,
+    dependencies,
+  )
   const group = RpcGroup.make(rpc)
   const commands = new Data.Class({ group, handlers: Layer.empty })
   expect(() => Application.make({ name: "missing", parts: [commands] })).toThrow()

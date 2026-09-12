@@ -132,7 +132,7 @@ const generate = Operation.make({
   payload: ReportExportRequestSchema,
   success: ReportArtifactSchema,
   handler: selectGenerate,
-  error: ReportExportGenerationErrorsSchema,
+  errors: ReportExportGenerationErrorsSchema,
   policy: ReportExportGenerationAuthorization,
   unavailable: ReportExportUnavailable,
 })
@@ -142,7 +142,7 @@ const generateDiscard = Operation.make({
   payload: ReportExportRequestSchema,
   success: Schema.String,
   handler: selectGenerateDiscard,
-  error: ReportExportGenerationErrorsSchema,
+  errors: ReportExportGenerationErrorsSchema,
   policy: ReportExportGenerationAuthorization,
   unavailable: ReportExportUnavailable,
 })
@@ -151,7 +151,7 @@ const resume = Operation.make({
   name: "ReportExport.GenerateResume",
   payload: PollReportExportSchema,
   success: Schema.Void,
-  error: ReportExportOperatorErrorsSchema,
+  errors: ReportExportOperatorErrorsSchema,
   policy: ExampleRoles.admin,
   unavailable: ReportExportUnavailable,
   handler: resumeWorkflow,
@@ -161,7 +161,7 @@ const release = Operation.make({
   name: "ReportExport.Release",
   payload: ReleaseReportSchema,
   success: Schema.Void,
-  error: ReportExportOperatorErrorsSchema,
+  errors: ReportExportOperatorErrorsSchema,
   policy: ExampleRoles.admin,
   unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
@@ -183,7 +183,7 @@ const poll = Operation.make({
   name: "ReportExport.Poll",
   payload: PollReportExportSchema,
   success: ReportExportPollResultSchema,
-  error: ReportExportOperatorErrorsSchema,
+  errors: ReportExportOperatorErrorsSchema,
   policy: ExampleRoles.admin,
   unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
@@ -203,7 +203,7 @@ const poll = Operation.make({
 const status = Operation.make({
   name: "ReportExport.Status",
   success: ReportExportStatusSchema,
-  error: ReportExportOperatorErrorsSchema,
+  errors: ReportExportOperatorErrorsSchema,
   policy: ExampleRoles.admin,
   unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Status")(function* () {

@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Record, Result, Schema, pipe } from "effect"
-import { Requests } from "../packages/example-web/src/requests.ts"
-import { Form } from "../packages/example-web/src/form.ts"
+import { Form } from "effect-domains/form"
+import { Requests } from "effect-domains/requests"
 
 it("a replaced request cannot publish an error or finish its successor", () => {
   const empty = Requests.empty()

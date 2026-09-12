@@ -4,16 +4,16 @@ import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
-import { Form } from "@effect-domains/example-web/form"
+import { Form } from "effect-domains/form"
 import { Page } from "@effect-domains/example-web/page"
-import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
 import { formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { AssetConditionSchema, AssetSchema } from "../domain.ts"
 import { AssetsResource } from "../resources.ts"
 
 const AssetRowSchema = AssetsResource.table.rowSchema
-const AssetPageSchema = Page.schema(AssetRowSchema)
+const AssetPageSchema = AssetsResource.contracts.list.successSchema
 export const WebClient = RpcService.make({ name: "equipment-register/WebClient", group: AssetsResource.group })
 export type WebClient = Type<typeof WebClient>
 const conditions = ["in-service", "needs-repair", "retired"] as const

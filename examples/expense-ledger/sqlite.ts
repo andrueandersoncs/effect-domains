@@ -113,21 +113,11 @@ const remove = Effect.fn("ExpenseLedger.remove")(function* (
 
 const expenseTotalsSuccessSchema = Schema.Array(ExpenseTotalSchema)
 
-const expenseTotalsErrorSchema = Schema.Union([
-  InvalidExpenseDateRange,
-  ExpenseLedgerUnavailable,
-])
-
-const mutationErrorsSchema = Schema.Union([
-  ExpenseNotFound,
-  ExpenseLedgerUnavailable,
-])
 
 const recordExpense = Operation.make({
   name: "expenses.record",
   payload: ExpenseSchema,
   success: ExpensesResource.table.rowSchema,
-  error: ExpenseLedgerUnavailable,
   unavailable: ExpenseLedgerUnavailable,
   handler: ExpensesResource.repository.create,
 })
@@ -136,7 +126,7 @@ const getExpense = Operation.make({
   name: "expenses.get",
   payload: ExpenseIdentifierInputSchema,
   success: ExpensesResource.table.rowSchema,
-  error: mutationErrorsSchema,
+  errors: ExpenseNotFound,
   unavailable: ExpenseLedgerUnavailable,
   handler: get,
 })
@@ -145,7 +135,7 @@ const expenseTotals = Operation.make({
   name: "expenses.totals",
   payload: ExpenseQueryInputSchema,
   success: expenseTotalsSuccessSchema,
-  error: expenseTotalsErrorSchema,
+  errors: InvalidExpenseDateRange,
   unavailable: ExpenseLedgerUnavailable,
   handler: totals,
 })
@@ -154,7 +144,7 @@ const updateExpense = Operation.make({
   name: "expenses.update",
   payload: ExpensesResource.table.rowSchema,
   success: ExpensesResource.table.rowSchema,
-  error: mutationErrorsSchema,
+  errors: ExpenseNotFound,
   unavailable: ExpenseLedgerUnavailable,
   handler: update,
 })
@@ -163,7 +153,7 @@ const removeExpense = Operation.make({
   name: "expenses.remove",
   payload: ExpenseIdentifierInputSchema,
   success: ExpensesResource.table.rowSchema,
-  error: mutationErrorsSchema,
+  errors: ExpenseNotFound,
   unavailable: ExpenseLedgerUnavailable,
   handler: remove,
 })

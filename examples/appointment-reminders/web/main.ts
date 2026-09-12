@@ -7,14 +7,14 @@ import { dataTable, field, primaryButton, quietButton, shell, textInput } from "
 import { Page } from "@effect-domains/example-web/page"
 import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { AppointmentRecipientProxy, AppointmentReminderDelivery } from "../appointment-reminder-entity.ts"
 import { AppointmentInboxNotificationResource } from "../resources.ts"
 
 const ReminderWebRpcs = AppointmentRecipientProxy.merge(AppointmentInboxNotificationResource.group)
 const NotificationSchema = Schema.toType(AppointmentInboxNotificationResource.table.rowSchema)
-const NotificationPageSchema = Page.schema(NotificationSchema)
+const NotificationPageSchema = AppointmentInboxNotificationResource.contracts.list.successSchema
 const hexByte = (byte: number) => byte.toString(16).padStart(2, "0")
 const uuidV7 = () => { const bytes = crypto.getRandomValues(new Uint8Array(16)); const timestamp = Date.now(); bytes[0] = Math.floor(timestamp / 2 ** 40) % 256; bytes[1] = Math.floor(timestamp / 2 ** 32) % 256; bytes[2] = Math.floor(timestamp / 2 ** 24) % 256; bytes[3] = Math.floor(timestamp / 2 ** 16) % 256; bytes[4] = Math.floor(timestamp / 2 ** 8) % 256; bytes[5] = timestamp % 256; bytes[6] = (bytes[6]! & 0x0f) | 0x70; bytes[8] = (bytes[8]! & 0x3f) | 0x80; const hex = globalThis.Array.from(bytes, hexByte).join(""); return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` }
 const defaultTimes = () => ({ reminderAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), appointmentAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() })
@@ -58,7 +58,7 @@ export const ScheduleReminder = Command.define("ScheduleReminder", {
 })
 
 const startList = (model: Model, cursor: string | null, append: boolean) => { const next = Requests.start(model.requests, "inbox"); return { state: next.state, command: ListNotifications({ request: next.request, token: currentToken(model.session), recipient: model.recipient.trim(), cursor, append }) } }
-const pending = (model: Model, key?: string) => Requests.pending(model.requests, key)
+const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
 const resetIdentityState = (model: Model, session: typeof SessionModel.Type): Model => ({ ...model, ...emptyForm(), session, inbox: Page.empty(), recipient: currentToken(session) === null ? "" : session.username, requests: Requests.reset(model.requests), notice: null })
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {

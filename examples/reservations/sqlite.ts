@@ -96,14 +96,13 @@ const operationErrorsSchema = Schema.Union([
   InsufficientStock,
   ResourceNotFound,
   ReservationStateTransitions.Error,
-  InventoryUnavailable,
 ])
 
 const reserveStock = Operation.make({
   name: "reserve",
   payload: ReserveStockInputSchema,
   success: ReservationSchema,
-  error: operationErrorsSchema,
+  errors: operationErrorsSchema,
   transaction: true,
   unavailable: InventoryUnavailable,
   handler: reserve,
@@ -113,7 +112,7 @@ const confirmReservation = Operation.make({
   name: "confirm",
   payload: ReservationInputSchema,
   success: ReservationSchema,
-  error: operationErrorsSchema,
+  errors: operationErrorsSchema,
   transaction: true,
   unavailable: InventoryUnavailable,
   handler: transition("confirm"),
@@ -123,7 +122,7 @@ const releaseReservation = Operation.make({
   name: "release",
   payload: ReservationInputSchema,
   success: ReservationSchema,
-  error: operationErrorsSchema,
+  errors: operationErrorsSchema,
   transaction: true,
   unavailable: InventoryUnavailable,
   handler: transition("release"),

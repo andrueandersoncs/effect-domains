@@ -4,6 +4,8 @@ import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 import { Table } from "effect-domains/table"
 const RelationSchema = Schema.Struct({ tenantId: Schema.String, number: Schema.String })
+const TenantSchema = Schema.Struct({ tenantId: Schema.String })
+const Tenants = Table.make({ name: "tenants", schema: TenantSchema })
 interface Relation extends Schema.Schema.Type<typeof RelationSchema> {}
 type TableOptions = Parameters<typeof Table.make<"relation_types", typeof RelationSchema>>[0]
 type ResourceOptions = Parameters<typeof Resource.make<"relation_resources", typeof RelationSchema>>[0]
@@ -21,7 +23,7 @@ const resourceOptions: ResourceOptions = {
   operations: { get: true },
   relations: {
     indexes: [{ fields: ["tenantId", "number"] }],
-    foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: { table: "tenants", fields: ["id"] } }],
+    foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: Table.reference(Tenants, ["id"]) }],
   },
 }
 
@@ -41,6 +43,9 @@ const invalidResource: ResourceOptions = {
   relations: { indexes: [{ name: "bad_index", fields: ["missing"] }] },
 }
 
+// @ts-expect-error because referenced fields must exist on the target table.
+const invalidReference = Table.reference(Tenants, ["missing"])
+
 const ExplicitIdentitySchema = Schema.Struct({ key: identifier(Schema.String), value: Schema.String })
 interface ExplicitIdentity extends Schema.Schema.Type<typeof ExplicitIdentitySchema> {}
 type ExplicitOptions = Parameters<typeof Table.make<"explicit_relation_types", typeof ExplicitIdentitySchema>>[0]
@@ -56,4 +61,5 @@ void implicitKey
 void resourceOptions
 void invalidTable
 void invalidResource
+void invalidReference
 void invalidImplicitKey

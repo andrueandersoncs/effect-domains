@@ -1,6 +1,7 @@
 import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
+import { Table } from "effect-domains/table"
 import { Transitions } from "effect-domains/transitions"
 import { InvoiceSchema, InvoiceStatusSchema, OrderLineSchema, OrderSchema, OrderStatusSchema } from "./domain.ts"
 
@@ -30,7 +31,7 @@ const ordersScope = ordersPolicy.sameAs("tenantId")
 
 const ordersAuthorization = ordersPolicy.policy({
   scope: ordersScope,
-  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor },
+  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
 export const OrdersResource = Resource.make({
@@ -61,6 +62,8 @@ const linesAuthorization = linesPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor },
 })
 
+const OrderIdReference = Table.reference(OrdersResource.table, ["id"])
+
 export const OrderLinesResource = Resource.make({
   authorization: linesAuthorization,
   name: "order_lines",
@@ -75,7 +78,7 @@ export const OrderLinesResource = Resource.make({
     ],
     foreignKeys: [{
       fields: ["orderId"],
-      references: { table: "orders", fields: ["id"] },
+      references: OrderIdReference,
       scope: ["tenantId"],
     }],
   },
@@ -85,7 +88,7 @@ const invoicesScope = invoicesPolicy.sameAs("tenantId")
 
 const invoicesAuthorization = invoicesPolicy.policy({
   scope: invoicesScope,
-  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor },
+  allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
 export const InvoicesResource = Resource.make({
@@ -106,7 +109,7 @@ export const InvoicesResource = Resource.make({
     ],
     foreignKeys: [{
       fields: ["orderId"],
-      references: { table: "orders", fields: ["id"] },
+      references: OrderIdReference,
       scope: ["tenantId"],
     }],
     indexes: [

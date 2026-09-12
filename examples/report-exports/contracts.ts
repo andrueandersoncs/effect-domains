@@ -125,13 +125,11 @@ export const ReportExportGenerationErrorsSchema = Schema.Union([
   Forbidden,
   EntitlementRequired,
   EntitlementUnavailable,
-  ReportExportUnavailable,
 ])
 
 export const ReportExportOperatorErrorsSchema = Schema.Union([
   Forbidden,
   ClusterError.PersistenceError,
-  ReportExportUnavailable,
 ])
 
 export interface ReportExportRequest extends Schema.Schema.Type<typeof ReportExportRequestSchema> {}

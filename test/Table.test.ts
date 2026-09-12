@@ -303,6 +303,8 @@ describe("Table", () => {
         relations: { unique: [{ fields: ["tenantId", "id"] }] },
       })
 
+      const ParentIdReference = Table.reference(parent, ["id"])
+
       const child = Table.make({
         name: "scoped_children",
         schema: ChildSchema,
@@ -310,7 +312,7 @@ describe("Table", () => {
           foreignKeys: [{
             scope: ["tenantId"],
             fields: ["parentId"],
-            references: { table: "scoped_parents", fields: ["id"] },
+            references: ParentIdReference,
           }],
           indexes: [{ fields: ["tenantId", "parentId"] }],
         },

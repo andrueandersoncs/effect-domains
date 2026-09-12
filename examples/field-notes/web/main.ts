@@ -6,7 +6,7 @@ import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput, textareaInput } from "@effect-domains/example-web/html"
 import { Page } from "@effect-domains/example-web/page"
 import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
-import { Requests, RequestStateSchema, RequestTokenSchema } from "@effect-domains/example-web/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
@@ -15,7 +15,7 @@ import { FieldReportsResource } from "../resources.ts"
 
 const FieldNotesRpcs = IdentityRpcs.merge(FieldReportsResource.group)
 const ReportSchema = Schema.toType(FieldReportsResource.table.rowSchema)
-const ReportPageSchema = Page.schema(ReportSchema)
+const ReportPageSchema = FieldReportsResource.contracts.list.successSchema
 type Report = typeof ReportSchema.Type
 
 export const WebClient = RpcService.make({ name: "field-notes/WebClient", group: FieldNotesRpcs })

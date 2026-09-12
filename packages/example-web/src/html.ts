@@ -21,13 +21,17 @@ export const field = <Message>(
     id: string
     label: string
     children: Html
+    error?: string
   }>,
 ) => {
   const className = h.Class("field")
   const htmlFor = h.For(options.id)
   const labelClass = h.Class("field-label")
   const caption = h.span([labelClass], [options.label])
-  return h.label([className, htmlFor], [caption, options.children])
+  const control = options.error === undefined
+    ? options.children
+    : h.div([], [options.children, h.p([h.Class("field-error")], [options.error])])
+  return h.label([className, htmlFor], [caption, control])
 }
 
 export const textInput = <Message>(

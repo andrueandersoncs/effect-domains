@@ -5,7 +5,7 @@
     "": {
       "name": "effect-domains",
       "devDependencies": {
-        "@better-typescript/better-typescript": "0.4.15",
+        "@better-typescript/better-typescript": "0.4.16",
         "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
@@ -153,6 +153,7 @@
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
+        "foldkit": "0.158.2",
       },
       "peerDependencies": {
         "typescript": "^7",
@@ -226,9 +227,9 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.15", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.15", "@better-typescript/better-typescript-darwin-arm64": "0.4.15", "@better-typescript/better-typescript-linux-amd64": "0.4.15", "@better-typescript/better-typescript-linux-arm64": "0.4.15" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-lubLq1nblwmvVPIlEiwGysa05fPluBThYojBJXZWejtbYwioOJGOkKpeaK9w2i056b/0EyBERPy7NNUPpVtQwQ=="],
+    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.16", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.16", "@better-typescript/better-typescript-darwin-arm64": "0.4.16", "@better-typescript/better-typescript-linux-amd64": "0.4.16", "@better-typescript/better-typescript-linux-arm64": "0.4.16" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-87EqiJaHpZDaipyzOwRVOy5TbMafdfK61xzDvlO/lBFgUM5GNkrw86IPk3vnO2MN2j7ge74PdM0fx/+2KdLzfQ=="],
 
-    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.15", "", { "os": "linux", "cpu": "x64" }, "sha512-aSWxew6gxW+lfpBSaXbpT1mISVE3bxPWQ7phLxkJhshxr3++9XiHUnSnEYahZ1WmBMhv5Sl4x06Djji5yt/JBg=="],
+    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.16", "", { "os": "linux", "cpu": "x64" }, "sha512-7sk2s95+MzFoXiDs7SDmqpa+GiEQFh6z4t69yVtnba58dqPaFr72ZKp5hvPJmB6zscLoeKXEYmMdySBIaycoSQ=="],
 
     "@docsearch/css": ["@docsearch/css@3.8.2", "", {}, "sha512-y05ayQFyUmCXze79+56v/4HpycYF3uFqB78pLPrSV5ZKAlDuIAAJNhaRi8tTdRNXh05yxX/TyNnzD6LwSM89vQ=="],
 

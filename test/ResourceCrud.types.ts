@@ -42,11 +42,23 @@ undefined satisfies Parameters<typeof TypeProbe.repository.list>[0]
 const defaultListInput: Parameters<typeof NoPolicyProbe.repository.list>[0] = { limit: 1, cursor: "continuation" }
 const listPage: Effect.Success<ReturnType<typeof TypeProbe.repository.list>> = { items: [], nextCursor: null }
 const defaultListPage: Effect.Success<ReturnType<typeof NoPolicyProbe.repository.list>> = { items: [], nextCursor: "continuation" }
+
+const contractListInput: typeof TypeProbe.contracts.list.payloadSchema.Type = {
+  filter: { completed: true },
+  limit: 1,
+}
+
+const contractListPage: typeof TypeProbe.contracts.list.successSchema.Type = {
+  items: [],
+  nextCursor: null,
+}
 // @ts-expect-error because generated lists never return bare arrays.
 const bareList: Effect.Success<ReturnType<typeof NoPolicyProbe.repository.list>> = []
 void defaultListInput
 void listPage
 void defaultListPage
+void contractListInput
+void contractListPage
 void bareList
 
 void noPolicyCreate
