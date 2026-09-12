@@ -32,3 +32,5 @@ Use Bun for project commands:
 ## Rules and Advice
 
 **Every plan is a prediction. Do everything in your power to make sure yours are accurate and effective.**
+
+Keep the docs/ up to date before every commit - this includes the vitepress docs site and the project wiki.

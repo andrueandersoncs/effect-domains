@@ -30,6 +30,14 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-12: Resource cursor contract isolation
+
+Generated resource cursors previously scoped themselves only by table name. Two otherwise identical resource declarations with opposite title ordering could therefore accept the same cursor and reinterpret its last-row values under different comparison semantics. Resource cursor scope now includes the resource name, declared filter and range fields, and complete effective ordering, matching the stricter `SqliteView.list` boundary. ([Resource compiler](../../packages/effect-domains/src/resource.ts); [regression](../../test/ResourceCrud.test.ts))
+
+- The regression creates ascending and descending list declarations over the same physical table. It failed before the fix because the descending list accepted the ascending cursor; it now rejects that cursor while ordinary same-contract continuation still returns the next row.
+- A direct in-memory SQLite smoke returned `alpha` then `zulu` through the ascending contract and reported the changed-order cursor as rejected. This establishes resource cursor isolation for changed ordering, not signed or secret cursors; authorization still protects row visibility.
+- Final verification: `bun run check`; **128 tests in 24 files**; framework package lint; and `bun run docs:build`. Workspace lint passed every package and retained the same 11 pre-existing root-test style findings recorded by the preceding verification; none are in the changed source or regression.
+
 ### 2026-09-11: Contract-derived resource editor
 
 The public editorial-calendar page now uses `ResourceEditor.make` to derive its Foldkit RPC client service, model, messages, CRUD commands, keyset page state, request ownership, stale-result rejection, reversible row/form conversion, and reload-after-mutation behavior from the public `Resource.crud` contract plus an explicit form codec. The page still owns labels, controls, layout, copy, error formatting, and the empty form. Filtered, authenticated, non-CRUD, or alternate-refresh pages remain explicit rather than being forced through this adapter. ([Editor compiler](../../packages/effect-domains/src/resource-editor.ts); [form codecs](../../packages/effect-domains/src/form.ts); [request ownership](../../packages/effect-domains/src/requests.ts); [editorial page](../../examples/editorial-calendar/web/main.ts))

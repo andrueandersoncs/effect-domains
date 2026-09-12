@@ -683,8 +683,17 @@ export const Resource = {
       [entry.field, Schema.toEncoded(storageField(entry.field))] as const
 
     const cursorEntries = Array.map(order, cursorEntry)
+    const cursorOrder = Array.map(order, ({ field, direction }) => [field, direction])
+
+    const cursorScope = JSON.stringify({
+      resource: table.name,
+      filter: filterFields,
+      range: rangeFields,
+      order: cursorOrder,
+    })
+
     const CursorAfterSchema = Schema.Struct(Record.fromEntries(cursorEntries))
-    const { parse: parseCursor, render: encodeCursor } = Page.cursor(table.name, CursorAfterSchema)
+    const { parse: parseCursor, render: encodeCursor } = Page.cursor(cursorScope, CursorAfterSchema)
     const renderCursor = flow(encodeCursor, Effect.mapError(repositoryFailure))
     const MaximumPageLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(maximum))
     const isLimit = Schema.is(MaximumPageLimitSchema)

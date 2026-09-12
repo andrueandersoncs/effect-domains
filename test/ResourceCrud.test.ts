@@ -28,6 +28,21 @@ const PagedTodoSchema = Schema.Struct({
 
 interface PagedTodo extends Schema.Schema.Type<typeof PagedTodoSchema> {}
 const PagedTodos = Resource.make({ authorization: Authorization.public, name: "paged_todo_policies", schema: PagedTodoSchema, operations: { list: { filter: ["completed"], limit: 1, publish: false } } })
+
+const CursorAscendingTodos = Resource.make({
+  authorization: Authorization.public,
+  name: "cursor_contract_todos",
+  schema: PagedTodoSchema,
+  operations: { list: { limit: 1, order: [["title", "asc"]], publish: false } },
+})
+
+const CursorDescendingTodos = Resource.make({
+  authorization: Authorization.public,
+  name: "cursor_contract_todos",
+  schema: PagedTodoSchema,
+  operations: { list: { limit: 1, order: [["title", "desc"]], publish: false } },
+})
+
 const DefaultTodoSchema = Schema.Struct({ id: identifier(Schema.Int), title: Schema.NonEmptyString })
 interface DefaultTodo extends Schema.Schema.Type<typeof DefaultTodoSchema> {}
 
@@ -240,6 +255,20 @@ const pagedCrudProgram = Effect.gen(function* () {
 })
 
 it.effect("identifier cursors preserve filtered page boundaries and patch keeps keys immutable and rows valid", () => pipe(pagedCrudProgram, Effect.provide(sqlite)))
+
+it.effect("generated cursors reject a different declared ordering for the same table", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([CursorAscendingTodos.table])
+    yield* CursorAscendingTodos.repository.create({ id: "1", title: "alpha", completed: false })
+    yield* CursorAscendingTodos.repository.create({ id: "2", title: "zulu", completed: false })
+    const first = yield* CursorAscendingTodos.repository.list({ limit: 1 })
+    const cursor = yield* pipe(Option.fromNullishOr(first.nextCursor), Effect.fromOption)
+    const result = yield* pipe(CursorDescendingTodos.repository.list({ limit: 1, cursor }), Effect.result)
+    const rejected = Result.isFailure(result)
+    expect(rejected).toBe(true)
+  }),
+  Effect.provide(sqlite),
+))
 
 const orderedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([OrderedTodos.table])
