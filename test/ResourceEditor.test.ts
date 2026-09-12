@@ -217,3 +217,16 @@ it("resource editor preserves newer form edits when a save completes", () => {
   expect(failed.model.notice).toBeNull()
   expect(failedSavePending).toBe(false)
 })
+
+it("resource editor enqueues each mutation at most once while it is pending", () => {
+  const initialized = Editor.init()
+  const firstSave = Editor.update(initialized.model, Editor.Message.ClickedSave())
+  const duplicateSave = Editor.update(firstSave.model, Editor.Message.ClickedSave())
+  const firstRemove = Editor.update(initialized.model, Editor.Message.ClickedRemove({ id: todoId }))
+  const duplicateRemove = Editor.update(firstRemove.model, Editor.Message.ClickedRemove({ id: todoId }))
+
+  expect(duplicateSave.commands).toBeUndefined()
+  expect(duplicateSave.model.requests).toEqual(firstSave.model.requests)
+  expect(duplicateRemove.commands).toBeUndefined()
+  expect(duplicateRemove.model.requests).toEqual(firstRemove.model.requests)
+})

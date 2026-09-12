@@ -38,6 +38,14 @@ An accepted save reply previously always encoded its returned row over the curre
 - The real editorial-calendar page ran against a disposable SQLite database with RPC POSTs delayed by 700 ms. The update persisted the value submitted at click time and reloaded it into the table; text typed while that request was in flight remained in the form with the success notice visible. This is browser evidence for the public editor's save race, not a claim about offline editing or conflict resolution.
 - Final verification: `bun run check`; **129 tests in 24 files**; framework package lint; `bun run build`; and `bun run docs:build`. Workspace lint passed every package and retained the same 11 pre-existing root-test style findings recorded by the preceding verification; none are in the changed source or regression.
 
+### 2026-09-12: Resource editor pending-mutation suppression
+
+`ResourceEditor` previously accepted another save or remove message while the same operation was pending. Request ownership hid the earlier reply but did not cancel its RPC effect, so repeated create messages could execute more than one server mutation. The reducer now rejects repeated save/remove messages until the accepted request settles. This is client-side command suppression, not server idempotency. ([Editor](../../packages/effect-domains/src/resource-editor.ts); [regression](../../test/ResourceEditor.test.ts))
+
+- The reducer regression failed before the fix because a second save produced another `Save` command with a new request token. It now proves that repeated save and remove messages emit no command and leave request ownership unchanged.
+- Focused verification passed the three editor regressions, framework package typecheck and lint, and the editorial-calendar consumer typecheck.
+
+
 ### 2026-09-12: Resource cursor contract isolation
 
 Generated resource cursors previously scoped themselves only by table name. Two otherwise identical resource declarations with opposite title ordering could therefore accept the same cursor and reinterpret its last-row values under different comparison semantics. Resource cursor scope now includes the resource name, declared filter and range fields, and complete effective ordering, matching the stricter `SqliteView.list` boundary. ([Resource compiler](../../packages/effect-domains/src/resource.ts); [regression](../../test/ResourceCrud.test.ts))

@@ -301,6 +301,8 @@ const make = <
       return { model: next, commands: [command] }
     },
     ClickedSave: () => {
+      if (Requests.pending(model.requests, saveKey)) return { model }
+
       const started = Requests.start(model.requests, saveKey)
 
       const next = ModelSchema.make({
@@ -354,6 +356,8 @@ const make = <
       })
     },
     ClickedRemove: ({ id }) => {
+      if (Requests.pending(model.requests, removeKey)) return { model }
+
       const started = Requests.start(model.requests, removeKey)
       const next = ModelSchema.make({ ...model, requests: started.state, notice: null })
       const command = Remove({ id, request: started.request })
