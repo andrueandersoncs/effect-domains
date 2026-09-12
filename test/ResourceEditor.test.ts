@@ -128,3 +128,92 @@ it("resource editor owns form conversion, stale replies, and mutation reloads", 
 
   expect(reloadCommandNames).toEqual(["test/TodoEditor.List"])
 })
+
+it("resource editor preserves newer form edits when a save completes", () => {
+  const initialized = Editor.init()
+
+  const listRequestId = pipe(
+    Record.values(initialized.model.requests.pending),
+    Option.fromIterable,
+    Option.getOrThrow,
+  )
+
+  const listRequest = RequestTokenSchema.make({
+    epoch: initialized.model.requests.epoch,
+    id: listRequestId,
+    key: "resource_editor_todos.list",
+  })
+
+  const listedMessage = Editor.Message.SucceededList({
+    page: { items: [{ id: todoId, title: "Before", priority: 1 }], nextCursor: null },
+    append: false,
+    request: listRequest,
+  })
+
+  const loaded = Editor.update(initialized.model, listedMessage)
+  const selectMessage = Editor.Message.ClickedSelect({ id: todoId })
+  const selected = Editor.update(loaded.model, selectMessage)
+  const saveMessage = Editor.Message.ClickedSave()
+  const saving = Editor.update(selected.model, saveMessage)
+
+  const saveRequestId = pipe(
+    Record.get(saving.model.requests.pending, "resource_editor_todos.save"),
+    Option.getOrThrow,
+  )
+
+  const saveRequest = RequestTokenSchema.make({
+    epoch: saving.model.requests.epoch,
+    id: saveRequestId,
+    key: "resource_editor_todos.save",
+  })
+
+  const editMessage = Editor.Message.ChangedField({ key: "title", value: "Next edit" })
+  const edited = Editor.update(saving.model, editMessage)
+
+  const completedMessage = Editor.Message.SucceededSave({
+    row: { id: todoId, title: "Before", priority: 1 },
+    created: false,
+    request: saveRequest,
+  })
+
+  const completed = Editor.update(edited.model, completedMessage)
+  const completedSavePending = Editor.pending(completed.model, "save")
+  const completedCommands = Array.map(completed.commands ?? [], Struct.get("name"))
+
+  expect(completed.model.form).toEqual({ title: "Next edit", priority: "1" })
+  expect(completed.model.selectedId).toBe(todoId)
+  expect(completed.model.notice).toEqual({ kind: "success", text: "Todo updated." })
+  expect(completedSavePending).toBe(false)
+  expect(completedCommands).toEqual(["test/TodoEditor.List"])
+
+  const resaveMessage = Editor.Message.ClickedSave()
+  const resaving = Editor.update(completed.model, resaveMessage)
+
+  const nextSaveRequestId = pipe(
+    Record.get(resaving.model.requests.pending, "resource_editor_todos.save"),
+    Option.getOrThrow,
+  )
+
+  const nextSaveRequest = RequestTokenSchema.make({
+    epoch: resaving.model.requests.epoch,
+    id: nextSaveRequestId,
+    key: "resource_editor_todos.save",
+  })
+
+  const nextEditMessage = Editor.Message.ChangedField({ key: "title", value: "Third edit" })
+  const editedAgain = Editor.update(resaving.model, nextEditMessage)
+
+  const failedMessage = Editor.Message.Failed({
+    request: nextSaveRequest,
+    error: "The superseded save failed.",
+    fieldErrors: { title: "The superseded save failed." },
+  })
+
+  const failed = Editor.update(editedAgain.model, failedMessage)
+  const failedSavePending = Editor.pending(failed.model, "save")
+
+  expect(failed.model.form).toEqual({ title: "Third edit", priority: "1" })
+  expect(failed.model.fieldErrors).toEqual({})
+  expect(failed.model.notice).toBeNull()
+  expect(failedSavePending).toBe(false)
+})

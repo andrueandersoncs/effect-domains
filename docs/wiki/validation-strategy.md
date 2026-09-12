@@ -30,6 +30,14 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-12: Resource editor save ownership
+
+An accepted save reply previously always encoded its returned row over the current editor form. Per-key request ownership still considered that reply current after the user changed the form or selected another row, so a slow save could erase newer local work. `ResourceEditor` now snapshots the submitted form and selection. Success still settles the request and authoritatively reloads the list, but replaces the form only when the snapshot remains current; a failure for a superseded form settles without publishing stale field errors. ([Editor](../../packages/effect-domains/src/resource-editor.ts); [regression](../../test/ResourceEditor.test.ts))
+
+- The reducer regression failed before the fix with the submitted `Before` value replacing `Next edit`. It now covers both late success and late failure: newer values remain, the save leaves pending state, stale field errors stay absent, and successful persistence still schedules the list reload.
+- The real editorial-calendar page ran against a disposable SQLite database with RPC POSTs delayed by 700 ms. The update persisted the value submitted at click time and reloaded it into the table; text typed while that request was in flight remained in the form with the success notice visible. This is browser evidence for the public editor's save race, not a claim about offline editing or conflict resolution.
+- Final verification: `bun run check`; **129 tests in 24 files**; framework package lint; `bun run build`; and `bun run docs:build`. Workspace lint passed every package and retained the same 11 pre-existing root-test style findings recorded by the preceding verification; none are in the changed source or regression.
+
 ### 2026-09-12: Resource cursor contract isolation
 
 Generated resource cursors previously scoped themselves only by table name. Two otherwise identical resource declarations with opposite title ordering could therefore accept the same cursor and reinterpret its last-row values under different comparison semantics. Resource cursor scope now includes the resource name, declared filter and range fields, and complete effective ordering, matching the stricter `SqliteView.list` boundary. ([Resource compiler](../../packages/effect-domains/src/resource.ts); [regression](../../test/ResourceCrud.test.ts))

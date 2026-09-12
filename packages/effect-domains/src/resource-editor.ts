@@ -88,8 +88,17 @@ const make = <
   const removeMethod = `${options.resource.name}.remove`
   const FormValueSchema = Schema.toEncoded(options.form)
   const OptionalIdentifierSchema = Schema.NullOr(options.resource.table.identifierSchema)
+
+  const SavingSchema = Schema.NullOr(Schema.Struct({
+    form: FormValueSchema,
+    selectedId: OptionalIdentifierSchema,
+  }))
+
   const isFormValue = Schema.is(FormValueSchema)
   const sameIdentifier = Equivalence.strictEqual<Identifier>()
+  const sameKey = Equivalence.strictEqual<string>()
+  const sameForm = Schema.toEquivalence(FormValueSchema)
+  const sameOptionalIdentifier = Schema.toEquivalence(OptionalIdentifierSchema)
   const Client = RpcService.make({ name: `${options.name}/Client`, group: options.resource.group })
   type Client = Type<typeof Client>
   type ClientValue = Effect.Success<typeof Client>
@@ -110,6 +119,7 @@ const make = <
     nextCursor: Schema.NullOr(Schema.String),
     form: FormValueSchema,
     selectedId: OptionalIdentifierSchema,
+    saving: SavingSchema,
     requests: RequestStateSchema,
     fieldErrors: FieldErrorsSchema,
     notice: NoticeSchema,
@@ -135,6 +145,12 @@ const make = <
   type UpdateReturn = Update.Return<Model, Message, Client>
   const rowIdentifier = (row: Row) => row[options.resource.table.identifier]
   const rowToForm = Schema.encodeUnknownSync(options.form)
+
+  const savingIsCurrent = (model: Model) => pipe(
+    Option.fromNullishOr(model.saving),
+    Option.exists(({ form, selectedId }) =>
+      sameForm(model.form, form) && sameOptionalIdentifier(model.selectedId, selectedId)),
+  )
 
   const failure = (request: RequestToken, error: unknown) => {
     if (isFormFailure(error)) {
@@ -245,6 +261,7 @@ const make = <
       nextCursor: null,
       form: model.form,
       selectedId: model.selectedId,
+      saving: model.saving,
       requests,
       fieldErrors: model.fieldErrors,
       notice: model.notice,
@@ -291,6 +308,7 @@ const make = <
         requests: started.state,
         fieldErrors: FieldErrorsSchema.make({}),
         notice: null,
+        saving: SavingSchema.make({ form: model.form, selectedId: model.selectedId }),
       })
 
       const command = Save({
@@ -354,12 +372,13 @@ const make = <
     SucceededSave: ({ row, created, request }) => {
       if (!Requests.accepts(model.requests, request)) return { model }
 
-      const form = rowToForm(row)
-      const selectedId = rowIdentifier(row)
+      const current = savingIsCurrent(model)
+      const form = current ? rowToForm(row) : model.form
+      const selectedId = current ? rowIdentifier(row) : model.selectedId
       const requests = Requests.succeed(model.requests, request)
       const text = created ? options.notices.created : options.notices.updated
       const notice = NoticeSchema.make({ kind: "success", text })
-      const settled = ModelSchema.make({ ...model, form, selectedId, requests, notice })
+      const settled = ModelSchema.make({ ...model, form, selectedId, requests, saving: null, notice })
 
       return reload(settled)
     },
@@ -379,6 +398,17 @@ const make = <
     Failed: ({ request, error, fieldErrors }) => {
       if (!Requests.accepts(model.requests, request)) return { model }
 
+      const saveRequest = sameKey(request.key, saveKey)
+      const savingChanged = !savingIsCurrent(model)
+      const changedSinceSave = saveRequest && savingChanged
+      const saving = saveRequest ? null : model.saving
+
+      if (changedSinceSave) {
+        const requests = Requests.succeed(model.requests, request)
+        const next = ModelSchema.make({ ...model, requests, saving })
+        return { model: next }
+      }
+
       const requests = Requests.fail(model.requests, request, error)
 
       const mergedErrors = Record.isEmptyRecord(fieldErrors)
@@ -386,7 +416,7 @@ const make = <
         : Record.union(model.fieldErrors, fieldErrors, (_, incoming) => incoming)
 
       const notice = NoticeSchema.make({ kind: "error", text: error })
-      const next = ModelSchema.make({ ...model, requests, fieldErrors: mergedErrors, notice })
+      const next = ModelSchema.make({ ...model, requests, saving, fieldErrors: mergedErrors, notice })
 
       return { model: next }
     },
@@ -398,6 +428,7 @@ const make = <
       nextCursor: null,
       form: options.empty,
       selectedId: null,
+      saving: null,
       requests: Requests.empty(),
       fieldErrors: FieldErrorsSchema.make({}),
       notice: null,
