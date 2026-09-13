@@ -51,6 +51,8 @@
     "editorial-calendar": "bun run examples/editorial-calendar/main.ts",
     "repair-workshop": "bun run examples/repair-workshop/main.ts",
     "repair-workshop:server": "bun run examples/repair-workshop/main.ts serve",
+    "support-cases": "bun run examples/support-cases/main.ts",
+    "support-cases:server": "bun run examples/support-cases/main.ts serve",
     "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
   },
   "devDependencies": {

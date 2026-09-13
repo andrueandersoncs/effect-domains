@@ -4,7 +4,7 @@ description: Choose a runnable application for CRUD, authorization, migrations, 
 
 # Choose an example
 
-Each of the twelve applications has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
+Each of the thirteen applications has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
 
 Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: every application needs its prebuilt Foldkit frontend, and some also enable generated admin. Keep demonstration servers on loopback. Example pages begin signed out; protected examples issue credentials through the example identity store, which is not a production authentication service.
 
@@ -32,6 +32,12 @@ Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to recor
 Use this for a board that joins repairs to current customer and optional technician records. The [repair-workshop guide](../examples/repair-workshop/README.md) creates assigned and unassigned jobs, changes joined names and on-call values, contrasts bounded arrays with cursor pages, and exercises foreign-key failures.
 
 [`board.ts`](../examples/repair-workshop/board.ts) declares the projection, joins, filtering, ordering, bounds, and cursor executor with `SqliteView`; [`sqlite.ts`](../examples/repair-workshop/sqlite.ts) publishes it through `SqliteView.listOperation` without restating the fragment.
+
+### Support cases
+
+Use this when a lifecycle must update a versioned record and append its event history atomically. The [support-cases guide](../examples/support-cases/README.md) covers open, triage, assignment, resolution, stale writes, duty checks, joined board filters, and nested history.
+
+[`board.ts`](../examples/support-cases/board.ts) is the second bounded `SqliteView` domain. [`sqlite.ts`](../examples/support-cases/sqlite.ts) keeps the one-to-many event projection and transactional business operations authored rather than extending the view declaration into an aggregate query language.
 
 ### Reservations
 

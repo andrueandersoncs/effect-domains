@@ -1,0 +1,418 @@
+{
+  "id": "001_initial",
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "support_customers",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ]
+      },
+      {
+        "name": "support_agents",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "onDuty",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "support_cases",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "customerId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "subject",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "priority",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "low",
+                  "normal",
+                  "high",
+                  "urgent"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "open",
+                  "triaged",
+                  "assigned",
+                  "resolved"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "assignedAgentId",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "openedAt",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "version",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          }
+        ],
+        "relations": {
+          "foreignKeys": [
+            {
+              "name": "support_cases_customer_id_fkey",
+              "fields": [
+                "customerId"
+              ],
+              "references": {
+                "table": "support_customers",
+                "fields": [
+                  "id"
+                ]
+              }
+            },
+            {
+              "name": "support_cases_assigned_agent_id_fkey",
+              "fields": [
+                "assignedAgentId"
+              ],
+              "references": {
+                "table": "support_agents",
+                "fields": [
+                  "id"
+                ]
+              }
+            }
+          ],
+          "indexes": [
+            {
+              "name": "support_cases_customer_id_idx",
+              "fields": [
+                "customerId"
+              ]
+            },
+            {
+              "name": "support_cases_priority_status_idx",
+              "fields": [
+                "priority",
+                "status"
+              ]
+            },
+            {
+              "name": "support_cases_assigned_agent_id_idx",
+              "fields": [
+                "assignedAgentId"
+              ]
+            },
+            {
+              "name": "support_cases_opened_at_idx",
+              "fields": [
+                "openedAt"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "support_case_events",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "caseId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "kind",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "opened",
+                  "triaged",
+                  "assigned",
+                  "resolved",
+                  "reopened"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "agentId",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "note",
+            "scalar": "string",
+            "nullable": true,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "occurredAt",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ],
+        "relations": {
+          "foreignKeys": [
+            {
+              "name": "support_case_events_case_id_fkey",
+              "fields": [
+                "caseId"
+              ],
+              "references": {
+                "table": "support_cases",
+                "fields": [
+                  "id"
+                ]
+              }
+            },
+            {
+              "name": "support_case_events_agent_id_fkey",
+              "fields": [
+                "agentId"
+              ],
+              "references": {
+                "table": "support_agents",
+                "fields": [
+                  "id"
+                ]
+              }
+            }
+          ],
+          "indexes": [
+            {
+              "name": "support_case_events_case_id_occurred_at_idx",
+              "fields": [
+                "caseId",
+                "occurredAt"
+              ]
+            },
+            {
+              "name": "support_case_events_agent_id_idx",
+              "fields": [
+                "agentId"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "support_customers"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "support_agents"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "support_cases"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "support_case_events"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_cases",
+      "name": "support_cases_customer_id_idx"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_cases",
+      "name": "support_cases_priority_status_idx"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_cases",
+      "name": "support_cases_assigned_agent_id_idx"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_cases",
+      "name": "support_cases_opened_at_idx"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_case_events",
+      "name": "support_case_events_case_id_occurred_at_idx"
+    },
+    {
+      "_tag": "SqliteCreateIndex",
+      "table": "support_case_events",
+      "name": "support_case_events_agent_id_idx"
+    }
+  ]
+}

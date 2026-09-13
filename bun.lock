@@ -135,6 +135,15 @@
         "foldkit": "0.158.2",
       },
     },
+    "examples/support-cases": {
+      "name": "@effect-domains/example-support-cases",
+      "dependencies": {
+        "@effect-domains/example-web": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+        "foldkit": "0.158.2",
+      },
+    },
     "examples/team-tasks": {
       "name": "@effect-domains/example-team-tasks",
       "dependencies": {
@@ -262,6 +271,8 @@
     "@effect-domains/example-reservations": ["@effect-domains/example-reservations@workspace:examples/reservations"],
 
     "@effect-domains/example-support": ["@effect-domains/example-support@workspace:packages/example-support"],
+
+    "@effect-domains/example-support-cases": ["@effect-domains/example-support-cases@workspace:examples/support-cases"],
 
     "@effect-domains/example-team-tasks": ["@effect-domains/example-team-tasks@workspace:examples/team-tasks"],
 

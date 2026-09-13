@@ -16,6 +16,7 @@ export const exampleWebApps = [
   "reading-list",
   "report-exports",
   "reservations",
+  "support-cases",
   "team-tasks",
 ] as const
 
