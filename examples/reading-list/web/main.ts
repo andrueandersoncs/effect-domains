@@ -14,9 +14,10 @@ import {
   textareaInput,
 } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { Page } from "@effect-domains/example-web/page"
+import { Page } from "effect-domains/page"
+import { ResourcePager } from "effect-domains/resource-pager"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
-import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { BookFormatSchema, RatingSchema, ReadingListBookSchema, ReadingStatusSchema } from "../domain.ts"
 import { ReadingListResource } from "../resources.ts"
@@ -84,7 +85,7 @@ const isFormFailure = (error: unknown): error is FormFailure =>
   typeof error === "object" && error !== null && "_tag" in error && error._tag === "FormFailure"
 const failed = (request: RequestToken, error: unknown) => Message.Failed({
   request,
-  error: isFormFailure(error) ? error.error : formatRpcError(error),
+  error: isFormFailure(error) ? error.error : RpcBrowser.messageFromUnknown(error),
   field: isFormFailure(error) ? error.field : null,
 })
 
@@ -135,11 +136,20 @@ export const RemoveBook = Command.define("RemoveBook", {
   }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))),
 })
 
+const BooksPager = ResourcePager.make("books.list")
+const pageState = (model: Model) => ({
+  page: { items: model.books, nextCursor: model.nextCursor },
+  requests: model.requests,
+})
 const listCommand = (model: Model, request: RequestToken, cursor: string | null, append: boolean) =>
   ListBooks({ filterStatus: model.filterStatus, filterFormat: model.filterFormat, cursor, append, request })
-const beginList = (model: Model, cursor: string | null, append: boolean) => {
-  const started = Requests.start(model.requests, "books.list")
-  return { state: started.state, command: listCommand(model, started.request, cursor, append) }
+const beginList = (model: Model, append: boolean) => {
+  const started = pipe(BooksPager.begin(model.requests, pageState(model).page, append), Option.getOrThrow)
+  return {
+    page: started.page,
+    state: started.requests,
+    command: listCommand(model, started.request, started.cursor, started.append),
+  }
 }
 const begin = (model: Model, key: string) => Requests.start(model.requests, key)
 const withError = <M>(h: HtmlBuilder<M>, child: Html, error: string | undefined) =>
@@ -148,13 +158,13 @@ const withError = <M>(h: HtmlBuilder<M>, child: Html, error: string | undefined)
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   ChangedFilterStatus: ({ value }) => {
     const next = evo(model, { filterStatus: () => value })
-    const listing = beginList(next, null, false)
-    return { model: evo(next, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
+    const listing = beginList(next, false)
+    return { model: evo(next, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
   },
   ChangedFilterFormat: ({ value }) => {
     const next = evo(model, { filterFormat: () => value })
-    const listing = beginList(next, null, false)
-    return { model: evo(next, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
+    const listing = beginList(next, false)
+    return { model: evo(next, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
   },
   ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
   ChangedAuthor: ({ value }) => ({ model: evo(model, { author: () => value }) }),
@@ -163,13 +173,13 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
   ChangedRating: ({ value }) => ({ model: evo(model, { rating: () => value }) }),
   ChangedNotes: ({ value }) => ({ model: evo(model, { notes: () => value }) }),
   ClickedReload: () => {
-    const listing = beginList(model, null, false)
-    return { model: evo(model, { books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
+    const listing = beginList(model, false)
+    return { model: evo(model, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => null }), commands: [listing.command] }
   },
   ClickedNext: () => {
-    if (model.nextCursor === null || Requests.pending(model.requests, "books.list")) return { model }
-    const listing = beginList(model, model.nextCursor, true)
-    return { model: evo(model, { requests: () => listing.state }), commands: [listing.command] }
+    if (model.nextCursor === null || BooksPager.pending(model.requests)) return { model }
+    const listing = beginList(model, true)
+    return { model: evo(model, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state }), commands: [listing.command] }
   },
   ClickedSave: () => {
     const started = begin(model, "books.save")
@@ -184,22 +194,28 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     const started = begin(model, "books.remove")
     return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveBook({ id, request: started.request })] }
   },
-  SucceededList: ({ page, append, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const received = Page.receive({ items: model.books, nextCursor: model.nextCursor }, page, append)
-    return { model: evo(model, { books: () => received.items, nextCursor: () => received.nextCursor, requests: () => Requests.succeed(model.requests, request) }) }
-  },
+  SucceededList: ({ page, append, request }) => Option.match(
+    BooksPager.receive(pageState(model), request, page, append),
+    {
+      onNone: () => ({ model }),
+      onSome: (received) => ({ model: evo(model, {
+        books: () => received.page.items,
+        nextCursor: () => received.page.nextCursor,
+        requests: () => received.requests,
+      }) }),
+    },
+  ),
   SucceededSave: ({ book, created, request }) => {
     if (!Requests.accepts(model.requests, request)) return { model }
-    const listing = beginList(evo(model, { requests: () => Requests.succeed(model.requests, request) }), null, false)
-    return { model: evo(model, { selectedId: () => book.id, title: () => book.title, author: () => book.author, status: () => book.status, format: () => book.format, rating: () => book.rating === null ? "" : String(book.rating), notes: () => book.notes ?? "", books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: created ? "Added to the list." : "Updated." }) }), commands: [listing.command] }
+    const listing = beginList(evo(model, { requests: () => Requests.succeed(model.requests, request) }), false)
+    return { model: evo(model, { selectedId: () => book.id, title: () => book.title, author: () => book.author, status: () => book.status, format: () => book.format, rating: () => book.rating === null ? "" : String(book.rating), notes: () => book.notes ?? "", books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: created ? "Added to the list." : "Updated." }) }), commands: [listing.command] }
   },
   SucceededRemove: ({ id, request }) => {
     if (!Requests.accepts(model.requests, request)) return { model }
     const base = evo(model, { requests: () => Requests.succeed(model.requests, request) })
-    const listing = beginList(base, null, false)
+    const listing = beginList(base, false)
     const selected = model.selectedId === id
-    return { model: evo(model, { title: () => selected ? "" : model.title, author: () => selected ? "" : model.author, status: () => selected ? "planned" : model.status, format: () => selected ? "paperback" : model.format, rating: () => selected ? "" : model.rating, notes: () => selected ? "" : model.notes, selectedId: () => selected ? null : model.selectedId, books: () => [], nextCursor: () => null, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: "Removed." }) }), commands: [listing.command] }
+    return { model: evo(model, { title: () => selected ? "" : model.title, author: () => selected ? "" : model.author, status: () => selected ? "planned" : model.status, format: () => selected ? "paperback" : model.format, rating: () => selected ? "" : model.rating, notes: () => selected ? "" : model.notes, selectedId: () => selected ? null : model.selectedId, books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: "Removed." }) }), commands: [listing.command] }
   },
   Failed: ({ request, error, field }) => {
     if (!Requests.accepts(model.requests, request)) return { model }
@@ -209,8 +225,8 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
   const model: Model = { books: [], nextCursor: null, filterStatus: "", filterFormat: "", ...emptyForm, requests: Requests.empty(), fieldErrors: {}, notice: null }
-  const listing = beginList(model, null, false)
-  return { model: evo(model, { requests: () => listing.state }), commands: [listing.command] }
+  const listing = beginList(model, false)
+  return { model: evo(model, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state }), commands: [listing.command] }
 }
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({

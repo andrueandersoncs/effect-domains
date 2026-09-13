@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Data, Effect, Equivalence, Layer, Record, Schema, SchemaGetter, pipe } from "effect"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { Rpc, RpcGroup, RpcTest } from "effect/unstable/rpc"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { Application } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
@@ -45,6 +45,16 @@ const JobList = SqliteView.list({
   order: [["urgent", "desc"], ["id", "asc"]],
   limit: 2,
 })
+
+class JobListUnavailable extends Schema.TaggedError<JobListUnavailable>()("JobListUnavailable", {}) {}
+
+const JobListOperation = SqliteView.listOperation({
+  name: "jobs.list",
+  unavailable: JobListUnavailable,
+  list: JobList,
+})
+
+const JobListBundle = Operation.bundle(JobListOperation)
 
 it.effect("decodes composite left joins without losing booleans, service codecs, or unmatched rows", () => pipe(
   Effect.gen(function* () {
@@ -95,6 +105,7 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES
       ('a', 'acme', NULL, 1),
       ('b', 'acme', NULL, 0),
@@ -123,6 +134,19 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
 
     expect(mismatch._tag).toBe("SqliteViewListInputError")
   }),
+  Effect.provide(database),
+))
+
+it.effect("publishes a compiled list as an operation without hand-written pass-through fields", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([Jobs])
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('a', 'acme', NULL, 1)`
+    const client = yield* RpcTest.makeClient(JobListBundle.group)
+    const page = yield* client["jobs.list"]({ filter: { tenant: "acme" } })
+    expect(page).toEqual({ items: [{ id: "a", tenant: "acme", urgent: true }], nextCursor: null })
+  }),
+  Effect.provide(JobListBundle.handlers),
   Effect.provide(database),
 ))
 
@@ -165,6 +189,7 @@ it("rejects an operation whose joined table is absent or replaced by a different
     Operation.annotation,
     dependencies,
   )
+
   const group = RpcGroup.make(rpc)
   const commands = new Data.Class({ group, handlers: Layer.empty })
   expect(() => Application.make({ name: "missing", parts: [commands] })).toThrow()

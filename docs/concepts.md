@@ -28,7 +28,7 @@ See the [resource reference](/reference/resources) for exact contracts.
 
 ## Authored operations: business commands
 
-Use `Operation.make` for an authored application operation instead of assembling `Rpc.make`, a group, a handler layer, authorization middleware, and error translation by hand.
+Use `Operation.make` for a one-off authored application operation. When several operations share a namespace, unavailable boundary, authorization policy, and transaction mode, bind those invariants once with `Operation.family`.
 
 ```ts
 import { Effect, Schema } from "effect"
@@ -39,18 +39,21 @@ class BillingUnavailable extends Schema.TaggedError<BillingUnavailable>()(
   {},
 ) {}
 
-const issueInvoice = Operation.make({
-  name: "billing.issueInvoice",
+const BillingOperation = Operation
+  .family("billing.", BillingUnavailable)
+  .transactional()
+
+const issueInvoice = BillingOperation.make({
+  name: "issueInvoice",
   payload: Schema.Struct({ orderId: Schema.String }),
   success: Schema.Struct({ invoiceId: Schema.String }),
-  unavailable: BillingUnavailable,
   handler: (input) => Effect.succeed({ invoiceId: input.orderId }),
 })
 
 export const BillingOperations = Operation.bundle(issueInvoice)
 ```
 
-`Operation.make` takes one definition, applies JSON codecs, and derives its public error schema by unioning declared domain `errors` with the required `unavailable` schema. Undeclared infrastructure or untagged failures become `unavailable`; a domain-tagged failure the handler can raise but `errors` omits is a compile error, so nothing a client should see is silently hidden. With a `SubjectPolicy`, its handler also receives a typed subject; `transaction: true` wraps it in `RepositoryStore.transaction`. `dependencies` accepts Resource, Table, and `SqliteView` descriptors and application composition validates their exact registered tables.
+`Operation.make` and family members apply JSON codecs and derive the public error schema by unioning declared domain `errors` with the required `unavailable` schema. Undeclared infrastructure or untagged failures become `unavailable`; a domain-tagged failure the handler can raise but `errors` omits is a compile error. A family can bind a typed `SubjectPolicy` with `.authorized(policy)` and apply `RepositoryStore.transaction` to every member with `.transactional()`. `dependencies` accepts Resource, Table, and `SqliteView` descriptors; application composition validates their exact registered tables.
 
 Use an authored operation when an action preserves a cross-record invariant, calculates an aggregate, invokes an external system, or has a domain-specific failure boundary. For example, reservations can use declared state transitions while their inventory accounting remains an authored transactional operation.
 

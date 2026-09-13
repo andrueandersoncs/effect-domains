@@ -19,7 +19,7 @@ features:
   - title: Use the same operations everywhere
     details: The CLI, MCP tools, and browser admin share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
   - title: Keep business rules in your code
-    details: Use Operation.make for authored commands, policies, transactions, SQL-view dependencies, and unavailable-error translation. Compose them with generated resources in one application.
+    details: Use Operation.make for one-off commands or Operation.family for shared names, policies, and transactions. Keep handlers and business failures explicit.
 ---
 
 <div class="home-code">

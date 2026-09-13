@@ -362,6 +362,7 @@ it.effect("transitions use their own authorization action rather than patch perm
       AuthorizedTransitionResource.repository.transition("publication", "publish"),
       Effect.provideService(AuthorizationSubject, subject),
     )
+
     expect(published).toEqual({ id: "publication", state: "published" })
   }),
   Effect.provide(sqlite),

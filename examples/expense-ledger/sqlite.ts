@@ -113,48 +113,44 @@ const remove = Effect.fn("ExpenseLedger.remove")(function* (
 
 const expenseTotalsSuccessSchema = Schema.Array(ExpenseTotalSchema)
 
+const ExpenseOperations = Operation.family("expenses.", ExpenseLedgerUnavailable)
 
-const recordExpense = Operation.make({
-  name: "expenses.record",
+const recordExpense = ExpenseOperations.make({
+  name: "record",
   payload: ExpenseSchema,
   success: ExpensesResource.table.rowSchema,
-  unavailable: ExpenseLedgerUnavailable,
   handler: ExpensesResource.repository.create,
 })
 
-const getExpense = Operation.make({
-  name: "expenses.get",
+const getExpense = ExpenseOperations.make({
+  name: "get",
   payload: ExpenseIdentifierInputSchema,
   success: ExpensesResource.table.rowSchema,
   errors: ExpenseNotFound,
-  unavailable: ExpenseLedgerUnavailable,
   handler: get,
 })
 
-const expenseTotals = Operation.make({
-  name: "expenses.totals",
+const expenseTotals = ExpenseOperations.make({
+  name: "totals",
   payload: ExpenseQueryInputSchema,
   success: expenseTotalsSuccessSchema,
   errors: InvalidExpenseDateRange,
-  unavailable: ExpenseLedgerUnavailable,
   handler: totals,
 })
 
-const updateExpense = Operation.make({
-  name: "expenses.update",
+const updateExpense = ExpenseOperations.make({
+  name: "update",
   payload: ExpensesResource.table.rowSchema,
   success: ExpensesResource.table.rowSchema,
   errors: ExpenseNotFound,
-  unavailable: ExpenseLedgerUnavailable,
   handler: update,
 })
 
-const removeExpense = Operation.make({
-  name: "expenses.remove",
+const removeExpense = ExpenseOperations.make({
+  name: "remove",
   payload: ExpenseIdentifierInputSchema,
   success: ExpensesResource.table.rowSchema,
   errors: ExpenseNotFound,
-  unavailable: ExpenseLedgerUnavailable,
   handler: remove,
 })
 

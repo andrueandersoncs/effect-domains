@@ -4,13 +4,17 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
-import { Page } from "@effect-domains/example-web/page"
-import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Page } from "effect-domains/page"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { identitySessionView } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
+
 import { AppointmentRecipientProxy, AppointmentReminderDelivery } from "../appointment-reminder-entity.ts"
 import { AppointmentInboxNotificationResource } from "../resources.ts"
+
+type SessionClient = Type<typeof Session.Client>
 
 const ReminderWebRpcs = AppointmentRecipientProxy.merge(AppointmentInboxNotificationResource.group)
 const NotificationSchema = Schema.toType(AppointmentInboxNotificationResource.table.rowSchema)
@@ -24,7 +28,7 @@ export const WebClient = RpcService.make({ name: "appointment-reminders/WebClien
 export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
-  session: SessionModel,
+  session: Session.ModelSchema,
   inbox: NotificationPageSchema,
   recipient: Schema.String, reminderId: Schema.String, appointmentId: Schema.String, appointmentAt: Schema.String, reminderAt: Schema.String, location: Schema.String, purpose: Schema.String,
   requests: RequestStateSchema,
@@ -33,33 +37,33 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  SessionChanged: { message: SessionMessage }, ChangedRecipient: { value: Schema.String }, ChangedReminderId: { value: Schema.String }, ChangedAppointmentId: { value: Schema.String }, ChangedAppointmentAt: { value: Schema.String }, ChangedReminderAt: { value: Schema.String }, ChangedLocation: { value: Schema.String }, ChangedPurpose: { value: Schema.String }, ClickedGenerateIds: {}, ClickedReload: {}, ClickedLoadMore: {}, ClickedSchedule: {},
+  SessionChanged: { message: Session.MessageSchema }, ChangedRecipient: { value: Schema.String }, ChangedReminderId: { value: Schema.String }, ChangedAppointmentId: { value: Schema.String }, ChangedAppointmentAt: { value: Schema.String }, ChangedReminderAt: { value: Schema.String }, ChangedLocation: { value: Schema.String }, ChangedPurpose: { value: Schema.String }, ClickedGenerateIds: {}, ClickedReload: {}, ClickedLoadMore: {}, ClickedSchedule: {},
   SucceededList: { request: RequestTokenSchema, page: NotificationPageSchema, append: Schema.Boolean }, SucceededSchedule: { request: RequestTokenSchema }, Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
-const currentToken = (session: typeof SessionModel.Type) => Session.token(session)
+const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
 const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
   effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }) }),
+  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
 )
 
 export const ListNotifications = Command.define("ListNotifications", {
   args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), recipient: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean }, messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, token, recipient, cursor, append }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["appointment_notifications.list"]({ filter: { recipient }, ...Page.input(cursor) }, bearer(token)))), (page) => Message.SucceededList({ request, page, append })),
+  execute: ({ request, token, recipient, cursor, append }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["appointment_notifications.list"]({ filter: { recipient }, ...Page.input(cursor) }, RpcBrowser.requestOptions(token)))), (page) => Message.SucceededList({ request, page, append })),
 })
 export const ScheduleReminder = Command.define("ScheduleReminder", {
   args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), recipient: Schema.String, reminderId: Schema.String, appointmentId: Schema.String, appointmentAt: Schema.String, reminderAt: Schema.String, location: Schema.String, purpose: Schema.String }, messages: [Message.SucceededSchedule, Message.Failed],
   execute: (args) => requestEffect(args.request, Effect.gen(function*() {
     const payload = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(AppointmentReminderDelivery))({ recipient: args.recipient.trim(), reminderId: args.reminderId.trim(), appointmentId: args.appointmentId.trim(), appointmentAt: args.appointmentAt.trim(), reminderAt: args.reminderAt.trim(), location: args.location.trim(), purpose: args.purpose.trim() })
     const client = yield* WebClient
-    yield* client["AppointmentRecipient.ScheduleReminderDiscard"]({ entityId: payload.recipient, payload }, bearer(args.token))
+    yield* client["AppointmentRecipient.ScheduleReminderDiscard"]({ entityId: payload.recipient, payload }, RpcBrowser.requestOptions(args.token))
   }), () => Message.SucceededSchedule({ request: args.request })),
 })
 
 const startList = (model: Model, cursor: string | null, append: boolean) => { const next = Requests.start(model.requests, "inbox"); return { state: next.state, command: ListNotifications({ request: next.request, token: currentToken(model.session), recipient: model.recipient.trim(), cursor, append }) } }
 const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
-const resetIdentityState = (model: Model, session: typeof SessionModel.Type): Model => ({ ...model, ...emptyForm(), session, inbox: Page.empty(), recipient: currentToken(session) === null ? "" : session.username, requests: Requests.reset(model.requests), notice: null })
+const resetIdentityState = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({ ...model, ...emptyForm(), session, inbox: Page.empty(), recipient: currentToken(session) === null ? "" : session.username, requests: Requests.reset(model.requests), notice: null })
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => {
@@ -83,7 +87,7 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({ model: { session: Session.empty(), inbox: Page.empty(), ...emptyForm(), requests: Requests.empty(), notice: null } })
 
-export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Appointment reminders", body: shell(h, { title: "Appointment reminders", lede: "Schedule durable in-app reminders, then check the recipient’s delivery inbox after the reminder time.", notice: model.notice, session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })), children: [h.div([h.Class("split")], [
+export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Appointment reminders", body: shell(h, { title: "Appointment reminders", lede: "Schedule durable in-app reminders, then check the recipient’s delivery inbox after the reminder time.", notice: model.notice, session: identitySessionView(h, model.session, (message) => Message.SessionChanged({ message })), children: [h.div([h.Class("split")], [
   h.section([h.Class("panel stack")], [h.div([h.Class("actions")], [h.h2([], ["Recipient inbox"]), primaryButton(h, { label: pending(model, "inbox") ? "Loading…" : "Reload inbox", message: Option.some(Message.ClickedReload()), type: "button", disabled: pending(model, "inbox") || currentToken(model.session) === null })]), dataTable(h, { caption: `Delivered reminders for ${model.recipient || "recipient"}`, columns: ["Purpose", "Appointment", "Reminder", "Location", "Delivered"], rows: model.inbox.items, key: (notification) => notification.id, cells: (notification) => [notification.purpose, DateTime.formatIso(notification.appointmentAt), DateTime.formatIso(notification.reminderAt), notification.location, DateTime.formatIso(notification.deliveredAt)] }), model.inbox.nextCursor === null ? h.empty : quietButton(h, { label: pending(model, "inbox") ? "Loading…" : "Load more", message: Message.ClickedLoadMore(), disabled: pending(model, "inbox") || currentToken(model.session) === null })]),
   h.section([h.Class("panel")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSchedule())], [h.h2([], ["Schedule a reminder"]), field(h, { id: "recipient", label: "Recipient", children: textInput(h, { id: "recipient", value: model.recipient, onInput: (value) => Message.ChangedRecipient({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "reminder-id", label: "Reminder ID (UUIDv7)", children: textInput(h, { id: "reminder-id", value: model.reminderId, onInput: (value) => Message.ChangedReminderId({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "appointment-id", label: "Appointment ID (UUIDv7)", children: textInput(h, { id: "appointment-id", value: model.appointmentId, onInput: (value) => Message.ChangedAppointmentId({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), quietButton(h, { label: "Generate IDs", message: Message.ClickedGenerateIds(), disabled: false }), field(h, { id: "reminder-at", label: "Reminder at (ISO 8601 UTC)", children: textInput(h, { id: "reminder-at", value: model.reminderAt, onInput: (value) => Message.ChangedReminderAt({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "appointment-at", label: "Appointment at (ISO 8601 UTC)", children: textInput(h, { id: "appointment-at", value: model.appointmentAt, onInput: (value) => Message.ChangedAppointmentAt({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "location", label: "Location", children: textInput(h, { id: "location", value: model.location, onInput: (value) => Message.ChangedLocation({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "purpose", label: "Purpose", children: textInput(h, { id: "purpose", value: model.purpose, onInput: (value) => Message.ChangedPurpose({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), primaryButton(h, { label: pending(model, "schedule") ? "Scheduling…" : "Schedule reminder", message: Option.none(), type: "submit", disabled: pending(model, "schedule") || currentToken(model.session) === null }) ])]),
 ]) ] }) })

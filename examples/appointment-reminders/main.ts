@@ -1,14 +1,13 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { SingleRunner } from "effect/unstable/cluster"
 import { Layer, pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { AppointmentRemindersApplication } from "./application.ts"
 import { AppointmentReminderBackground } from "./background.ts"
 import { AppointmentReminderMigrations } from "./migrations.ts"
-import { AppointmentRemindersWebAssets } from "./web/assets.ts"
 
 const privateClient = SqliteBunRuntime.privateClient({
   application: "appointment-reminders",
@@ -20,11 +19,15 @@ const execution = pipe(
   Layer.provide(privateClient),
 )
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Appointment reminders",
   accent: "#9f1239",
-  ...AppointmentRemindersWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 const identity = ExampleIdentity.layer("appointment-reminders")
 const services = Layer.mergeAll(identity, execution)

@@ -1,14 +1,14 @@
-import { Runtime } from "foldkit"
-import { browserLayer } from "@effect-domains/example-web/rpc"
+import { Effect } from "effect"
+import { BrowserRuntime } from "effect-domains/browser-runtime"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Model, WebClient, init, update, view } from "./main.ts"
 
-const application = Runtime.makeApplication({
+Effect.runSync(BrowserRuntime.run({
   Model,
   init,
   update,
   view,
-  container: document.getElementById("root"),
-  resources: browserLayer(WebClient),
-})
+  resources: RpcBrowser.layer(WebClient),
+}))
 
-Runtime.run(application)
+

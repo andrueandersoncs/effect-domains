@@ -1,7 +1,7 @@
 import { Array, DateTime, Option, Schema } from "effect"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput, textareaInput } from "@effect-domains/example-web/html"
-import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Form } from "effect-domains/form"
 import { ResourceEditor } from "effect-domains/resource-editor"
 import { ArticleSchema, EditorialChannelSchema, NonNegativePrioritySchema } from "../domain.ts"
@@ -25,7 +25,7 @@ const Editor = ResourceEditor.make({
     updated: "Updated.",
     removed: "Removed.",
   },
-  formatError: formatRpcError,
+  formatError: RpcBrowser.messageFromUnknown,
 })
 
 export const WebClient = Editor.Client

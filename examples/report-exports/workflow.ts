@@ -127,43 +127,43 @@ const selectGenerate = Effect.fn("ReportExports.selectGenerate")(function* (
   return yield* FinancialReportExport.execute(workflow)
 })
 
-const generate = Operation.make({
-  name: "ReportExport.Generate",
+const ReportGenerationOperation = Operation
+  .family("ReportExport.", ReportExportUnavailable)
+  .authorized(ReportExportGenerationAuthorization)
+
+const ReportOperatorOperation = Operation
+  .family("ReportExport.", ReportExportUnavailable)
+  .authorized(ExampleRoles.admin)
+
+const generate = ReportGenerationOperation.make({
+  name: "Generate",
   payload: ReportExportRequestSchema,
   success: ReportArtifactSchema,
   handler: selectGenerate,
   errors: ReportExportGenerationErrorsSchema,
-  policy: ReportExportGenerationAuthorization,
-  unavailable: ReportExportUnavailable,
 })
 
-const generateDiscard = Operation.make({
-  name: "ReportExport.GenerateDiscard",
+const generateDiscard = ReportGenerationOperation.make({
+  name: "GenerateDiscard",
   payload: ReportExportRequestSchema,
   success: Schema.String,
   handler: selectGenerateDiscard,
   errors: ReportExportGenerationErrorsSchema,
-  policy: ReportExportGenerationAuthorization,
-  unavailable: ReportExportUnavailable,
 })
 
-const resume = Operation.make({
-  name: "ReportExport.GenerateResume",
+const resume = ReportOperatorOperation.make({
+  name: "GenerateResume",
   payload: PollReportExportSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
-  policy: ExampleRoles.admin,
-  unavailable: ReportExportUnavailable,
   handler: resumeWorkflow,
 })
 
-const release = Operation.make({
-  name: "ReportExport.Release",
+const release = ReportOperatorOperation.make({
+  name: "Release",
   payload: ReleaseReportSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
-  policy: ExampleRoles.admin,
-  unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
     const releasedBy = yield* Schema.decodeUnknownEffect(
       Schema.NonEmptyString,
@@ -179,13 +179,11 @@ const release = Operation.make({
   }),
 })
 
-const poll = Operation.make({
-  name: "ReportExport.Poll",
+const poll = ReportOperatorOperation.make({
+  name: "Poll",
   payload: PollReportExportSchema,
   success: ReportExportPollResultSchema,
   errors: ReportExportOperatorErrorsSchema,
-  policy: ExampleRoles.admin,
-  unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
     const result = yield* FinancialReportExport.poll(executionId)
 
@@ -200,12 +198,10 @@ const poll = Operation.make({
   }),
 })
 
-const status = Operation.make({
-  name: "ReportExport.Status",
+const status = ReportOperatorOperation.make({
+  name: "Status",
   success: ReportExportStatusSchema,
   errors: ReportExportOperatorErrorsSchema,
-  policy: ExampleRoles.admin,
-  unavailable: ReportExportUnavailable,
   handler: Effect.fn("ReportExports.Status")(function* () {
     const sharding = yield* Sharding.Sharding
     const storage = yield* RunnerStorage.RunnerStorage

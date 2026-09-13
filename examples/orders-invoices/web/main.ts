@@ -5,9 +5,11 @@ import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { identitySessionView } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
+
 import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { OrderSummary } from "../contracts.ts"
 import {
@@ -21,6 +23,9 @@ import { VersionConflict } from "effect-domains/repository-store"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { OrdersResource } from "../resources.ts"
 import { BillingOperations } from "../sqlite.ts"
+
+type SessionClient = Type<typeof Session.Client>
+
 const BillingBrowserRpcs = IdentityRpcs.merge(BillingOperations.group)
 const OrderSchema = OrdersResource.table.rowSchema
 
@@ -38,10 +43,10 @@ const errorText = (error: unknown) => error instanceof VersionConflict || (
   typeof error === "object" && error !== null && "_tag" in error && error._tag === "VersionConflict"
 )
   ? "Version conflict: this order or invoice changed. Reload it and try again."
-  : formatRpcError(error)
+  : RpcBrowser.messageFromUnknown(error)
 
 export const Model = Schema.Struct({
-  session: SessionModel,
+  session: Session.ModelSchema,
   requests: RequestStateSchema,
   summary: Schema.NullOr(OrderSummary),
   orderNumber: Schema.String,
@@ -57,7 +62,7 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  SessionChanged: { message: SessionMessage },
+  SessionChanged: { message: Session.MessageSchema },
   ChangedOrderNumber: { value: Schema.String },
   ChangedCustomer: { value: Schema.String },
   ChangedLineNumber: { value: Schema.String },
@@ -85,7 +90,7 @@ export const LoadOrder = Command.define("LoadOrder", {
   execute: ({ request, token, orderId }) => pipe(
     Effect.gen(function*() {
       const client = yield* WebClient
-      return yield* client["billing.getOrder"]({ orderId }, bearer(token))
+      return yield* client["billing.getOrder"]({ orderId }, RpcBrowser.requestOptions(token))
     }),
     Effect.match({
       onSuccess: (summary) => Message.SucceededSummary({ request, summary }),
@@ -100,7 +105,7 @@ export const CreateOrder = Command.define("CreateOrder", {
     Schema.decodeUnknownEffect(CreateOrderInputSchema)({ number: number.trim(), customer: customer.trim() }),
     Effect.flatMap((input) => Effect.gen(function*() {
       const client = yield* WebClient
-      return yield* client["billing.createOrder"](input, bearer(token))
+      return yield* client["billing.createOrder"](input, RpcBrowser.requestOptions(token))
     })),
     Effect.match({
       onSuccess: (order) => Message.SucceededCreate({ request, order }),
@@ -129,7 +134,7 @@ export const AddLine = Command.define("AddLine", {
             description: args.description.trim(),
             quantity: numbers.quantity,
             unitAmountMinor: numbers.unitAmountMinor,
-          }, bearer(args.token))
+          }, RpcBrowser.requestOptions(args.token))
         }),
         Effect.match({
           onSuccess: (summary) => Message.SucceededSummary({ request: args.request, summary }),
@@ -146,7 +151,7 @@ export const IssueInvoice = Command.define("IssueInvoice", {
     Schema.decodeUnknownEffect(InvoiceNumberSchema)(number.trim()),
     Effect.flatMap((number) => Effect.gen(function*() {
       const client = yield* WebClient
-      yield* client["billing.issueInvoice"]({ orderId, expectedVersion, number }, bearer(token))
+      yield* client["billing.issueInvoice"]({ orderId, expectedVersion, number }, RpcBrowser.requestOptions(token))
     })),
     Effect.match({
       onSuccess: () => Message.SucceededAction({ request, text: "Invoice issued." }),
@@ -160,7 +165,7 @@ export const PayInvoice = Command.define("PayInvoice", {
   execute: ({ request, token, invoiceId, expectedVersion }) => pipe(
     Effect.gen(function*() {
       const client = yield* WebClient
-      yield* client["billing.payInvoice"]({ invoiceId, expectedVersion }, bearer(token))
+      yield* client["billing.payInvoice"]({ invoiceId, expectedVersion }, RpcBrowser.requestOptions(token))
     }),
     Effect.match({
       onSuccess: () => Message.SucceededAction({ request, text: "Invoice paid." }),
@@ -292,7 +297,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
       title: "Orders and invoices",
       lede: "Create a draft order, add priced lines, issue an invoice, and record payment with optimistic versions.",
       notice: model.notice,
-      session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
+      session: identitySessionView(h, model.session, (message) => Message.SessionChanged({ message })),
       children: [h.div([h.Class("split")], [
         h.section([h.Class("panel stack")], [
           h.div([h.Class("actions")], [h.h2([], ["Current order"]), quietButton(h, { label: pending ? "Loading…" : "Reload", message: Message.ClickedReload(), disabled: pending || summary === null })]),

@@ -5,7 +5,7 @@ import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { ExpenseQueryInputSchema, ExpenseSchema, ExpenseTotalSchema } from "../domain.ts"
@@ -61,7 +61,7 @@ const emptyForm = { date: today, merchant: "", category: "meals", amountMinor: "
 const queryPayload = (from: string, through: string, filterCategory: string) => Schema.decodeUnknownEffect(ExpenseQueryInputSchema)({ from, through, ...(filterCategory === "" ? {} : { category: filterCategory }), limit: 50 })
 const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
   effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }) }),
+  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
 )
 
 export const ListExpenses = Command.define("ListExpenses", {

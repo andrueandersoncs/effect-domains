@@ -62,13 +62,13 @@ Report exports and appointment reminders have separate native execution stores. 
 
 - `domain.ts`: canonical values, brands, and domain errors; use framework schemas such as `UuidV7Schema`, `SafeIntSchema`, and `PageLimitSchema`, and use `Schema.DateTimeUtc` for canonical timestamps.
 - `resources.ts`: resource schemas, policies, relation declarations, generated operations, versions, and transitions.
-- `sqlite.ts` where needed: `Operation.make` handlers and authored SQL for cross-record rules, aggregates, and projections.
+- `sqlite.ts` where needed: authored SQL and `Operation.make` or `Operation.family` handlers for cross-record rules, aggregates, and projections.
 - `application.ts`: `Application.make({ name, parts })` with resources, `Operation.bundle(...)`, and `IdentityBundle` where identity is provided.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
-- `main.ts`: `ApplicationBun.run` piped to `BunRuntime.runMain`, with database, services, initialization, background, routes, and optional admin.
-- `web/`: Foldkit SPA over the published RPC contracts.
+- `main.ts`: `ApplicationBun.run` plus `StaticSpa.layerHttp`, piped to `BunRuntime.runMain`.
+- `web/`: a Foldkit SPA started by `BrowserRuntime`, using `RpcBrowser` over the published contracts. Shared HTML/session rendering remains in example-web; transport, paging, identity commands, startup, and asset routes are framework modules.
 
-`Operation.make` owns JSON codecs, policy middleware, optional repository transactions, declared `SqliteView` dependencies, and unavailable-error translation. The handler keeps its business rules. `Operation.bundle(...)` produces the application part; examples do not hand-assemble `Rpc.make`/`toLayer` skeletons.
+`Operation.make` owns JSON codecs, policy middleware, optional repository transactions, declared `SqliteView` dependencies, and unavailable-error translation. `Operation.family` binds a repeated prefix, unavailable error, policy, and transaction mode once while leaving each member's schemas and handler explicit. `Operation.bundle(...)` produces the application part. Derived joined lists publish through `SqliteView.listOperation`, not manual fragment forwarding.
 
 ## Generated resource conventions
 

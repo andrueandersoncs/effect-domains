@@ -15,7 +15,7 @@ export const RequestStateSchema = Schema.Struct({
   errors: Schema.Record(Schema.String, Schema.String),
 })
 
-interface RequestState extends Schema.Schema.Type<typeof RequestStateSchema> {}
+export interface RequestState extends Schema.Schema.Type<typeof RequestStateSchema> {}
 
 const StartedSchema = Schema.Struct({
   state: RequestStateSchema,

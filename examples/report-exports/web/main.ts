@@ -5,12 +5,16 @@ import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { identitySessionView } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
+
 import { FinancialReportLineSchema, ReportExportPollResultSchema, ReportExportRequestSchema, ReportExportStatusSchema } from "../contracts.ts"
 import { ReportExportRpcs } from "../workflow.ts"
+
+type SessionClient = Type<typeof Session.Client>
 
 const currencies = ["AUD", "CAD", "EUR", "GBP", "JPY", "USD"] as const
 const releasePolicies = ["automatic", "operatorApproval"] as const
@@ -19,7 +23,7 @@ export const WebClient = RpcService.make({ name: "report-exports/WebClient", gro
 export type WebClient = Type<typeof WebClient>
 
 export const Model = Schema.Struct({
-  session: SessionModel,
+  session: Session.ModelSchema,
   reportId: Schema.String, startsAt: Schema.String, endsAt: Schema.String, currency: Schema.String, releasePolicy: Schema.String,
   debitAccountCode: Schema.String, debitDescription: Schema.String, debitAmountMinor: Schema.String,
   creditAccountCode: Schema.String, creditDescription: Schema.String, creditAmountMinor: Schema.String,
@@ -31,7 +35,7 @@ export type Model = typeof Model.Type
 
 const StatusSchema = ReportExportStatusSchema
 export const Message = defineMessageUnion({
-  SessionChanged: { message: SessionMessage },
+  SessionChanged: { message: Session.MessageSchema },
   ChangedReportId: { value: Schema.String }, ChangedStartsAt: { value: Schema.String }, ChangedEndsAt: { value: Schema.String }, ChangedCurrency: { value: Schema.String }, ChangedReleasePolicy: { value: Schema.String },
   ChangedDebitAccountCode: { value: Schema.String }, ChangedDebitDescription: { value: Schema.String }, ChangedDebitAmountMinor: { value: Schema.String }, ChangedCreditAccountCode: { value: Schema.String }, ChangedCreditDescription: { value: Schema.String }, ChangedCreditAmountMinor: { value: Schema.String }, ChangedExecutionId: { value: Schema.String },
   ClickedGenerate: {}, ClickedPoll: {}, ClickedRelease: {}, ClickedStatus: {},
@@ -42,9 +46,9 @@ type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
   effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }) }),
+  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
 )
-const currentToken = (session: typeof SessionModel.Type) => Session.token(session)
+const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
 export const GenerateDiscard = Command.define("GenerateDiscard", {
   args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), reportId: Schema.String, startsAt: Schema.String, endsAt: Schema.String, currency: Schema.String, releasePolicy: Schema.String, debitAccountCode: Schema.String, debitDescription: Schema.String, debitAmountMinor: Schema.String, creditAccountCode: Schema.String, creditDescription: Schema.String, creditAmountMinor: Schema.String }, messages: [Message.SucceededGenerate, Message.Failed],
   execute: (args) => requestEffect(args.request, Effect.gen(function*() {
@@ -53,12 +57,12 @@ export const GenerateDiscard = Command.define("GenerateDiscard", {
       { accountCode: args.creditAccountCode.trim(), description: args.creditDescription.trim(), direction: "credit", amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(FinancialReportLineSchema.fields.amountMinor))(args.creditAmountMinor) },
     ] })
     const client = yield* WebClient
-    return yield* client["ReportExport.GenerateDiscard"](request, bearer(args.token))
+    return yield* client["ReportExport.GenerateDiscard"](request, RpcBrowser.requestOptions(args.token))
   }), (executionId) => Message.SucceededGenerate({ request: args.request, executionId })),
 })
-export const Poll = Command.define("Poll", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededPoll, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Poll"]({ executionId }, bearer(token)))), (result) => Message.SucceededPoll({ request, result })) })
-export const Release = Command.define("Release", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededRelease, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Release"]({ executionId }, bearer(token)))), () => Message.SucceededRelease({ request })) })
-export const Status = Command.define("Status", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String) }, messages: [Message.SucceededStatus, Message.Failed], execute: ({ request, token }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Status"](undefined, bearer(token)))), (status) => Message.SucceededStatus({ request, status })) })
+export const Poll = Command.define("Poll", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededPoll, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Poll"]({ executionId }, RpcBrowser.requestOptions(token)))), (result) => Message.SucceededPoll({ request, result })) })
+export const Release = Command.define("Release", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededRelease, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Release"]({ executionId }, RpcBrowser.requestOptions(token)))), () => Message.SucceededRelease({ request })) })
+export const Status = Command.define("Status", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String) }, messages: [Message.SucceededStatus, Message.Failed], execute: ({ request, token }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Status"](undefined, RpcBrowser.requestOptions(token)))), (status) => Message.SucceededStatus({ request, status })) })
 
 const start = (model: Model, key: string) => Requests.start(model.requests, key)
 const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
@@ -75,7 +79,7 @@ const emptyForm = {
   creditDescription: "Consulting revenue",
   creditAmountMinor: "125000",
 }
-const clearedForSession = (model: Model, session: typeof SessionModel.Type): Model => ({ ...model, ...emptyForm, session, requests: Requests.reset(model.requests), executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, notice: null })
+const clearedForSession = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({ ...model, ...emptyForm, session, requests: Requests.reset(model.requests), executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, notice: null })
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => { const child = Session.update(model.session, message); const changed = Session.generation(child.model) !== Session.generation(model.session); return { model: changed ? clearedForSession(model, child.model) : evo(model, { session: () => child.model }), commands: Command.mapMessages(child.commands, (message) => Message.SessionChanged({ message })) } },
@@ -92,7 +96,7 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
 })
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({ model: { session: Session.empty(), ...emptyForm, executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, requests: Requests.empty(), notice: null } })
 
-export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Report exports", body: shell(h, { title: "Report exports", lede: "Generate a balanced financial report, then use an operator session to inspect and release exports that need approval.", notice: model.notice, session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })), children: [h.div([h.Class("split")], [
+export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Report exports", body: shell(h, { title: "Report exports", lede: "Generate a balanced financial report, then use an operator session to inspect and release exports that need approval.", notice: model.notice, session: identitySessionView(h, model.session, (message) => Message.SessionChanged({ message })), children: [h.div([h.Class("split")], [
   h.section([h.Class("panel")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedGenerate())], [h.h2([], ["Generate a report"]),
     field(h, { id: "report-id", label: "Report ID", children: textInput(h, { id: "report-id", value: model.reportId, onInput: (value) => Message.ChangedReportId({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "starts-at", label: "Period starts at (ISO 8601 UTC)", children: textInput(h, { id: "starts-at", value: model.startsAt, onInput: (value) => Message.ChangedStartsAt({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "ends-at", label: "Period ends at (ISO 8601 UTC)", children: textInput(h, { id: "ends-at", value: model.endsAt, onInput: (value) => Message.ChangedEndsAt({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "currency", label: "Currency", children: selectInput(h, { id: "currency", value: model.currency, onChange: (value) => Message.ChangedCurrency({ value }), choices: Array.map(currencies, (value) => ({ value, label: value })) }) }), field(h, { id: "release-policy", label: "Release policy", children: selectInput(h, { id: "release-policy", value: model.releasePolicy, onChange: (value) => Message.ChangedReleasePolicy({ value }), choices: Array.map(releasePolicies, (value) => ({ value, label: value })) }) }), h.h3([], ["Sample journal pair"]),
     field(h, { id: "debit-account", label: "Debit account code", children: textInput(h, { id: "debit-account", value: model.debitAccountCode, onInput: (value) => Message.ChangedDebitAccountCode({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "debit-description", label: "Debit description", children: textInput(h, { id: "debit-description", value: model.debitDescription, onInput: (value) => Message.ChangedDebitDescription({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "debit-amount", label: "Debit amount (minor units)", children: textInput(h, { id: "debit-amount", type: "number", value: model.debitAmountMinor, onInput: (value) => Message.ChangedDebitAmountMinor({ value }), placeholder: "", autocomplete: "off" }) }), field(h, { id: "credit-account", label: "Credit account code", children: textInput(h, { id: "credit-account", value: model.creditAccountCode, onInput: (value) => Message.ChangedCreditAccountCode({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "credit-description", label: "Credit description", children: textInput(h, { id: "credit-description", value: model.creditDescription, onInput: (value) => Message.ChangedCreditDescription({ value }), type: "text", placeholder: "", autocomplete: "off" }) }), field(h, { id: "credit-amount", label: "Credit amount (minor units)", children: textInput(h, { id: "credit-amount", type: "number", value: model.creditAmountMinor, onInput: (value) => Message.ChangedCreditAmountMinor({ value }), placeholder: "", autocomplete: "off" }) }), primaryButton(h, { label: pending(model, "generate") ? "Working…" : "Generate export", message: Option.none(), type: "submit", disabled: pending(model, "generate") || currentToken(model.session) === null }),

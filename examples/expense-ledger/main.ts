@@ -1,16 +1,19 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExpenseLedgerApplication } from "./application.ts"
 import { ExpenseLedgerMigrations } from "./migrations.ts"
-import { ExpenseLedgerWebAssets } from "./web/assets.ts"
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Expense ledger",
   accent: "#1d4ed8",
-  ...ExpenseLedgerWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 pipe(ApplicationBun.run(ExpenseLedgerApplication, {
   database: { migrations: ExpenseLedgerMigrations },

@@ -11,7 +11,7 @@ import {
   textInput,
 } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { InventoryOperations } from "../sqlite.ts"
@@ -60,7 +60,7 @@ type UpdateReturn = Update.Return<Model, Message, WebClient>
 const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, onSuccess: (value: A) => Success) =>
   pipe(effect, Effect.match({
     onSuccess,
-    onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
+    onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
   }))
 
 export const GetStock = Command.define("GetStock", {

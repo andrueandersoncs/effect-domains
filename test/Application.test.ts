@@ -62,8 +62,10 @@ it("validates foreign keys against the exact registered table descriptor", () =>
 
   const makeValid = () => Application.make({ name: "exact-valid", parts: [Parent, Child] })
   const makeInvalid = () => Application.make({ name: "exact-invalid", parts: [Replacement, Child] })
-  expect(makeValid).not.toThrow()
-  expect(makeInvalid).toThrow("references unregistered table exact_parents")
+  const validExpectation = expect(makeValid)
+  const invalidExpectation = expect(makeInvalid)
+  validExpectation.not.toThrow()
+  invalidExpectation.toThrow("references unregistered table exact_parents")
 })
 
 class ApplicationOperationUnavailable extends Schema.TaggedError<ApplicationOperationUnavailable>()(
@@ -115,6 +117,8 @@ it("validates resource and table operation dependencies by descriptor identity",
     parts: [Replacement, TableDependency, operations],
   })
 
-  expect(makeValid).not.toThrow()
-  expect(makeInvalid).toThrow("reads unregistered table resource_dependency")
+  const validExpectation = expect(makeValid)
+  const invalidExpectation = expect(makeInvalid)
+  validExpectation.not.toThrow()
+  invalidExpectation.toThrow("reads unregistered table resource_dependency")
 })

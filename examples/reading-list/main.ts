@@ -1,16 +1,19 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReadingListApplication } from "./application.ts"
 import { ReadingListMigrations } from "./migrations.ts"
-import { ReadingListWebAssets } from "./web/assets.ts"
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Reading list",
   accent: "#9a3412",
-  ...ReadingListWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 pipe(ApplicationBun.run(ReadingListApplication, {
   database: { migrations: ReadingListMigrations },

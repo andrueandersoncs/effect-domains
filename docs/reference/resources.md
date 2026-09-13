@@ -37,7 +37,7 @@ const Books = Resource.make({
 | `version` | Optional integer version-field name. Create writes `1`; updates and patches require the read version and increment it. |
 | `transitions` | Optional `Transitions.make(...)` declaration used by local and published transition operations. |
 
-A resource exposes `table`, `repository`, `contracts`, `group`, and `handlers`. `contracts` contains every generated RPC descriptor even when an operation is not published; for example, `Books.contracts.list.payloadSchema` and `.successSchema` are the authoritative request and page schemas. `Application.make({ name, parts })` rejects duplicate table and operation names.
+A resource exposes `table`, `repository`, `contracts`, `group`, `handlers`, and `published`. `published` is the exact compile-time and runtime capability record for the selected RPC operations; adapters such as `ResourceEditor` use it to reject incomplete resources. `contracts` contains every generated RPC descriptor even when an operation is not published; for example, `Books.contracts.list.payloadSchema` and `.successSchema` are the authoritative request and page schemas. `Application.make({ name, parts })` rejects duplicate table and operation names.
 
 ## Operations and repository
 
@@ -84,6 +84,8 @@ A list request accepts `filter?`, `range?`, `limit?`, and `cursor?` and returns 
 - `limit` is from 1 through the configured maximum (50 by default).
 - Return a non-null cursor unchanged with the same filter and range to read the next page.
 
+`ResourcePager.make(key)` composes a `Page` with keyed `Requests` ownership. It derives replacement/continuation starts, rejects paging past the end or while the key is pending, ignores stale replies, and settles accepted pages. It does not infer filters, authentication, or mutation refresh policy.
+
 ## Relations and projections
 
 Relation names are optional. `Table` derives them as `<table>_<snake_case fields>_key`, `_fkey`, or `_idx`. A foreign-key `scope` is prepended on both sides, so a tenant-scoped reference can stay concise:
@@ -102,7 +104,7 @@ This creates a foreign key over `(tenantId, orderId)` to `(tenantId, id)`. Keep 
 
 `Table.project(table, ["id", "number"])` provides selected `fields`, `schema`, JSON codec, and `object(sql, alias)` for an authored projection. Use it to compose native SQL without restating table fields.
 
-`SqliteView.make` declares a joined projection and supplies its selected row codec, quoted SQL prefix, columns, and dependency metadata. `SqliteView.list({ view, filter?, range?, order, limit? })` derives a bounded equality/range/keyset executor with `payload`, `success`, `errors`, `dependencies`, and `handler`; pass those members to `Operation.make`. Ordering and range fields must preserve non-null storage ordering, and the declared ordering must end in fields that form a total order. Authorization and transaction policy remain explicit on the authored operation. See the [repair board](../../examples/repair-workshop/board.ts).
+`SqliteView.make` declares a joined projection and supplies its selected row codec, quoted SQL prefix, columns, and dependency metadata. `SqliteView.list({ view, filter?, range?, order, limit? })` derives a bounded equality/range/keyset executor with `payload`, `success`, `errors`, `dependencies`, and `handler`. Publish that fragment with `SqliteView.listOperation({ name, unavailable, list })`; no pass-through contract assembly is needed. Ordering and range fields must preserve non-null storage ordering, and the declared ordering must end in fields that form a total order. Authorization and transaction policy remain explicit authored concerns. See the [repair board](../../examples/repair-workshop/board.ts).
 
 ## Errors and limits
 

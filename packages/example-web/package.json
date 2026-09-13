@@ -4,10 +4,7 @@
   "type": "module",
   "exports": {
     "./html": "./src/html.ts",
-    "./rpc": "./src/rpc.ts",
-    "./page": "./src/page.ts",
-    "./session": "./src/session.ts",
-    "./serve": "./src/serve.ts"
+    "./session": "./src/session.ts"
   },
   "scripts": {
     "build": "bun run build.ts",

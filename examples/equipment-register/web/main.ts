@@ -5,9 +5,9 @@ import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { Form } from "effect-domains/form"
-import { Page } from "@effect-domains/example-web/page"
+import { Page } from "effect-domains/page"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
-import { formatRpcError } from "@effect-domains/example-web/rpc"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { AssetConditionSchema, AssetSchema } from "../domain.ts"
 import { AssetsResource } from "../resources.ts"
@@ -35,7 +35,7 @@ type UpdateReturn = Update.Return<Model, Message, WebClient>
 type FormFailure = Readonly<{ _tag: "FormFailure"; field: string; error: string }>
 const formFailure = (field: string) => (error: Schema.SchemaError): FormFailure => ({ _tag: "FormFailure", field, error: Form.errors(error)["$"] ?? error.message })
 const isFormFailure = (error: unknown): error is FormFailure => typeof error === "object" && error !== null && "_tag" in error && error._tag === "FormFailure"
-const failed = (request: RequestToken, error: unknown) => Message.Failed({ request, error: isFormFailure(error) ? error.error : formatRpcError(error), field: isFormFailure(error) ? error.field : null })
+const failed = (request: RequestToken, error: unknown) => Message.Failed({ request, error: isFormFailure(error) ? error.error : RpcBrowser.messageFromUnknown(error), field: isFormFailure(error) ? error.field : null })
 const withError = <M>(h: HtmlBuilder<M>, child: Html, error: string | undefined) => h.div([], [child, error === undefined ? h.empty : h.p([h.Class("field-error")], [error])])
 const emptyForm = { assetTag: "", name: "", model: "", serial: "", location: "", condition: "in-service" as const, selectedId: null as string | null }
 

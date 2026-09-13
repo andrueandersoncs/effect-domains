@@ -1,23 +1,26 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
 import { InventoryMigrations } from "./migrations.ts"
 import { seedStock } from "./sqlite.ts"
-import { ReservationsWebAssets } from "./web/assets.ts"
 
 const InitialStock = StockSchema.make({
   sku: SkuSchema.make("book"),
   available: 5,
 })
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Reservations",
   accent: "#b45309",
-  ...ReservationsWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 const seed = seedStock(InitialStock)
 

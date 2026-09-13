@@ -1,16 +1,19 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { EquipmentRegisterApplication } from "./application.ts"
 import { EquipmentRegisterMigrations } from "./migrations.ts"
-import { EquipmentRegisterWebAssets } from "./web/assets.ts"
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Equipment register",
   accent: "#334155",
-  ...EquipmentRegisterWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 pipe(ApplicationBun.run(EquipmentRegisterApplication, {
   database: { migrations: EquipmentRegisterMigrations },

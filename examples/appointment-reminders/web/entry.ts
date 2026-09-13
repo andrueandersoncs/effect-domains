@@ -1,17 +1,16 @@
-import { Layer } from "effect"
-import { Runtime } from "foldkit"
-import { browserLayer } from "@effect-domains/example-web/rpc"
+import { Effect, Layer } from "effect"
+import { BrowserRuntime } from "effect-domains/browser-runtime"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Model, init, update, view, WebClient } from "./main.ts"
-import { SessionClient } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
 
-const application = Runtime.makeApplication({
+Effect.runSync(BrowserRuntime.run({
   Model,
   init,
   update,
   view,
-  container: document.getElementById("root"),
-  resources: Layer.merge(browserLayer(WebClient), browserLayer(SessionClient)),
+  resources: Layer.merge(RpcBrowser.layer(WebClient), RpcBrowser.layer(Session.Client)),
   devTools: false,
-})
+}))
 
-Runtime.run(application)
+

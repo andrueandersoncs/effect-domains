@@ -141,6 +141,28 @@ type OperationDefinition<
   dependencies: ReadonlyArray<OperationDependency>
 }>>
 
+type OperationFamilyDefinition<
+  Name extends string,
+  Payload extends Schema.Constraint | undefined,
+  Success extends Schema.Constraint,
+  Errors extends Schema.Constraint | undefined,
+  Unavailable extends Schema.Constraint,
+  Policy extends SubjectPolicy | undefined,
+  Transaction extends boolean | undefined,
+  Failure,
+  Requirements,
+> = Readonly<{
+  name: Name
+  success: Success
+  handler: Handler<Payload, Success, Policy, Failure, Requirements>
+    & DeclaresEveryFailure<Failure, OperationFailure<Errors, Unavailable>>
+}> & Readonly<Partial<{
+  errors: Errors
+  payload: Payload
+  dependencies: ReadonlyArray<OperationDependency>
+}>>
+
+
 /** A compiled contract with its translated handler; `bundle` installs many at once. */
 export interface Operation<Contract extends RpcProcedure = RpcProcedure> {
   readonly rpc: Contract
@@ -245,6 +267,88 @@ const make = <
   } satisfies Operation
 }
 
+const defineFamily = <
+  const Prefix extends string,
+  const Unavailable extends Schema.Constraint,
+  const Policy extends SubjectPolicy | undefined,
+  const Transaction extends boolean | undefined,
+>(
+  prefix: Prefix,
+  unavailable: Unavailable & UnavailableConstructor<Unavailable>,
+  policy: Policy,
+  transaction: Transaction,
+) => {
+  const define = <
+    const Name extends string,
+    const Payload extends Schema.Constraint | undefined = undefined,
+    const Success extends Schema.Constraint = typeof Schema.Void,
+    const Errors extends Schema.Constraint | undefined = undefined,
+    Failure = never,
+    Requirements = never,
+  >(definition: OperationFamilyDefinition<Name, Payload, Success, Errors, Unavailable, Policy, Transaction, Failure, Requirements>) => {
+    const name = `${prefix}${definition.name}` as `${Prefix}${Name}`
+
+    return make({
+      name,
+      success: definition.success,
+      handler: definition.handler,
+      errors: definition.errors,
+      payload: definition.payload,
+      dependencies: definition.dependencies,
+      unavailable,
+      policy,
+      transaction,
+    } as OperationDefinition<`${Prefix}${Name}`, Payload, Success, Errors, Unavailable, Policy, Transaction, Failure, Requirements>)
+  }
+
+  return { make: define }
+}
+
+const family = <
+  const Prefix extends string,
+  const Unavailable extends Schema.Constraint,
+>(
+  prefix: Prefix,
+  unavailable: Unavailable & UnavailableConstructor<Unavailable>,
+) => {
+  const base = defineFamily(prefix, unavailable, undefined, undefined)
+  const transactional = () => defineFamily(prefix, unavailable, undefined, true)
+
+  const authorized = <const Policy extends SubjectPolicy>(policy: Policy) => {
+    const scoped = defineFamily(prefix, unavailable, policy, undefined)
+    const transactional = () => defineFamily(prefix, unavailable, policy, true)
+
+    return { ...scoped, transactional }
+  }
+
+  return { ...base, authorized, transactional }
+}
+
+const listOperation = <
+  const Name extends string,
+  const Payload extends Schema.Constraint,
+  const Success extends Schema.Constraint,
+  const Errors extends Schema.Constraint,
+  const Unavailable extends Schema.Constraint,
+  Failure,
+  Requirements,
+>(definition: Readonly<{
+  name: Name
+  unavailable: Unavailable & UnavailableConstructor<Unavailable>
+  list: Readonly<{
+    payload: Payload
+    success: Success
+    errors: Errors
+    dependencies: ReadonlyArray<SqliteView>
+    handler: UnprotectedHandler<Payload, Success, Failure, Requirements>
+      & DeclaresEveryFailure<Failure, OperationFailure<Errors, Unavailable>>
+  }>
+}>) => make({
+  name: definition.name,
+  unavailable: definition.unavailable,
+  ...definition.list,
+} as OperationDefinition<Name, Payload, Success, Errors, Unavailable, undefined, undefined, Failure, Requirements>)
+
 const bundle = <const Operations extends ReadonlyArray<Operation>>(...operations: Operations) => {
   type Contract = Operations[number]["rpc"]
   type Requirements = Exclude<Effect.Services<ReturnType<Operations[number]["handler"]>>, AuthorizationSubject>
@@ -259,4 +363,4 @@ const bundle = <const Operations extends ReadonlyArray<Operation>>(...operations
   return RpcBundle.make(group)(handlers)
 }
 
-export const Operation = { make, bundle, annotation: OperationDependencies, dependencies: dependencySet }
+export const Operation = { make, family, listOperation, bundle, annotation: OperationDependencies, dependencies: dependencySet }

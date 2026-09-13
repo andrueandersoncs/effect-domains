@@ -199,16 +199,18 @@ Protected tools require bearer credentials on every call. Tool discovery exposes
 
 ### Example Foldkit clients
 
-Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `packages/example-web/src/rpc.ts` lazily builds the same-origin `/rpc/v1` protocol with native `FetchHttpClient` and JSON serialization, supplies bearer call options, and formats errors only for display; it does not use handwritten envelopes, `rpcCall`, or `matchRpc`.
+Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, and display error formatting. `BrowserRuntime.run` is an `Effect` that injects the required root container while constructing and starting Foldkit. `StaticSpa.site` declares a title, accent, and example `web/` base URL; `StaticSpa.layerHttp` reads and serves its explicitly prebuilt JavaScript and CSS.
 
-The optional helpers are deliberately small:
+The client modules stay narrow:
 
-- `requests.ts` owns keyed monotonic request tokens, per-key pending/error state, session epochs, key-specific invalidation, and guarded success/failure. A refresh supersedes only its own key; stale successes and failures are ignored without cancelling unrelated mutations.
-- `page.ts` uses canonical item schemas with explicit replace/append and cursor input. Query, filter, or session changes clear previous rows and cursors; fixed-limit custom projections disclose their limit rather than pretending to have cursors.
-- `form.ts` decodes strict integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths. It does not truncate with `parseInt` or use implicit truthiness conversion.
-- `session.ts` is optional shared login/logout/expiry state. Pages begin signed out; submission clears the password immediately, issued credentials stay only in memory and are never rendered or stored in local/session storage, and identity generation clears application data and drafts. Servers, not typed usernames or credential chips, enforce roles.
+- `Requests` owns keyed monotonic request tokens, per-key pending/error state, session epochs, key-specific invalidation, and guarded settlement.
+- `Page` owns the shared `{ items, nextCursor }` value plus explicit replace/append and cursor input helpers.
+- `ResourcePager.make(key)` composes those two concerns for continuation starts and stale-page rejection. It does not infer filters or refresh policy.
+- `Form` decodes strict integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths.
+- `IdentitySession` owns in-memory login/logout/expiry commands and generation changes. Credentials are never rendered or stored; the example-web package supplies only the styled session view.
+- `ResourceEditor.make` derives a public CRUD editor only when `list`, `create`, `update`, and `remove` are all published. Form codecs, copy, error display, and complete presentation remain authored.
 
-Applications keep their own mutation refresh policy and business semantics; these helpers infer neither authorization nor invalidation dependencies.
+Applications still own authorization, filter semantics, mutation refresh policy, and business state transitions. [`packages/example-web`](../../packages/example-web/) now contains build and HTML presentation support, not RPC, paging, identity, runtime, or static-serving mechanics.
 
 ### Browser admin
 
@@ -236,4 +238,8 @@ The runner composes native Effect layers; it does not supply a job system. The r
 - [Native identity RPC adapter](../../packages/effect-domains/src/identity-rpc.ts)
 - [SQLite identity implementation](../../packages/effect-domains/src/sqlite-identity.ts)
 - [SQLite Bun runtime](../../packages/effect-domains/src/sqlite-bun.ts)
-- [Example browser helpers](../../packages/example-web/src/)
+- [Browser RPC boundary](../../packages/effect-domains/src/rpc-browser.ts)
+- [Browser runtime](../../packages/effect-domains/src/browser-runtime.ts)
+- [Identity session controller](../../packages/effect-domains/src/identity-session.ts)
+- [Static SPA routes](../../packages/effect-domains/src/static-spa.ts)
+- [Example HTML presentation](../../packages/example-web/src/)

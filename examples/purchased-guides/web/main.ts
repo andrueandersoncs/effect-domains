@@ -4,14 +4,18 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell } from "@effect-domains/example-web/html"
-import { Page } from "@effect-domains/example-web/page"
-import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Page } from "effect-domains/page"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { identitySessionView } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
+
 import { EntitlementRequired } from "effect-domains/entitlements"
 import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { GuidesResource } from "../resources.ts"
+
+type SessionClient = Type<typeof Session.Client>
 
 const PurchasedGuidesRpcs = IdentityRpcs.merge(GuidesResource.group)
 const GuideSchema = GuidesResource.table.rowSchema
@@ -29,10 +33,10 @@ const errorText = (error: unknown) => error instanceof EntitlementRequired || (
   typeof error === "object" && error !== null && "_tag" in error && error._tag === "EntitlementRequired"
 )
   ? "This guide requires an active purchase entitlement."
-  : formatRpcError(error)
+  : RpcBrowser.messageFromUnknown(error)
 
 export const Model = Schema.Struct({
-  session: SessionModel,
+  session: Session.ModelSchema,
   requests: RequestStateSchema,
   selectedGuideId: Schema.String,
   guide: Schema.NullOr(GuideSchema),
@@ -42,7 +46,7 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  SessionChanged: { message: SessionMessage },
+  SessionChanged: { message: Session.MessageSchema },
   SelectedGuide: { id: Schema.String },
   ClickedLoad: {},
   ClickedList: {},
@@ -60,7 +64,7 @@ export const GetGuide = Command.define("GetGuide", {
   execute: ({ request, token, id }) => pipe(
     Effect.gen(function*() {
       const client = yield* WebClient
-      return yield* client["guides.get"]({ id }, bearer(token))
+      return yield* client["guides.get"]({ id }, RpcBrowser.requestOptions(token))
     }),
     Effect.match({
       onSuccess: (guide) => Message.SucceededGuide({ request, guide }),
@@ -75,7 +79,7 @@ export const ListGuides = Command.define("ListGuides", {
   execute: ({ request, token, cursor, append }) => pipe(
     Effect.gen(function*() {
       const client = yield* WebClient
-      return yield* client["guides.list"]({ limit: 25, ...Page.input(cursor) }, bearer(token))
+      return yield* client["guides.list"]({ limit: 25, ...Page.input(cursor) }, RpcBrowser.requestOptions(token))
     }),
     Effect.match({
       onSuccess: (page) => Message.SucceededList({ request, append, page }),
@@ -146,7 +150,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
     title: "Purchased guides",
     lede: "Read guides granted to this account. The same entitlement checks apply to every RPC request.",
     notice: model.notice,
-    session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
+    session: identitySessionView(h, model.session, (message) => Message.SessionChanged({ message })),
     children: [h.div([h.Class("split")], [
       h.section([h.Class("panel stack")], [
         h.h2([], ["Open a guide"]),

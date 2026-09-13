@@ -1,13 +1,12 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { Layer, pipe } from "effect"
-import { ExampleWeb } from "@effect-domains/example-web/serve"
+import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ReportExportsApplication } from "./application.ts"
 import { ReportExportMigrations } from "./migrations.ts"
 import { ReportExportRoutes } from "./routes.ts"
-import { ReportExportWebAssets } from "./web/assets.ts"
 import { ReportExportBackground, ReportExportExecution, ReportExportServices } from "./runtime.ts"
 import { seedReportExportSubscriptions } from "./subscriptions.ts"
 
@@ -29,11 +28,15 @@ const services = Layer.mergeAll(
   execution,
 )
 
-const web = ExampleWeb.layerHttp({
+const webBase = new URL("./web/", import.meta.url)
+
+const webSite = StaticSpa.site({
   title: "Report exports",
   accent: "#365314",
-  ...ReportExportWebAssets,
+  base: webBase,
 })
+
+const web = StaticSpa.layerHttp(webSite)
 
 const initialize = seedReportExportSubscriptions()
 const routes = Layer.mergeAll(ReportExportRoutes, web)

@@ -41,6 +41,16 @@ const alicePredicate = subject.eq(subject.subject.userId, "alice")
 const aliceOnly = subject.policy(alicePredicate)
 const authenticatedUserId = (_input: void, authenticated: Subject) => Effect.succeed(authenticated.userId)
 
+const protectedFamily = Operation
+  .family("family.", OperationUnavailable)
+  .authorized(aliceOnly)
+
+const familyMember = protectedFamily.make({
+  name: "member",
+  success: Schema.String,
+  handler: authenticatedUserId,
+})
+
 const protectedOperation = Operation.make({
   name: "operation.protected",
   success: Schema.String,
@@ -74,7 +84,7 @@ const transactional = Operation.make({
   }),
 })
 
-const bundle = Operation.bundle(failures, protectedOperation, transactional, deniedInside)
+const bundle = Operation.bundle(failures, protectedOperation, familyMember, transactional, deniedInside)
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
 const authenticator = AuthorizationRpc.Authenticator.of({
@@ -108,6 +118,8 @@ const subjectPolicy = Effect.gen(function* () {
   const anonymous = yield* pipe(client["operation.protected"](), Effect.flip)
   expect(anonymous._tag).toBe("Unauthenticated")
   const result = yield* client["operation.protected"](undefined, { headers: { authorization: "alice" } })
+  const familyResult = yield* client["family.member"](undefined, { headers: { authorization: "alice" } })
+  expect(familyResult).toBe("alice")
   expect(result).toBe("alice")
   const denied = yield* pipe(client["operation.deniedInside"](undefined, { headers: { authorization: "alice" } }), Effect.flip)
   expect(denied._tag).toBe("Forbidden")

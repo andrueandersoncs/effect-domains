@@ -6,7 +6,8 @@ import { Authorization } from "./authorization.ts"
 import { Form } from "./form.ts"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "./requests.ts"
 import { RpcService, type Type } from "./rpc-service.ts"
-import type { Page } from "./page.ts"
+import { Page, type Page as PageValue } from "./page.ts"
+import { ResourcePager } from "./resource-pager.ts"
 
 const NoticeSchema = Schema.NullOr(Schema.Struct({
   kind: Schema.Literals(["info", "error", "success"]),
@@ -14,6 +15,13 @@ const NoticeSchema = Schema.NullOr(Schema.Struct({
 }))
 
 const FieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
+
+const EditorCapabilitiesSchema = Schema.Struct({
+  list: Schema.Literal(true),
+  create: Schema.Literal(true),
+  update: Schema.Literal(true),
+  remove: Schema.Literal(true),
+})
 
 const FormFailureSchema = Schema.TaggedStruct("FormFailure", {
   errors: FieldErrorsSchema,
@@ -63,6 +71,12 @@ const make = <
   resource: Readonly<{
     name: ResourceName
     authorization: typeof Authorization.public
+    published: Readonly<{
+      list: true
+      create: true
+      update: true
+      remove: true
+    }>
     createInputSchema: Schema.Codec<Draft, unknown, unknown, unknown>
     table: Readonly<{
       identifier: IdentifierKey
@@ -70,7 +84,7 @@ const make = <
       rowSchema: Schema.Codec<Row, unknown, never, never>
     }>
     contracts: Readonly<{
-      list: Readonly<{ successSchema: Schema.Codec<Page<Row>, unknown, never, never> }>
+      list: Readonly<{ successSchema: Schema.Codec<PageValue<Row>, unknown, never, never> }>
     }>
     group: RpcGroup.RpcGroup<Rpcs>
   }>
@@ -79,13 +93,20 @@ const make = <
   notices: Readonly<{ created: string; updated: string; removed: string }>
   formatError: (error: unknown) => string
 }>) => {
+  const capabilities = pipe(
+    options.resource.published,
+    Option.liftPredicate(Schema.is(EditorCapabilitiesSchema)),
+    Option.getOrThrow,
+  )
+
   const listKey = `${options.resource.name}.list`
   const saveKey = `${options.resource.name}.save`
   const removeKey = `${options.resource.name}.remove`
-  const listMethod = `${options.resource.name}.list`
-  const createMethod = `${options.resource.name}.create`
-  const updateMethod = `${options.resource.name}.update`
-  const removeMethod = `${options.resource.name}.remove`
+  const pager = ResourcePager.make(listKey)
+  const listMethod = `${options.resource.name}.${capabilities.list ? "list" : ""}`
+  const createMethod = `${options.resource.name}.${capabilities.create ? "create" : ""}`
+  const updateMethod = `${options.resource.name}.${capabilities.update ? "update" : ""}`
+  const removeMethod = `${options.resource.name}.${capabilities.remove ? "remove" : ""}`
   const FormValueSchema = Schema.toEncoded(options.form)
   const OptionalIdentifierSchema = Schema.NullOr(options.resource.table.identifierSchema)
 
@@ -174,7 +195,6 @@ const make = <
     request: RequestTokenSchema,
   })
 
-  const ListInputSchema = Schema.Struct({ cursor: Schema.optionalKey(Schema.String) })
 
   const List = Command.define(`${options.name}.List`, {
     args: ListArgsSchema.fields,
@@ -182,8 +202,8 @@ const make = <
     execute: ({ cursor, append, request }) => pipe(
       Effect.gen(function* () {
         const client = yield* Client
-        const input = Predicate.isNull(cursor) ? ListInputSchema.make({}) : ListInputSchema.make({ cursor })
-        const page = yield* invoke<Page<Row>>(client, listMethod, input)
+        const input = Page.input(cursor)
+        const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
 
         return MessageSchema.SucceededList({ page, append, request })
       }),
@@ -246,28 +266,46 @@ const make = <
     ),
   })
 
-  const beginList = (requests: Model["requests"], cursor: string | null, append: boolean) => {
-    const started = Requests.start(requests, listKey)
-    const command = List({ request: started.request, cursor, append })
+  const beginList = (
+    requests: Model["requests"],
+    items: ReadonlyArray<Row>,
+    nextCursor: string | null,
+    append: boolean,
+  ) => {
+    const started = pipe(
+      pager.begin(requests, { items, nextCursor }, append),
+      Option.getOrThrow,
+    )
 
-    return [started.state, command] as const
+    const command = List({
+      request: started.request,
+      cursor: started.cursor,
+      append: started.append,
+    })
+
+    return { ...started, command }
   }
 
   const reload = (model: Model): UpdateReturn => {
-    const [requests, command] = beginList(model.requests, null, false)
+    const started = beginList(
+      model.requests,
+      model.items,
+      model.nextCursor,
+      false,
+    )
 
     const next = ModelSchema.make({
-      items: [],
-      nextCursor: null,
+      items: started.page.items,
+      nextCursor: started.page.nextCursor,
       form: model.form,
       selectedId: model.selectedId,
       saving: model.saving,
-      requests,
+      requests: started.requests,
       fieldErrors: model.fieldErrors,
       notice: model.notice,
     })
 
-    return { model: next, commands: [command] }
+    return { model: next, commands: [started.command] }
   }
 
   const update = (model: Model, message: Message) => MessageSchema.match<UpdateReturn>(message, {
@@ -295,10 +333,16 @@ const make = <
 
       if (unavailable) return { model }
 
-      const [requests, command] = beginList(model.requests, model.nextCursor, true)
-      const next = ModelSchema.make({ ...model, requests })
+      const started = beginList(
+        model.requests,
+        model.items,
+        model.nextCursor,
+        true,
+      )
 
-      return { model: next, commands: [command] }
+      const next = ModelSchema.make({ ...model, requests: started.requests })
+
+      return { model: next, commands: [started.command] }
     },
     ClickedSave: () => {
       if (Requests.pending(model.requests, saveKey)) return { model }
@@ -364,15 +408,25 @@ const make = <
 
       return { model: next, commands: [command] }
     },
-    SucceededList: ({ page, append, request }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
-
-      const items = append ? Array.appendAll(model.items, page.items) : page.items
-      const requests = Requests.succeed(model.requests, request)
-      const next = ModelSchema.make({ ...model, items, nextCursor: page.nextCursor, requests })
-
-      return { model: next }
-    },
+    SucceededList: ({ page, append, request }) => pipe(
+      pager.receive(
+        { page: { items: model.items, nextCursor: model.nextCursor }, requests: model.requests },
+        request,
+        page,
+        append,
+      ),
+      Option.match({
+        onNone: () => ({ model }),
+        onSome: (received) => ({
+          model: ModelSchema.make({
+            ...model,
+            items: received.page.items,
+            nextCursor: received.page.nextCursor,
+            requests: received.requests,
+          }),
+        }),
+      }),
+    ),
     SucceededSave: ({ row, created, request }) => {
       if (!Requests.accepts(model.requests, request)) return { model }
 

@@ -33,12 +33,14 @@ const protocolRequiresProtocol = true satisfies Types.Equals<
   Extract<Layer.Services<typeof Echo.layerProtocol>, RpcClient.Protocol>,
   RpcClient.Protocol
 >
+
 void protocolRequiresProtocol
 
 const inProcessOmitsProtocol = true satisfies Types.Equals<
   Extract<Layer.Services<typeof Echo.layer>, RpcClient.Protocol>,
   never
 >
+
 void inProcessOmitsProtocol
 
 it.effect("in-process service calls group methods and declared errors", () => pipe(

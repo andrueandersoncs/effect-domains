@@ -31,7 +31,7 @@ Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to recor
 
 Use this for a board that joins repairs to current customer and optional technician records. The [repair-workshop guide](../examples/repair-workshop/README.md) creates assigned and unassigned jobs, changes joined names and on-call values, contrasts bounded arrays with cursor pages, and exercises foreign-key failures.
 
-[`board.ts`](../examples/repair-workshop/board.ts) declares the projection and joins with `SqliteView`; [`sqlite.ts`](../examples/repair-workshop/sqlite.ts) still owns filtering, ordering, bounds, and errors. Status values are editable records, not guarded workflow transitions.
+[`board.ts`](../examples/repair-workshop/board.ts) declares the projection, joins, filtering, ordering, bounds, and cursor executor with `SqliteView`; [`sqlite.ts`](../examples/repair-workshop/sqlite.ts) publishes it through `SqliteView.listOperation` without restating the fragment.
 
 ### Reservations
 

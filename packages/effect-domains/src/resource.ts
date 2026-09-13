@@ -38,6 +38,10 @@ type PublishedOperation<Operations> = {
     Operations[Operation] extends false | { readonly publish: false } ? never : Operation
 }[EnabledOperation<Operations>]
 
+type PublishedCapabilities<Operations> = Readonly<{
+  [Operation in ResourceOperation]: Operation extends PublishedOperation<Operations> ? true : false
+}>
+
 type CreationDefaultKeys<Creation> = Creation extends { readonly defaults: infer Defaults }
   ? Extract<keyof Defaults, string> : never
 
@@ -273,14 +277,30 @@ export const Resource = {
       Effect.runSync,
     )
 
-
-
-
     const operations = pipe(operationValues, Struct.keys, Array.filter((operation: ResourceOperation): operation is PublishedOperation<Operations> => {
       const value = options.operations[operation]
       const publication = Predicate.isBoolean(value) ? value : value?.publish
       return !equals(publication, false)
     }))
+
+    const isPublished = (operation: ResourceOperation) => Array.contains(operations, operation)
+    const publishesGet = isPublished("get")
+    const publishesList = isPublished("list")
+    const publishesCreate = isPublished("create")
+    const publishesUpdate = isPublished("update")
+    const publishesRemove = isPublished("remove")
+    const publishesPatch = isPublished("patch")
+    const publishesTransition = isPublished("transition")
+
+    const published = Object.freeze({
+      get: publishesGet,
+      list: publishesList,
+      create: publishesCreate,
+      update: publishesUpdate,
+      remove: publishesRemove,
+      patch: publishesPatch,
+      transition: publishesTransition,
+    }) as PublishedCapabilities<Operations>
 
     const creation = pipe(Option.fromNullishOr(options.operations.create), Option.filter(Predicate.isObject)) as Option.Option<CreationPolicy<S, Auth>>
     const listConfiguration = pipe(Option.fromNullishOr(options.operations.list), Option.filter(Predicate.isObject)) as Option.Option<ListPolicy<S>>
@@ -1038,6 +1058,7 @@ export const Resource = {
 
     return Struct.assign(options, {
       operations,
+      published,
       storage: storageSchema,
       table,
       creation: creationPlan.inspection,

@@ -98,33 +98,31 @@ const operationErrorsSchema = Schema.Union([
   ReservationStateTransitions.Error,
 ])
 
-const reserveStock = Operation.make({
+const InventoryOperation = Operation
+  .family("", InventoryUnavailable)
+  .transactional()
+
+const reserveStock = InventoryOperation.make({
   name: "reserve",
   payload: ReserveStockInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  transaction: true,
-  unavailable: InventoryUnavailable,
   handler: reserve,
 })
 
-const confirmReservation = Operation.make({
+const confirmReservation = InventoryOperation.make({
   name: "confirm",
   payload: ReservationInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  transaction: true,
-  unavailable: InventoryUnavailable,
   handler: transition("confirm"),
 })
 
-const releaseReservation = Operation.make({
+const releaseReservation = InventoryOperation.make({
   name: "release",
   payload: ReservationInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  transaction: true,
-  unavailable: InventoryUnavailable,
   handler: transition("release"),
 })
 

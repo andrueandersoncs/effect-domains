@@ -2,6 +2,7 @@ import { Array, Effect, Equivalence, Function, HashSet, Match, Option, Record, S
 import { SqlClient } from "effect/unstable/sql"
 import { PageLimitSchema } from "./domain.ts"
 import { Page } from "./page.ts"
+import { Operation } from "./operation.ts"
 import { quoteIdentifier } from "./sqlite-ddl.ts"
 import { TableField, type Table } from "./table.ts"
 import { ScalarSchema, type ScalarF } from "./schema-algebra.ts"
@@ -691,4 +692,5 @@ const list = <
   })
 }
 
-export const SqliteView = { make, list }
+
+export const SqliteView = { make, list, listOperation: Operation.listOperation }

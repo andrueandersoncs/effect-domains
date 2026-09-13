@@ -128,7 +128,6 @@ const referencedParentRebuild = Effect.fn("SqliteMigrations.referencedParentRebu
   const ChildSchema = Schema.Struct({ parentId: Schema.String })
   interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
   const sourceParent = Table.make({ name: "rebuild_parents", schema: RelationalParentSchema })
-
   const SourceParentIdReference = Table.reference(sourceParent, ["id"])
 
   const sourceChild = Table.make({

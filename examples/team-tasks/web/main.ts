@@ -13,14 +13,18 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
-import { Page } from "@effect-domains/example-web/page"
-import { bearer, formatRpcError } from "@effect-domains/example-web/rpc"
+import { Page } from "effect-domains/page"
+import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { Session, SessionClient, SessionMessage, SessionModel } from "@effect-domains/example-web/session"
+import { identitySessionView } from "@effect-domains/example-web/session"
+import { IdentitySession as Session } from "effect-domains/identity-session"
+
 import { IdentityRpcs } from "effect-domains/identity-rpc"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { TaskPrioritySchema, TaskSchema } from "../domain.ts"
 import { TasksResource } from "../resources.ts"
+
+type SessionClient = Type<typeof Session.Client>
 
 const TeamTasksRpcs = IdentityRpcs.merge(TasksResource.group)
 const TaskRowSchema = TasksResource.table.rowSchema
@@ -40,7 +44,7 @@ const completedChoices = [
 const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 
 export const Model = Schema.Struct({
-  session: SessionModel,
+  session: Session.ModelSchema,
   requests: RequestStateSchema,
   tasks: TaskPageSchema,
   filterProject: Schema.String,
@@ -60,7 +64,7 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  SessionChanged: { message: SessionMessage },
+  SessionChanged: { message: Session.MessageSchema },
   ChangedFilterProject: { value: Schema.String },
   ChangedFilterPriority: { value: Schema.String },
   ChangedFilterCompleted: { value: Schema.String },
@@ -127,11 +131,11 @@ export const ListTasks = Command.define("ListTasks", {
           },
           limit: 25,
           ...Page.input(cursor),
-        }, bearer(token))
+        }, RpcBrowser.requestOptions(token))
       }),
       Effect.match({
         onSuccess: (page) => Message.SucceededList({ request, append, page }),
-        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
+        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
       }),
     ),
 })
@@ -150,12 +154,12 @@ export const SaveTask = Command.define("SaveTask", {
             detail: task.detail,
             priority: task.priority,
             dueDate: task.dueDate,
-          }, bearer(token))
-          : yield* client["todos.update"]({ id: selectedId, ...task }, bearer(token))
+          }, RpcBrowser.requestOptions(token))
+          : yield* client["todos.update"]({ id: selectedId, ...task }, RpcBrowser.requestOptions(token))
       }),
       Effect.match({
         onSuccess: (task) => Message.SucceededSave({ request, task, created: selectedId === null }),
-        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
+        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
       }),
     ),
 })
@@ -167,11 +171,11 @@ export const RemoveTask = Command.define("RemoveTask", {
     pipe(
       Effect.gen(function*() {
         const client = yield* WebClient
-        yield* client["todos.remove"]({ id }, bearer(token))
+        yield* client["todos.remove"]({ id }, RpcBrowser.requestOptions(token))
       }),
       Effect.match({
         onSuccess: () => Message.SucceededRemove({ request, id }),
-        onFailure: (error) => Message.Failed({ request, error: formatRpcError(error) }),
+        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
       }),
     ),
 })
@@ -198,7 +202,7 @@ const beginList = (model: Model, cursor: string | null, append: boolean) => {
   }
 }
 
-const resetIdentity = (model: Model, session: typeof SessionModel.Type): Model => ({
+const resetIdentity = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({
   ...model,
   ...emptyForm,
   session,
@@ -316,7 +320,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
     title: "Team tasks",
     lede: "Organize work for your team and track what is ready to close.",
     notice: model.notice,
-    session: Session.view(h, model.session, (message) => Message.SessionChanged({ message })),
+    session: identitySessionView(h, model.session, (message) => Message.SessionChanged({ message })),
     children: [
       h.div([h.Class("split")], [
         h.section([h.Class("panel stack")], [

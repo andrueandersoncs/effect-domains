@@ -52,6 +52,7 @@ const contractListPage: typeof TypeProbe.contracts.list.successSchema.Type = {
   items: [],
   nextCursor: null,
 }
+
 // @ts-expect-error because generated lists never return bare arrays.
 const bareList: Effect.Success<ReturnType<typeof NoPolicyProbe.repository.list>> = []
 void defaultListInput

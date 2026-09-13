@@ -140,14 +140,16 @@ const issueInvoiceErrorSchema = Schema.Union([
 
 const payInvoiceErrorSchema = Schema.Union([InvoiceNotFound, VersionConflict, InvoiceTransitions.Error])
 
-const createOrder = Operation.make({
-  name: "billing.createOrder",
+const BillingOperation = Operation
+  .family("billing.", BillingUnavailable)
+  .authorized(ExampleRoles.editor)
+  .transactional()
+
+const createOrder = BillingOperation.make({
+  name: "createOrder",
   payload: CreateOrderInputSchema,
   success: OrdersResource.table.rowSchema,
   errors: DuplicateOrderNumber,
-  policy: ExampleRoles.editor,
-  transaction: true,
-  unavailable: BillingUnavailable,
   handler: Effect.fn("Billing.createOrder")(function* (input, subject) {
     const tenantId = TenantIdSchema.make(subject.tenantId)
 
@@ -164,14 +166,11 @@ const createOrder = Operation.make({
   }),
 })
 
-const addLine = Operation.make({
-  name: "billing.addLine",
+const addLine = BillingOperation.make({
+  name: "addLine",
   payload: AddLineInputSchema,
   success: OrderSummary,
   errors: addLineErrorSchema,
-  policy: ExampleRoles.editor,
-  transaction: true,
-  unavailable: BillingUnavailable,
   handler: Effect.fn("Billing.addLine")(function* (input) {
     const current = yield* requireOrder(input.orderId)
 
@@ -202,14 +201,11 @@ const addLine = Operation.make({
   }),
 })
 
-const issueInvoice = Operation.make({
-  name: "billing.issueInvoice",
+const issueInvoice = BillingOperation.make({
+  name: "issueInvoice",
   payload: IssueInvoiceInputSchema,
   success: InvoicesResource.table.rowSchema,
   errors: issueInvoiceErrorSchema,
-  policy: ExampleRoles.editor,
-  transaction: true,
-  unavailable: BillingUnavailable,
   handler: Effect.fn("Billing.issueInvoice")(function* (input) {
     const current = yield* requireOrder(input.orderId)
 
@@ -232,14 +228,11 @@ const issueInvoice = Operation.make({
   }),
 })
 
-const payInvoice = Operation.make({
-  name: "billing.payInvoice",
+const payInvoice = BillingOperation.make({
+  name: "payInvoice",
   payload: PayInvoiceInputSchema,
   success: InvoicesResource.table.rowSchema,
   errors: payInvoiceErrorSchema,
-  policy: ExampleRoles.editor,
-  transaction: true,
-  unavailable: BillingUnavailable,
   handler: Effect.fn("Billing.payInvoice")(function* (input) {
     yield* requireInvoice(input.invoiceId)
 
@@ -247,14 +240,11 @@ const payInvoice = Operation.make({
   }),
 })
 
-const getOrder = Operation.make({
-  name: "billing.getOrder",
+const getOrder = BillingOperation.make({
+  name: "getOrder",
   payload: GetOrderInputSchema,
   success: OrderSummary,
   errors: OrderNotFound,
-  policy: ExampleRoles.editor,
-  transaction: true,
-  unavailable: BillingUnavailable,
   handler: Effect.fn("Billing.getOrder")(function* (input) {
     return yield* requireOrder(input.orderId)
   }),
