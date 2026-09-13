@@ -109,6 +109,7 @@ const make = <
   const removeMethod = `${options.resource.name}.${capabilities.remove ? "remove" : ""}`
   const FormValueSchema = Schema.toEncoded(options.form)
   const OptionalIdentifierSchema = Schema.NullOr(options.resource.table.identifierSchema)
+  const CursorSchema = Schema.NullOr(Schema.String)
 
   const SavingSchema = Schema.NullOr(Schema.Struct({
     form: FormValueSchema,
@@ -137,7 +138,7 @@ const make = <
 
   const ModelSchema = Schema.Struct({
     items: Schema.Array(options.resource.table.rowSchema),
-    nextCursor: Schema.NullOr(Schema.String),
+    nextCursor: CursorSchema,
     form: FormValueSchema,
     selectedId: OptionalIdentifierSchema,
     saving: SavingSchema,
@@ -147,6 +148,11 @@ const make = <
   })
 
   interface Model extends Schema.Schema.Type<typeof ModelSchema> {}
+
+  const UpdateResultSchema = Schema.Struct({
+    model: ModelSchema,
+    commands: Schema.optionalKey(Schema.Array(Schema.Unknown)),
+  })
 
   const MessageSchema = defineMessageUnion({
     ChangedField: { key: Schema.String, value: Schema.Unknown },
@@ -164,6 +170,15 @@ const make = <
 
   type Message = typeof MessageSchema.Type
   type UpdateReturn = Update.Return<Model, Message, Client>
+
+  const result = (model: Model) =>
+    UpdateResultSchema.make({ model }) as UpdateReturn
+
+  const commanded = (
+    model: Model,
+    commands: NonNullable<UpdateReturn["commands"]>,
+  ) => UpdateResultSchema.make({ model, commands }) as UpdateReturn
+
   const rowIdentifier = (row: Row) => row[options.resource.table.identifier]
   const rowToForm = Schema.encodeUnknownSync(options.form)
 
@@ -189,93 +204,111 @@ const make = <
     return Effect.catch(flow(toFailure, Effect.succeed))
   }
 
-  const ListArgsSchema = Schema.Struct({
-    cursor: Schema.NullOr(Schema.String),
+  class ListArgs extends Schema.Class<ListArgs>(`${options.name}/ListArgs`)({
+    cursor: CursorSchema,
     append: Schema.Boolean,
     request: RequestTokenSchema,
-  })
+  }) {}
 
+  const executeList = ({ cursor, append, request }: ListArgs) => pipe(
+    Effect.gen(function* () {
+      const client = yield* Client
+      const input = Page.input(cursor)
+      const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
 
-  const List = Command.define(`${options.name}.List`, {
-    args: ListArgsSchema.fields,
+      return MessageSchema.SucceededList({ page, append, request })
+    }),
+    recover(request),
+  )
+
+  const ListConfig = Object.freeze({
+    args: ListArgs.fields,
     messages: [MessageSchema.SucceededList, MessageSchema.Failed],
-    execute: ({ cursor, append, request }) => pipe(
-      Effect.gen(function* () {
-        const client = yield* Client
-        const input = Page.input(cursor)
-        const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
-
-        return MessageSchema.SucceededList({ page, append, request })
-      }),
-      recover(request),
-    ),
+    execute: executeList,
   })
 
-  const SaveArgsSchema = Schema.Struct({
+  const List = Command.define(`${options.name}.List`, ListConfig)
+
+  class SaveArgs extends Schema.Class<SaveArgs>(`${options.name}/SaveArgs`)({
     selectedId: OptionalIdentifierSchema,
     form: FormValueSchema,
     request: RequestTokenSchema,
-  })
+  }) {}
 
-  const Save = Command.define(`${options.name}.Save`, {
-    args: SaveArgsSchema.fields,
+  const executeSave = ({ selectedId, form, request }: SaveArgs) => pipe(
+    Effect.gen(function* () {
+      const draft = yield* pipe(
+        Schema.decodeUnknownEffect(options.form)(form),
+        Effect.mapError(formFailure),
+      )
+
+      const client = yield* Client
+      const created = Predicate.isNull(selectedId)
+
+      const row = yield* created
+        ? invoke<Row>(client, createMethod, draft)
+        : Effect.gen(function* () {
+          const candidate = Record.set(draft, options.resource.table.identifier, selectedId)
+          const input = yield* Schema.decodeUnknownEffect(options.resource.table.rowSchema)(candidate)
+          return yield* invoke<Row>(client, updateMethod, input)
+        })
+
+      return MessageSchema.SucceededSave({ row, created, request })
+    }),
+    recover(request),
+  )
+
+  const SaveConfig = Object.freeze({
+    args: SaveArgs.fields,
     messages: [MessageSchema.SucceededSave, MessageSchema.Failed],
-    execute: ({ selectedId, form, request }) => pipe(
-      Effect.gen(function* () {
-        const draft = yield* pipe(
-          Schema.decodeUnknownEffect(options.form)(form),
-          Effect.mapError(formFailure),
-        )
-
-        const client = yield* Client
-        const created = Predicate.isNull(selectedId)
-
-        const row = yield* created
-          ? invoke<Row>(client, createMethod, draft)
-          : Effect.gen(function* () {
-            const candidate = Record.set(draft, options.resource.table.identifier, selectedId)
-            const input = yield* Schema.decodeUnknownEffect(options.resource.table.rowSchema)(candidate)
-            return yield* invoke<Row>(client, updateMethod, input)
-          })
-
-        return MessageSchema.SucceededSave({ row, created, request })
-      }),
-      recover(request),
-    ),
+    execute: executeSave,
   })
 
-  const RemoveArgsSchema = Schema.Struct({
+  const Save = Command.define(`${options.name}.Save`, SaveConfig)
+
+  class RemoveArgs extends Schema.Class<RemoveArgs>(`${options.name}/RemoveArgs`)({
     id: options.resource.table.identifierSchema,
     request: RequestTokenSchema,
-  })
+  }) {}
 
   const RemoveInputSchema = Schema.Record(Schema.String, options.resource.table.identifierSchema)
 
-  const Remove = Command.define(`${options.name}.Remove`, {
-    args: RemoveArgsSchema.fields,
-    messages: [MessageSchema.SucceededRemove, MessageSchema.Failed],
-    execute: ({ id, request }) => pipe(
-      Effect.gen(function* () {
-        const client = yield* Client
-        const input = RemoveInputSchema.make({ [options.resource.table.identifier]: id })
-        yield* invoke<void>(client, removeMethod, input)
+  const makeRemove = ({ id, request }: RemoveArgs) => pipe(
+    Effect.gen(function* () {
+      const client = yield* Client
+      const input = RemoveInputSchema.make({ [options.resource.table.identifier]: id })
+      yield* invoke<void>(client, removeMethod, input)
 
-        return MessageSchema.SucceededRemove({ id, request })
-      }),
-      recover(request),
-    ),
+      return MessageSchema.SucceededRemove({ id, request })
+    }),
+    recover(request),
+  )
+
+  const RemoveConfig = Object.freeze({
+    args: RemoveArgs.fields,
+    messages: [MessageSchema.SucceededRemove, MessageSchema.Failed],
+    execute: makeRemove,
   })
 
-  const beginList = (
-    requests: Model["requests"],
-    items: ReadonlyArray<Row>,
-    nextCursor: string | null,
-    append: boolean,
-  ) => {
+  const Remove = Command.define(`${options.name}.Remove`, RemoveConfig)
+
+  const beginList = (model: Model, append: boolean): UpdateReturn => {
+    const page = options.resource.contracts.list.successSchema.make({
+      items: model.items,
+      nextCursor: model.nextCursor,
+    })
+
     const started = pipe(
-      pager.begin(requests, { items, nextCursor }, append),
+      pager.begin(model.requests, page, append),
       Option.getOrThrow,
     )
+
+    const next = ModelSchema.make({
+      ...model,
+      items: started.page.items,
+      nextCursor: started.page.nextCursor,
+      requests: started.requests,
+    })
 
     const command = List({
       request: started.request,
@@ -283,69 +316,36 @@ const make = <
       append: started.append,
     })
 
-    return { ...started, command }
+    return commanded(next, [command])
   }
 
-  const reload = (model: Model): UpdateReturn => {
-    const started = beginList(
-      model.requests,
-      model.items,
-      model.nextCursor,
-      false,
-    )
-
-    const next = ModelSchema.make({
-      items: started.page.items,
-      nextCursor: started.page.nextCursor,
-      form: model.form,
-      selectedId: model.selectedId,
-      saving: model.saving,
-      requests: started.requests,
-      fieldErrors: model.fieldErrors,
-      notice: model.notice,
-    })
-
-    return { model: next, commands: [started.command] }
-  }
+  const reload = (model: Model) => beginList(model, false)
 
   const update = (model: Model, message: Message) => MessageSchema.match<UpdateReturn>(message, {
     ChangedField: ({ key, value }) => {
-      if (!Record.has(model.form, key)) return { model }
+      if (!Record.has(model.form, key)) return result(model)
 
       const candidate = Record.set(model.form, key, value)
 
-      if (!isFormValue(candidate)) return { model }
+      if (!isFormValue(candidate)) return result(model)
 
       const next = ModelSchema.make({ ...model, form: candidate })
 
-      return { model: next }
+      return result(next)
     },
-    ClickedReload: () => {
-      const reloading = reload(model)
-      const next = ModelSchema.make({ ...reloading.model, notice: null })
-
-      return { model: next, commands: reloading.commands }
-    },
+    ClickedReload: () => pipe(
+      ModelSchema.make({ ...model, notice: null }),
+      reload,
+    ),
     ClickedNext: () => {
       const endReached = Predicate.isNull(model.nextCursor)
       const alreadyPending = Requests.pending(model.requests, listKey)
       const unavailable = endReached || alreadyPending
 
-      if (unavailable) return { model }
-
-      const started = beginList(
-        model.requests,
-        model.items,
-        model.nextCursor,
-        true,
-      )
-
-      const next = ModelSchema.make({ ...model, requests: started.requests })
-
-      return { model: next, commands: [started.command] }
+      return unavailable ? result(model) : beginList(model, true)
     },
     ClickedSave: () => {
-      if (Requests.pending(model.requests, saveKey)) return { model }
+      if (Requests.pending(model.requests, saveKey)) return result(model)
 
       const started = Requests.start(model.requests, saveKey)
 
@@ -363,19 +363,18 @@ const make = <
         request: started.request,
       })
 
-      return { model: next, commands: [command] }
+      return commanded(next, [command])
     },
-    ClickedNew: () => {
-      const next = ModelSchema.make({
+    ClickedNew: () => pipe(
+      ModelSchema.make({
         ...model,
         form: options.empty,
         selectedId: null,
         fieldErrors: FieldErrorsSchema.make({}),
         notice: null,
-      })
-
-      return { model: next }
-    },
+      }),
+      result,
+    ),
     ClickedSelect: ({ id }) => {
       const matchesIdentifier = (row: Row) => {
         const rowId = rowIdentifier(row)
@@ -385,28 +384,27 @@ const make = <
       const selected = Array.findFirst(model.items, matchesIdentifier)
 
       return Option.match(selected, {
-        onNone: () => ({ model }),
-        onSome: (row) => {
-          const next = ModelSchema.make({
+        onNone: () => result(model),
+        onSome: (row) => pipe(
+          ModelSchema.make({
             ...model,
             form: rowToForm(row),
             selectedId: id,
             fieldErrors: FieldErrorsSchema.make({}),
             notice: null,
-          })
-
-          return { model: next }
-        },
+          }),
+          result,
+        ),
       })
     },
     ClickedRemove: ({ id }) => {
-      if (Requests.pending(model.requests, removeKey)) return { model }
+      if (Requests.pending(model.requests, removeKey)) return result(model)
 
       const started = Requests.start(model.requests, removeKey)
       const next = ModelSchema.make({ ...model, requests: started.state, notice: null })
       const command = Remove({ id, request: started.request })
 
-      return { model: next, commands: [command] }
+      return commanded(next, [command])
     },
     SucceededList: ({ page, append, request }) => pipe(
       pager.receive(
@@ -416,19 +414,20 @@ const make = <
         append,
       ),
       Option.match({
-        onNone: () => ({ model }),
-        onSome: (received) => ({
-          model: ModelSchema.make({
+        onNone: () => result(model),
+        onSome: (received) => pipe(
+          ModelSchema.make({
             ...model,
             items: received.page.items,
             nextCursor: received.page.nextCursor,
             requests: received.requests,
           }),
-        }),
+          result,
+        ),
       }),
     ),
     SucceededSave: ({ row, created, request }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
+      if (!Requests.accepts(model.requests, request)) return result(model)
 
       const current = savingIsCurrent(model)
       const form = current ? rowToForm(row) : model.form
@@ -441,7 +440,7 @@ const make = <
       return reload(settled)
     },
     SucceededRemove: ({ id, request }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
+      if (!Requests.accepts(model.requests, request)) return result(model)
 
       const matchesIdentifier = (selectedId: Identifier) => sameIdentifier(selectedId, id)
       const selected = pipe(Option.fromNullishOr(model.selectedId), Option.exists(matchesIdentifier))
@@ -454,7 +453,7 @@ const make = <
       return reload(settled)
     },
     Failed: ({ request, error, fieldErrors }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
+      if (!Requests.accepts(model.requests, request)) return result(model)
 
       const saveRequest = sameKey(request.key, saveKey)
       const savingChanged = !savingIsCurrent(model)
@@ -464,7 +463,7 @@ const make = <
       if (changedSinceSave) {
         const requests = Requests.succeed(model.requests, request)
         const next = ModelSchema.make({ ...model, requests, saving })
-        return { model: next }
+        return result(next)
       }
 
       const requests = Requests.fail(model.requests, request, error)
@@ -476,7 +475,7 @@ const make = <
       const notice = NoticeSchema.make({ kind: "error", text: error })
       const next = ModelSchema.make({ ...model, requests, saving, fieldErrors: mergedErrors, notice })
 
-      return { model: next }
+      return result(next)
     },
   })
 
