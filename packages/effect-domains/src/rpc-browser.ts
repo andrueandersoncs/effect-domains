@@ -1,12 +1,20 @@
-import { Effect, Equivalence, Layer, Predicate, Schema, pipe } from "effect"
+import { Effect, Equivalence, Layer, Predicate, Record, Schema, pipe } from "effect"
+import { Command } from "foldkit"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc"
+
+import { RequestTokenSchema } from "./requests.ts"
 
 const TaggedErrorSchema = Schema.Struct({ _tag: Schema.String })
 const BrowserGlobalSchema = Schema.Struct({ location: Schema.Struct({ href: Schema.String }) })
 const HeadersSchema = Schema.Record(Schema.String, Schema.String)
 const RequestOptionsSchema = Schema.Struct({ headers: HeadersSchema })
 const sameString = Equivalence.strictEqual<string>()
+
+type RequestCommandFieldSchema = globalThis.Record<"request", typeof RequestTokenSchema>
+
+type RequestCommandArgs<Fields extends Schema.Struct.Fields> =
+  Schema.Schema.Type<Schema.Struct<Fields & RequestCommandFieldSchema>>
 
 const isNonEmptyString = (value: unknown): value is string =>
   Predicate.isString(value) && value.length > 0
@@ -67,4 +75,54 @@ const requestOptions = (token: string | null) => {
   })
 }
 
-export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions }
+interface BrowserCommandDefinition<
+  Fields extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Failure extends Schema.Top,
+  Output,
+  Error,
+  Requirements,
+> {
+  readonly args: Fields
+  readonly success: Success
+  readonly failure: Failure
+  readonly execute: (args: RequestCommandArgs<Fields>) => Effect.Effect<Output, Error, Requirements>
+  readonly onSuccess: (output: Output, args: RequestCommandArgs<Fields>) => Schema.Schema.Type<Success>
+  readonly onFailure: (error: Error, args: RequestCommandArgs<Fields>) => Schema.Schema.Type<Failure>
+}
+
+const command = <
+  const Name extends string,
+  Fields extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Failure extends Schema.Top,
+  Output,
+  Error,
+  Requirements,
+>(
+  name: Name,
+  definition: BrowserCommandDefinition<Fields, Success, Failure, Output, Error, Requirements>,
+) => {
+  const args = Record.set(definition.args, "request", RequestTokenSchema) as
+    Fields & globalThis.Record<"request", typeof RequestTokenSchema>
+
+  const execute = (commandArgs: RequestCommandArgs<Fields>) => pipe(
+    definition.execute(commandArgs),
+    Effect.match({
+      onSuccess: (output) => definition.onSuccess(output, commandArgs),
+      onFailure: (error) => definition.onFailure(error, commandArgs),
+    }),
+  )
+
+  const messages = [definition.success, definition.failure] as const
+  const config = Object.freeze({ args, messages, execute })
+
+  return Command.define<
+    Name,
+    Fields & RequestCommandFieldSchema,
+    typeof messages,
+    ReturnType<typeof execute>
+  >(name, config)
+}
+
+export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions, command }

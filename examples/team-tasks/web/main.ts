@@ -13,7 +13,9 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
+import { ResourcePager } from "effect-domains/resource-pager"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -41,7 +43,6 @@ const completedChoices = [
   { value: "false", label: "Open" },
   { value: "true", label: "Completed" },
 ]
-const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 
 export const Model = Schema.Struct({
   session: Session.ModelSchema,
@@ -59,7 +60,7 @@ export const Model = Schema.Struct({
   completed: Schema.Boolean,
   tenantId: Schema.String,
   ownerId: Schema.String,
-  notice: noticeSchema,
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -180,14 +181,16 @@ export const RemoveTask = Command.define("RemoveTask", {
     ),
 })
 
-const beginList = (model: Model, cursor: string | null, append: boolean) => {
+const TasksPager = ResourcePager.make("tasks.list")
+const tasksState = (model: Model) => ({ page: model.tasks, requests: model.requests })
+const beginList = (model: Model, append: boolean) => {
   const token = Session.token(model.session)
   if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before listing tasks." }) }), commands: [] }
-  const started = Requests.start(model.requests, "tasks.list")
+  const started = pipe(TasksPager.begin(model.requests, model.tasks, append), Option.getOrThrow)
   return {
     model: evo(model, {
-      requests: () => started.state,
-      tasks: () => append ? model.tasks : Page.empty<TaskRow>(),
+      requests: () => started.requests,
+      tasks: () => started.page,
       notice: () => null,
     }),
     commands: [ListTasks({
@@ -196,46 +199,48 @@ const beginList = (model: Model, cursor: string | null, append: boolean) => {
       filterProject: model.filterProject,
       filterPriority: model.filterPriority,
       filterCompleted: model.filterCompleted,
-      cursor,
-      append,
+      cursor: started.cursor,
+      append: started.append,
     })],
   }
 }
 
-const resetIdentity = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({
-  ...model,
-  ...emptyForm,
-  session,
-  requests: Requests.reset(model.requests),
-  tasks: Page.empty<TaskRow>(),
-  filterProject: "",
-  filterPriority: "",
-  filterCompleted: "",
-  notice: null,
-})
+const resetIdentity = (model: Model, session: typeof Session.ModelSchema.Type): Model => {
+  const reset = TasksPager.reset(tasksState(model))
+  return {
+    ...model,
+    ...emptyForm,
+    session,
+    requests: reset.requests,
+    tasks: reset.page,
+    filterProject: "",
+    filterPriority: "",
+    filterCompleted: "",
+    notice: null,
+  }
+}
 
 export const update = (model: Model, message: Message): UpdateReturn =>
   Message.match<UpdateReturn>(message, {
     SessionChanged: ({ message }) => {
-      const child = Session.update(model.session, message)
-      const changed = Session.generation(child.model) !== Session.generation(model.session)
+      const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
+      const changed = Session.generationChanged(model.session, child.model)
       const next = changed ? resetIdentity(model, child.model) : evo(model, { session: () => child.model })
-      const commands = Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message }))
-      if (!changed || Session.token(next.session) === null) return { model: next, commands }
-      const listing = beginList(next, null, false)
-      return { model: listing.model, commands: [...commands, ...listing.commands] }
+      if (!changed || child.model.token === null) return { model: next, commands: child.commands }
+      const listing = beginList(next, false)
+      return { model: listing.model, commands: [...child.commands, ...listing.commands] }
     },
-    ChangedFilterProject: ({ value }) => beginList(evo(model, { filterProject: () => value }), null, false),
-    ChangedFilterPriority: ({ value }) => beginList(evo(model, { filterPriority: () => value }), null, false),
-    ChangedFilterCompleted: ({ value }) => beginList(evo(model, { filterCompleted: () => value }), null, false),
+    ChangedFilterProject: ({ value }) => beginList(evo(model, { filterProject: () => value }), false),
+    ChangedFilterPriority: ({ value }) => beginList(evo(model, { filterPriority: () => value }), false),
+    ChangedFilterCompleted: ({ value }) => beginList(evo(model, { filterCompleted: () => value }), false),
     ChangedProject: ({ value }) => ({ model: evo(model, { project: () => value }) }),
     ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
     ChangedDetail: ({ value }) => ({ model: evo(model, { detail: () => value }) }),
     ChangedPriority: ({ value }) => ({ model: evo(model, { priority: () => value }) }),
     ChangedDueDate: ({ value }) => ({ model: evo(model, { dueDate: () => value }) }),
     ChangedCompleted: ({ value }) => ({ model: evo(model, { completed: () => value }) }),
-    ClickedReload: () => beginList(model, null, false),
-    ClickedMore: () => model.tasks.nextCursor === null ? { model } : beginList(model, model.tasks.nextCursor, true),
+    ClickedReload: () => beginList(model, false),
+    ClickedMore: () => model.tasks.nextCursor === null || TasksPager.pending(model.requests) ? { model } : beginList(model, true),
     ClickedSave: () => {
       const token = Session.token(model.session)
       if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before saving a task." }) }) }
@@ -273,9 +278,10 @@ export const update = (model: Model, message: Message): UpdateReturn =>
       const started = Requests.start(model.requests, "tasks.remove")
       return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveTask({ request: started.request, token, id })] }
     },
-    SucceededList: ({ request, append, page }) => !Requests.accepts(model.requests, request)
-      ? { model }
-      : { model: evo(model, { requests: () => Requests.succeed(model.requests, request), tasks: () => Page.receive(model.tasks, page, append) }) },
+    SucceededList: ({ request, append, page }) => Option.match(TasksPager.receive(tasksState(model), request, page, append), {
+      onNone: () => ({ model }),
+      onSome: (received) => ({ model: evo(model, { requests: () => received.requests, tasks: () => received.page }) }),
+    }),
     SucceededSave: ({ request, task, created }) => {
       if (!Requests.accepts(model.requests, request)) return { model }
       const next = evo(model, {
@@ -285,7 +291,7 @@ export const update = (model: Model, message: Message): UpdateReturn =>
         tenantId: () => task.tenantId, ownerId: () => task.ownerId,
         notice: () => ({ kind: "success" as const, text: created ? "Task created." : "Task updated." }),
       })
-      return beginList(next, null, false)
+      return beginList(next, false)
     },
     SucceededRemove: ({ request, id }) => {
       if (!Requests.accepts(model.requests, request)) return { model }
@@ -294,7 +300,7 @@ export const update = (model: Model, message: Message): UpdateReturn =>
         ...(model.selectedId === id ? Object.fromEntries(Object.entries(emptyForm).map(([key, value]) => [key, () => value])) : {}),
         notice: () => ({ kind: "success" as const, text: "Task removed." }),
       })
-      return beginList(next, null, false)
+      return beginList(next, false)
     },
     Failed: ({ request, error }) => !Requests.accepts(model.requests, request)
       ? { model }

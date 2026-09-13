@@ -1,6 +1,6 @@
 import { Array, Effect, Option, Schema, pipe } from "effect"
 import { Command, Runtime, type Update } from "foldkit"
-import { type Document, type Html, type HtmlBuilder } from "foldkit/html"
+import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import {
@@ -13,6 +13,7 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
@@ -47,8 +48,8 @@ export const Model = Schema.Struct({
   notes: Schema.String,
   selectedId: Schema.NullOr(Schema.String),
   requests: RequestStateSchema,
-  fieldErrors: Schema.Record(Schema.String, Schema.String),
-  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
+  fieldErrors: BrowserModel.FieldErrorsSchema,
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -70,24 +71,13 @@ export const Message = defineMessageUnion({
   SucceededList: { page: BookPageSchema, append: Schema.Boolean, request: RequestTokenSchema },
   SucceededSave: { book: BookRowSchema, created: Schema.Boolean, request: RequestTokenSchema },
   SucceededRemove: { id: Schema.String, request: RequestTokenSchema },
-  Failed: { request: RequestTokenSchema, error: Schema.String, field: Schema.NullOr(Schema.String) },
+  Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: BrowserModel.FieldErrorsSchema },
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>
 
-type FormFailure = Readonly<{ _tag: "FormFailure"; field: string; error: string }>
-const formFailure = (field: string) => (error: Schema.SchemaError): FormFailure => ({
-  _tag: "FormFailure",
-  field,
-  error: Form.errors(error)["$"] ?? error.message,
-})
-const isFormFailure = (error: unknown): error is FormFailure =>
-  typeof error === "object" && error !== null && "_tag" in error && error._tag === "FormFailure"
-const failed = (request: RequestToken, error: unknown) => Message.Failed({
-  request,
-  error: isFormFailure(error) ? error.error : RpcBrowser.messageFromUnknown(error),
-  field: isFormFailure(error) ? error.field : null,
-})
+const failed = (request: RequestToken, error: unknown) =>
+  Message.Failed({ request, ...BrowserModel.failure(error, RpcBrowser.messageFromUnknown) })
 
 const emptyForm = { title: "", author: "", status: "planned" as const, format: "paperback" as const, rating: "", notes: "", selectedId: null as string | null }
 
@@ -112,12 +102,12 @@ export const SaveBook = Command.define("SaveBook", {
   args: { selectedId: Schema.NullOr(Schema.String), title: Schema.String, author: Schema.String, status: ReadingStatusSchema, format: BookFormatSchema, rating: Schema.String, notes: Schema.String, request: RequestTokenSchema },
   messages: [Message.SucceededSave, Message.Failed],
   execute: (args) => Effect.gen(function*() {
-    const title = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.title)(args.title.trim()).pipe(Effect.mapError(formFailure("title")))
-    const author = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.author)(args.author.trim()).pipe(Effect.mapError(formFailure("author")))
+    const title = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.title)(args.title.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("title")))
+    const author = yield* Schema.decodeUnknownEffect(ReadingListBookSchema.fields.author)(args.author.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("author")))
     const rating = args.rating.trim() === ""
       ? null
-      : yield* Schema.decodeUnknownEffect(Form.integer(RatingSchema))(args.rating).pipe(Effect.mapError(formFailure("rating")))
-    const notes = yield* Schema.decodeUnknownEffect(Form.nullableText(Schema.NonEmptyString))(args.notes).pipe(Effect.mapError(formFailure("notes")))
+      : yield* Schema.decodeUnknownEffect(Form.integer(RatingSchema))(args.rating).pipe(Effect.mapError(BrowserModel.fieldFailure("rating")))
+    const notes = yield* Schema.decodeUnknownEffect(Form.nullableText(Schema.NonEmptyString))(args.notes).pipe(Effect.mapError(BrowserModel.fieldFailure("notes")))
     const client = yield* WebClient
     const book = { title, author, status: args.status, format: args.format, rating, notes }
     const created = args.selectedId === null
@@ -152,8 +142,6 @@ const beginList = (model: Model, append: boolean) => {
   }
 }
 const begin = (model: Model, key: string) => Requests.start(model.requests, key)
-const withError = <M>(h: HtmlBuilder<M>, child: Html, error: string | undefined) =>
-  h.div([], [child, error === undefined ? h.empty : h.p([h.Class("field-error")], [error])])
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   ChangedFilterStatus: ({ value }) => {
@@ -217,14 +205,14 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     const selected = model.selectedId === id
     return { model: evo(model, { title: () => selected ? "" : model.title, author: () => selected ? "" : model.author, status: () => selected ? "planned" : model.status, format: () => selected ? "paperback" : model.format, rating: () => selected ? "" : model.rating, notes: () => selected ? "" : model.notes, selectedId: () => selected ? null : model.selectedId, books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state, notice: () => ({ kind: "success" as const, text: "Removed." }) }), commands: [listing.command] }
   },
-  Failed: ({ request, error, field }) => {
+  Failed: ({ request, error, fieldErrors }) => {
     if (!Requests.accepts(model.requests, request)) return { model }
-    return { model: evo(model, { requests: () => Requests.fail(model.requests, request, error), fieldErrors: () => field === null ? model.fieldErrors : { ...model.fieldErrors, [field]: error }, notice: () => ({ kind: "error" as const, text: error }) }) }
+    return { model: evo(model, { requests: () => Requests.fail(model.requests, request, error), fieldErrors: () => ({ ...model.fieldErrors, ...fieldErrors }), notice: () => ({ kind: "error" as const, text: error }) }) }
   },
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
-  const model: Model = { books: [], nextCursor: null, filterStatus: "", filterFormat: "", ...emptyForm, requests: Requests.empty(), fieldErrors: {}, notice: null }
+  const model: Model = { books: [], nextCursor: null, filterStatus: "", filterFormat: "", ...emptyForm, requests: Requests.empty(), fieldErrors: BrowserModel.emptyFieldErrors(), notice: null }
   const listing = beginList(model, false)
   return { model: evo(model, { books: () => listing.page.items, nextCursor: () => listing.page.nextCursor, requests: () => listing.state }), commands: [listing.command] }
 }
@@ -248,12 +236,12 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
       ]),
       h.section([h.Class("panel")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSave())], [
         h.h2([], [model.selectedId === null ? "Add a book" : "Edit book"]),
-        field(h, { id: "title", label: "Title", children: withError(h, textInput(h, { id: "title", value: model.title, onInput: (value) => Message.ChangedTitle({ value }), type: "text", placeholder: "", autocomplete: "off" }), model.fieldErrors.title) }),
-        field(h, { id: "author", label: "Author", children: withError(h, textInput(h, { id: "author", value: model.author, onInput: (value) => Message.ChangedAuthor({ value }), type: "text", placeholder: "", autocomplete: "off" }), model.fieldErrors.author) }),
+        field(h, { id: "title", label: "Title", children: textInput(h, { id: "title", value: model.title, onInput: (value) => Message.ChangedTitle({ value }), type: "text", placeholder: "", autocomplete: "off" }), error: model.fieldErrors.title }),
+        field(h, { id: "author", label: "Author", children: textInput(h, { id: "author", value: model.author, onInput: (value) => Message.ChangedAuthor({ value }), type: "text", placeholder: "", autocomplete: "off" }), error: model.fieldErrors.author }),
         field(h, { id: "status", label: "Status", children: selectInput(h, { id: "status", value: model.status, onChange: (value) => Message.ChangedStatus({ value }), choices: formStatusChoices }) }),
         field(h, { id: "format", label: "Format", children: selectInput(h, { id: "format", value: model.format, onChange: (value) => Message.ChangedFormat({ value }), choices: formFormatChoices }) }),
-        field(h, { id: "rating", label: "Rating (1–5)", children: withError(h, textInput(h, { id: "rating", value: model.rating, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedRating({ value }) }), model.fieldErrors.rating) }),
-        field(h, { id: "notes", label: "Notes", children: withError(h, textareaInput(h, { id: "notes", value: model.notes, rows: 4, onInput: (value) => Message.ChangedNotes({ value }) }), model.fieldErrors.notes) }),
+        field(h, { id: "rating", label: "Rating (1–5)", children: textInput(h, { id: "rating", value: model.rating, type: "number", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedRating({ value }) }), error: model.fieldErrors.rating }),
+        field(h, { id: "notes", label: "Notes", children: textareaInput(h, { id: "notes", value: model.notes, rows: 4, onInput: (value) => Message.ChangedNotes({ value }) }), error: model.fieldErrors.notes }),
         h.div([h.Class("actions")], [primaryButton(h, { label: model.selectedId === null ? "Add book" : "Save changes", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests, "books.save") }), quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false })]),
       ])]),
     ])],

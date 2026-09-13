@@ -1,6 +1,6 @@
 import { DateTime, Effect, Option, Schema, pipe } from "effect"
 import { RpcGroup } from "effect/unstable/rpc"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -14,9 +14,10 @@ import {
   textInput,
   textareaInput,
 } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { SupportCaseBoardList, SupportCaseBoardRowSchema } from "../board.ts"
 import { SupportCaseDetail } from "../contracts.ts"
 import {
@@ -75,10 +76,7 @@ export const Model = Schema.Struct({
   transitionAgentId: Schema.String,
   transitionNote: Schema.String,
   requests: RequestStateSchema,
-  notice: Schema.NullOr(Schema.Struct({
-    kind: Schema.Literals(["info", "error", "success"]),
-    text: Schema.String,
-  })),
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -114,137 +112,112 @@ export type Message = typeof Message.Type
 
 type UpdateReturn = Update.Return<Model, Message, WebClient>
 
-const failed = (request: RequestToken, error: unknown) => Message.Failed({
-  request,
-  error: RpcBrowser.messageFromUnknown(error),
+export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
+  args: {},
+  success: Message.SucceededCustomers,
+  failure: Message.Failed,
+  execute: () => pipe(WebClient, Effect.flatMap((client) => client["support_customers.list"]({ limit: 50 }))),
+  onSuccess: (page, { request }) => Message.SucceededCustomers({ customers: page.items, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-const requestEffect = <A, E, Success extends Message>(
-  request: RequestToken,
-  effect: Effect.Effect<A, E, WebClient>,
-  onSuccess: (value: A) => Success,
-) => pipe(
-  effect,
-  Effect.match({
-    onSuccess,
-    onFailure: (error) => failed(request, error),
+export const LoadAgents = RpcBrowser.command("LoadAgents", {
+  args: {},
+  success: Message.SucceededAgents,
+  failure: Message.Failed,
+  execute: () => pipe(WebClient, Effect.flatMap((client) => client["support_agents.list"]({ limit: 50 }))),
+  onSuccess: (page, { request }) => Message.SucceededAgents({ agents: page.items, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
+})
+
+export const LoadBoard = RpcBrowser.command("LoadBoard", {
+  args: { status: Schema.String },
+  success: Message.SucceededBoard,
+  failure: Message.Failed,
+  execute: ({ status }) => pipe(WebClient, Effect.flatMap((client) => client["support.board"]({
+    limit: 50,
+    ...(status === "" ? {} : { filter: { status: status as typeof SupportCaseStatusSchema.Type } }),
+  }))),
+  onSuccess: (page, { request }) => Message.SucceededBoard({ page, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
+})
+
+export const LoadDetail = RpcBrowser.command("LoadDetail", {
+  args: { id: Schema.String },
+  success: Message.SucceededDetail,
+  failure: Message.Failed,
+  execute: ({ id }) => pipe(WebClient, Effect.flatMap((client) => client["support.caseDetail"]({ caseId: id }))),
+  onSuccess: (detail, { request }) => Message.SucceededDetail({ detail, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
+})
+
+export const CreateCustomer = RpcBrowser.command("CreateCustomer", {
+  args: { id: Schema.String, name: Schema.String },
+  success: Message.SucceededCustomer,
+  failure: Message.Failed,
+  execute: ({ id, name }) => Effect.gen(function* () {
+    const customerId = yield* Schema.decodeUnknownEffect(SupportCustomerSchema.fields.id)(id.trim())
+    const customerName = yield* Schema.decodeUnknownEffect(SupportCustomerSchema.fields.name)(name.trim())
+    const client = yield* WebClient
+    return yield* client["support_customers.create"]({ id: customerId, name: customerName })
   }),
-)
-
-export const LoadCustomers = Command.define("LoadCustomers", {
-  args: { request: RequestTokenSchema },
-  messages: [Message.SucceededCustomers, Message.Failed],
-  execute: ({ request }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client["support_customers.list"]({ limit: 50 }))),
-    (page) => Message.SucceededCustomers({ customers: page.items, request }),
-  ),
+  onSuccess: (customer, { request }) => Message.SucceededCustomer({ customer, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const LoadAgents = Command.define("LoadAgents", {
-  args: { request: RequestTokenSchema },
-  messages: [Message.SucceededAgents, Message.Failed],
-  execute: ({ request }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client["support_agents.list"]({ limit: 50 }))),
-    (page) => Message.SucceededAgents({ agents: page.items, request }),
-  ),
+export const CreateAgent = RpcBrowser.command("CreateAgent", {
+  args: { id: Schema.String, name: Schema.String, onDuty: Schema.Boolean },
+  success: Message.SucceededAgent,
+  failure: Message.Failed,
+  execute: ({ id, name, onDuty }) => Effect.gen(function* () {
+    const agentId = yield* Schema.decodeUnknownEffect(SupportAgentSchema.fields.id)(id.trim())
+    const agentName = yield* Schema.decodeUnknownEffect(SupportAgentSchema.fields.name)(name.trim())
+    const client = yield* WebClient
+    return yield* client["support_agents.create"]({ id: agentId, name: agentName, onDuty })
+  }),
+  onSuccess: (agent, { request }) => Message.SucceededAgent({ agent, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const LoadBoard = Command.define("LoadBoard", {
-  args: { status: Schema.String, request: RequestTokenSchema },
-  messages: [Message.SucceededBoard, Message.Failed],
-  execute: ({ status, request }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client["support.board"]({
-      limit: 50,
-      ...(status === "" ? {} : { filter: { status: status as typeof SupportCaseStatusSchema.Type } }),
-    }))),
-    (page) => Message.SucceededBoard({ page, request }),
-  ),
-})
-
-export const LoadDetail = Command.define("LoadDetail", {
-  args: { id: Schema.String, request: RequestTokenSchema },
-  messages: [Message.SucceededDetail, Message.Failed],
-  execute: ({ id, request }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client["support.caseDetail"]({ caseId: id }))),
-    (detail) => Message.SucceededDetail({ detail, request }),
-  ),
-})
-
-export const CreateCustomer = Command.define("CreateCustomer", {
-  args: { id: Schema.String, name: Schema.String, request: RequestTokenSchema },
-  messages: [Message.SucceededCustomer, Message.Failed],
-  execute: ({ id, name, request }) => requestEffect(
-    request,
-    Effect.gen(function* () {
-      const customerId = yield* Schema.decodeUnknownEffect(SupportCustomerSchema.fields.id)(id.trim())
-      const customerName = yield* Schema.decodeUnknownEffect(SupportCustomerSchema.fields.name)(name.trim())
-      const client = yield* WebClient
-      return yield* client["support_customers.create"]({ id: customerId, name: customerName })
-    }),
-    (customer) => Message.SucceededCustomer({ customer, request }),
-  ),
-})
-
-export const CreateAgent = Command.define("CreateAgent", {
-  args: { id: Schema.String, name: Schema.String, onDuty: Schema.Boolean, request: RequestTokenSchema },
-  messages: [Message.SucceededAgent, Message.Failed],
-  execute: ({ id, name, onDuty, request }) => requestEffect(
-    request,
-    Effect.gen(function* () {
-      const agentId = yield* Schema.decodeUnknownEffect(SupportAgentSchema.fields.id)(id.trim())
-      const agentName = yield* Schema.decodeUnknownEffect(SupportAgentSchema.fields.name)(name.trim())
-      const client = yield* WebClient
-      return yield* client["support_agents.create"]({ id: agentId, name: agentName, onDuty })
-    }),
-    (agent) => Message.SucceededAgent({ agent, request }),
-  ),
-})
-
-export const OpenCase = Command.define("OpenCase", {
+export const OpenCase = RpcBrowser.command("OpenCase", {
   args: {
     customerId: Schema.String,
     subject: Schema.String,
     priority: SupportCasePrioritySchema,
-    request: RequestTokenSchema,
   },
-  messages: [Message.SucceededCase, Message.Failed],
-  execute: ({ customerId, subject, priority, request }) => requestEffect(
-    request,
-    Effect.gen(function* () {
-      const decodedCustomerId = yield* Schema.decodeUnknownEffect(SupportCaseSchema.fields.customerId)(customerId)
-      const decodedSubject = yield* Schema.decodeUnknownEffect(SupportCaseSchema.fields.subject)(subject.trim())
-      const client = yield* WebClient
-      return yield* client["support.openCase"]({ customerId: decodedCustomerId, subject: decodedSubject, priority })
-    }),
-    (supportCase) => Message.SucceededCase({ supportCase, action: "Case opened.", request }),
-  ),
+  success: Message.SucceededCase,
+  failure: Message.Failed,
+  execute: ({ customerId, subject, priority }) => Effect.gen(function* () {
+    const decodedCustomerId = yield* Schema.decodeUnknownEffect(SupportCaseSchema.fields.customerId)(customerId)
+    const decodedSubject = yield* Schema.decodeUnknownEffect(SupportCaseSchema.fields.subject)(subject.trim())
+    const client = yield* WebClient
+    return yield* client["support.openCase"]({ customerId: decodedCustomerId, subject: decodedSubject, priority })
+  }),
+  onSuccess: (supportCase, { request }) => Message.SucceededCase({ supportCase, action: "Case opened.", request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const AdvanceCase = Command.define("AdvanceCase", {
+export const AdvanceCase = RpcBrowser.command("AdvanceCase", {
   args: {
     id: Schema.String,
     expectedVersion: Schema.Number,
     action: SupportCaseTransitions.actions,
     assignedAgentId: Schema.String,
     note: Schema.String,
-    request: RequestTokenSchema,
   },
-  messages: [Message.SucceededCase, Message.Failed],
-  execute: ({ id, expectedVersion, action, assignedAgentId, note, request }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client["support.advanceCase"]({
+  success: Message.SucceededCase,
+  failure: Message.Failed,
+  execute: ({ id, expectedVersion, action, assignedAgentId, note }) => pipe(WebClient, Effect.flatMap((client) =>
+    client["support.advanceCase"]({
       caseId: id,
       expectedVersion,
       action,
       ...(action === "assign" ? { assignedAgentId } : {}),
       ...(note.trim() === "" ? {} : { note: note.trim() }),
     }))),
-    (supportCase) => Message.SucceededCase({ supportCase, action: `Case ${action} completed.`, request }),
-  ),
+  onSuccess: (supportCase, { action, request }) =>
+    Message.SucceededCase({ supportCase, action: `Case ${action} completed.`, request }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 const startRefresh = (model: Model) => {

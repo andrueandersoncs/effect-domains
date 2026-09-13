@@ -3,18 +3,11 @@ import { Command, type Update } from "foldkit"
 import { defineMessageUnion } from "foldkit/message"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Authorization } from "./authorization.ts"
-import { Form } from "./form.ts"
+import { BrowserModel } from "./browser-model.ts"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "./requests.ts"
 import { RpcService, type Type } from "./rpc-service.ts"
 import { Page, type Page as PageValue } from "./page.ts"
 import { ResourcePager } from "./resource-pager.ts"
-
-const NoticeSchema = Schema.NullOr(Schema.Struct({
-  kind: Schema.Literals(["info", "error", "success"]),
-  text: Schema.String,
-}))
-
-const FieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
 
 const EditorCapabilitiesSchema = Schema.Struct({
   list: Schema.Literal(true),
@@ -22,26 +15,6 @@ const EditorCapabilitiesSchema = Schema.Struct({
   update: Schema.Literal(true),
   remove: Schema.Literal(true),
 })
-
-const FormFailureSchema = Schema.TaggedStruct("FormFailure", {
-  errors: FieldErrorsSchema,
-  message: Schema.String,
-})
-
-const isFormFailure = Schema.is(FormFailureSchema)
-
-const firstError = (errors: Readonly<Record<string, string>>, fallback: string) => pipe(
-  Record.values(errors),
-  Array.head,
-  Option.getOrElse(Function.constant(fallback)),
-)
-
-const formFailure = (error: Schema.SchemaError) => {
-  const errors = Form.errors(error)
-  const message = firstError(errors, error.message)
-
-  return FormFailureSchema.make({ errors, message })
-}
 
 class RpcClientDefinitionError extends Schema.TaggedError<RpcClientDefinitionError>()("RpcClientDefinitionError", {
   method: Schema.String,
@@ -143,8 +116,8 @@ const make = <
     selectedId: OptionalIdentifierSchema,
     saving: SavingSchema,
     requests: RequestStateSchema,
-    fieldErrors: FieldErrorsSchema,
-    notice: NoticeSchema,
+    fieldErrors: BrowserModel.FieldErrorsSchema,
+    notice: BrowserModel.NoticeSchema,
   })
 
   interface Model extends Schema.Schema.Type<typeof ModelSchema> {}
@@ -165,7 +138,7 @@ const make = <
     SucceededList: { page: options.resource.contracts.list.successSchema, append: Schema.Boolean, request: RequestTokenSchema },
     SucceededSave: { row: options.resource.table.rowSchema, created: Schema.Boolean, request: RequestTokenSchema },
     SucceededRemove: { id: options.resource.table.identifierSchema, request: RequestTokenSchema },
-    Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: FieldErrorsSchema },
+    Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: BrowserModel.FieldErrorsSchema },
   })
 
   type Message = typeof MessageSchema.Type
@@ -189,14 +162,9 @@ const make = <
   )
 
   const failure = (request: RequestToken, error: unknown) => {
-    if (isFormFailure(error)) {
-      return MessageSchema.Failed({ request, error: error.message, fieldErrors: error.errors })
-    }
+    const details = BrowserModel.failure(error, options.formatError)
 
-    const message = options.formatError(error)
-    const fieldErrors = FieldErrorsSchema.make({})
-
-    return MessageSchema.Failed({ request, error: message, fieldErrors })
+    return MessageSchema.Failed({ request, ...details })
   }
 
   const recover = (request: RequestToken) => {
@@ -239,7 +207,7 @@ const make = <
     Effect.gen(function* () {
       const draft = yield* pipe(
         Schema.decodeUnknownEffect(options.form)(form),
-        Effect.mapError(formFailure),
+        Effect.mapError(BrowserModel.formFailure),
       )
 
       const client = yield* Client
@@ -352,7 +320,7 @@ const make = <
       const next = ModelSchema.make({
         ...model,
         requests: started.state,
-        fieldErrors: FieldErrorsSchema.make({}),
+        fieldErrors: BrowserModel.emptyFieldErrors(),
         notice: null,
         saving: SavingSchema.make({ form: model.form, selectedId: model.selectedId }),
       })
@@ -370,7 +338,7 @@ const make = <
         ...model,
         form: options.empty,
         selectedId: null,
-        fieldErrors: FieldErrorsSchema.make({}),
+        fieldErrors: BrowserModel.emptyFieldErrors(),
         notice: null,
       }),
       result,
@@ -390,7 +358,7 @@ const make = <
             ...model,
             form: rowToForm(row),
             selectedId: id,
-            fieldErrors: FieldErrorsSchema.make({}),
+            fieldErrors: BrowserModel.emptyFieldErrors(),
             notice: null,
           }),
           result,
@@ -434,7 +402,7 @@ const make = <
       const selectedId = current ? rowIdentifier(row) : model.selectedId
       const requests = Requests.succeed(model.requests, request)
       const text = created ? options.notices.created : options.notices.updated
-      const notice = NoticeSchema.make({ kind: "success", text })
+      const notice = BrowserModel.NoticeSchema.make({ kind: "success", text })
       const settled = ModelSchema.make({ ...model, form, selectedId, requests, saving: null, notice })
 
       return reload(settled)
@@ -447,7 +415,7 @@ const make = <
       const form = selected ? options.empty : model.form
       const selectedId = selected ? null : model.selectedId
       const requests = Requests.succeed(model.requests, request)
-      const notice = NoticeSchema.make({ kind: "success", text: options.notices.removed })
+      const notice = BrowserModel.NoticeSchema.make({ kind: "success", text: options.notices.removed })
       const settled = ModelSchema.make({ ...model, form, selectedId, requests, notice })
 
       return reload(settled)
@@ -472,7 +440,7 @@ const make = <
         ? model.fieldErrors
         : Record.union(model.fieldErrors, fieldErrors, (_, incoming) => incoming)
 
-      const notice = NoticeSchema.make({ kind: "error", text: error })
+      const notice = BrowserModel.NoticeSchema.make({ kind: "error", text: error })
       const next = ModelSchema.make({ ...model, requests, saving, fieldErrors: mergedErrors, notice })
 
       return result(next)
@@ -487,7 +455,7 @@ const make = <
       selectedId: null,
       saving: null,
       requests: Requests.empty(),
-      fieldErrors: FieldErrorsSchema.make({}),
+      fieldErrors: BrowserModel.emptyFieldErrors(),
       notice: null,
     }),
     reload,

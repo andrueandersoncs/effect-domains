@@ -4,6 +4,7 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
@@ -37,8 +38,6 @@ const integerFields = Schema.Struct({
   quantity: Form.integer(QuantitySchema),
   unitAmountMinor: Form.integer(PositiveMinorUnitsSchema),
 })
-const fieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
-const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 const errorText = (error: unknown) => error instanceof VersionConflict || (
   typeof error === "object" && error !== null && "_tag" in error && error._tag === "VersionConflict"
 )
@@ -56,8 +55,8 @@ export const Model = Schema.Struct({
   quantity: Schema.String,
   unitAmountMinor: Schema.String,
   invoiceNumber: Schema.String,
-  fieldErrors: fieldErrorsSchema,
-  notice: noticeSchema,
+  fieldErrors: BrowserModel.FieldErrorsSchema,
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -78,7 +77,7 @@ export const Message = defineMessageUnion({
   SucceededCreate: { request: RequestTokenSchema, order: OrderSchema },
   SucceededSummary: { request: RequestTokenSchema, summary: OrderSummary },
   SucceededAction: { request: RequestTokenSchema, text: Schema.String },
-  InvalidLine: { request: RequestTokenSchema, errors: fieldErrorsSchema },
+  InvalidLine: { request: RequestTokenSchema, errors: BrowserModel.FieldErrorsSchema },
   Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
@@ -187,8 +186,8 @@ const loadCurrent = (model: Model, notice = model.notice) => {
 
 export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => {
-    const child = Session.update(model.session, message)
-    const changed = Session.generation(child.model) !== Session.generation(model.session)
+    const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
+    const changed = Session.generationChanged(model.session, child.model)
     const next = changed
       ? evo(model, {
         session: () => child.model,
@@ -201,11 +200,11 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
         quantity: () => "1",
         unitAmountMinor: () => "",
         invoiceNumber: () => "",
-        fieldErrors: () => ({}),
+        fieldErrors: BrowserModel.emptyFieldErrors,
         notice: () => null,
       })
       : evo(model, { session: () => child.model })
-    return { model: next, commands: Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message })) }
+    return { model: next, commands: child.commands }
   },
   ChangedOrderNumber: ({ value }) => ({ model: evo(model, { orderNumber: () => value, fieldErrors: () => ({}) }) }),
   ChangedCustomer: ({ value }) => ({ model: evo(model, { customer: () => value, fieldErrors: () => ({}) }) }),

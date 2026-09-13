@@ -4,6 +4,7 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
@@ -39,7 +40,7 @@ export const Model = Schema.Struct({
   currency: Schema.String,
   selectedId: Schema.NullOr(Schema.String),
   requests: RequestStateSchema,
-  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 

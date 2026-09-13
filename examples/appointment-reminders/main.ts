@@ -1,4 +1,3 @@
-import { BunRuntime } from "@effect/platform-bun"
 import { SingleRunner } from "effect/unstable/cluster"
 import { Layer, pipe } from "effect"
 import { StaticSpa } from "effect-domains/static-spa"
@@ -20,21 +19,16 @@ const execution = pipe(
 )
 
 const webBase = new URL("./web/", import.meta.url)
-
-const webSite = StaticSpa.site({
-  title: "Appointment reminders",
-  accent: "#9f1239",
-  base: webBase,
-})
-
-const web = StaticSpa.layerHttp(webSite)
+const web = StaticSpa.layerHttp({ title: "Appointment reminders", accent: "#9f1239", base: webBase })
 
 const identity = ExampleIdentity.layer("appointment-reminders")
 const services = Layer.mergeAll(identity, execution)
 
-pipe(ApplicationBun.run(AppointmentRemindersApplication, {
+const program = ApplicationBun.run(AppointmentRemindersApplication, {
   database: { migrations: AppointmentReminderMigrations },
   services,
   background: AppointmentReminderBackground,
   routes: web,
-}), BunRuntime.runMain)
+})
+
+pipe(program, ApplicationBun.runMain)

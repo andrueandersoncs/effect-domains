@@ -1,10 +1,12 @@
 import { Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
+import { ResourcePager } from "effect-domains/resource-pager"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -41,7 +43,7 @@ export const Model = Schema.Struct({
   selectedGuideId: Schema.String,
   guide: Schema.NullOr(GuideSchema),
   guides: GuidePageSchema,
-  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -58,60 +60,52 @@ export const Message = defineMessageUnion({
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
-export const GetGuide = Command.define("GetGuide", {
-  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
-  messages: [Message.SucceededGuide, Message.Failed],
-  execute: ({ request, token, id }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["guides.get"]({ id }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: (guide) => Message.SucceededGuide({ request, guide }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
-    }),
-  ),
+export const GetGuide = RpcBrowser.command("GetGuide", {
+  args: { token: Schema.String, id: Schema.String },
+  success: Message.SucceededGuide,
+  failure: Message.Failed,
+  execute: ({ token, id }) => pipe(WebClient, Effect.flatMap((client) =>
+    client["guides.get"]({ id }, RpcBrowser.requestOptions(token)))),
+  onSuccess: (guide, { request }) => Message.SucceededGuide({ request, guide }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: errorText(error) }),
 })
 
-export const ListGuides = Command.define("ListGuides", {
-  args: { request: RequestTokenSchema, token: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
-  messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, token, cursor, append }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["guides.list"]({ limit: 25, ...Page.input(cursor) }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: (page) => Message.SucceededList({ request, append, page }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
-    }),
-  ),
+export const ListGuides = RpcBrowser.command("ListGuides", {
+  args: { token: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
+  success: Message.SucceededList,
+  failure: Message.Failed,
+  execute: ({ token, cursor }) => pipe(WebClient, Effect.flatMap((client) =>
+    client["guides.list"]({ limit: 25, ...Page.input(cursor) }, RpcBrowser.requestOptions(token)))),
+  onSuccess: (page, { request, append }) => Message.SucceededList({ request, append, page }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: errorText(error) }),
 })
 
-const list = (model: Model, cursor: string | null, append: boolean) => {
+const GuidesPager = ResourcePager.make("guides.list")
+const guidesState = (model: Model) => ({ page: model.guides, requests: model.requests })
+const list = (model: Model, append: boolean) => {
   const token = Session.token(model.session)
   if (token === null) return {
     model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before listing guides." }) }),
     commands: [],
   }
-  const started = Requests.start(model.requests, "guides.list")
+  const started = pipe(GuidesPager.begin(model.requests, model.guides, append), Option.getOrThrow)
   return {
-    model: evo(model, { requests: () => started.state, guides: () => append ? model.guides : Page.empty<Guide>(), notice: () => null }),
-    commands: [ListGuides({ request: started.request, token, cursor, append })],
+    model: evo(model, { requests: () => started.requests, guides: () => started.page, notice: () => null }),
+    commands: [ListGuides({ request: started.request, token, cursor: started.cursor, append: started.append })],
   }
 }
 
 export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => {
-    const child = Session.update(model.session, message)
-    const changed = Session.generation(child.model) !== Session.generation(model.session)
+    const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
+    const changed = Session.generationChanged(model.session, child.model)
+    const reset = GuidesPager.reset(guidesState(model))
     const next = changed
-      ? evo(model, { session: () => child.model, requests: () => Requests.reset(model.requests), guide: () => null, guides: () => Page.empty<Guide>(), notice: () => null })
+      ? evo(model, { session: () => child.model, requests: () => reset.requests, guide: () => null, guides: () => reset.page, notice: () => null })
       : evo(model, { session: () => child.model })
-    const commands = Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message }))
-    if (!changed || Session.token(next.session) === null) return { model: next, commands }
-    const listing = list(next, null, false)
-    return { model: listing.model, commands: [...commands, ...listing.commands] }
+    if (!changed || child.model.token === null) return { model: next, commands: child.commands }
+    const listing = list(next, false)
+    return { model: listing.model, commands: [...child.commands, ...listing.commands] }
   },
   SelectedGuide: ({ id }) => ({ model: evo(model, { requests: () => Requests.invalidate(model.requests, "guides.get"), selectedGuideId: () => id, guide: () => null, notice: () => null }) }),
   ClickedLoad: () => {
@@ -120,14 +114,15 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     const started = Requests.start(model.requests, "guides.get")
     return { model: evo(model, { requests: () => started.state, guide: () => null, notice: () => null }), commands: [GetGuide({ request: started.request, token, id: model.selectedGuideId })] }
   },
-  ClickedList: () => list(model, null, false),
-  ClickedMore: () => model.guides.nextCursor === null || Requests.pending(model.requests, "guides.list") ? { model } : list(model, model.guides.nextCursor, true),
+  ClickedList: () => list(model, false),
+  ClickedMore: () => model.guides.nextCursor === null || GuidesPager.pending(model.requests) ? { model } : list(model, true),
   SucceededGuide: ({ request, guide }) => !Requests.accepts(model.requests, request) ? { model } : {
     model: evo(model, { requests: () => Requests.succeed(model.requests, request), guide: () => guide }),
   },
-  SucceededList: ({ request, append, page }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.succeed(model.requests, request), guides: () => Page.receive(model.guides, page, append) }),
-  },
+  SucceededList: ({ request, append, page }) => Option.match(GuidesPager.receive(guidesState(model), request, page, append), {
+    onNone: () => ({ model }),
+    onSome: (received) => ({ model: evo(model, { requests: () => received.requests, guides: () => received.page }) }),
+  }),
   Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
     model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
   },

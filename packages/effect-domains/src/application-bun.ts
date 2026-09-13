@@ -274,7 +274,7 @@ export const ApplicationBun = {
     App extends Application,
     Services extends RuntimeLayer = Layer.Layer<never, never, never>,
     Initialize extends Initialization = Effect.Effect<void>,
-      Background extends RuntimeLayer = Layer.Layer<never, never, never>,
+    Background extends RuntimeLayer = Layer.Layer<never, never, never>,
     Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
   >(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
     const telemetry = pipe(
@@ -292,4 +292,5 @@ export const ApplicationBun = {
       RunRequirements<App, Services, Initialize, Background, Routes>
     >
   }),
+  runMain: BunRuntime.runMain,
 }

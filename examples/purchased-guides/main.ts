@@ -1,4 +1,3 @@
-import { BunRuntime } from "@effect/platform-bun"
 import { Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { StaticSpa } from "effect-domains/static-spa"
@@ -11,20 +10,15 @@ const identity = ExampleIdentity.layer("purchased-guides")
 const services = Layer.mergeAll(identity, PurchasedGuideEntitlements)
 
 const webBase = new URL("./web/", import.meta.url)
-
-const webSite = StaticSpa.site({
-  title: "Purchased guides",
-  accent: "#be185d",
-  base: webBase,
-})
-
-const web = StaticSpa.layerHttp(webSite)
+const web = StaticSpa.layerHttp({ title: "Purchased guides", accent: "#be185d", base: webBase })
 
 const initialize = seedPurchasedGuides()
 
-pipe(ApplicationBun.run(PurchasedGuidesApplication, {
+const program = ApplicationBun.run(PurchasedGuidesApplication, {
   database: { migrations: PurchasedGuidesMigrations },
   services,
   initialize,
   routes: web,
-}), BunRuntime.runMain)
+})
+
+pipe(program, ApplicationBun.runMain)

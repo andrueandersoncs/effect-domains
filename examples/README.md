@@ -66,8 +66,8 @@ Report exports and appointment reminders have separate native execution stores. 
 - `sqlite.ts` where needed: authored SQL and `Operation.make` or `Operation.family` handlers for cross-record rules, aggregates, and projections.
 - `application.ts`: `Application.make({ name, parts })` with resources, `Operation.bundle(...)`, and `IdentityBundle` where identity is provided.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
-- `main.ts`: `ApplicationBun.run` plus `StaticSpa.layerHttp`, piped to `BunRuntime.runMain`.
-- `web/`: a Foldkit SPA started by `BrowserRuntime`, using `RpcBrowser` over the published contracts. Shared HTML/session rendering remains in example-web; transport, paging, identity commands, startup, and asset routes are framework modules.
+- `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary without requiring an example-level platform import. `StaticSpa.layerHttp` validates and mounts the authored static-site declaration.
+- `web/`: a Foldkit SPA started by effectful `BrowserRuntime.run` at the explicit `Effect.runSync` browser boundary, using `RpcBrowser` over the published contracts. Shared HTML/session rendering remains in example-web; transport, paging, identity command mapping, startup, and asset routes are framework modules.
 
 `Operation.make` owns JSON codecs, policy middleware, optional repository transactions, declared `SqliteView` dependencies, and unavailable-error translation. `Operation.family` binds a repeated prefix, unavailable error, policy, and transaction mode once while leaving each member's schemas and handler explicit. `Operation.bundle(...)` produces the application part. Derived joined lists publish through `SqliteView.listOperation`, not manual fragment forwarding.
 

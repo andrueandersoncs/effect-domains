@@ -26,9 +26,6 @@ const readAsset = (file: URL) => Effect.tryPromise({
   }),
 })
 
-const site = (definition: typeof StaticSpaSiteSchema.Type) =>
-  StaticSpaSiteSchema.make(definition)
-
 const register = Effect.fn("StaticSpa.register")(function* (options: typeof StaticSpaSiteSchema.Type) {
   const javascriptUrl = new URL("./dist/entry.js", options.base)
   const stylesheetUrl = new URL("./dist/styles.css", options.base)
@@ -50,9 +47,11 @@ const register = Effect.fn("StaticSpa.register")(function* (options: typeof Stat
   yield* router.add("GET", "/app.css", stylesheetResponse)
 })
 
-const layerHttp = (options: typeof StaticSpaSiteSchema.Type) => pipe(
-  register(options),
+const layerHttp = (definition: typeof StaticSpaSiteSchema.Type) => pipe(
+  definition,
+  StaticSpaSiteSchema.make,
+  register,
   Layer.effectDiscard,
 ) as Layer.Layer<never, StaticSpaAssetsError, HttpRouter.HttpRouter>
 
-export const StaticSpa = { site, layerHttp }
+export const StaticSpa = { layerHttp }

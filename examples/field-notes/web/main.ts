@@ -4,6 +4,7 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput, textareaInput } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
 import { RpcBrowser } from "effect-domains/rpc-browser"
@@ -26,7 +27,6 @@ type Report = typeof ReportSchema.Type
 export const WebClient = RpcService.make({ name: "field-notes/WebClient", group: FieldNotesRpcs })
 export type WebClient = Type<typeof WebClient>
 
-const noticeSchema = Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String }))
 export const Model = Schema.Struct({
   session: Session.ModelSchema,
   requests: RequestStateSchema,
@@ -37,7 +37,7 @@ export const Model = Schema.Struct({
   site: Schema.String,
   body: Schema.String,
   selectedId: Schema.NullOr(Schema.String),
-  notice: noticeSchema,
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -161,13 +161,12 @@ const setReport = (model: Model, report: Report) => evo(model, {
 
 export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => {
-    const child = Session.update(model.session, message)
-    const changed = Session.generation(child.model) !== Session.generation(model.session)
+    const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
+    const changed = Session.generationChanged(model.session, child.model)
     const next = changed ? clearIdentity(model, child.model) : evo(model, { session: () => child.model })
-    const commands = Command.mapMessages(child.commands ?? [], (message) => Message.SessionChanged({ message }))
-    if (!changed || Session.token(next.session) === null) return { model: next, commands }
+    if (!changed || child.model.token === null) return { model: next, commands: child.commands }
     const listing = list(next, false)
-    return { model: listing.model, commands: [...commands, ...listing.commands] }
+    return { model: listing.model, commands: [...child.commands, ...listing.commands] }
   },
   ChangedFilterSite: ({ value }) => list(evo(model, { filterSite: () => value }), false),
   ChangedId: ({ value }) => ({ model: evo(model, { id: () => value }) }),

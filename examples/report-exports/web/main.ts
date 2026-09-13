@@ -4,6 +4,7 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
 import { field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
@@ -29,7 +30,7 @@ export const Model = Schema.Struct({
   creditAccountCode: Schema.String, creditDescription: Schema.String, creditAmountMinor: Schema.String,
   executionId: Schema.String, artifactPath: Schema.NullOr(Schema.String), releasedBy: Schema.NullOr(Schema.String), clusterStatus: Schema.NullOr(Schema.String),
   requests: RequestStateSchema,
-  notice: Schema.NullOr(Schema.Struct({ kind: Schema.Literals(["info", "error", "success"]), text: Schema.String })),
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -82,7 +83,11 @@ const emptyForm = {
 const clearedForSession = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({ ...model, ...emptyForm, session, requests: Requests.reset(model.requests), executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, notice: null })
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
-  SessionChanged: ({ message }) => { const child = Session.update(model.session, message); const changed = Session.generation(child.model) !== Session.generation(model.session); return { model: changed ? clearedForSession(model, child.model) : evo(model, { session: () => child.model }), commands: Command.mapMessages(child.commands, (message) => Message.SessionChanged({ message })) } },
+  SessionChanged: ({ message }) => {
+    const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
+    const changed = Session.generationChanged(model.session, child.model)
+    return { model: changed ? clearedForSession(model, child.model) : evo(model, { session: () => child.model }), commands: child.commands }
+  },
   ChangedReportId: ({ value }) => ({ model: evo(model, { reportId: () => value }) }), ChangedStartsAt: ({ value }) => ({ model: evo(model, { startsAt: () => value }) }), ChangedEndsAt: ({ value }) => ({ model: evo(model, { endsAt: () => value }) }), ChangedCurrency: ({ value }) => ({ model: evo(model, { currency: () => value }) }), ChangedReleasePolicy: ({ value }) => ({ model: evo(model, { releasePolicy: () => value }) }), ChangedDebitAccountCode: ({ value }) => ({ model: evo(model, { debitAccountCode: () => value }) }), ChangedDebitDescription: ({ value }) => ({ model: evo(model, { debitDescription: () => value }) }), ChangedDebitAmountMinor: ({ value }) => ({ model: evo(model, { debitAmountMinor: () => value }) }), ChangedCreditAccountCode: ({ value }) => ({ model: evo(model, { creditAccountCode: () => value }) }), ChangedCreditDescription: ({ value }) => ({ model: evo(model, { creditDescription: () => value }) }), ChangedCreditAmountMinor: ({ value }) => ({ model: evo(model, { creditAmountMinor: () => value }) }), ChangedExecutionId: ({ value }) => ({ model: evo(model, { executionId: () => value, artifactPath: () => null, releasedBy: () => null, requests: (current) => Requests.invalidate(Requests.invalidate(Requests.invalidate(current, "poll"), "release"), "generate"), notice: () => null }) }),
   ClickedGenerate: () => { const next = Requests.start(Requests.invalidate(Requests.invalidate(model.requests, "poll"), "release"), "generate"); return { model: evo(model, { requests: () => next.state, notice: () => null, executionId: () => "", artifactPath: () => null, releasedBy: () => null }), commands: [GenerateDiscard({ request: next.request, token: currentToken(model.session), reportId: model.reportId, startsAt: model.startsAt, endsAt: model.endsAt, currency: model.currency, releasePolicy: model.releasePolicy, debitAccountCode: model.debitAccountCode, debitDescription: model.debitDescription, debitAmountMinor: model.debitAmountMinor, creditAccountCode: model.creditAccountCode, creditDescription: model.creditDescription, creditAmountMinor: model.creditAmountMinor })] } },
   ClickedPoll: () => { const next = start(model, "poll"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Poll({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },

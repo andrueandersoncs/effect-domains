@@ -1,5 +1,5 @@
 import { DateTime, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -10,6 +10,7 @@ import {
   shell,
   textInput,
 } from "@effect-domains/example-web/html"
+import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
@@ -32,10 +33,7 @@ export const Model = Schema.Struct({
   quantity: Schema.String,
   reservationId: Schema.String,
   requests: RequestStateSchema,
-  notice: Schema.NullOr(Schema.Struct({
-    kind: Schema.Literals(["info", "error", "success"]),
-    text: Schema.String,
-  })),
+  notice: BrowserModel.NoticeSchema,
 })
 export type Model = typeof Model.Type
 
@@ -57,63 +55,53 @@ export type Message = typeof Message.Type
 
 type UpdateReturn = Update.Return<Model, Message, WebClient>
 
-const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, onSuccess: (value: A) => Success) =>
-  pipe(effect, Effect.match({
-    onSuccess,
-    onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-  }))
-
-export const GetStock = Command.define("GetStock", {
-  args: { request: RequestTokenSchema, sku: Schema.String },
-  messages: [Message.SucceededStock, Message.Failed],
-  execute: ({ request, sku }) => requestEffect(
-    request,
-    Effect.gen(function* () {
-      const client = yield* WebClient
-      const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
-      return yield* client["stock.get"]({ sku: key })
-    }),
-    (stock) => Message.SucceededStock({ request, stock }),
-  ),
+export const GetStock = RpcBrowser.command("GetStock", {
+  args: { sku: Schema.String },
+  success: Message.SucceededStock,
+  failure: Message.Failed,
+  execute: ({ sku }) => Effect.gen(function* () {
+    const client = yield* WebClient
+    const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
+    return yield* client["stock.get"]({ sku: key })
+  }),
+  onSuccess: (stock, { request }) => Message.SucceededStock({ request, stock }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const GetReservation = Command.define("GetReservation", {
-  args: { request: RequestTokenSchema, id: Schema.String },
-  messages: [Message.SucceededLoadedReservation, Message.Failed],
-  execute: ({ request, id }) => requestEffect(
-    request,
-    Effect.gen(function* () {
-      const client = yield* WebClient
-      const key = yield* Schema.decodeUnknownEffect(ReservationSchema.fields.id)(id)
-      return yield* client["reservations.get"]({ id: key })
-    }),
-    (reservation) => Message.SucceededLoadedReservation({ request, reservation }),
-  ),
+export const GetReservation = RpcBrowser.command("GetReservation", {
+  args: { id: Schema.String },
+  success: Message.SucceededLoadedReservation,
+  failure: Message.Failed,
+  execute: ({ id }) => Effect.gen(function* () {
+    const client = yield* WebClient
+    const key = yield* Schema.decodeUnknownEffect(ReservationSchema.fields.id)(id)
+    return yield* client["reservations.get"]({ id: key })
+  }),
+  onSuccess: (reservation, { request }) => Message.SucceededLoadedReservation({ request, reservation }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const Reserve = Command.define("Reserve", {
-  args: { request: RequestTokenSchema, sku: Schema.String, quantity: Schema.String },
-  messages: [Message.SucceededReservation, Message.Failed],
-  execute: ({ request, sku, quantity }) => requestEffect(
-    request,
-    Effect.gen(function*() {
-      const decodedQuantity = yield* Schema.decodeUnknownEffect(Form.integer(QuantitySchema))(quantity)
-      const client = yield* WebClient
-      const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
-      return yield* client.reserve({ sku: key, quantity: decodedQuantity })
-    }),
-    (reservation) => Message.SucceededReservation({ request, reservation, action: "Reservation held." }),
-  ),
+export const Reserve = RpcBrowser.command("Reserve", {
+  args: { sku: Schema.String, quantity: Schema.String },
+  success: Message.SucceededReservation,
+  failure: Message.Failed,
+  execute: ({ sku, quantity }) => Effect.gen(function* () {
+    const decodedQuantity = yield* Schema.decodeUnknownEffect(Form.integer(QuantitySchema))(quantity)
+    const client = yield* WebClient
+    const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
+    return yield* client.reserve({ sku: key, quantity: decodedQuantity })
+  }),
+  onSuccess: (reservation, { request }) => Message.SucceededReservation({ request, reservation, action: "Reservation held." }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-const transition = (name: "confirm" | "release", action: string) => Command.define(name, {
-  args: { request: RequestTokenSchema, id: ReservationSchema.fields.id },
-  messages: [Message.SucceededReservation, Message.Failed],
-  execute: ({ request, id }) => requestEffect(
-    request,
-    pipe(WebClient, Effect.flatMap((client) => client[name]({ id }))),
-    (reservation) => Message.SucceededReservation({ request, reservation, action }),
-  ),
+const transition = (name: "confirm" | "release", action: string) => RpcBrowser.command(name, {
+  args: { id: ReservationSchema.fields.id },
+  success: Message.SucceededReservation,
+  failure: Message.Failed,
+  execute: ({ id }) => pipe(WebClient, Effect.flatMap((client) => client[name]({ id }))),
+  onSuccess: (reservation, { request }) => Message.SucceededReservation({ request, reservation, action }),
+  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 export const Confirm = transition("confirm", "Reservation confirmed.")

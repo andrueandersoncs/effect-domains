@@ -1,4 +1,3 @@
-import { BunRuntime } from "@effect/platform-bun"
 import { Config, Effect, Layer, pipe } from "effect"
 import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
@@ -16,18 +15,13 @@ const identity = ExampleIdentity.layer("field-notes")
 const services = Layer.mergeAll(encryption, identity)
 
 const webBase = new URL("./web/", import.meta.url)
+const web = StaticSpa.layerHttp({ title: "Field notes", accent: "#854d0e", base: webBase })
 
-const webSite = StaticSpa.site({
-  title: "Field notes",
-  accent: "#854d0e",
-  base: webBase,
-})
-
-const web = StaticSpa.layerHttp(webSite)
-
-pipe(ApplicationBun.run(FieldNotesApplication, {
+const program = ApplicationBun.run(FieldNotesApplication, {
   database: { migrations: FieldNotesMigrations },
   services,
   admin: true,
   routes: web,
-}), BunRuntime.runMain)
+})
+
+pipe(program, ApplicationBun.runMain)

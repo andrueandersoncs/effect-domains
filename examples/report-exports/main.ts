@@ -1,4 +1,3 @@
-import { BunRuntime } from "@effect/platform-bun"
 import { Layer, pipe } from "effect"
 import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
@@ -29,23 +28,17 @@ const services = Layer.mergeAll(
 )
 
 const webBase = new URL("./web/", import.meta.url)
-
-const webSite = StaticSpa.site({
-  title: "Report exports",
-  accent: "#365314",
-  base: webBase,
-})
-
-const web = StaticSpa.layerHttp(webSite)
+const web = StaticSpa.layerHttp({ title: "Report exports", accent: "#365314", base: webBase })
 
 const initialize = seedReportExportSubscriptions()
 const routes = Layer.mergeAll(ReportExportRoutes, web)
 
-pipe(ApplicationBun.run(ReportExportsApplication, {
+const program = ApplicationBun.run(ReportExportsApplication, {
   database: { migrations: ReportExportMigrations },
   services,
   initialize,
   background: ReportExportBackground,
   routes,
-}), BunRuntime.runMain)
+})
 
+pipe(program, ApplicationBun.runMain)

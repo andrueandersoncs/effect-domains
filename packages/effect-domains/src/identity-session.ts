@@ -19,6 +19,7 @@ const IdentitySessionModelSchema = Schema.Struct({
 })
 
 interface IdentitySessionModel extends Schema.Schema.Type<typeof IdentitySessionModelSchema> {}
+const sameGeneration = Equivalence.strictEqual<number>()
 
 const IssuedSessionTypeSchema = Schema.toType(IssuedSessionSchema)
 
@@ -262,11 +263,29 @@ const update = (model: IdentitySessionModel, message: IdentitySessionMessage) =>
       return result(next)
     },
     Expired: ({ generation }) => {
-      const current = Equivalence.strictEqual<number>()(model.generation, generation)
+      const current = sameGeneration(model.generation, generation)
       const next = current ? clear(model) : model
       return result(next)
     },
   })
+
+const generationChanged = (
+  previous: IdentitySessionModel,
+  current: IdentitySessionModel,
+) => !sameGeneration(previous.generation, current.generation)
+
+const embed = <ParentMessage>(
+  model: IdentitySessionModel,
+  message: IdentitySessionMessage,
+  toParent: (message: IdentitySessionMessage) => ParentMessage,
+) => {
+  const child = update(model, message)
+  const commands = Command.mapMessages(child.commands, toParent)
+
+  return UpdateResultSchema.make({ model: child.model, commands }) as
+    Omit<Update.Return<IdentitySessionModel, ParentMessage, Type<typeof Client>>, "commands"> &
+    Readonly<{ commands: typeof commands }>
+}
 
 export const IdentitySession = {
   Client,
@@ -274,6 +293,8 @@ export const IdentitySession = {
   MessageSchema: IdentitySessionMessageSchema,
   empty,
   update,
+  embed,
+  generationChanged,
   token: Struct.get<IdentitySessionModel, "token">("token"),
   expiresAt: Struct.get<IdentitySessionModel, "expiresAt">("expiresAt"),
   generation: Struct.get<IdentitySessionModel, "generation">("generation"),
