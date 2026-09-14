@@ -3,14 +3,26 @@ import { IdentityBundle } from "effect-domains/identity-rpc"
 import { BillingOperations } from "./sqlite.ts"
 import { InvoicesResource, OrderLinesResource, OrdersResource } from "./resources.ts"
 
-const parts = [
+const billingParts = [
   Part.resource(OrdersResource),
   Part.resource(OrderLinesResource),
   Part.resource(InvoicesResource),
   Part.command(BillingOperations),
+]
+
+const BillingDomain = Application.define({
+  name: "billing",
+  parts: billingParts,
+})
+
+const applicationParts = [
+  Part.application(BillingDomain),
   Part.native(IdentityBundle),
 ]
 
-const billing = Application.define({ name: "orders-invoices", parts })
+const application = Application.define({
+  name: "orders-invoices",
+  parts: applicationParts,
+})
 
-export const BillingApplication = Application.compile(billing)
+export const BillingApplication = Application.compile(application)

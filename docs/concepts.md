@@ -63,7 +63,7 @@ Use an authored operation when an action preserves a cross-record invariant, cal
 
 ## Application: which operations belong together
 
-`Application.define({ name, parts })` records explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax. `Application.compile` produces the authoritative `ApplicationIR`, flattens nested applications, and rejects duplicate tables and command names.
+`Application.define({ name, parts })` records explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax. `Application.compile` produces the authoritative `ApplicationIR`, recursively flattens nested applications, and rejects duplicate tables and command names across the complete tree. Orders and invoices uses this boundary to keep its billing resources and commands together while the outer runnable application adds native identity.
 
 ```text
 ResourceSpec ──Resource.compile──┐

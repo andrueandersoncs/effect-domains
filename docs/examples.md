@@ -47,9 +47,9 @@ The [reservation walkthrough](../examples/reservations/README.md) covers stock r
 
 ### Orders and invoices
 
-Use this for tenant-scoped relations, uniqueness constraints, optimistic versions, declared transitions, and multi-record transactions. The application builds an order, issues an invoice, and records payment.
+Use this for nested application composition, tenant-scoped relations, uniqueness constraints, optimistic versions, declared transitions, and multi-record transactions. The application nests the three resources and their authored command bundle as one billing domain, then composes that module with native identity before final compilation.
 
-Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Command.bundle`.
+Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`application.ts`](../examples/orders-invoices/application.ts) shows the `Part.application` boundary; [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Command.bundle`.
 
 ## Connect an MCP client
 

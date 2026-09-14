@@ -2,6 +2,8 @@
 
 Build a tenant-scoped sales order, add a priced line, issue its one invoice, and record a local payment transition. This is a runnable billing workflow with authored mutations; it is not a payment-provider integration.
 
+The final runtime composes a nested `BillingDomain` application—three generated resources plus their authored commands—with the native identity bundle at the outer application boundary. This keeps domain operation composition independent of the runtime's authentication integration while compiling one flattened application for every adapter.
+
 [All examples](../README.md)
 
 ## Run it
@@ -141,6 +143,7 @@ Startup decodes and applies the frozen [migration history](migrations.ts); it pr
 - [`resources.ts`](resources.ts): tenant-scoped generated reads and relational declarations.
 - [`contracts.ts`](contracts.ts): the authored nested order-summary success schema.
 - [`sqlite.ts`](sqlite.ts): declarative billing operations, repository writes, transaction boundaries, and the aggregate SQL read model built with `Table.project`.
+- [`application.ts`](application.ts): nested billing-domain composition, identity integration, and final application compilation.
 - [`main.ts`](main.ts): identity service, generated admin, frontend route, migrations, and runner.
 - [`web/main.ts`](web/main.ts): the actual browser workflow and its native client reader controls.
 - [Resource reference](../../docs/reference/resources.md): generated list/page and entitlement-independent resource contracts.

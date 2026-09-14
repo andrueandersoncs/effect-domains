@@ -22,6 +22,8 @@ This example belongs beside the reading list's `resources.ts`. In your applicati
 
 Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` produces the authoritative `ApplicationIR`; adapters do not rediscover resources or inspect arbitrary object properties. Compilation rejects duplicate table and command names.
 
+Use `Part.application(child)` when a domain module owns a coherent set of resources and commands but the runnable application adds integrations such as identity. Compilation recursively flattens the child into the same `ApplicationIR`, so adapters and dependency validation see one operation, resource, command, and table set. [Orders and invoices](../../examples/orders-invoices/application.ts) exercises this boundary with a nested billing domain and an outer native identity bundle.
+
 ## Bun runner
 
 Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.

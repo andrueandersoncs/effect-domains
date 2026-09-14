@@ -30,6 +30,17 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-14: Nested application example coverage
+
+Orders/invoices now defines its three generated resources and authored command bundle as a nested billing application, then composes that domain module with the native identity bundle at the outer runnable boundary. `Application.compile` recursively flattens both branches into the one `ApplicationIR` consumed unchanged by local tests and the generated CLI. This adds domain-level evidence for `Part.application` without inventing a second runtime or module registry. ([Billing composition](../../examples/orders-invoices/application.ts); [application compiler](../../packages/effect-domains/src/application.ts))
+
+- The focused Application and Orders/Invoices regressions passed **5 tests in 2 files**. The billing suite prepares the compiled tables, installs the flattened handlers, and exercises generated resource reads, authored transactional commands, authorization, version conflicts, and rollback through the composed application. ([Application regressions](../../test/Application.test.ts); [billing regression](../../test/OrdersInvoices.test.ts))
+- The Orders/Invoices package typecheck and Better TypeScript lint passed.
+- The real `orders-invoices --help` command compiled the nested application and exposed all six generated resource operations, five authored billing operations, three native identity operations, `serve`, and `inspect` through one CLI.
+- The documentation site built after the example, guide, catalogue, runtime reference, and wiki were updated.
+
+This proves one coherent resource-and-command child application composed with a native sibling. It does not establish dynamic module loading, independently versioned modules, duplicate-name resolution, or deployment isolation; collisions remain compile-time errors rather than a namespacing system.
+
 ### 2026-09-14: Better TypeScript lint completion
 
 The explicit compiler architecture now passes Better TypeScript across the framework, adapters, examples, and root integration fixtures without rule changes or exclusions. The cleanup removed the 296 diagnostics recorded at the compiler cutover: speculative exports and aliases were deleted, closed one-owner abstractions were collapsed, optional and unused type fields were removed, Effect collection and equality operations replaced native equivalents, and repeated derived values were named rather than recomputed through nested calls. Canonical domain models and declarative specifications did not gain persistence, transport, UI, or authorization concerns. ([Resource](../../packages/effect-domains/src/resource.ts); [Application](../../packages/effect-domains/src/application.ts); [compiler cutover](#2026-09-14-explicit-compiler-architecture-cutover))

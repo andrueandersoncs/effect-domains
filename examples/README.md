@@ -15,7 +15,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 | [repair-workshop](repair-workshop/README.md) | Track customer repairs and assignments | `ReadModel` joined reads and bounded projections |
 | [support-cases](support-cases/README.md) | Triage, assign, and resolve customer cases | A second joined view, versioned transitions, and authored event history |
 | [reservations](reservations/README.md) | Hold, confirm, or release stock | `Transitions.make` and transactional inventory |
-| [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Scoped relations, optimistic versions, and `Command.bundle` |
+| [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Nested application composition, scoped relations, and optimistic versions |
 | [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a purchase | `Entitlements.fromTable` after row visibility |
 | [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Subscription gating and durable execution storage |
 | [appointment-reminders](appointment-reminders/README.md) | Schedule an application notification | Durable scheduling and deduplicated delivery |
