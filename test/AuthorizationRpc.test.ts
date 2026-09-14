@@ -20,12 +20,16 @@ const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unrestrictedScope = p.all()
 const policy = p.policy({ scope: unrestrictedScope, allow: { read: owned, create: candidateOwned } })
 
-const Notes = Resource.make({
+const Notes = Resource.define({
   name: "private_notes",
   schema: PrivateNoteSchema,
   authorization: policy,
-  operations: { get: true, create: { fromSubject: { ownerId: p.subject.userId } } },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.create({ sources: { ownerId: Resource.fromSubject(p.subject.userId) } }),
+  ),
 })
+const NotesRuntime = Resource.compile(Notes)
 
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)
 interface Sessions extends Schema.Schema.Type<typeof SessionsSchema> {}
@@ -44,13 +48,13 @@ const bobHeaders = { authorization: "Bearer bob-session" }
 
 it.effect("RPC authentication overrides captured identity and isolates concurrent requests", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Notes.table])
+    yield* prepareTables([Resource.table(Notes)])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO private_notes (id, ownerId, text) VALUES ('alice-note', 'alice', 'alice secret'), ('bob-note', 'bob', 'bob secret')`
-    const client = yield* RpcTest.makeClient(Notes.group)
+    const client = yield* RpcTest.makeClient(NotesRuntime.group)
 
     const forgedPayload = yield* pipe(
-      Schema.decodeUnknownEffect(Schema.toCodecJson(Notes.createInputSchema))({ id: "forged-note", ownerId: "bob", text: "forged" }),
+      Schema.decodeUnknownEffect(Schema.toCodecJson(NotesRuntime.createInputSchema))({ id: "forged-note", ownerId: "bob", text: "forged" }),
       Effect.result,
     )
 
@@ -74,7 +78,7 @@ it.effect("RPC authentication overrides captured identity and isolates concurren
     const forgedClaims = yield* pipe(client["private_notes.get"]({ id: "alice-note" }, { headers: { userId: "alice" } }), Effect.flip, Effect.map(Struct.get("_tag")))
     expect(forgedClaims).toBe("Unauthenticated")
   }),
-  Effect.provide(Notes.handlers),
+  Effect.provide(NotesRuntime.handlers),
   Effect.provide(AuthorizationRpc.layer),
   Effect.provideService(AuthorizationRpc.Authenticator, authenticator),
   Effect.provideService(AuthorizationSubject, { userId: "captured-identity" }),
@@ -83,11 +87,11 @@ it.effect("RPC authentication overrides captured identity and isolates concurren
 
 it.effect("missing RPC authentication provider cannot fall back to a captured subject", () => pipe(
   Effect.gen(function* () {
-    const client = yield* RpcTest.makeClient(Notes.group)
+    const client = yield* RpcTest.makeClient(NotesRuntime.group)
     const denied = yield* pipe(client["private_notes.get"]({ id: "alice-note" }, { headers: aliceHeaders }), Effect.flip, Effect.map(Struct.get("_tag")))
     expect(denied).toBe("Unauthenticated")
   }),
-  Effect.provide(Notes.handlers),
+  Effect.provide(NotesRuntime.handlers),
   Effect.provide(AuthorizationRpc.layer),
   Effect.provideService(AuthorizationSubject, { userId: "alice" }),
   Effect.provide(sqlite),
@@ -99,12 +103,13 @@ const operatorPolicy = operator.policy(allowedOperator)
 const unrestrictedRead = p.all()
 const protectedNotesPolicy = p.policy({ scope: operatorPolicy.expression, allow: { read: unrestrictedRead } })
 
-const OperatorNotes = Resource.make({
+const OperatorNotes = Resource.define({
   name: "operator_notes",
   schema: PrivateNoteSchema,
   authorization: protectedNotesPolicy,
-  operations: { get: true },
+  capabilities: Resource.capabilities(Resource.get()),
 })
+const OperatorNotesRuntime = Resource.compile(OperatorNotes)
 
 const changeNote = Rpc.make("operator.change", { payload: { text: Schema.String }, success: Schema.Void })
   .middleware(AuthorizationRpc)
@@ -112,7 +117,7 @@ const changeNote = Rpc.make("operator.change", { payload: { text: Schema.String 
 
 const identifyOperator = Rpc.make("operator.identity", { success: Schema.String }).middleware(AuthorizationRpc)
 const operatorCommands = RpcGroup.make(changeNote, identifyOperator)
-const operatorGroup = OperatorNotes.group.merge(operatorCommands)
+const operatorGroup = OperatorNotesRuntime.group.merge(operatorCommands)
 
 const operatorHandlers = operatorCommands.toLayer({
   "operator.change": Effect.fn("AuthorizationRpc.changeNote")(function* ({ text }) {
@@ -125,11 +130,11 @@ const operatorHandlers = operatorCommands.toLayer({
   }),
 })
 
-const protectedHandlers = Layer.merge(OperatorNotes.handlers, operatorHandlers)
+const protectedHandlers = Layer.merge(OperatorNotesRuntime.handlers, operatorHandlers)
 
 it.effect("a shared subject policy protects resource reads and authored writes without leaking between RPCs", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([OperatorNotes.table])
+    yield* prepareTables([Resource.table(OperatorNotes)])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO operator_notes (id, ownerId, text) VALUES ('one', 'alice', 'original')`
     const client = yield* RpcTest.makeClient(operatorGroup)

@@ -15,25 +15,52 @@ const unchanged = p.unchanged("ownerId")
 const sharedTenant = p.sameAs("tenantId")
 void sharedTenant
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
-Resource.make({ name: "typed_authorization", schema: ScoredDocumentSchema, authorization: policy, operations: { get: true } })
+Resource.define({
+  name: "typed_authorization",
+  schema: ScoredDocumentSchema,
+  authorization: policy,
+  capabilities: Resource.capabilities(Resource.get()),
+})
 
-const BoundDocument = Resource.make({
+const BoundDocument = Resource.define({
   name: "subject_bound_authorization",
   schema: ScoredDocumentSchema,
   authorization: policy,
-  operations: { create: { fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId } } },
+  capabilities: Resource.capabilities(Resource.create({
+    sources: {
+      tenantId: Resource.fromSubject(p.subject.tenantId),
+      ownerId: Resource.fromSubject(p.subject.userId),
+    },
+  })),
 })
 
-const boundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1 }
+const BoundDocumentRepository = Resource.repository(BoundDocument)
+const boundCreate: Parameters<typeof BoundDocumentRepository.create>[0] = { score: 1 }
 void boundCreate
 
 // @ts-expect-error because subject-bound fields are not caller-controlled.
-const forgedBoundCreate: Parameters<typeof BoundDocument.repository.create>[0] = { score: 1, ownerId: "forged" }
+const forgedBoundCreate: Parameters<typeof BoundDocumentRepository.create>[0] = { score: 1, ownerId: "forged" }
 void forgedBoundCreate
 // @ts-expect-error because subject bindings must have the destination field's type.
-Resource.make({ name: "invalid_subject_binding_type", schema: ScoredDocumentSchema, authorization: policy, operations: { create: { fromSubject: { score: p.subject.userId }, publish: false } } })
+Resource.define({
+  name: "invalid_subject_binding_type",
+  schema: ScoredDocumentSchema,
+  authorization: policy,
+  capabilities: Resource.capabilities(Resource.create({
+    sources: { score: Resource.fromSubject(p.subject.userId) },
+    publish: false,
+  })),
+})
 // @ts-expect-error because public resources do not have a verified subject.
-Resource.make({ name: "public_subject_binding", schema: ScoredDocumentSchema, authorization: Authorization.public, operations: { create: { fromSubject: { ownerId: p.subject.userId }, publish: false } } })
+Resource.define({
+  name: "public_subject_binding",
+  schema: ScoredDocumentSchema,
+  authorization: Authorization.public,
+  capabilities: Resource.capabilities(Resource.create({
+    sources: { ownerId: Resource.fromSubject(p.subject.userId) },
+    publish: false,
+  })),
+})
 
 const NullableOwnerDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.NullOr(Schema.String), score: Schema.Int })
 interface NullableOwnerDocument extends Schema.Schema.Type<typeof NullableOwnerDocumentSchema> {}
@@ -42,11 +69,14 @@ const nullableOwner = Authorization.for({ resource: NullableOwnerDocumentSchema,
 const nullableOwnerAll = nullableOwner.all()
 const nullableOwnerPolicy = nullableOwner.policy({ scope: nullableOwnerAll, allow: { create: nullableOwnerAll } })
 
-Resource.make({
+Resource.define({
   name: "nullable_subject_binding_target",
   schema: NullableOwnerDocumentSchema,
   authorization: nullableOwnerPolicy,
-  operations: { create: { fromSubject: { ownerId: nullableOwner.subject.userId }, publish: false } },
+  capabilities: Resource.capabilities(Resource.create({
+    sources: { ownerId: Resource.fromSubject(nullableOwner.subject.userId) },
+    publish: false,
+  })),
 })
 
 const NullableBindingIdentitySchema = Schema.Struct({ userId: Schema.NullOr(Schema.String) })
@@ -57,11 +87,19 @@ const nullableOwnerSubjectAll = nullableOwnerSubject.all()
 const nullableOwnerSubjectPolicy = nullableOwnerSubject.policy({ scope: nullableOwnerSubjectAll, allow: { create: nullableOwnerSubjectAll } })
 
 // @ts-expect-error because a nullable subject field cannot populate a required destination.
-Resource.make({ name: "nullable_subject_binding_source", schema: ScoredDocumentSchema, authorization: nullableOwnerSubjectPolicy, operations: { create: { fromSubject: { ownerId: nullableOwnerSubject.subject.userId }, publish: false } } })
+Resource.define({
+  name: "nullable_subject_binding_source",
+  schema: ScoredDocumentSchema,
+  authorization: nullableOwnerSubjectPolicy,
+  capabilities: Resource.capabilities(Resource.create({
+    sources: { ownerId: Resource.fromSubject(nullableOwnerSubject.subject.userId) },
+    publish: false,
+  })),
+})
 
 // These probes are compile-only because rejected definitions intentionally fail at runtime.
 // @ts-expect-error Because authorization must be an explicit application choice.
-Resource.make({ name: "implicit_access", schema: ScoredDocumentSchema, operations: {} })
+Resource.define({ name: "implicit_access", schema: ScoredDocumentSchema, capabilities: Resource.capabilities() })
 // @ts-expect-error Because unknown fields cannot become policy references.
 p.row.absent
 // @ts-expect-error Because equality cannot compare numeric resource values with subject strings.

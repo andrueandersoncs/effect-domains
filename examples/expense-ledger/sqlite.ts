@@ -2,8 +2,9 @@ import { Effect, Option, Schema, pipe } from "effect"
 
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
 import { ResourceNotFound } from "effect-domains/repository-store"
+import { Resource } from "effect-domains/resource"
 
 import {
   type Expense,
@@ -19,6 +20,8 @@ import {
 } from "./domain.ts"
 
 import { ExpensesResource } from "./resources.ts"
+
+const ExpenseRowSchema = Resource.table(ExpensesResource).rowSchema
 
 type SqliteRow = Readonly<Record<string, unknown>>
 
@@ -55,7 +58,7 @@ const calculateTotals = SqlSchema.findAll({
     return yield* database<SqliteRow>`
       SELECT ${database("category")}, ${database("currency")},
         SUM(${database("amountMinor")}) AS ${database("totalMinor")}
-      FROM ${database(ExpensesResource.table.name)}
+      FROM ${database(Resource.table(ExpensesResource).name)}
       WHERE ${database.and(conditions)}
       GROUP BY ${database("category")}, ${database("currency")}
       ORDER BY ${database("category")} ASC, ${database("currency")} ASC
@@ -82,7 +85,7 @@ const get = Effect.fn("ExpenseLedger.get")(function* (
   input: ExpenseIdentifierInput,
 ) {
   return yield* pipe(
-    ExpensesResource.repository.get(input.id),
+    Resource.repository(ExpensesResource).get(input.id),
     Effect.catchTag("ResourceNotFound", () => expenseNotFound(input.id)),
   )
 })
@@ -95,10 +98,10 @@ const totals = Effect.fn("ExpenseLedger.totals")(function* (
 })
 
 const update = Effect.fn("ExpenseLedger.update")(function* (
-  input: typeof ExpensesResource.table.rowSchema.Type,
+  input: typeof ExpenseRowSchema.Type,
 ) {
   return yield* pipe(
-    ExpensesResource.repository.update(input),
+    Resource.repository(ExpensesResource).update(input),
     Effect.catchTag("ResourceNotFound", () => expenseNotFound(input.id)),
   )
 })
@@ -107,54 +110,67 @@ const remove = Effect.fn("ExpenseLedger.remove")(function* (
   input: ExpenseIdentifierInput,
 ) {
   const expense = yield* get(input)
-  yield* ExpensesResource.repository.remove(input.id)
+  yield* Resource.repository(ExpensesResource).remove(input.id)
   return expense
 })
 
 const expenseTotalsSuccessSchema = Schema.Array(ExpenseTotalSchema)
 
-const ExpenseOperations = Operation.family("expenses.", ExpenseLedgerUnavailable)
+const ExpenseCommand = Command.family("expenses.", ExpenseLedgerUnavailable)
 
-const recordExpense = ExpenseOperations.make({
+const recordExpenseSpec = ExpenseCommand.define({
   name: "record",
   payload: ExpenseSchema,
-  success: ExpensesResource.table.rowSchema,
-  handler: ExpensesResource.repository.create,
+  success: Resource.table(ExpensesResource).rowSchema,
+  dependencies: [ExpensesResource],
 })
 
-const getExpense = ExpenseOperations.make({
+const recordExpense = Command.implement(
+  recordExpenseSpec,
+  Resource.repository(ExpensesResource).create,
+)
+
+const getExpenseSpec = ExpenseCommand.define({
   name: "get",
   payload: ExpenseIdentifierInputSchema,
-  success: ExpensesResource.table.rowSchema,
+  success: Resource.table(ExpensesResource).rowSchema,
   errors: ExpenseNotFound,
-  handler: get,
+  dependencies: [ExpensesResource],
 })
 
-const expenseTotals = ExpenseOperations.make({
+const getExpense = Command.implement(getExpenseSpec, get)
+
+const expenseTotalsSpec = ExpenseCommand.define({
   name: "totals",
   payload: ExpenseQueryInputSchema,
   success: expenseTotalsSuccessSchema,
   errors: InvalidExpenseDateRange,
-  handler: totals,
+  dependencies: [ExpensesResource],
 })
 
-const updateExpense = ExpenseOperations.make({
+const expenseTotals = Command.implement(expenseTotalsSpec, totals)
+
+const updateExpenseSpec = ExpenseCommand.define({
   name: "update",
-  payload: ExpensesResource.table.rowSchema,
-  success: ExpensesResource.table.rowSchema,
+  payload: Resource.table(ExpensesResource).rowSchema,
+  success: Resource.table(ExpensesResource).rowSchema,
   errors: ExpenseNotFound,
-  handler: update,
+  dependencies: [ExpensesResource],
 })
 
-const removeExpense = ExpenseOperations.make({
+const updateExpense = Command.implement(updateExpenseSpec, update)
+
+const removeExpenseSpec = ExpenseCommand.define({
   name: "remove",
   payload: ExpenseIdentifierInputSchema,
-  success: ExpensesResource.table.rowSchema,
+  success: Resource.table(ExpensesResource).rowSchema,
   errors: ExpenseNotFound,
-  handler: remove,
+  dependencies: [ExpensesResource],
 })
 
-export const ExpenseLedgerOperations = Operation.bundle(
+const removeExpense = Command.implement(removeExpenseSpec, remove)
+
+export const ExpenseLedgerOperations = Command.bundle(
   recordExpense,
   getExpense,
   expenseTotals,

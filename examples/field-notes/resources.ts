@@ -18,13 +18,16 @@ const authorization = p.policy({
   },
 })
 
-export const FieldReportsResource = Resource.make({
+export const FieldReportsResource = Resource.define({
   authorization,
   name: "reports",
   schema: FieldReportSchema,
   storage: StoredFieldReportSchema,
-  operations: {
-    ...Resource.crud,
-    list: { filter: ["site"], limit: 50 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["site"], limit: 50 }),
+    Resource.create(),
+    Resource.update(),
+    Resource.remove(),
+  ),
 })

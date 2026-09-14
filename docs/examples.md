@@ -25,19 +25,19 @@ For any example, `bun run <application> --help` lists its commands and `bun run 
 
 Use this when an operation is a query or calculation, not just a record list. The application records integer minor-unit amounts and calculates category totals separately for each currency. Its date-range query has its own ordering and bounds.
 
-Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to record two currencies, query inclusive date bounds, compare totals, and correct or remove an entry. Read [`sqlite.ts`](../examples/expense-ledger/sqlite.ts) beside its schemas to see `Operation.make` and authored SQL working with generated repositories.
+Follow the [expense-ledger guide](../examples/expense-ledger/README.md) to record two currencies, query inclusive date bounds, compare totals, and correct or remove an entry. Read [`sqlite.ts`](../examples/expense-ledger/sqlite.ts) beside its schemas to see `Command.define`/`Command.implement` and authored SQL working with generated repositories.
 
 ### Repair workshop
 
 Use this for a board that joins repairs to current customer and optional technician records. The [repair-workshop guide](../examples/repair-workshop/README.md) creates assigned and unassigned jobs, changes joined names and on-call values, contrasts bounded arrays with cursor pages, and exercises foreign-key failures.
 
-[`board.ts`](../examples/repair-workshop/board.ts) declares the projection, joins, filtering, ordering, bounds, and cursor executor with `SqliteView`; [`sqlite.ts`](../examples/repair-workshop/sqlite.ts) publishes it through `SqliteView.listOperation` without restating the fragment.
+[`board.ts`](../examples/repair-workshop/board.ts) declares the projection, joins, filtering, ordering, bounds, and cursor page with `ReadModel`; [`sqlite.ts`](../examples/repair-workshop/sqlite.ts) publishes it through `ReadModel.publish` without restating the fragment.
 
 ### Support cases
 
 Use this when a lifecycle must update a versioned record and append its event history atomically. The [support-cases guide](../examples/support-cases/README.md) covers open, triage, assignment, resolution, stale writes, duty checks, joined board filters, and nested history.
 
-[`board.ts`](../examples/support-cases/board.ts) is the second bounded `SqliteView` domain. [`sqlite.ts`](../examples/support-cases/sqlite.ts) keeps the one-to-many event projection and transactional business operations authored rather than extending the view declaration into an aggregate query language.
+[`board.ts`](../examples/support-cases/board.ts) is the second bounded `ReadModel` domain. [`sqlite.ts`](../examples/support-cases/sqlite.ts) keeps the one-to-many event projection and transactional business commands authored rather than extending the read-model language into an aggregate query DSL.
 
 ### Reservations
 
@@ -49,7 +49,7 @@ The [reservation walkthrough](../examples/reservations/README.md) covers stock r
 
 Use this for tenant-scoped relations, uniqueness constraints, optimistic versions, declared transitions, and multi-record transactions. The application builds an order, issues an invoice, and records payment.
 
-Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Operation.bundle`.
+Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Command.bundle`.
 
 ## Connect an MCP client
 
@@ -93,8 +93,8 @@ Most examples use this layout:
 | --- | --- |
 | `domain.ts` | Canonical values, shared domain schemas, and domain errors |
 | `resources.ts` | Persistence, authorization, generated operations, versions, and transitions |
-| `sqlite.ts` | `Operation.make` handlers and authored SQL where needed |
-| `application.ts` | Composition of resources, authored operation bundles, and identity bundle |
+| `sqlite.ts` | `Command` specifications, implementations, and authored SQL where needed |
+| `application.ts` | `Application.define` parts and the compiled `ApplicationIR` |
 | `migrations.ts` | Ordered `SqliteMigrations.history(...)` imports of frozen artifacts |
 | `main.ts` | `ApplicationBun.run` runtime service wiring and admin opt-in |
 

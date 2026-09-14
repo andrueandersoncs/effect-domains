@@ -106,7 +106,7 @@ The first cannot reference a nonexistent customer. The second cannot delete a cu
 bun run repair-workshop workshop.board --input-json '{"limit":51}'
 ```
 
-This fails the board input schema before execution. Unknown statuses and empty names also fail validation. A malformed cursor or one reused with a different filter fails as `SqliteViewListInputError`. Missing generated-resource rows produce `ResourceNotFound`; generated storage failures produce `RepositoryError`. The authored board translates SQL/result-codec failures to `RepairWorkshopUnavailable`.
+This fails the board input schema before execution. Unknown statuses and empty names also fail validation. A malformed cursor or one reused with a different filter fails as `ReadModelInputError`. Missing generated-resource rows produce `ResourceNotFound`; generated storage failures produce `RepositoryError`. The published read model translates SQL/result-codec failures to `RepairWorkshopUnavailable`.
 
 ## Use the browser or MCP
 
@@ -139,9 +139,9 @@ bun run repair-workshop inspect workshop.board
 
 - [`domain.ts`](domain.ts): canonical customer, technician, and repair schemas; board input and error.
 - [`resources.ts`](resources.ts): public policies, generated CRUD/patch, creation defaults, foreign keys, indexes, and urgent-first repair list.
-- [`board.ts`](board.ts): `SqliteView` selects repair fields, inner-joins the required customer, and left-joins the optional technician; selected storage codecs and output aliases are derived.
-- [`sqlite.ts`](sqlite.ts): `Operation.make` declares the board and its `SqliteView` dependency; native `SqlSchema` execution owns filtering, urgent-first ordering, bounds, and error translation.
+- [`board.ts`](board.ts): `ReadModel` selects repair fields, inner-joins the required customer, and left-joins the optional technician; selected storage codecs and output aliases are derived.
+- [`sqlite.ts`](sqlite.ts): `ReadModel.publish` turns the declared page into a command without restating its contract.
 - [`application.ts`](application.ts), [`main.ts`](main.ts): resource/native composition, SQLite history, and browser routes.
 - [`web/main.ts`](web/main.ts): authored forms, board, and selector pagination.
 
-A `SqliteView` does not grant access or apply resource authorization to privileged native SQL. This example has no tenant isolation, production identity, staffing calendar, parts inventory, invoices, or business-transition guards. Compare [reservations](../reservations/README.md) for authored transactional transitions and the [joined projection reference](../../docs/reference/resources.md#joined-read-projections) for the derivation API.
+A `ReadModel` does not grant access or apply resource authorization to privileged native SQL. This example has no tenant isolation, production identity, staffing calendar, parts inventory, invoices, or business-transition guards. Compare [reservations](../reservations/README.md) for authored transactional transitions and the [joined projection reference](../../docs/reference/resources.md#relations-and-projections) for the derivation API.

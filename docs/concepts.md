@@ -16,62 +16,62 @@ A rating between 1 and 5 belongs in the schema. A SQLite index name, a user's pe
 
 ## Resource: records and routine operations
 
-A resource combines a canonical schema with authorization, selected CRUD operations, creation sources, list declarations, optional storage, relations, a version field, and a transition graph. It derives a table, local repository, and selected RPC contracts and handlers.
+A resource specification combines a canonical schema with authorization, declared capabilities, creation sources, list declarations, optional storage, relations, a version field, and a transition graph. `Resource.define` records that intent; `Resource.compile` derives its table, local repository, RPC contracts, and handlers.
 
-A nullable field defaults to `null` when omitted on create. A version field gives patches `{ key, expectedVersion, changes }` and produces `VersionConflict` for stale writes. Declared lists can expose equality filters, inclusive ranges, and a stable declared order. `repository.ensure(row)` is the idempotent seed primitive; declared unique constraints surface `UniqueViolation` rather than requiring preflight reads.
+A nullable field defaults to `null` when omitted on create. A version field gives patches `{ key, expectedVersion, changes }` and produces `VersionConflict` for stale writes. `Resource.list(...)` can expose equality filters, inclusive ranges, and stable declared order. `Resource.repository(spec).ensure(row)` is the idempotent seed primitive; declared unique constraints surface `UniqueViolation`.
 
-`Transitions.make` declares allowed status actions. Passing it as `Resource.make({ transitions })` and selecting `transition: true` publishes the resource transition contract; local code uses `repository.transition(...)`. This fits state changes that remain a single record mutation.
+`Transitions.make` declares allowed status actions. Passing it to `Resource.define` and including `Resource.transition()` publishes the transition contract; local code uses `Resource.repository(spec).transition(...)`.
 
-A **repository** is the local Effect interface to stored rows. An **RPC operation** is a published contract with input, success, and error schemas. Publication and authorization are separate: omitting an operation does not authorize a local repository call.
+A **repository** is the local Effect interface to stored rows. A **published command** is an RPC contract with input, success, and error schemas. Capability publication and authorization are separate.
 
 See the [resource reference](/reference/resources) for exact contracts.
 
-## Authored operations: business commands
+## Authored business commands
 
-Use `Operation.make` for a one-off authored application operation. When several operations share a namespace, unavailable boundary, authorization policy, and transaction mode, bind those invariants once with `Operation.family`.
+Use `Command.define` for an inspectable command contract and `Command.implement` to attach authored behavior. A command family binds a shared namespace, unavailable boundary, authorization policy, and transaction mode without putting procedures into the specification.
 
 ```ts
 import { Effect, Schema } from "effect"
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
 
 class BillingUnavailable extends Schema.TaggedError<BillingUnavailable>()(
   "BillingUnavailable",
   {},
 ) {}
 
-const BillingOperation = Operation
+const BillingCommand = Command
   .family("billing.", BillingUnavailable)
   .transactional()
 
-const issueInvoice = BillingOperation.make({
+const issueInvoiceSpec = BillingCommand.define({
   name: "issueInvoice",
   payload: Schema.Struct({ orderId: Schema.String }),
   success: Schema.Struct({ invoiceId: Schema.String }),
-  handler: (input) => Effect.succeed({ invoiceId: input.orderId }),
 })
 
-export const BillingOperations = Operation.bundle(issueInvoice)
+const issueInvoice = Command.implement(
+  issueInvoiceSpec,
+  (input) => Effect.succeed({ invoiceId: input.orderId }),
+)
+
+export const BillingCommands = Command.bundle(issueInvoice)
 ```
 
-`Operation.make` and family members apply JSON codecs and derive the public error schema by unioning declared domain `errors` with the required `unavailable` schema. Undeclared infrastructure or untagged failures become `unavailable`; a domain-tagged failure the handler can raise but `errors` omits is a compile error. A family can bind a typed `SubjectPolicy` with `.authorized(policy)` and apply `RepositoryStore.transaction` to every member with `.transactional()`. `dependencies` accepts Resource, Table, and `SqliteView` descriptors; application composition validates their exact registered tables.
+Compilation applies JSON codecs and derives the public error schema from declared domain errors plus the required unavailable schema. Undeclared infrastructure failures become unavailable failures; omitted domain-tagged errors are rejected at compile time. Dependencies accept Resource, Table, and ReadModel specifications, and application composition validates their exact registered tables.
 
 Use an authored operation when an action preserves a cross-record invariant, calculates an aggregate, invokes an external system, or has a domain-specific failure boundary. For example, reservations can use declared state transitions while their inventory accounting remains an authored transactional operation.
 
 ## Application: which operations belong together
 
-`Application.make({ name, parts })` composes resources, `Operation.bundle(...)` values, `IdentityBundle`, and nested applications. It rejects duplicate tables and operation names.
+`Application.define({ name, parts })` records explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax. `Application.compile` produces the authoritative `ApplicationIR`, flattens nested applications, and rejects duplicate tables and command names.
 
 ```text
-Canonical schema + resource configuration
-    ├── SQLite table and repository
-    └── Selected RPC contracts and handlers
-                │
-Operation.bundle ┤
-                ▼
-           Application
-                ├── HTTP RPC → generated CLI
-                ├── MCP tools
-                └── Optional browser admin
+ResourceSpec ──Resource.compile──┐
+CommandSpec + implementation ───┼─Application.compile─► ApplicationIR
+ReadModel syntax ──fold──────────┘                         ├── HTTP RPC / CLI
+                                                         ├── MCP tools
+                                                         ├── inspection
+                                                         └── optional admin
 ```
 
 `ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint. See [runtime and clients](/reference/runtime).
@@ -90,4 +90,4 @@ The repository implements a Bun runtime and SQLite persistence. It is experiment
 - [Restrict access](/guides/authorization)
 - [Choose an example](/examples)
 
-Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Operation`](../packages/effect-domains/src/operation.ts), [`Application`](../packages/effect-domains/src/application.ts), and [Bun runtime](../packages/effect-domains/src/application-bun.ts).
+Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Command`](../packages/effect-domains/src/command.ts), [`ReadModel`](../packages/effect-domains/src/read-model.ts), [`Application`](../packages/effect-domains/src/application.ts), and [Bun runtime](../packages/effect-domains/src/application-bun.ts).

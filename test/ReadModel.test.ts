@@ -1,14 +1,14 @@
 import { expect, it } from "@effect/vitest"
-import { Data, Effect, Equivalence, Layer, Record, Schema, SchemaGetter, pipe } from "effect"
-import { Rpc, RpcGroup, RpcTest } from "effect/unstable/rpc"
+import { Data, Effect, Equivalence, Record, Schema, SchemaGetter, pipe } from "effect"
+import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
+import { ReadModel } from "effect-domains/read-model"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
-import { SqliteView } from "effect-domains/sqlite-view"
 import { Table } from "effect-domains/table"
 import { prepareTables } from "./prepare-tables.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
@@ -27,8 +27,8 @@ const Jobs = Table.make({ name: "jobs.work", schema: JobSchema })
 const Technicians = Table.make({ name: 'people"records', schema: TechnicianSchema })
 const database = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
-const JobListView = SqliteView.make({
-  tables: { job: Jobs },
+const JobListModel = ReadModel.define({
+  tables: ReadModel.sources({ job: Jobs }),
   from: "job",
   joins: [],
   select: {
@@ -37,24 +37,25 @@ const JobListView = SqliteView.make({
     urgent: ["job", "is.urgent"],
   },
 })
+const JobListView = ReadModel.compile(JobListModel)
 
-const JobList = SqliteView.list({
-  view: JobListView,
+const JobListPageSpec = ReadModel.page({
+  model: JobListModel,
   filter: ["tenant"],
   range: ["id"],
   order: [["urgent", "desc"], ["id", "asc"]],
   limit: 2,
 })
+const JobListPage = ReadModel.compilePage(JobListPageSpec)
 
 class JobListUnavailable extends Schema.TaggedError<JobListUnavailable>()("JobListUnavailable", {}) {}
 
-const JobListOperation = SqliteView.listOperation({
+const JobListCommand = ReadModel.publish({
   name: "jobs.list",
   unavailable: JobListUnavailable,
-  list: JobList,
+  page: JobListPageSpec,
 })
-
-const JobListBundle = Operation.bundle(JobListOperation)
+const JobListBundle = Command.bundle(JobListCommand)
 
 it.effect("decodes composite left joins without losing booleans, service codecs, or unmatched rows", () => pipe(
   Effect.gen(function* () {
@@ -63,8 +64,8 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('assigned', 'acme', 'sam', 1), ('waiting', 'acme', NULL, 0)`
     yield* sql`INSERT INTO "people""records" (id, tenant, localId, name, onCall) VALUES ('a', 'acme', 'sam', 'stored:Sam', 1), ('b', 'other', 'sam', 'stored:Not Sam', 0)`
 
-    const view = SqliteView.make({
-      tables: { "base.jobs": Jobs, 'joined"people': Technicians },
+    const model = ReadModel.define({
+      tables: ReadModel.sources({ "base.jobs": Jobs, 'joined"people': Technicians }),
       from: "base.jobs",
       joins: [{ kind: "left", table: 'joined"people', on: [
         { left: ["base.jobs", "tenant"], right: ['joined"people', "tenant"] },
@@ -75,6 +76,7 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
         'technician.name"': ['joined"people', "name"], onCall: ['joined"people', "onCall"],
       },
     })
+    const view = ReadModel.compile(model)
 
     const query = SqlSchema.findAll({
       Request: Schema.Void,
@@ -112,7 +114,7 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
       ('c', 'acme', NULL, 1),
       ('d', 'other', NULL, 1)`
 
-    const first = yield* JobList.handler({ filter: { tenant: "acme" }, limit: 2 })
+    const first = yield* JobListPage.handler({ filter: { tenant: "acme" }, limit: 2 })
 
     expect(first.items).toEqual([
       { id: "a", tenant: "acme", urgent: true },
@@ -120,7 +122,7 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
     ])
 
     const cursor = yield* Effect.fromNullishOr(first.nextCursor)
-    const second = yield* JobList.handler({ filter: { tenant: "acme" }, cursor, limit: 2 })
+    const second = yield* JobListPage.handler({ filter: { tenant: "acme" }, cursor, limit: 2 })
 
     expect(second).toEqual({
       items: [{ id: "b", tenant: "acme", urgent: false }],
@@ -128,16 +130,16 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
     })
 
     const mismatch = yield* pipe(
-      JobList.handler({ filter: { tenant: "other" }, cursor, limit: 2 }),
+      JobListPage.handler({ filter: { tenant: "other" }, cursor, limit: 2 }),
       Effect.flip,
     )
 
-    expect(mismatch._tag).toBe("SqliteViewListInputError")
+    expect(mismatch._tag).toBe("ReadModelInputError")
   }),
   Effect.provide(database),
 ))
 
-it.effect("publishes a compiled list as an operation without hand-written pass-through fields", () => pipe(
+it.effect("publishes a compiled page as a command without hand-written pass-through fields", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
     const sql = yield* SqlClient.SqlClient
@@ -156,7 +158,13 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('job', 'acme', NULL, 0)`
     const select = Record.singleton("value", ["j", "tenant"] as const)
-    const view = SqliteView.make({ tables: { j: Jobs }, from: "j", joins: [], select })
+    const model = ReadModel.define({
+      tables: ReadModel.sources({ j: Jobs }),
+      from: "j",
+      joins: [],
+      select,
+    })
+    const view = ReadModel.compile(model)
     yield* Effect.sync(() => Reflect.set(select.value, "1", "id"))
     const rows = yield* sql<Readonly<Record<string, unknown>>>`${view.select(sql)}`
     const RowsSchema = Schema.Array(view.schema)
@@ -169,33 +177,53 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
 it("rejects ambiguous or disconnected joins rather than silently changing result cardinality", () => {
   const base = new Data.Class({ tables: { j: Jobs, t: Technicians }, from: "j", select: { id: ["j", "id"] } })
   const join = new Data.Class({ kind: "inner", table: "t", on: [{ left: ["j", "technicianId"], right: ["t", "localId"] }] })
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, joins: [join], select: { unknown: ["t", "missing"] } }])).toThrow()
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, joins: [{ ...join, on: [] }] }])).toThrow()
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, joins: [{ ...join, on: [{ left: ["t", "id"], right: ["t", "localId"] }] }] }])).toThrow()
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, joins: [{ ...join, on: [{ left: ["j", "is.urgent"], right: ["t", "localId"] }] }] }])).toThrow()
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, tables: { ...base.tables, J: Jobs }, joins: [join] }])).toThrow()
-  expect(() => Reflect.apply(SqliteView.make, null, [{ ...base, joins: [join], select: { label: ["j", "id"], LABEL: ["t", "id"] } }])).toThrow()
+  const compile = (definition: object) =>
+    ReadModel.compile(Reflect.apply(ReadModel.define, null, [definition]))
+  expect(() => compile({ ...base, joins: [join], select: { unknown: ["t", "missing"] } })).toThrow()
+  expect(() => compile({ ...base, joins: [{ ...join, on: [] }] })).toThrow()
+  expect(() => compile({ ...base, joins: [{ ...join, on: [{ left: ["t", "id"], right: ["t", "localId"] }] }] })).toThrow()
+  expect(() => compile({ ...base, joins: [{ ...join, on: [{ left: ["j", "is.urgent"], right: ["t", "localId"] }] }] })).toThrow()
+  expect(() => compile({ ...base, tables: { ...base.tables, J: Jobs }, joins: [join] })).toThrow()
+  expect(() => compile({ ...base, joins: [join], select: { label: ["j", "id"], LABEL: ["t", "id"] } })).toThrow()
 })
 
-it("rejects an operation whose joined table is absent or replaced by a different same-named definition", () => {
+it("rejects a command whose read-model source is absent or replaced by a same-named definition", () => {
   const PersonSchema = Schema.Struct({ name: Schema.String })
-  const People = Resource.make({ name: "people", schema: PersonSchema, authorization: Authorization.public, operations: {} })
-  const view = SqliteView.make({ tables: { p: People.table }, from: "p", joins: [], select: { name: ["p", "name"] } })
-  const RowSchema = Schema.toType(view.schema)
-  const RowsSchema = Schema.Array(RowSchema)
-  const dependencies = Operation.dependencies([view])
+  const People = Resource.define({
+    name: "people",
+    schema: PersonSchema,
+    authorization: Authorization.public,
+    capabilities: Resource.capabilities(),
+  })
+  const model = ReadModel.define({
+    tables: ReadModel.sources({ p: People }),
+    from: "p",
+    joins: [],
+    select: { name: ["p", "name"] },
+  })
+  const page = ReadModel.page({ model, order: [["name", "asc"]] })
+  const command = ReadModel.publish({
+    name: "people.names",
+    unavailable: JobListUnavailable,
+    page,
+  })
+  const commands = Command.bundle(command)
+  expect(() => Application.compile(Application.define({
+    name: "missing",
+    parts: [Part.command(commands)],
+  }))).toThrow()
 
-  const rpc = Rpc.make("people.names", { success: RowsSchema }).annotate(
-    Operation.annotation,
-    dependencies,
-  )
-
-  const group = RpcGroup.make(rpc)
-  const commands = new Data.Class({ group, handlers: Layer.empty })
-  expect(() => Application.make({ name: "missing", parts: [commands] })).toThrow()
   const WrongPersonSchema = Schema.Struct({ name: Schema.Int })
-  const WrongPeople = Resource.make({ name: "people", schema: WrongPersonSchema, authorization: Authorization.public, operations: {} })
-  expect(() => Application.make({ name: "mismatch", parts: [WrongPeople, commands] })).toThrow()
+  const WrongPeople = Resource.define({
+    name: "people",
+    schema: WrongPersonSchema,
+    authorization: Authorization.public,
+    capabilities: Resource.capabilities(),
+  })
+  expect(() => Application.compile(Application.define({
+    name: "mismatch",
+    parts: [Part.resource(WrongPeople), Part.command(commands)],
+  }))).toThrow()
 })
 
 it("rejects left projections when stored null has application-defined decoding semantics", () => {
@@ -210,9 +238,10 @@ it("rejects left projections when stored null has application-defined decoding s
   const PersonSchema = Schema.Struct({ id: identifier(Schema.String), name: StoredNameSchema })
   const People = Table.make({ name: "optional_people", schema: PersonSchema })
 
-  expect(() => SqliteView.make({
-    tables: { j: Jobs, p: People }, from: "j",
+  expect(() => ReadModel.compile(ReadModel.define({
+    tables: ReadModel.sources({ j: Jobs, p: People }),
+    from: "j",
     joins: [{ kind: "left", table: "p", on: [{ left: ["j", "technicianId"], right: ["p", "id"] }] }],
     select: { name: ["p", "name"] },
-  })).toThrow()
+  }))).toThrow()
 })

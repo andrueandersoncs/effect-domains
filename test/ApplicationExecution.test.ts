@@ -11,7 +11,7 @@ const source = `
   import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
   class PrivateSql extends Context.Service()("test/PrivateSql") {}
   process.argv = [process.execPath, "execution-isolation", "worker"]
-  const app = Application.make({ name: "execution-isolation" })
+  const app = Application.compile(Application.define({ name: "execution-isolation", parts: [] }))
   const privateDatabase = SqliteBunRuntime.privateClient({ application: "execution-isolation", purpose: "execution" })
   const services = Layer.effect(PrivateSql, SqlClient.SqlClient).pipe(Layer.provide(privateDatabase))
   const initialize = Effect.gen(function* () {

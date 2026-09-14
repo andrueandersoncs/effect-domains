@@ -5,32 +5,37 @@ import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { ApplicationBun } from "effect-domains/application-bun"
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false
 
-const emptyApplication = Application.make({ name: "empty" })
+const emptyDefinition = Application.define({ name: "empty", parts: [] })
+const emptyApplication = Application.compile(emptyDefinition)
 const NoteSchema = Schema.Struct({ text: Schema.String })
 interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
 const StoredNoteSchema = Schema.Struct({ text: StoredTextSchema })
 interface StoredNote extends Schema.Schema.Type<typeof StoredNoteSchema> {}
 
-const Notes = Resource.make({
+const Notes = Resource.define({
   name: "notes",
   schema: NoteSchema,
   storage: StoredNoteSchema,
   authorization: Authorization.public,
-  operations: Resource.crud,
+  capabilities: Resource.crud(),
 })
 
-const NotesApplication = Application.make({ name: "codec-notes", parts: [Notes] })
+const NotesDefinition = Application.define({
+  name: "codec-notes",
+  parts: [Part.resource(Notes)],
+})
+const NotesApplication = Application.compile(NotesDefinition)
 
-const nestedNotes = Application.make({
+const nestedNotes = Application.compile(Application.define({
   name: "nested-notes",
-  parts: [emptyApplication, NotesApplication],
-})
+  parts: [Part.application(emptyDefinition), Part.application(NotesDefinition)],
+}))
 
 const missing = ApplicationBun.run(nestedNotes, {
   database: { migrations: [] },
@@ -45,7 +50,10 @@ const storedTextRpc = Rpc.make("stored-text", {
 })
 
 const storedTextGroup = RpcGroup.make(storedTextRpc)
-const storedTextApplication = Application.make({ name: "stored-text", parts: [{ group: storedTextGroup, handlers: Layer.empty }] })
+const storedTextApplication = Application.compile(Application.define({
+  name: "stored-text",
+  parts: [Part.native({ group: storedTextGroup, handlers: Layer.empty })],
+}))
 
 const storedTextCli = ApplicationBun.run(storedTextApplication, {
   database: { migrations: [] },
@@ -103,10 +111,10 @@ const middlewareRpc = Rpc.make("middleware-requirement", {
 
 const middlewareGroup = RpcGroup.make(middlewareRpc).middleware(MiddlewareRequirement)
 
-const middlewareApplication = Application.make({ name: "middleware-requirement", parts: [{
-  group: middlewareGroup,
-  handlers: Layer.empty,
-}] })
+const middlewareApplication = Application.compile(Application.define({
+  name: "middleware-requirement",
+  parts: [Part.native({ group: middlewareGroup, handlers: Layer.empty })],
+}))
 
 const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
   database: { migrations: [] },

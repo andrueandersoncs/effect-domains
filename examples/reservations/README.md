@@ -90,7 +90,7 @@ All remote operation input is canonical JSON passed through `--input-json`. Succ
 | Unknown valid UUIDv7 | `{"id":"018f3d72-4a68-7cc1-9f23-2e1f8530a0e1"}` to `reservations.get`, `confirm`, or `release` | `ResourceNotFound` |
 | Releasing the confirmed `RESERVATION_ID` | `{"id":"<confirmed UUIDv7>"}` to `release` | Framework `InvalidReservationTransition` with `key`, `action: "release"`, and `actual: "confirmed"` |
 
-[`sqlite.ts`](sqlite.ts) declares `reserve`, `confirm`, and `release` with `Operation.make`; `ReservationStateTransitions` on the resource declares the valid lifecycle. Do not retry `reserve` as though it were idempotent: every successful invocation creates a separate held reservation. There is no idempotency key or ambiguous-outcome recovery.
+[`sqlite.ts`](sqlite.ts) declares `reserve`, `confirm`, and `release` as separate `Command` specifications and implementations; `ReservationStateTransitions` declares the valid lifecycle. Do not retry `reserve` as though it were idempotent: every successful invocation creates a separate held reservation.
 
 ## What stays atomic
 
@@ -133,7 +133,7 @@ bun run reservations inspect reserve
 
 - [`domain.ts`](domain.ts): stock/quantity schemas, statuses, typed errors, and the transition declaration.
 - [`resources.ts`](resources.ts): the intentionally narrow generated `stock.get` and `reservations.get` surface; private reservation creation supplies held status plus UUIDv7 and current-time defaults, while public `reserve` owns the stock policy.
-- [`sqlite.ts`](sqlite.ts): `Operation.make` commands, transactional stock changes, and idempotent seed behavior.
+- [`sqlite.ts`](sqlite.ts): `Command` specifications and implementations, transactional stock changes, and idempotent seed behavior.
 - [`migrations.ts`](migrations.ts) and [`migrations/`](migrations/): ordered imported history and historical timestamp conversion.
 - [`main.ts`](main.ts): server initialization, generated admin, and Foldkit routes.
 - [`web/main.ts`](web/main.ts): application-specific reservation UI.

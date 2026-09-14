@@ -31,16 +31,16 @@ const purchaseAuthorization = purchasePolicy.policy({
   },
 })
 
-export const GuidesResource = Resource.make({
+export const GuidesResource = Resource.define({
   authorization: guideAuthorization,
   name: "guides",
   schema: GuideSchema,
-  operations: { get: true, list: { limit: 25 } },
+  capabilities: Resource.capabilities(Resource.get(), Resource.list({ limit: 25 })),
 })
 
-export const GuidePurchasesResource = Resource.make({
+export const GuidePurchasesResource = Resource.define({
   authorization: purchaseAuthorization,
   name: "guide_purchases",
   schema: GuidePurchaseSchema,
-  operations: {},
+  capabilities: [],
 })

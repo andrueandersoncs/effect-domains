@@ -2,6 +2,7 @@ import { Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
 
@@ -108,20 +109,21 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
   }))
 })
 
-const layerHttp = <Rpcs extends Rpc.Any>(options: Readonly<{
-  name: string
-  group: RpcGroup.RpcGroup<Rpcs>
+const layerHttp = <App extends ApplicationIR>(options: Readonly<{
+  application: App
   path: `/${string}`
 }>) => {
+  type Rpcs = RpcGroup.Rpcs<App["group"]>
+  const { application } = options
   const server = McpServer.layerHttp({
-    name: options.name,
+    name: application.name,
     version: "0.1.0",
     path: options.path,
     protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26],
   })
 
   return pipe(
-    register(options.group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>),
+    register(application.group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>),
     Layer.effectDiscard,
     Layer.provide(server),
   ) as Layer.Layer<

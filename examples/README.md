@@ -12,10 +12,10 @@ Each application solves a concrete record-keeping or operational problem. Every 
 | [field-notes](field-notes/README.md) | Share encrypted site observations | Role policy independent of storage encryption |
 | [editorial-calendar](editorial-calendar/README.md) | Plan articles by channel and publication date | Version-2 migration history and rebuild copies |
 | [equipment-register](equipment-register/README.md) | Register and inspect equipment through MCP | Unique tags and generated tool contracts |
-| [repair-workshop](repair-workshop/README.md) | Track customer repairs and assignments | `SqliteView` joined reads and bounded projections |
+| [repair-workshop](repair-workshop/README.md) | Track customer repairs and assignments | `ReadModel` joined reads and bounded projections |
 | [support-cases](support-cases/README.md) | Triage, assign, and resolve customer cases | A second joined view, versioned transitions, and authored event history |
 | [reservations](reservations/README.md) | Hold, confirm, or release stock | `Transitions.make` and transactional inventory |
-| [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Scoped relations, optimistic versions, and `Operation.bundle` |
+| [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Scoped relations, optimistic versions, and `Command.bundle` |
 | [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a purchase | `Entitlements.fromTable` after row visibility |
 | [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Subscription gating and durable execution storage |
 | [appointment-reminders](appointment-reminders/README.md) | Schedule an application notification | Durable scheduling and deduplicated delivery |
@@ -63,13 +63,13 @@ Report exports and appointment reminders have separate native execution stores. 
 
 - `domain.ts`: canonical values, brands, and domain errors; use framework schemas such as `UuidV7Schema`, `SafeIntSchema`, and `PageLimitSchema`, and use `Schema.DateTimeUtc` for canonical timestamps.
 - `resources.ts`: resource schemas, policies, relation declarations, generated operations, versions, and transitions.
-- `sqlite.ts` where needed: authored SQL and `Operation.make` or `Operation.family` handlers for cross-record rules, aggregates, and projections.
-- `application.ts`: `Application.make({ name, parts })` with resources, `Operation.bundle(...)`, and `IdentityBundle` where identity is provided.
+- `sqlite.ts` where needed: `Command` specifications, implementations, and authored SQL for cross-record rules, aggregates, and projections.
+- `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax, followed by `Application.compile`.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
 - `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary without requiring an example-level platform import. `StaticSpa.layerHttp` validates and mounts the authored static-site declaration.
 - `web/`: a Foldkit SPA started by effectful `BrowserRuntime.run` at the explicit `Effect.runSync` browser boundary, using `RpcBrowser` over the published contracts. Shared HTML/session rendering remains in example-web; transport, paging, identity command mapping, startup, and asset routes are framework modules.
 
-`Operation.make` owns JSON codecs, policy middleware, optional repository transactions, declared `SqliteView` dependencies, and unavailable-error translation. `Operation.family` binds a repeated prefix, unavailable error, policy, and transaction mode once while leaving each member's schemas and handler explicit. `Operation.bundle(...)` produces the application part. Derived joined lists publish through `SqliteView.listOperation`, not manual fragment forwarding.
+`Command.define` owns inspectable JSON contracts, policy, transaction mode, and ReadModel dependencies; `Command.implement` attaches the authored Effect handler. `Command.bundle(...)` produces a command part. Derived joined pages publish through `ReadModel.publish`.
 
 ## Generated resource conventions
 

@@ -20,11 +20,11 @@ const ReportSubscriptionSchema = Schema.Struct({
   graceUntil: Schema.NullOr(Schema.DateTimeUtc),
 })
 
-export const ReportSubscriptionsResource = Resource.make({
+export const ReportSubscriptionsResource = Resource.define({
   authorization: Authorization.public,
   name: "report_subscriptions",
   schema: ReportSubscriptionSchema,
-  operations: {},
+  capabilities: [],
 })
 
 const subscriptionAccess = (
@@ -48,7 +48,7 @@ const entitlementKey = (subject: typeof ExampleSubjectSchema.Type) =>
 
 const entitlementDefinition = new Entitlements.Source({
   name: "reports.generate",
-  table: ReportSubscriptionsResource.table,
+  table: Resource.table(ReportSubscriptionsResource),
   subject: ExampleSubjectSchema,
   key: "tenantId",
   where: entitlementKey,
@@ -67,7 +67,7 @@ export const seedReportExportSubscriptions = Effect.fn(
   const tenantId = TenantIdSchema.make("acme")
   const validUntil = DateTime.addDuration(now, "30 days")
 
-  yield* ReportSubscriptionsResource.repository.ensure({
+  yield* Resource.repository(ReportSubscriptionsResource).ensure({
     tenantId,
     status: "active",
     validUntil,

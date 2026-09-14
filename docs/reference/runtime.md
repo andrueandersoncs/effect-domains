@@ -9,18 +9,18 @@ This reference covers `ApplicationBun.run` in the current Bun workspace. The [fi
 ## Application composition
 
 ```ts
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { ReadingListResource } from "./resources.ts"
 
-const application = Application.make({
+const application = Application.compile(Application.define({
   name: "reading-list",
-  parts: [ReadingListResource],
-})
+  parts: [Part.resource(ReadingListResource)],
+}))
 ```
 
 This example belongs beside the reading list's `resources.ts`. In your application, import the resource you want to register.
 
-`parts` accepts resources, native `{ group, handlers }` RPC bundles, and nested applications. Construction rejects duplicate resource table names and duplicate RPC operation names. Nesting composes parts; it does not supply an automatic naming prefix.
+Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` produces the authoritative `ApplicationIR`; adapters do not rediscover resources or inspect arbitrary object properties. Compilation rejects duplicate table and command names.
 
 ## Bun runner
 

@@ -1,8 +1,9 @@
 import { Effect, Equivalence, Match, Option, Schema, pipe } from "effect"
-import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { Operation } from "effect-domains/operation"
+import { SqlClient, SqlError, SqlSchema } from "effect/unstable/sql"
+import { Command } from "effect-domains/command"
 import { VersionConflict } from "effect-domains/repository-store"
-import { SqliteView } from "effect-domains/sqlite-view"
+import { Resource } from "effect-domains/resource"
+import { ReadModel } from "effect-domains/read-model"
 import { Table } from "effect-domains/table"
 import { SupportCaseBoardList } from "./board.ts"
 import { SupportCaseDetail } from "./contracts.ts"
@@ -29,7 +30,7 @@ import {
 
 type SqliteRow = Readonly<Record<string, unknown>>
 
-const SupportCaseProjection = Table.project(SupportCasesResource.table, [
+const SupportCaseProjection = Table.project(Resource.table(SupportCasesResource), [
   "id",
   "customerId",
   "subject",
@@ -40,10 +41,10 @@ const SupportCaseProjection = Table.project(SupportCasesResource.table, [
   "version",
 ])
 
-const SupportCustomerProjection = Table.project(SupportCustomersResource.table, ["id", "name"])
-const SupportAgentProjection = Table.project(SupportAgentsResource.table, ["id", "name", "onDuty"])
+const SupportCustomerProjection = Table.project(Resource.table(SupportCustomersResource), ["id", "name"])
+const SupportAgentProjection = Table.project(Resource.table(SupportAgentsResource), ["id", "name", "onDuty"])
 
-const SupportCaseEventProjection = Table.project(SupportCaseEventsResource.table, [
+const SupportCaseEventProjection = Table.project(Resource.table(SupportCaseEventsResource), [
   "id",
   "caseId",
   "kind",
@@ -73,44 +74,50 @@ const supportCaseDetail = SqlSchema.findOneOption({
         ${SupportCustomerProjection.object(sql, "customer")} AS ${sql("customer")},
         (
           SELECT ${SupportAgentProjection.object(sql, "agent")}
-          FROM ${sql(SupportAgentsResource.table.name)} agent
+          FROM ${sql(Resource.table(SupportAgentsResource).name)} agent
           WHERE agent.${sql("id")} = support_case.${sql("assignedAgentId")}
           LIMIT 1
         ) AS ${sql("agent")},
         COALESCE((
           SELECT json_group_array(${SupportCaseEventProjection.object(sql, "event")})
           FROM (
-            SELECT * FROM ${sql(SupportCaseEventsResource.table.name)}
+            SELECT * FROM ${sql(Resource.table(SupportCaseEventsResource).name)}
             WHERE ${sql("caseId")} = support_case.${sql("id")}
             ORDER BY ${sql("occurredAt")}, ${sql("id")}
           ) event
         ), '[]') AS ${sql("events")}
-      FROM ${sql(SupportCasesResource.table.name)} support_case
-      INNER JOIN ${sql(SupportCustomersResource.table.name)} customer
+      FROM ${sql(Resource.table(SupportCasesResource).name)} support_case
+      INNER JOIN ${sql(Resource.table(SupportCustomersResource).name)} customer
         ON customer.${sql("id")} = support_case.${sql("customerId")}
       WHERE support_case.${sql("id")} = ${input.caseId}
       LIMIT 1
     `
   }),
-})
+}) as (
+  input: typeof GetSupportCaseInputSchema.Type,
+) => Effect.Effect<
+  Option.Option<typeof SupportCaseDetail.Type>,
+  Schema.SchemaError | SqlError.SqlError,
+  SqlClient.SqlClient
+>
 
 const requireCustomer = Effect.fn("SupportCases.requireCustomer")(function* (customerId: string) {
   return yield* pipe(
-    SupportCustomersResource.repository.get(customerId),
+    Resource.repository(SupportCustomersResource).get(customerId),
     Effect.catchTag("ResourceNotFound", () => SupportCustomerNotFound.make({ customerId })),
   )
 })
 
 const requireAgent = Effect.fn("SupportCases.requireAgent")(function* (agentId: string) {
   return yield* pipe(
-    SupportAgentsResource.repository.get(agentId),
+    Resource.repository(SupportAgentsResource).get(agentId),
     Effect.catchTag("ResourceNotFound", () => SupportAgentNotFound.make({ agentId })),
   )
 })
 
 const requireCase = Effect.fn("SupportCases.requireCase")(function* (caseId: string) {
   return yield* pipe(
-    SupportCasesResource.repository.get(caseId),
+    Resource.repository(SupportCasesResource).get(caseId),
     Effect.catchTag("ResourceNotFound", () => SupportCaseNotFound.make({ caseId })),
   )
 })
@@ -147,41 +154,45 @@ const eventKinds = {
   reopen: "reopened",
 } as const
 
-const SupportOperation = Operation.family("support.", SupportCasesUnavailable)
-const SupportTransaction = SupportOperation.transactional()
+const SupportCommand = Command.family("support.", SupportCasesUnavailable)
+const SupportTransaction = SupportCommand.transactional()
 
-const openCase = SupportTransaction.make({
+const openCaseSpec = SupportTransaction.define({
   name: "openCase",
   payload: OpenSupportCaseInputSchema,
-  success: SupportCasesResource.table.rowSchema,
+  success: Resource.table(SupportCasesResource).rowSchema,
   errors: SupportCustomerNotFound,
   dependencies: [SupportCustomersResource, SupportCasesResource, SupportCaseEventsResource],
-  handler: Effect.fn("SupportCases.openCase")(function* (input) {
-    yield* requireCustomer(input.customerId)
-
-    const supportCase = yield* pipe(
-      Option.fromNullishOr(input.priority),
-      Option.match({
-        onNone: () => SupportCasesResource.repository.create({
-          customerId: input.customerId,
-          subject: input.subject,
-        }),
-        onSome: (priority) => SupportCasesResource.repository.create({
-          customerId: input.customerId,
-          subject: input.subject,
-          priority,
-        }),
-      }),
-    )
-
-    yield* SupportCaseEventsResource.repository.create({
-      caseId: supportCase.id,
-      kind: "opened",
-    })
-
-    return supportCase
-  }),
 })
+
+const openCase = Command.implement(openCaseSpec, Effect.fn("SupportCases.openCase")(function* (
+  input: typeof OpenSupportCaseInputSchema.Type,
+) {
+  yield* requireCustomer(input.customerId)
+
+  const supportCase = yield* pipe(
+    Option.fromNullishOr(input.priority),
+    Option.match({
+      onNone: () => Resource.repository(SupportCasesResource).create({
+        customerId: input.customerId,
+        subject: input.subject,
+      }),
+      onSome: (priority) => Resource.repository(SupportCasesResource).create({
+        customerId: input.customerId,
+        subject: input.subject,
+        priority,
+      }),
+    }),
+  )
+
+  yield* Resource.repository(SupportCaseEventsResource).create({
+    caseId: supportCase.id,
+    kind: "opened",
+  })
+
+  return supportCase
+}))
+
 
 const advanceCaseErrorsSchema = Schema.Union([
   SupportCaseNotFound,
@@ -192,80 +203,97 @@ const advanceCaseErrorsSchema = Schema.Union([
   SupportCaseTransitions.Error,
 ])
 
-const advanceCase = SupportTransaction.make({
+const advanceCaseSpec = SupportTransaction.define({
   name: "advanceCase",
   payload: AdvanceSupportCaseInputSchema,
-  success: SupportCasesResource.table.rowSchema,
+  success: Resource.table(SupportCasesResource).rowSchema,
   errors: advanceCaseErrorsSchema,
   dependencies: [SupportCasesResource, SupportAgentsResource, SupportCaseEventsResource],
-  handler: Effect.fn("SupportCases.advanceCase")(function* (input) {
-    yield* requireCase(input.caseId)
-    const assignment = yield* assignmentFor(input)
-
-    const changes = pipe(
-      Match.value(input.action),
-      Match.when("assign", () => pipe(
-        assignment,
-        Option.map(
-          (assignedAgentId) => SupportAssignmentChangesSchema.make({ assignedAgentId }),
-        ),
-      )),
-      Match.when("reopen", () => pipe(
-        SupportAssignmentChangesSchema.make({ assignedAgentId: null }),
-        Option.some,
-      )),
-      Match.orElse(() => Option.none<typeof SupportAssignmentChangesSchema.Type>()),
-    )
-
-    const transitionChanges = Option.getOrUndefined(changes)
-
-    const supportCase = yield* SupportCasesResource.repository.transition(
-      input.caseId,
-      input.action,
-      transitionChanges,
-      input.expectedVersion,
-    )
-
-    yield* pipe(
-      Option.fromNullishOr(input.note),
-      Option.match({
-        onNone: () => SupportCaseEventsResource.repository.create({
-          caseId: supportCase.id,
-          kind: eventKinds[input.action],
-          agentId: supportCase.assignedAgentId,
-        }),
-        onSome: (note) => SupportCaseEventsResource.repository.create({
-          caseId: supportCase.id,
-          kind: eventKinds[input.action],
-          agentId: supportCase.assignedAgentId,
-          note,
-        }),
-      }),
-    )
-
-    return supportCase
-  }),
 })
 
-const caseDetail = SupportOperation.make({
+const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.advanceCase")(function* (
+  input: typeof AdvanceSupportCaseInputSchema.Type,
+) {
+  yield* requireCase(input.caseId)
+  const assignment = yield* assignmentFor(input)
+
+  const changes = pipe(
+    Match.value(input.action),
+    Match.when("assign", () => pipe(
+      assignment,
+      Option.map(
+        (assignedAgentId) => SupportAssignmentChangesSchema.make({ assignedAgentId }),
+      ),
+    )),
+    Match.when("reopen", () => pipe(
+      SupportAssignmentChangesSchema.make({ assignedAgentId: null }),
+      Option.some,
+    )),
+    Match.orElse(() => Option.none<typeof SupportAssignmentChangesSchema.Type>()),
+  )
+
+  const transitionChanges = Option.getOrUndefined(changes)
+
+  const supportCase = yield* Resource.repository(SupportCasesResource).transition(
+    input.caseId,
+    input.action,
+    transitionChanges,
+    input.expectedVersion,
+  )
+
+  yield* pipe(
+    Option.fromNullishOr(input.note),
+    Option.match({
+      onNone: () => Resource.repository(SupportCaseEventsResource).create({
+        caseId: supportCase.id,
+        kind: eventKinds[input.action],
+        agentId: supportCase.assignedAgentId,
+      }),
+      onSome: (note) => Resource.repository(SupportCaseEventsResource).create({
+        caseId: supportCase.id,
+        kind: eventKinds[input.action],
+        agentId: supportCase.assignedAgentId,
+        note,
+      }),
+    }),
+  )
+
+  return supportCase
+}))
+
+
+const caseDetailSpec = SupportCommand.define({
   name: "caseDetail",
   payload: GetSupportCaseInputSchema,
   success: SupportCaseDetail,
   errors: SupportCaseNotFound,
   dependencies: [SupportCasesResource, SupportCustomersResource, SupportAgentsResource, SupportCaseEventsResource],
-  handler: Effect.fn("SupportCases.caseDetail")(function* (input) {
-    yield* requireCase(input.caseId)
-    const detail = yield* supportCaseDetail(input)
-
-    if (Option.isNone(detail)) return yield* SupportCaseNotFound.make({ caseId: input.caseId })
-    return detail.value
-  }),
 })
 
-const caseBoard = SqliteView.listOperation({
+const caseDetail = Command.implement(caseDetailSpec, Effect.fn("SupportCases.caseDetail")(function* (
+  input: typeof GetSupportCaseInputSchema.Type,
+) {
+  yield* requireCase(input.caseId)
+  const detail = yield* supportCaseDetail(input)
+
+  if (Option.isNone(detail)) {
+    return yield* SupportCaseNotFound.make({ caseId: input.caseId })
+  }
+  return detail.value
+}))
+
+
+const caseBoard = ReadModel.publish({
   name: "support.board",
   unavailable: SupportCasesUnavailable,
-  list: SupportCaseBoardList,
+  page: SupportCaseBoardList,
 })
 
-export const SupportCaseOperations = Operation.bundle(openCase, advanceCase, caseDetail, caseBoard)
+export const SupportCaseOperations = Command.bundle(
+  openCase,
+  advanceCase,
+  caseDetail,
+  caseBoard,
+)
+
+

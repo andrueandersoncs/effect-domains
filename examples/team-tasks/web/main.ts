@@ -16,6 +16,7 @@ import {
 import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -28,9 +29,9 @@ import { TasksResource } from "../resources.ts"
 
 type SessionClient = Type<typeof Session.Client>
 
-const TeamTasksRpcs = IdentityRpcs.merge(TasksResource.group)
-const TaskRowSchema = TasksResource.table.rowSchema
-const TaskPageSchema = TasksResource.contracts.list.successSchema
+const TeamTasksRpcs = IdentityRpcs.merge(Resource.compile(TasksResource).group)
+const TaskRowSchema = Resource.table(TasksResource).rowSchema
+const TaskPageSchema = Resource.compile(TasksResource).contracts.list.successSchema
 type TaskRow = typeof TaskRowSchema.Type
 
 export const WebClient = RpcService.make({ name: "team-tasks/WebClient", group: TeamTasksRpcs })

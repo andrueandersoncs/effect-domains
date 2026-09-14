@@ -3,6 +3,7 @@ import { Array, Effect, Layer, Option, Schema, SchemaAST, Stream, pipe } from "e
 import * as Stdio from "effect/Stdio"
 import { CliError, Command, Flag } from "effect/unstable/cli"
 import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc"
+import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 
 class RpcCliDefinitionError extends Schema.TaggedError<RpcCliDefinitionError>()(
@@ -26,20 +27,19 @@ const makeInputJsonFlag = () => {
 }
 
 const makeRpcCli = <
-  Group extends RpcGroup.Any & Pick<RpcGroup.RpcGroup<RpcProcedure>, "requests">,
+  App extends ApplicationIR,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
   ProtocolError = never,
   ProtocolRequirements = never,
 >(
   options: Readonly<{
-    name: string
-    group: Group
+    application: App
     protocol: Layer.Layer<RpcClient.Protocol, ProtocolError, ProtocolRequirements>
     subcommands: Subcommands
   }>,
 ) => pipe(
   Effect.gen(function* () {
-    const procedures = (options.group as Group & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.values()
+    const procedures = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.values()
 
     const subcommands = yield* Effect.forEach(procedures, Effect.fn("RpcCli.compileProcedure")(function* (procedure) {
       const compiled = compileUnaryRpc(procedure)
@@ -69,7 +69,7 @@ const makeRpcCli = <
         })
 
         const client = yield* RpcClient.make(
-          options.group as Group & RpcGroup.RpcGroup<Rpc.AnyWithProps>,
+          options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>,
           { flatten: true },
         )
 
@@ -95,7 +95,7 @@ const makeRpcCli = <
     }))
 
     const verifyNoSubcommandCollision = Effect.fn("RpcCli.verifyNoSubcommandCollision")(function* (command: Subcommands[number]) {
-      const collision = (options.group as Group & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.has(command.name)
+      const collision = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.has(command.name)
 
       if (collision) {
         return yield* RpcCliDefinitionError.make({
@@ -108,7 +108,7 @@ const makeRpcCli = <
     yield* Effect.forEach(options.subcommands, verifyNoSubcommandCollision)
 
     const commands = Array.appendAll(subcommands, options.subcommands)
-    const root = Command.make(options.name)
+    const root = Command.make(options.application.name)
     return Array.isArrayNonEmpty(commands) ? Command.withSubcommands(root, commands) : root
   }),
   Effect.runSync,
@@ -117,9 +117,9 @@ const makeRpcCli = <
   {},
   {},
   CliError.UserError | Command.Error<Subcommands[number]> | ProtocolError,
-  | Rpc.MiddlewareClient<RpcGroup.Rpcs<Group>>
-  | Rpc.ServicesClient<RpcGroup.Rpcs<Group>>
-  | Rpc.ServicesServer<RpcGroup.Rpcs<Group>>
+  | Rpc.MiddlewareClient<RpcGroup.Rpcs<App["group"]>>
+  | Rpc.ServicesClient<RpcGroup.Rpcs<App["group"]>>
+  | Rpc.ServicesServer<RpcGroup.Rpcs<App["group"]>>
   | Stdio.Stdio
   | Command.Services<Subcommands[number]>
   | ProtocolRequirements

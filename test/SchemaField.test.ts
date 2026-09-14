@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Data, Effect, Equivalence, Function, Match, Option, Schema, SchemaAST, Struct, pipe } from "effect"
-import { ScalarSchema, type ScalarF } from "../packages/effect-domains/src/schema-algebra.ts"
+import { SchemaField, type ScalarF } from "../packages/effect-domains/src/schema-field.ts"
 import { Authorization } from "effect-domains/authorization"
 import { Table } from "effect-domains/table"
 
@@ -19,10 +19,10 @@ it.effect("scalar layer mapping preserves evidence and obeys identity and compos
   ]
 
   Array.forEach(layers, (layer) => {
-    const unchanged = ScalarSchema.map(layer, Function.identity<number>)
-    const incremented = ScalarSchema.map(layer, increment)
-    const composed = ScalarSchema.map(incremented, double)
-    const fused = ScalarSchema.map(layer, both)
+    const unchanged = SchemaField.map(layer, Function.identity<number>)
+    const incremented = SchemaField.map(layer, increment)
+    const composed = SchemaField.map(incremented, double)
+    const fused = SchemaField.map(layer, both)
     expect(unchanged).toEqual(layer)
     expect(composed).toEqual(fused)
     expect(composed.ast).toBe(ast)
@@ -38,8 +38,8 @@ const renderLayer = (layer: ScalarF<string>) => pipe(Match.value(layer), Match.t
   Union: ({ members }) => pipe(members, Array.join(","), (children) => `Union(${children})`),
 }))
 
-const renderCanonical = ScalarSchema.fold("canonical", renderLayer)
-const renderStorage = ScalarSchema.fold("storage", renderLayer)
+const renderCanonical = SchemaField.fold("canonical", renderLayer)
+const renderStorage = SchemaField.fold("storage", renderLayer)
 
 it.effect("scalar folds retain encoding boundaries, homogeneous collections, and path-local cycles", () => Effect.sync(() => {
   const encoded = renderStorage(Schema.NumberFromString.ast)

@@ -2,7 +2,7 @@ import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Sc
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { AdminPresentation } from "@effect-domains/admin/contract"
-import type { Application } from "./application.ts"
+import type { ApplicationIR } from "./application.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
@@ -52,7 +52,7 @@ const loopbackHosts = HashSet.make("localhost", "127.0.0.1", "[::1]")
 const sameString = Equivalence.strictEqual<string>()
 
 const register = Effect.fn("ApplicationAdmin.register")(function* (options: Readonly<{
-  application: Application
+  application: ApplicationIR
   javascript: string
   stylesheet: string
 }> & AdminOptions) {
@@ -153,7 +153,7 @@ const register = Effect.fn("ApplicationAdmin.register")(function* (options: Read
   yield* router.add("POST", `${path}/api/call`, receive)
 })
 
-const layerHttp = <App extends Application>(options: Readonly<{ application: App; javascript: string; stylesheet: string }> & AdminOptions) => pipe(
+const layerHttp = <App extends ApplicationIR>(options: Readonly<{ application: App; javascript: string; stylesheet: string }> & AdminOptions) => pipe(
   register(options),
   Layer.effectDiscard,
 ) as Layer.Layer<

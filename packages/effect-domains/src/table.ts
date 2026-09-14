@@ -19,7 +19,7 @@ import {
 } from "effect"
 
 import { DomainIdentifier, type StructSchema, UuidV7Schema } from "./domain.ts"
-import { ScalarSchema, ownValue, scalarChecks, type ScalarF } from "./schema-algebra.ts"
+import { FieldIR, ScalarSchema, SchemaField, ownValue, scalarChecks, type ScalarF } from "./schema-field.ts"
 
 const isTrue = (value: boolean) => value
 
@@ -439,6 +439,8 @@ const compileScalar = (table: string, field: string, ast: SchemaAST.AST) =>
 interface TableColumn {
   readonly storageSchema: Schema.Constraint
   readonly orderable: boolean
+  readonly canonical: Option.Option<FieldIR>
+  readonly transformsStoredNull: boolean
 }
 
 class CompiledField extends Data.Class<TableColumn & {
@@ -450,9 +452,13 @@ const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
   field: string,
   schema: Schema.Constraint,
 ) {
+  const canonical = SchemaField.compile(schema)
+  const transformsStoredNull = SchemaField.transformsStoredNull(schema.ast)
   const compiled = yield* compileScalar(table, field, schema.ast)
   if (Option.isNone(compiled.scalar)) return yield* unsupportedTableScalar(table, field)
-  if (Option.isNone(compiled.storageCodec)) return { ...compiled, storageSchema: schema }
+  if (Option.isNone(compiled.storageCodec)) {
+    return { ...compiled, canonical, transformsStoredNull, storageSchema: schema }
+  }
   const typeAst = SchemaAST.toType(schema.ast)
   const decoded = yield* compileScalar(table, field, typeAst)
   if (Option.isNone(decoded.storageCodec)) return yield* unsupportedTableScalar(table, field)
@@ -460,14 +466,19 @@ const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
   const storageSchema = Schema.decodeTo(schema)(codec)
   const storedAst = SchemaAST.toEncoded(storageSchema.ast)
   const stored = yield* compileScalar(table, field, storedAst)
-  return { ...stored, orderable: compiled.orderable, storageSchema }
+  return { ...stored, canonical, transformsStoredNull, orderable: compiled.orderable, storageSchema }
 })
 
 const storageFieldEntry = (compiled: CompiledField) =>
   [compiled.field.name, compiled.storageSchema] as const
 
 const compiledFieldEntry = (compiled: CompiledField) =>
-  [compiled.field.name, { storageSchema: compiled.storageSchema, orderable: compiled.orderable }] as const
+  [compiled.field.name, {
+    storageSchema: compiled.storageSchema,
+    orderable: compiled.orderable,
+    canonical: compiled.canonical,
+    transformsStoredNull: compiled.transformsStoredNull,
+  }] as const
 
 const compileStorageSchema = (schema: StructSchema, fields: ReadonlyArray<CompiledField>) => {
   const entries = Array.map(fields, storageFieldEntry)
@@ -515,10 +526,18 @@ const compileField = <S extends StructSchema>(table: string, schema: S) =>
 
     const fieldOption = sourceField(schema)(property.name)
     const fieldSchema = Option.getOrThrow(fieldOption)
-    const { storageSchema, scalar, nullable, checks, orderable } = yield* storageFieldFor(table, property.name, fieldSchema)
+    const {
+      canonical,
+      transformsStoredNull,
+      storageSchema,
+      scalar,
+      nullable,
+      checks,
+      orderable,
+    } = yield* storageFieldFor(table, property.name, fieldSchema)
     if (Option.isNone(scalar)) return yield* unsupportedTableScalar(table, property.name)
     const field = TableField.make({ name: property.name, scalar: scalar.value, nullable, generation: NoGeneration, checks })
-    return new CompiledField({ field, storageSchema, orderable })
+    return new CompiledField({ field, storageSchema, orderable, canonical, transformsStoredNull })
   })
 
 const compiledIdentifier = <S extends StructSchema>(schema: S) => (compiled: CompiledField) =>
@@ -559,7 +578,6 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const implicit = Option.isNone(identifier)
   const hasId = Array.some(compiled, namedIdentifierField)
   const ambiguousId = implicit && hasId
-
   if (ambiguousId) {
     return yield* failTableDefinition(
       name,
@@ -570,7 +588,11 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const rowSchema = implicit ? withImplicitIdentifier(schema) : schema
 
   const key = pipe(identifier, Option.getOrElse(() => new CompiledField({
-    field: DefaultIdentifierField, storageSchema: UuidV7Schema, orderable: true,
+    field: DefaultIdentifierField,
+    storageSchema: UuidV7Schema,
+    orderable: true,
+    canonical: SchemaField.compile(UuidV7Schema),
+    transformsStoredNull: SchemaField.transformsStoredNull(UuidV7Schema.ast),
   })))
 
   const storedFields = implicit ? Array.prepend(compiled, key) : compiled
@@ -579,6 +601,7 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const storageSchema = implicit ? compileStorageSchema(rowSchema, storedFields) : insertSchema
 
   return {
+    _tag: "Table" as const,
     name,
     schema,
     rowSchema,
@@ -607,6 +630,7 @@ export interface Table<
   IdentifierStorage extends Schema.Constraint = Schema.Constraint,
   Columns extends Readonly<Record<string, TableColumn>> = Readonly<Record<string, TableColumn>>,
 > extends Readonly<Partial<{ relations: TableRelations }>> {
+  readonly _tag: "Table"
   readonly name: Name
   readonly schema: StructSchema
   readonly rowSchema: Row

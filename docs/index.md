@@ -19,7 +19,7 @@ features:
   - title: Use the same operations everywhere
     details: The CLI, MCP tools, and browser admin share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
   - title: Keep business rules in your code
-    details: Use Operation.make for one-off commands or Operation.family for shared names, policies, and transactions. Keep handlers and business failures explicit.
+    details: Define inspectable Command specs, then attach explicit Effect implementations. Families share names, policies, and transaction boundaries without hiding business behavior.
 ---
 
 <div class="home-code">
@@ -31,7 +31,7 @@ import { Schema } from "effect"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 
-const Books = Resource.make({
+const Books = Resource.define({
   name: "books",
   schema: Schema.Struct({
     title: Schema.NonEmptyString,
@@ -39,11 +39,11 @@ const Books = Resource.make({
     status: Schema.Literals(["planned", "reading", "finished"]),
   }),
   authorization: Authorization.public,
-  operations: Resource.crud,
+  capabilities: Resource.crud(),
 })
 ```
 
-This declares `books.create`, `books.get`, `books.list`, `books.update`, and `books.remove`, plus a SQLite table and repository. Rows get a UUIDv7 identifier because this schema does not declare its own identity. Public access is an explicit choice for this example.
+This specification declares the five routine capabilities. `Resource.compile` derives their SQLite table, repository, and RPC contracts; `Application.compile` assembles those products into the application IR consumed by every adapter.
 
 Compose the resource into an application, supply migration history, and run it with Bun. [The resource guide covers those steps](/guides/define-a-resource); [the first-run tutorial](/getting-started) uses a ready-made reading list.
 

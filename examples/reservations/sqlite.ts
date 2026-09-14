@@ -2,8 +2,9 @@ import { Array, Effect, Equivalence, Option, Schema } from "effect"
 
 import { SqlClient } from "effect/unstable/sql"
 
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
 import { ResourceNotFound } from "effect-domains/repository-store"
+import { Resource } from "effect-domains/resource"
 
 import {
   InsufficientStock,
@@ -24,21 +25,21 @@ import { ReservationResource, StockResource } from "./resources.ts"
 export const seedStock = Effect.fn("Inventory.seedStock")(function* (
   stock: Stock,
 ) {
-  yield* StockResource.repository.ensure(stock)
+  yield* Resource.repository(StockResource).ensure(stock)
 })
 
 const reserve = Effect.fn("Inventory.reserve")(function* (
   input: ReserveStockInput,
 ) {
   const database = yield* SqlClient.SqlClient
-  const stock = yield* StockResource.repository.find(input.sku)
+  const stock = yield* Resource.repository(StockResource).find(input.sku)
 
   if (Option.isNone(stock)) {
     return yield* UnknownSku.make({ sku: input.sku })
   }
 
   const decremented = yield* database`
-    UPDATE ${database(StockResource.table.name)}
+    UPDATE ${database(Resource.table(StockResource).name)}
     SET ${database("available")} = ${database("available")} - ${input.quantity}
     WHERE ${database("sku")} = ${input.sku}
       AND ${database("available")} >= ${input.quantity}
@@ -53,7 +54,7 @@ const reserve = Effect.fn("Inventory.reserve")(function* (
     })
   }
 
-  return yield* ReservationResource.repository.create({
+  return yield* Resource.repository(ReservationResource).create({
     sku: input.sku,
     quantity: input.quantity,
   })
@@ -64,7 +65,7 @@ const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
   reservation: Reservation,
 ) {
   const replenished = yield* database`
-    UPDATE ${database(StockResource.table.name)}
+    UPDATE ${database(Resource.table(StockResource).name)}
     SET ${database("available")} = ${database("available")} + ${reservation.quantity}
     WHERE ${database("sku")} = ${reservation.sku}
       AND ${database("available")} <= ${Number.MAX_SAFE_INTEGER - reservation.quantity}
@@ -78,7 +79,7 @@ const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
 
 const transition = (action: "confirm" | "release") =>
   Effect.fn("Inventory.transition")(function* (input: ReservationInput) {
-    const reservation = yield* ReservationResource.repository.transition(
+    const reservation = yield* Resource.repository(ReservationResource).transition(
       input.id,
       action,
     )
@@ -98,35 +99,47 @@ const operationErrorsSchema = Schema.Union([
   ReservationStateTransitions.Error,
 ])
 
-const InventoryOperation = Operation
+const InventoryCommand = Command
   .family("", InventoryUnavailable)
   .transactional()
 
-const reserveStock = InventoryOperation.make({
+const reserveStockSpec = InventoryCommand.define({
   name: "reserve",
   payload: ReserveStockInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  handler: reserve,
+  dependencies: [StockResource, ReservationResource],
 })
 
-const confirmReservation = InventoryOperation.make({
+const reserveStock = Command.implement(reserveStockSpec, reserve)
+
+const confirmReservationSpec = InventoryCommand.define({
   name: "confirm",
   payload: ReservationInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  handler: transition("confirm"),
+  dependencies: [ReservationResource],
 })
 
-const releaseReservation = InventoryOperation.make({
+const confirmReservation = Command.implement(
+  confirmReservationSpec,
+  transition("confirm"),
+)
+
+const releaseReservationSpec = InventoryCommand.define({
   name: "release",
   payload: ReservationInputSchema,
   success: ReservationSchema,
   errors: operationErrorsSchema,
-  handler: transition("release"),
+  dependencies: [ReservationResource, StockResource],
 })
 
-export const InventoryOperations = Operation.bundle(
+const releaseReservation = Command.implement(
+  releaseReservationSpec,
+  transition("release"),
+)
+
+export const InventoryOperations = Command.bundle(
   reserveStock,
   confirmReservation,
   releaseReservation,

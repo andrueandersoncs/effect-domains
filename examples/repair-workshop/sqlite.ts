@@ -1,13 +1,13 @@
-import { Operation } from "effect-domains/operation"
-import { SqliteView } from "effect-domains/sqlite-view"
+import { Command } from "effect-domains/command"
+import { ReadModel } from "effect-domains/read-model"
 import { RepairBoardList } from "./board.ts"
 import { RepairWorkshopUnavailable } from "./domain.ts"
 
 
-const repairBoard = SqliteView.listOperation({
+const repairBoard = ReadModel.publish({
   name: "workshop.board",
   unavailable: RepairWorkshopUnavailable,
-  list: RepairBoardList,
+  page: RepairBoardList,
 })
 
-export const RepairWorkshopOperations = Operation.bundle(repairBoard)
+export const RepairWorkshopOperations = Command.bundle(repairBoard)

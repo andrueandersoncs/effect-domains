@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, flow, Function, Layer, Option, Order, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, flow, Function, Layer, Match, Option, Order, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RepositoryAccess, RepositoryError, RepositoryOrder, RepositorySelect, RepositoryStore, ResourceNotFound, UniqueViolation, VersionConflict } from "./repository-store.ts"
 import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
@@ -75,6 +75,121 @@ type ListPolicy<S extends StructSchema> = Readonly<Partial<{
   limit: number
   publish: false
 }>>
+
+const CreationSourceSchema = Schema.TaggedUnion({
+  Input: {},
+  Default: { value: Schema.Unknown },
+  Generated: { token: Schema.Literals(["uuidV7", "now"]) },
+  Subject: { operand: Schema.Unknown },
+})
+
+export type CreationSource = Schema.Schema.Type<typeof CreationSourceSchema>
+
+type TypedCreationSource<Value, Auth> =
+  | Readonly<{ readonly _tag: "Input" }>
+  | Readonly<{ readonly _tag: "Default"; readonly value: Value }>
+  | Readonly<{ readonly _tag: "Generated"; readonly token: "uuidV7" | "now" }>
+  | (Auth extends PolicyAuthorization
+    ? Readonly<{ readonly _tag: "Subject"; readonly operand: SubjectOperand<Value> }>
+    : never)
+
+type CreationSources<S extends StructSchema, Auth> = Readonly<Partial<{
+  readonly [Key in Extract<keyof S["fields"], string>]:
+    TypedCreationSource<S["Type"][Key], Auth>
+}>>
+
+type CreateCapabilityPolicy<
+  S extends StructSchema,
+  Auth,
+  Sources extends CreationSources<S, Auth> = CreationSources<S, Auth>,
+> = Readonly<{
+  sources?: Sources
+  publish?: false
+}>
+
+const creationInput = () => CreationSourceSchema.cases.Input.make({})
+const creationDefault = <const Value>(value: Value) =>
+  CreationSourceSchema.cases.Default.make({ value }) as unknown as
+    Readonly<{ readonly _tag: "Default"; readonly value: Value }>
+const creationGenerated = <const Token extends "uuidV7" | "now">(token: Token) =>
+  CreationSourceSchema.cases.Generated.make({ token }) as unknown as
+    Readonly<{ readonly _tag: "Generated"; readonly token: Token }>
+const creationSubject = <const Value>(operand: SubjectOperand<Value>) =>
+  CreationSourceSchema.cases.Subject.make({ operand }) as unknown as
+    Readonly<{ readonly _tag: "Subject"; readonly operand: SubjectOperand<Value> }>
+
+const ResourceCapabilitySchema = Schema.TaggedUnion({
+  Get: {},
+  List: {
+    filter: Schema.optionalKey(Schema.Array(Schema.String)),
+    range: Schema.optionalKey(Schema.Array(Schema.String)),
+    order: Schema.optionalKey(Schema.Array(Schema.Tuple([Schema.String, Schema.Literals(["asc", "desc"])]))),
+    limit: Schema.optionalKey(PageLimitSchema),
+    publish: Schema.optionalKey(Schema.Literal(false)),
+  },
+  Create: {
+    sources: Schema.optionalKey(Schema.Record(Schema.String, CreationSourceSchema)),
+    publish: Schema.optionalKey(Schema.Literal(false)),
+  },
+  Update: {},
+  Remove: {},
+  Patch: {},
+  Transition: {},
+})
+
+export type ResourceCapability = Schema.Schema.Type<typeof ResourceCapabilitySchema>
+
+type CapabilityFor<S extends StructSchema, Auth> = ResourceCapability & (
+  | Readonly<{ readonly _tag: "Get" | "Update" | "Remove" | "Patch" | "Transition" }>
+  | (Readonly<{ readonly _tag: "List" }> & ListPolicy<S>)
+  | (Readonly<{ readonly _tag: "Create" }> & CreateCapabilityPolicy<S, Auth>)
+)
+
+const capabilityGet = () => ResourceCapabilitySchema.cases.Get.make({})
+const capabilityUpdate = () => ResourceCapabilitySchema.cases.Update.make({})
+const capabilityRemove = () => ResourceCapabilitySchema.cases.Remove.make({})
+const capabilityPatch = () => ResourceCapabilitySchema.cases.Patch.make({})
+const capabilityTransition = () => ResourceCapabilitySchema.cases.Transition.make({})
+
+function capabilityList(): Readonly<{ readonly _tag: "List" }>
+function capabilityList<const Policy extends ListPolicy<StructSchema>>(
+  policy: Policy,
+): Readonly<{ readonly _tag: "List" }> & Policy
+function capabilityList(
+  policy: ListPolicy<StructSchema> = {},
+): Readonly<{ readonly _tag: "List" }> & ListPolicy<StructSchema> {
+  return ResourceCapabilitySchema.cases.List.make(policy as never) as
+    Readonly<{ readonly _tag: "List" }> & ListPolicy<StructSchema>
+}
+
+function capabilityCreate(): Readonly<{ readonly _tag: "Create" }>
+function capabilityCreate<
+  const Policy extends Readonly<{
+    sources?: Readonly<Record<string, CreationSource>>
+    publish?: false
+  }>,
+>(policy: Policy): Readonly<{ readonly _tag: "Create" }> & Policy
+function capabilityCreate(
+  policy: Readonly<{
+    sources?: Readonly<Record<string, CreationSource>>
+    publish?: false
+  }> = {},
+): Readonly<{ readonly _tag: "Create" }> & typeof policy {
+  return ResourceCapabilitySchema.cases.Create.make(policy as never) as unknown as
+    Readonly<{ readonly _tag: "Create" }> & typeof policy
+}
+
+const capabilities = <
+  const Values extends ReadonlyArray<ResourceCapability>,
+>(...values: Values) => Object.freeze([...values]) as Values
+
+const crud = () => capabilities(
+  capabilityGet(),
+  capabilityList(),
+  capabilityCreate(),
+  capabilityUpdate(),
+  capabilityRemove(),
+)
 
 type ProtectedKeys<Creation, Version extends string | undefined> =
   CreationGeneratedKeys<Creation> | CreationSubjectKeys<Creation> | Extract<Version, string>
@@ -226,6 +341,7 @@ export type Resource = RpcBundle & Readonly<{
   name: string
   schema: StructSchema
   storage: StructSchema
+  _tag: "CompiledResource"
   table: Table
   operations: ReadonlyArray<ResourceOperation>
   authorization: AuthorizationDefinition
@@ -237,23 +353,20 @@ export type Resource = RpcBundle & Readonly<{
   transitions: TransitionMachine
 }>>
 
-export const Resource = {
-  crud: Object.freeze({ get: true, list: true, create: true, update: true, remove: true }) as Readonly<Record<"get" | "list" | "create" | "update" | "remove", true>>,
-
-  make<
-    const Name extends string,
-    const S extends StructSchema,
-    const Storage extends StructSchema = S,
-    const Auth extends AuthorizationDefinition = AuthorizationDefinition,
-    const Operations extends ResourceOperations<S, Auth> = ResourceOperations<S, Auth>,
-    const Version extends Extract<keyof S["fields"], string> | undefined = undefined,
-    const Transition extends TransitionMachine | undefined = undefined,
-  >(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
-    storage: Storage
-    relations: TableRelationsInput<TableFieldName<Storage>>
-    version: Version
-    transitions: Transition
-  }>> & CompatibleStorage<S, Storage>) {
+const compileResource = <
+  const Name extends string,
+  const S extends StructSchema,
+  const Storage extends StructSchema = S,
+  const Auth extends AuthorizationDefinition = AuthorizationDefinition,
+  const Operations extends ResourceOperations<S, Auth> = ResourceOperations<S, Auth>,
+  const Version extends Extract<keyof S["fields"], string> | undefined = undefined,
+  const Transition extends TransitionMachine | undefined = undefined,
+>(options: Readonly<{ name: Name; schema: S; operations: Operations; authorization: Auth }> & Readonly<Partial<{
+  storage: Storage
+  relations: TableRelationsInput<TableFieldName<Storage>>
+  version: Version
+  transitions: Transition
+}>> & CompatibleStorage<S, Storage>) => {
     type Creation = CreationFrom<Operations>
     type List = Extract<ListFrom<Operations>, ListPolicy<S>>
     type CanonicalTable = ReturnType<typeof Table.make<Name, S>>
@@ -991,6 +1104,7 @@ export const Resource = {
 
 
     return Struct.assign(options, {
+      _tag: "CompiledResource" as const,
       operations,
       published,
       storage: storageSchema,
@@ -1005,5 +1119,522 @@ export const Resource = {
       group,
       handlers,
     })
-  },
+}
+
+type SourceKeys<
+  Sources,
+  Tag extends CreationSource["_tag"],
+> = {
+  readonly [Key in keyof Sources]-?:
+    Extract<NonNullable<Sources[Key]>, { readonly _tag: Tag }> extends never ? never : Key
+}[keyof Sources]
+
+type DefaultsFrom<Sources> = {
+  readonly [Key in SourceKeys<Sources, "Default">]:
+    Extract<NonNullable<Sources[Key]>, { readonly _tag: "Default" }> extends
+      { readonly value: infer Value } ? Value : never
+}
+
+type GeneratedFrom<Sources> = {
+  readonly [Key in SourceKeys<Sources, "Generated">]:
+    Extract<NonNullable<Sources[Key]>, { readonly _tag: "Generated" }> extends
+      { readonly token: infer Token } ? Token : never
+}
+
+type SubjectFrom<Sources> = {
+  readonly [Key in SourceKeys<Sources, "Subject">]:
+    Extract<NonNullable<Sources[Key]>, { readonly _tag: "Subject" }> extends
+      { readonly operand: infer Operand } ? Operand : never
+}
+
+type CreationSourcesFrom<Capability> =
+  Capability extends { readonly sources: infer Sources } ? Sources : {}
+
+type CreationPolicyFrom<Capability> =
+  Readonly<{
+    defaults: DefaultsFrom<CreationSourcesFrom<Capability>>
+    generated: GeneratedFrom<CreationSourcesFrom<Capability>>
+    fromSubject: SubjectFrom<CreationSourcesFrom<Capability>>
+  }> & (
+    Capability extends { readonly publish: false }
+      ? Readonly<{ publish: false }>
+      : unknown
+  )
+
+type CapabilityValue<Capability extends ResourceCapability> =
+  Capability extends { readonly _tag: "Create" }
+    ? CreationPolicyFrom<Capability>
+    : Capability extends { readonly _tag: "List" }
+      ? Omit<Capability, "_tag">
+      : true
+
+type CapabilityOperations<
+  Capabilities extends ReadonlyArray<ResourceCapability>,
+> = {
+  readonly [Capability in Capabilities[number] as Lowercase<Capability["_tag"]>]:
+    CapabilityValue<Capability>
+}
+type CompleteResourceOperations<
+  S extends StructSchema,
+  Auth extends AuthorizationDefinition,
+  Capabilities extends ReadonlyArray<ResourceCapability>,
+  Declared extends Partial<ResourceOperations<S, Auth>> = CapabilityOperations<Capabilities>,
+> = Omit<ResourceOperations<S, Auth>, keyof Declared> & Declared
+
+interface CreationOperation {
+  readonly defaults: Readonly<Record<string, unknown>>
+  readonly generated: Readonly<Record<string, "uuidV7" | "now">>
+  readonly fromSubject: Readonly<Record<string, unknown>>
+}
+
+const emptyCreationOperation: CreationOperation = {
+  defaults: {},
+  generated: {},
+  fromSubject: {},
+}
+
+const creationOperation = (
+  capability: Extract<ResourceCapability, { readonly _tag: "Create" }>,
+) => {
+  const entries = globalThis.Object.entries(
+    capability.sources ?? {},
+  ) as ReadonlyArray<readonly [string, CreationSource]>
+  const operation = Array.reduce(entries, emptyCreationOperation, (state, [field, source]) => pipe(
+    Match.value(source),
+    Match.tagsExhaustive({
+      Input: () => state,
+      Default: ({ value }) => ({
+        ...state,
+        defaults: Record.set(state.defaults, field, value),
+      }),
+      Generated: ({ token }) => ({
+        ...state,
+        generated: Record.set(state.generated, field, token),
+      }),
+      Subject: ({ operand }) => ({
+        ...state,
+        fromSubject: Record.set(state.fromSubject, field, operand),
+      }),
+    }),
+  ))
+
+  return {
+    ...operation,
+    ...(capability.publish === false ? { publish: false as const } : {}),
+  }
+}
+
+const operationEntry = Match.type<ResourceCapability>().pipe(
+  Match.tagsExhaustive({
+    Get: () => ["get", true] as const,
+    List: ({ _tag: _, ...policy }) => ["list", policy] as const,
+    Create: (capability) => ["create", creationOperation(capability)] as const,
+    Update: () => ["update", true] as const,
+    Remove: () => ["remove", true] as const,
+    Patch: () => ["patch", true] as const,
+    Transition: () => ["transition", true] as const,
+  }),
+)
+
+const operationsFrom = <
+  const Capabilities extends ReadonlyArray<ResourceCapability>,
+>(declared: Capabilities) =>
+  Record.fromEntries(Array.map(declared, operationEntry)) as
+    CapabilityOperations<Capabilities>
+
+export interface ResourceReference<
+  Target extends AnyResourceSpec = AnyResourceSpec,
+> {
+  readonly _tag: "ResourceReference"
+  readonly resource: Target
+  readonly fields: ReadonlyArray<string>
+}
+
+type TableForeignKeyInput<Fields extends string> =
+  NonNullable<TableRelationsInput<Fields>["foreignKeys"]>[number]
+
+export type ResourceRelationsInput<Fields extends string = string> =
+  Omit<TableRelationsInput<Fields>, "foreignKeys">
+  & Readonly<Partial<{
+    foreignKeys: ReadonlyArray<
+      Omit<TableForeignKeyInput<Fields>, "references">
+      & Readonly<{ references: ResourceReference }>
+    >
+  }>>
+
+export interface AnyResourceSpec {
+  readonly _tag: "ResourceSpec"
+  readonly name: string
+  readonly schema: StructSchema
+  readonly authorization: AuthorizationDefinition
+  readonly capabilities: ReadonlyArray<ResourceCapability>
+  readonly storage?: StructSchema
+  readonly relations?: ResourceRelationsInput
+  readonly version?: string
+  readonly transitions?: TransitionMachine
+  readonly _types?: Readonly<{
+    name: string
+    schema: StructSchema
+    storage: StructSchema
+    authorization: AuthorizationDefinition
+    capabilities: ReadonlyArray<ResourceCapability>
+    version: string | undefined
+    transitions: TransitionMachine | undefined
+  }>
+}
+
+export interface ResourceSpec<
+  Name extends string = string,
+  S extends StructSchema = StructSchema,
+  Storage extends StructSchema = S,
+  Auth extends AuthorizationDefinition = AuthorizationDefinition,
+  Capabilities extends ReadonlyArray<ResourceCapability> =
+    ReadonlyArray<ResourceCapability>,
+  Version extends Extract<keyof S["fields"], string> | undefined = undefined,
+  Transition extends TransitionMachine | undefined = undefined,
+> extends AnyResourceSpec {
+  readonly _tag: "ResourceSpec"
+  readonly name: Name
+  readonly schema: S
+  readonly authorization: Auth
+  readonly capabilities: Capabilities
+  readonly storage?: Storage
+  readonly relations?: ResourceRelationsInput<TableFieldName<Storage>>
+  readonly version?: Version
+  readonly transitions?: Transition
+  readonly _types?: Readonly<{
+    name: Name
+    schema: S
+    storage: Storage
+    authorization: Auth
+    capabilities: Capabilities
+    version: Version
+    transitions: Transition
+  }>
+}
+
+type ResourceDefinitionInput = Readonly<{
+  name: string
+  schema: StructSchema
+  authorization: AuthorizationDefinition
+  capabilities: ReadonlyArray<ResourceCapability>
+}> & Readonly<Partial<{
+  storage: StructSchema
+  relations: ResourceRelationsInput
+  version: string
+  transitions: TransitionMachine
+}>>
+
+type DefinitionStorage<Definition> =
+  Definition extends { readonly storage: infer Storage extends StructSchema }
+    ? Storage
+    : DefinitionSchema<Definition>
+
+type DefinitionVersion<Definition> =
+  Definition extends { readonly version: infer Version extends string }
+    ? Version & Extract<keyof DefinitionSchema<Definition>["fields"], string>
+    : undefined
+
+type DefinitionTransition<Definition> =
+  Definition extends { readonly transitions: infer Transition extends TransitionMachine }
+    ? Transition
+    : undefined
+
+type DefinitionName<Definition> =
+  Definition extends { readonly name: infer Name extends string } ? Name : never
+type DefinitionSchema<Definition> =
+  Definition extends { readonly schema: infer S extends StructSchema } ? S : never
+type DefinitionAuthorization<Definition> =
+  Definition extends { readonly authorization: infer Auth extends AuthorizationDefinition } ? Auth : never
+type DefinitionCapabilities<Definition> =
+  Definition extends { readonly capabilities: infer Capabilities extends ReadonlyArray<ResourceCapability> }
+    ? Capabilities
+    : never
+
+type DefinedResource<Definition> = ResourceSpec<
+  DefinitionName<Definition>,
+  DefinitionSchema<Definition>,
+  DefinitionStorage<Definition>,
+  DefinitionAuthorization<Definition>,
+  DefinitionCapabilities<Definition>,
+  DefinitionVersion<Definition>,
+  DefinitionTransition<Definition>
+>
+type CapabilityValidation<
+  Capability,
+  S extends StructSchema,
+  Auth extends AuthorizationDefinition,
+> = Capability extends { readonly _tag: "Create" }
+  ? Capability extends { readonly sources: infer Sources }
+    ? Sources extends CreationSources<S, Auth> ? unknown : never
+    : unknown
+  : Capability extends { readonly _tag: "List" }
+    ? Omit<Capability, "_tag"> extends ListPolicy<S> ? unknown : never
+    : Capability extends ResourceCapability ? unknown : never
+
+type CapabilitiesValidation<
+  Capabilities,
+  S extends StructSchema,
+  Auth extends AuthorizationDefinition,
+> = Capabilities extends readonly [
+  infer Head extends ResourceCapability,
+  ...infer Tail extends ReadonlyArray<ResourceCapability>,
+]
+  ? [CapabilityValidation<Head, S, Auth>] extends [never]
+    ? never
+    : CapabilitiesValidation<Tail, S, Auth>
+  : Capabilities extends ReadonlyArray<ResourceCapability> ? unknown : never
+
+type RelationEntryValidation<Entry, Field extends string> =
+  Entry extends { readonly fields: ReadonlyArray<infer Local> }
+    ? Exclude<Local, Field> extends never
+      ? Entry extends { readonly scope: ReadonlyArray<infer Scope> }
+        ? Exclude<Scope, Field> extends never ? unknown : never
+        : unknown
+      : never
+    : never
+
+type RelationEntriesValidation<Entries, Field extends string> =
+  Entries extends readonly [infer Head, ...infer Tail]
+    ? [RelationEntryValidation<Head, Field>] extends [never]
+      ? never
+      : RelationEntriesValidation<Tail, Field>
+    : Entries extends ReadonlyArray<unknown> ? unknown : never
+
+type RelationsValidation<Definition> =
+  Definition extends { readonly relations: infer Relations }
+    ? (
+      Relations extends { readonly unique: infer Unique }
+        ? RelationEntriesValidation<Unique, TableFieldName<DefinitionStorage<Definition>>>
+        : unknown
+    ) & (
+      Relations extends { readonly indexes: infer Indexes }
+        ? RelationEntriesValidation<Indexes, TableFieldName<DefinitionStorage<Definition>>>
+        : unknown
+    ) & (
+      Relations extends { readonly foreignKeys: infer ForeignKeys }
+        ? RelationEntriesValidation<ForeignKeys, TableFieldName<DefinitionStorage<Definition>>>
+        : unknown
+    )
+    : unknown
+
+type DefinitionValidation<Definition> =
+  Definition extends Readonly<{
+    name: string
+    schema: infer S extends StructSchema
+    authorization: infer Auth extends AuthorizationDefinition
+    capabilities: infer Capabilities
+  }>
+    ? CapabilitiesValidation<Capabilities, S, Auth> & RelationsValidation<Definition>
+    : never
+
+
+const define = <
+  const Definition extends Readonly<Record<string, unknown>>,
+>(
+  definition: Definition,
+  ..._validation: [DefinitionValidation<Definition>] extends [never]
+    ? readonly [invalidDefinition: never]
+    : readonly []
+): DefinedResource<Definition> => {
+  const input = definition as unknown as ResourceDefinitionInput
+  return Object.freeze({
+    ...input,
+    _tag: "ResourceSpec" as const,
+    capabilities: Object.freeze([...input.capabilities]),
+  }) as unknown as DefinedResource<Definition>
+}
+
+type ResourceRequirements<S extends StructSchema, Storage extends StructSchema> =
+  | RepositoryStore
+  | S["DecodingServices"]
+  | S["EncodingServices"]
+  | Storage["DecodingServices"]
+  | Storage["EncodingServices"]
+
+type ExactResourceRuntime<
+  Runtime extends { readonly handlers: Layer.Any },
+  S extends StructSchema,
+  Storage extends StructSchema,
+> = Omit<Runtime, "handlers"> & Readonly<{
+  handlers: Layer.Layer<
+    Layer.Success<Runtime["handlers"]>,
+    Layer.Error<Runtime["handlers"]>,
+    ResourceRequirements<S, Storage>
+  >
+}>
+
+
+type ResourceTypes<Spec extends AnyResourceSpec> = NonNullable<Spec["_types"]>
+
+
+export type ResourceRuntime<Spec extends AnyResourceSpec> =
+  string extends ResourceTypes<Spec>["name"] ? Resource : ExactResourceRuntime<
+    ReturnType<typeof compileResource<
+      ResourceTypes<Spec>["name"],
+      ResourceTypes<Spec>["schema"],
+      ResourceTypes<Spec>["storage"],
+      ResourceTypes<Spec>["authorization"],
+      CapabilityOperations<ResourceTypes<Spec>["capabilities"]>,
+      Extract<
+        ResourceTypes<Spec>["version"],
+        Extract<keyof ResourceTypes<Spec>["schema"]["fields"], string> | undefined
+      >,
+      ResourceTypes<Spec>["transitions"]
+    >>,
+    ResourceTypes<Spec>["schema"],
+    ResourceTypes<Spec>["storage"]
+  >
+
+const compiledResources = new WeakMap<AnyResourceSpec, Resource>()
+
+const compile = <const Spec extends AnyResourceSpec>(
+  spec: Spec,
+): ResourceRuntime<Spec> => {
+  const cached = compiledResources.get(spec)
+  if (cached) return cached as unknown as ResourceRuntime<Spec>
+
+  const { _tag: _, capabilities: declared, ...definition } = spec
+  const operations = operationsFrom(declared)
+  const relations = Option.match(Option.fromNullishOr(spec.relations), {
+    onNone: Function.constant(undefined),
+    onSome: (declaredRelations) => Option.match(Option.fromNullishOr(declaredRelations.foreignKeys), {
+      onNone: Function.constant(declaredRelations),
+      onSome: (declaredForeignKeys) => {
+        const foreignKeys = Array.map(
+          declaredForeignKeys,
+          ({ references, ...foreignKey }) => ({
+            ...foreignKey,
+            references: Table.reference(
+              compile(references.resource).table,
+              references.fields as ReadonlyArray<string>,
+            ),
+          }),
+        )
+
+        return { ...declaredRelations, foreignKeys }
+      },
+    }),
+  })
+  const compiled = compileResource({
+    ...definition,
+    relations,
+    operations,
+  } as never)
+
+  compiledResources.set(spec, compiled)
+  return compiled as unknown as ResourceRuntime<Spec>
+}
+
+
+type ExactRepository<
+  Repository,
+  S extends StructSchema,
+  Storage extends StructSchema,
+> = {
+  readonly [Key in keyof Repository]:
+    Repository[Key] extends (...arguments_: infer Arguments) => Effect.Effect<
+      infer Success,
+      infer Failure,
+      unknown
+    >
+      ? (...arguments_: Arguments) => Effect.Effect<
+        Success,
+        Failure,
+        ResourceRequirements<S, Storage>
+      >
+      : Repository[Key]
+}
+
+type RepositoryFor<Spec extends AnyResourceSpec> =
+  string extends ResourceTypes<Spec>["name"] ? ReturnType<typeof compileResource>["repository"] : ExactRepository<
+    Extract<
+      ReturnType<typeof compileResource<
+        ResourceTypes<Spec>["name"],
+        ResourceTypes<Spec>["schema"],
+        ResourceTypes<Spec>["storage"],
+        ResourceTypes<Spec>["authorization"],
+        CompleteResourceOperations<
+          ResourceTypes<Spec>["schema"],
+          ResourceTypes<Spec>["authorization"],
+          ResourceTypes<Spec>["capabilities"]
+        >,
+        Extract<
+          ResourceTypes<Spec>["version"],
+          Extract<keyof ResourceTypes<Spec>["schema"]["fields"], string> | undefined
+        >,
+        TransitionMachine | undefined
+      >>,
+      { readonly repository: unknown }
+    >["repository"],
+    ResourceTypes<Spec>["schema"],
+    ResourceTypes<Spec>["storage"]
+  >
+
+type ExactTable<
+  ResourceTable extends Table,
+  S extends StructSchema,
+  Storage extends StructSchema,
+> = Omit<ResourceTable, "rowSchema"> & Readonly<{
+  rowSchema: ResourceTable["rowSchema"] & Schema.Codec<
+    ResourceTable["rowSchema"]["Type"],
+    ResourceTable["rowSchema"]["Encoded"],
+    S["DecodingServices"] | Storage["DecodingServices"],
+    S["EncodingServices"] | Storage["EncodingServices"]
+  >
+}>
+
+export type ResourceTable<Spec extends AnyResourceSpec> =
+  string extends ResourceTypes<Spec>["name"] ? Table
+    : ResourceRuntime<Spec> extends { readonly table: infer ResourceTable extends Table }
+      ? ExactTable<
+        ResourceTable,
+        ResourceTypes<Spec>["schema"],
+        ResourceTypes<Spec>["storage"]
+      >
+      : Table
+
+const repository = <const Spec extends AnyResourceSpec>(
+  spec: Spec,
+): RepositoryFor<Spec> =>
+  (compile(spec) as unknown as { readonly repository: RepositoryFor<Spec> }).repository
+
+const table = <const Spec extends AnyResourceSpec>(
+  spec: Spec,
+): ResourceTable<Spec> =>
+  (compile(spec) as unknown as Resource).table as ResourceTable<Spec>
+
+const reference = <
+  const Target extends AnyResourceSpec,
+  const Fields extends ReadonlyArray<
+    Extract<keyof ResourceTable<Target>["rowSchema"]["fields"], string>
+  >,
+>(
+  resource: Target,
+  fields: Fields,
+): ResourceReference<Target> => Object.freeze({
+  _tag: "ResourceReference" as const,
+  resource,
+  fields: Object.freeze([...fields]),
+})
+
+export const Resource = {
+  define,
+  compile,
+  repository,
+  table,
+  capabilities,
+  crud,
+  get: capabilityGet,
+  list: capabilityList,
+  create: capabilityCreate,
+  update: capabilityUpdate,
+  remove: capabilityRemove,
+  patch: capabilityPatch,
+  transition: capabilityTransition,
+  reference,
+  input: creationInput,
+  default: creationDefault,
+  generated: creationGenerated,
+  fromSubject: creationSubject,
 }

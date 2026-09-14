@@ -8,20 +8,21 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell, textI
 import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
-import { RepairBoardList, RepairBoardRowSchema } from "../board.ts"
+import { RepairBoardList, RepairBoardPage, RepairBoardRowSchema } from "../board.ts"
 import { CustomerSchema, RepairJobSchema, RepairStatusSchema, TechnicianSchema } from "../domain.ts"
 import { CustomersResource, RepairJobsResource, TechniciansResource } from "../resources.ts"
 import { RepairWorkshopOperations } from "../sqlite.ts"
 
-const CustomerRowSchema = CustomersResource.table.rowSchema
-const TechnicianRowSchema = TechniciansResource.table.rowSchema
-const CustomerPageSchema = CustomersResource.contracts.list.successSchema
-const TechnicianPageSchema = TechniciansResource.contracts.list.successSchema
-const RepairJobRowSchema = RepairJobsResource.table.rowSchema
-const RepairWorkshopWebRpcs = RpcGroup.make().merge(CustomersResource.group, TechniciansResource.group, RepairJobsResource.group, RepairWorkshopOperations.group)
+const CustomerRowSchema = Resource.table(CustomersResource).rowSchema
+const TechnicianRowSchema = Resource.table(TechniciansResource).rowSchema
+const CustomerPageSchema = Resource.compile(CustomersResource).contracts.list.successSchema
+const TechnicianPageSchema = Resource.compile(TechniciansResource).contracts.list.successSchema
+const RepairJobRowSchema = Resource.table(RepairJobsResource).rowSchema
+const RepairWorkshopWebRpcs = RpcGroup.make().merge(Resource.compile(CustomersResource).group, Resource.compile(TechniciansResource).group, Resource.compile(RepairJobsResource).group, RepairWorkshopOperations.group)
 export const WebClient = RpcService.make({ name: "repair-workshop/WebClient", group: RepairWorkshopWebRpcs })
 export type WebClient = Type<typeof WebClient>
 
@@ -39,7 +40,7 @@ export type Model = typeof Model.Type
 export const Message = defineMessageUnion({
   ChangedFilterStatus: { value: Schema.String }, ChangedCustomerId: { value: Schema.String }, ChangedCustomerName: { value: Schema.String }, ChangedTechnicianId: { value: Schema.String }, ChangedTechnicianName: { value: Schema.String }, ChangedTechnicianOnCall: { value: Schema.String }, ChangedRepairCustomer: { value: Schema.String }, ChangedRepairItem: { value: Schema.String }, ChangedRepairFault: { value: Schema.String }, ChangedRepairUrgent: { value: Schema.String }, ChangedRepairStatus: { value: Schema.String }, ChangedRepairTechnician: { value: Schema.String },
   ClickedReload: {}, ClickedNextCustomers: {}, ClickedNextTechnicians: {}, ClickedSaveCustomer: {}, ClickedEditCustomer: { id: Schema.String }, ClickedClearCustomer: {}, ClickedSaveTechnician: {}, ClickedEditTechnician: { id: Schema.String }, ClickedClearTechnician: {}, ClickedCreateRepair: {}, ChangedBoardStatus: { id: Schema.String, value: Schema.String }, ChangedBoardTechnician: { id: Schema.String, value: Schema.String },
-  SucceededCustomers: { page: CustomerPageSchema, append: Schema.Boolean, request: RequestTokenSchema }, SucceededTechnicians: { page: TechnicianPageSchema, append: Schema.Boolean, request: RequestTokenSchema }, SucceededBoard: { page: RepairBoardList.success, request: RequestTokenSchema }, SucceededCustomer: { customer: CustomerRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, SucceededTechnician: { technician: TechnicianRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, SucceededRepair: { repair: RepairJobRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: BrowserModel.FieldErrorsSchema },
+  SucceededCustomers: { page: CustomerPageSchema, append: Schema.Boolean, request: RequestTokenSchema }, SucceededTechnicians: { page: TechnicianPageSchema, append: Schema.Boolean, request: RequestTokenSchema }, SucceededBoard: { page: RepairBoardPage.success, request: RequestTokenSchema }, SucceededCustomer: { customer: CustomerRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, SucceededTechnician: { technician: TechnicianRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, SucceededRepair: { repair: RepairJobRowSchema, created: Schema.Boolean, request: RequestTokenSchema }, Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: BrowserModel.FieldErrorsSchema },
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>

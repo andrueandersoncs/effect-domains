@@ -8,7 +8,7 @@ type TransitionDeclaration<Status extends string = string> = Readonly<{
 
 type TransitionDeclarations<Status extends string = string> = Readonly<Record<string, TransitionDeclaration<Status>>>
 
-/** The structural view `Resource.make` needs; the concrete machine narrows every member. */
+/** The structural transition intent consumed by the Resource compiler. */
 export interface TransitionMachine {
   readonly name: string
   readonly field: string

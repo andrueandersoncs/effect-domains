@@ -2,7 +2,7 @@
 
 [All examples](../README.md)
 
-Register customers and agents, open support cases, and advance each case through triage, assignment, resolution, and reopening. The current board is a bounded `SqliteView`; the nested event history stays an authored SQL projection. This public loopback example is not a production ticketing, identity, or notification system.
+Register customers and agents, open support cases, and advance each case through triage, assignment, resolution, and reopening. The current board is a bounded `ReadModel`; the nested event history stays an authored SQL projection.
 
 ## Run it
 
@@ -77,7 +77,7 @@ bun run support-cases support.advanceCase --input-json "{\"caseId\":\"$CASE_ID\"
 bun run support-cases support.caseDetail --input-json "{\"caseId\":\"$CASE_ID\"}"
 ```
 
-The detail result contains the current case, current customer, current assigned agent or `null`, and the ordered event array. `Table.project` supplies physical codecs and JSON object fragments, but the correlated one-to-many event query remains authored SQL. `SqliteView` handles only the flat board projection; no aggregate or relationship query language was added.
+The detail result contains the current case, current customer, current assigned agent or `null`, and the ordered event array. `Table.project` supplies physical codecs and JSON object fragments, but the correlated one-to-many event query remains authored SQL. `ReadModel` handles only the flat board projection; no aggregate or relationship query language was added.
 
 A stale `expectedVersion` fails with `VersionConflict` and appends no event. An invalid edge fails with `InvalidSupportCaseTransition`. The declared graph is:
 
@@ -109,7 +109,7 @@ The imported `001_initial.json` artifact creates four tables, foreign keys, inde
 
 - [`domain.ts`](domain.ts): canonical customer, agent, case, event, payload, transition, and failure schemas.
 - [`resources.ts`](resources.ts): public authorization, generated reads, private creation policies, versions, foreign keys, and list declarations.
-- [`board.ts`](board.ts): the flat customer/agent `SqliteView` and bounded keyset list.
+- [`board.ts`](board.ts): the flat customer/agent `ReadModel` and bounded keyset page.
 - [`contracts.ts`](contracts.ts): the nested case-detail result.
 - [`sqlite.ts`](sqlite.ts): transactional open/advance handlers and the authored nested history query.
 - [`application.ts`](application.ts), [`main.ts`](main.ts): application composition, frozen migration history, generated admin, and static browser routes.

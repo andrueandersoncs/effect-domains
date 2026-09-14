@@ -1,4 +1,4 @@
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 
 import {
   CustomersResource,
@@ -8,12 +8,12 @@ import {
 
 import { RepairWorkshopOperations } from "./sqlite.ts"
 
-export const RepairWorkshopApplication = Application.make({
+export const RepairWorkshopApplication = Application.compile(Application.define({
   name: "repair-workshop",
   parts: [
-    CustomersResource,
-    TechniciansResource,
-    RepairJobsResource,
-    RepairWorkshopOperations,
+    Part.resource(CustomersResource),
+    Part.resource(TechniciansResource),
+    Part.resource(RepairJobsResource),
+    Part.command(RepairWorkshopOperations),
   ],
-})
+}))

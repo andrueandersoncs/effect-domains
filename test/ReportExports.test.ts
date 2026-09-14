@@ -2,6 +2,7 @@ import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, Schema, pipe } from "effect"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { Resource } from "effect-domains/resource"
 
 import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
 
@@ -38,7 +39,7 @@ const RequestJsonSchema = Schema.toCodecJson(ReportExportRequestSchema)
 const requestEffect = Schema.decodeUnknownEffect(RequestJsonSchema)(requestInput)
 
 const executionStore = (filename: string) => {
-  const tables = prepareTables([ReportExportExecutionsResource.table])
+  const tables = prepareTables([Resource.table(ReportExportExecutionsResource)])
   const preparedTables = Layer.effectDiscard(tables)
   const services = Layer.mergeAll(preparedTables, ReportExportExecutionStoreLive)
   const database = SqliteBunRuntime.sqlClient(filename, { migrations: [] })

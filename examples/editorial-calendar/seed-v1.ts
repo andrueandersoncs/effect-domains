@@ -10,6 +10,7 @@ import {
 } from "effect"
 
 import { SchemaStore } from "effect-domains/migrations"
+import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { LegacyDocumentsResource } from "./legacy.ts"
 import { EditorialCalendarMigrations } from "./migrations.ts"
@@ -37,7 +38,7 @@ const seedVersionOneDraft = Effect.gen(function* () {
     const schemaStore = yield* SchemaStore
     yield* schemaStore.prepare(initialMigration.to.tables)
 
-    yield* LegacyDocumentsResource.repository.ensure({ id: seedId, title: seedTitle })
+    yield* Resource.repository(LegacyDocumentsResource).ensure({ id: seedId, title: seedTitle })
   })
 
   yield* pipe(seed, Effect.provide(runtime))

@@ -31,54 +31,57 @@ export const BookSchema = Schema.Struct({
 })
 ```
 
-Create `scratch-library/resource.ts`. The list accepts equality filters only for `status`, with at most 25 rows per page. `Resource.crud` selects `get`, `list`, `create`, `update`, and `remove`; `patch: true` adds the sixth operation.
+Create `scratch-library/resource.ts`. The list accepts equality filters only for `status`, with at most 25 rows per page. Each capability is an inspectable syntax value; `Resource.define` does not run the compiler.
 
 ```ts
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 import { BookSchema } from "./domain.ts"
 
-export const Books = Resource.make({
+export const Books = Resource.define({
   name: "books",
   schema: BookSchema,
   authorization: Authorization.public,
-  operations: {
-    ...Resource.crud,
-    patch: true,
-    create: {},
-    list: {
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({
       filter: ["status"],
       limit: 25,
-    },
-  },
+    }),
+    Resource.create(),
+    Resource.update(),
+    Resource.remove(),
+    Resource.patch(),
+  ),
 })
 ```
 
 Create `scratch-library/application.ts` to register the resource in one application:
 
 ```ts
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { Books } from "./resource.ts"
 
-export const Library = Application.make({
+export const Library = Application.compile(Application.define({
   name: "library",
-  parts: [Books],
-})
+  parts: [Part.resource(Books)],
+}))
 ```
 
 ## 2. Author and freeze the initial migration
 
-Create `scratch-library/author-initial-migration.ts`. It derives a fresh-table artifact from `Books.table`, encodes it as JSON, validates it as a history, and prints it. It does not open or alter a database.
+Create `scratch-library/author-initial-migration.ts`. It derives a fresh-table artifact from `Resource.table(Books)`, encodes it as JSON, validates it as a history, and prints it. It does not open or alter a database.
 
 ```ts
 import { BunRuntime } from "@effect/platform-bun"
 import { Console, Effect, Schema, pipe } from "effect"
+import { Resource } from "effect-domains/resource"
 import { SqliteMigration, SqliteMigrations } from "effect-domains/sqlite-migrations"
 import { Books } from "./resource.ts"
 
 const initial = SqliteMigrations.initial({
   id: "001_initial",
-  tables: [Books.table],
+  tables: [Resource.table(Books)],
 })
 const codec = Schema.toCodecJson(SqliteMigration)
 
@@ -161,7 +164,7 @@ Before using this pattern for private data, [restrict access](/guides/authorizat
 
 ## Implementation sources
 
-- [`Resource.make`](../../packages/effect-domains/src/resource.ts) compiles the canonical schema into a table, local repository, selected RPC group, create input, list input, and patch contract. It rejects undeclared filters and enforces the configured list maximum.
-- [`Application.make`](../../packages/effect-domains/src/application.ts) flattens resource parts and rejects duplicate table and operation names.
+- [`Resource.define` and `Resource.compile`](../../packages/effect-domains/src/resource.ts) separate declarative capability/creation syntax from table, repository, RPC, and handler derivation.
+- [`Application.define` and `Application.compile`](../../packages/effect-domains/src/application.ts) separate explicit parts from the authoritative `ApplicationIR` consumed by runtimes and adapters.
 - [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index artifact. Import frozen artifacts with `SqliteMigrations.history(...)`.
 - [`ApplicationBun.run`](../../packages/effect-domains/src/application-bun.ts) creates the command Effect that hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.

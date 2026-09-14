@@ -1,8 +1,9 @@
 import { Effect, Equivalence, Option, Schema, pipe } from "effect"
-import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { ExampleRoles } from "@effect-domains/example-support/subject"
-import { Operation } from "effect-domains/operation"
+import { SqlClient, SqlError, SqlSchema } from "effect/unstable/sql"
+import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { Command } from "effect-domains/command"
 import { VersionConflict } from "effect-domains/repository-store"
+import { Resource } from "effect-domains/resource"
 import { Table } from "effect-domains/table"
 import { OrderSummary } from "./contracts.ts"
 
@@ -39,7 +40,7 @@ const OrderSummaryInputSchema = Schema.Struct({
   tenantId: TenantIdSchema,
 })
 
-const OrderProjection = Table.project(OrdersResource.table, [
+const OrderProjection = Table.project(Resource.table(OrdersResource), [
   "id",
   "tenantId",
   "number",
@@ -49,7 +50,7 @@ const OrderProjection = Table.project(OrdersResource.table, [
   "version",
 ])
 
-const OrderLineProjection = Table.project(OrderLinesResource.table, [
+const OrderLineProjection = Table.project(Resource.table(OrderLinesResource), [
   "id",
   "tenantId",
   "orderId",
@@ -59,7 +60,7 @@ const OrderLineProjection = Table.project(OrderLinesResource.table, [
   "unitAmountMinor",
 ])
 
-const InvoiceProjection = Table.project(InvoicesResource.table, [
+const InvoiceProjection = Table.project(Resource.table(InvoicesResource), [
   "id",
   "tenantId",
   "orderId",
@@ -89,27 +90,33 @@ const orderSummaryForTenant = SqlSchema.findOneOption({
         COALESCE((
           SELECT json_group_array(${OrderLineProjection.object(sql, "l")})
           FROM (
-            SELECT * FROM ${sql(OrderLinesResource.table.name)}
+            SELECT * FROM ${sql(Resource.table(OrderLinesResource).name)}
             WHERE ${sql("tenantId")} = o.${sql("tenantId")} AND ${sql("orderId")} = o.${sql("id")}
             ORDER BY ${sql("lineNumber")}
           ) l
         ), '[]') AS ${sql("lines")},
         (
           SELECT ${InvoiceProjection.object(sql, "i")}
-          FROM ${sql(InvoicesResource.table.name)} i
+          FROM ${sql(Resource.table(InvoicesResource).name)} i
           WHERE i.${sql("tenantId")} = o.${sql("tenantId")} AND i.${sql("orderId")} = o.${sql("id")}
           LIMIT 1
         ) AS ${sql("invoice")}
-      FROM ${sql(OrdersResource.table.name)} o
+      FROM ${sql(Resource.table(OrdersResource).name)} o
       WHERE o.${sql("id")} = ${input.orderId} AND o.${sql("tenantId")} = ${input.tenantId}
       LIMIT 1
     `
   }),
-})
+}) as (
+  input: typeof OrderSummaryInputSchema.Type,
+) => Effect.Effect<
+  Option.Option<typeof OrderSummary.Type>,
+  Schema.SchemaError | SqlError.SqlError,
+  SqlClient.SqlClient
+>
 
 const requireOrder = Effect.fn("Billing.requireOrder")(function* (orderId: string) {
   const order = yield* pipe(
-    OrdersResource.repository.get(orderId),
+    Resource.repository(OrdersResource).get(orderId),
     Effect.catchTag("ResourceNotFound", () => OrderNotFound.make({ orderId })),
   )
 
@@ -122,7 +129,7 @@ const requireOrder = Effect.fn("Billing.requireOrder")(function* (orderId: strin
 
 const requireInvoice = Effect.fn("Billing.requireInvoice")(function* (invoiceId: string) {
   return yield* pipe(
-    InvoicesResource.repository.get(invoiceId),
+    Resource.repository(InvoicesResource).get(invoiceId),
     Effect.catchTag("ResourceNotFound", () => InvoiceNotFound.make({ invoiceId })),
   )
 })
@@ -140,114 +147,151 @@ const issueInvoiceErrorSchema = Schema.Union([
 
 const payInvoiceErrorSchema = Schema.Union([InvoiceNotFound, VersionConflict, InvoiceTransitions.Error])
 
-const BillingOperation = Operation
+const BillingCommand = Command
   .family("billing.", BillingUnavailable)
   .authorized(ExampleRoles.editor)
   .transactional()
 
-const createOrder = BillingOperation.make({
+const createOrderSpec = BillingCommand.define({
   name: "createOrder",
   payload: CreateOrderInputSchema,
-  success: OrdersResource.table.rowSchema,
+  success: Resource.table(OrdersResource).rowSchema,
   errors: DuplicateOrderNumber,
-  handler: Effect.fn("Billing.createOrder")(function* (input, subject) {
-    const tenantId = TenantIdSchema.make(subject.tenantId)
-
-    return yield* pipe(
-      OrdersResource.repository.create({
-        tenantId,
-        number: input.number,
-        customer: input.customer,
-        status: "draft",
-        totalMinor: 0,
-      }),
-      Effect.catchTag("UniqueViolation", () => DuplicateOrderNumber.make({ number: input.number })),
-    )
-  }),
+  dependencies: [OrdersResource],
 })
 
-const addLine = BillingOperation.make({
+const createOrder = Command.implement(createOrderSpec, Effect.fn("Billing.createOrder")(function* (
+  input: typeof CreateOrderInputSchema.Type,
+  subject: typeof ExampleSubjectSchema.Type,
+) {
+  const tenantId = TenantIdSchema.make(subject.tenantId)
+
+  return yield* pipe(
+    Resource.repository(OrdersResource).create({
+      tenantId,
+      number: input.number,
+      customer: input.customer,
+      status: "draft",
+      totalMinor: 0,
+    }),
+    Effect.catchTag("UniqueViolation", () => DuplicateOrderNumber.make({ number: input.number })),
+  )
+}))
+
+const addLineSpec = BillingCommand.define({
   name: "addLine",
   payload: AddLineInputSchema,
   success: OrderSummary,
   errors: addLineErrorSchema,
-  handler: Effect.fn("Billing.addLine")(function* (input) {
-    const current = yield* requireOrder(input.orderId)
-
-    if (current.order.status !== "draft") {
-      return yield* OrderNotDraft.make({ orderId: input.orderId, actual: current.order.status })
-    }
-
-    const lineTotal = input.quantity * input.unitAmountMinor
-
-    if (!Number.isSafeInteger(lineTotal)) return yield* TotalOverflow.make({ orderId: input.orderId })
-
-    const totalMinor = current.order.totalMinor + lineTotal
-
-    if (!Number.isSafeInteger(totalMinor)) return yield* TotalOverflow.make({ orderId: input.orderId })
-
-    yield* OrdersResource.repository.patch(input.orderId, { totalMinor }, input.expectedVersion)
-
-    yield* OrderLinesResource.repository.create({
-      tenantId: current.order.tenantId,
-      orderId: input.orderId,
-      lineNumber: input.lineNumber,
-      description: input.description,
-      quantity: input.quantity,
-      unitAmountMinor: input.unitAmountMinor,
-    })
-
-    return yield* requireOrder(input.orderId)
-  }),
+  dependencies: [OrdersResource, OrderLinesResource, InvoicesResource],
 })
 
-const issueInvoice = BillingOperation.make({
+const addLine = Command.implement(addLineSpec, Effect.fn("Billing.addLine")(function* (
+  input: typeof AddLineInputSchema.Type,
+) {
+  const current = yield* requireOrder(input.orderId)
+
+  if (current.order.status !== "draft") {
+    return yield* OrderNotDraft.make({ orderId: input.orderId, actual: current.order.status })
+  }
+
+  const lineTotal = input.quantity * input.unitAmountMinor
+
+  if (!Number.isSafeInteger(lineTotal)) return yield* TotalOverflow.make({ orderId: input.orderId })
+
+  const totalMinor = current.order.totalMinor + lineTotal
+
+  if (!Number.isSafeInteger(totalMinor)) return yield* TotalOverflow.make({ orderId: input.orderId })
+
+  yield* Resource.repository(OrdersResource).patch(input.orderId, { totalMinor }, input.expectedVersion)
+
+  yield* Resource.repository(OrderLinesResource).create({
+    tenantId: current.order.tenantId,
+    orderId: input.orderId,
+    lineNumber: input.lineNumber,
+    description: input.description,
+    quantity: input.quantity,
+    unitAmountMinor: input.unitAmountMinor,
+  })
+
+  return yield* requireOrder(input.orderId)
+}))
+
+const issueInvoiceSpec = BillingCommand.define({
   name: "issueInvoice",
   payload: IssueInvoiceInputSchema,
-  success: InvoicesResource.table.rowSchema,
+  success: Resource.table(InvoicesResource).rowSchema,
   errors: issueInvoiceErrorSchema,
-  handler: Effect.fn("Billing.issueInvoice")(function* (input) {
-    const current = yield* requireOrder(input.orderId)
-
-    if (noLines(current.lines.length, 0)) {
-      return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
-    }
-
-    yield* OrdersResource.repository.transition(input.orderId, "issueInvoice", undefined, input.expectedVersion)
-
-    return yield* pipe(
-      InvoicesResource.repository.create({
-        tenantId: current.order.tenantId,
-        orderId: input.orderId,
-        number: input.number,
-        status: "issued",
-        totalMinor: current.order.totalMinor,
-      }),
-      Effect.catchTag("UniqueViolation", () => DuplicateInvoiceNumber.make({ number: input.number })),
-    )
-  }),
+  dependencies: [OrdersResource, OrderLinesResource, InvoicesResource],
 })
 
-const payInvoice = BillingOperation.make({
+const issueInvoice = Command.implement(issueInvoiceSpec, Effect.fn("Billing.issueInvoice")(function* (
+  input: typeof IssueInvoiceInputSchema.Type,
+) {
+  const current = yield* requireOrder(input.orderId)
+
+  if (noLines(current.lines.length, 0)) {
+    return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
+  }
+
+  yield* Resource.repository(OrdersResource).transition(
+    input.orderId,
+    "issueInvoice",
+    undefined,
+    input.expectedVersion,
+  )
+
+  return yield* pipe(
+    Resource.repository(InvoicesResource).create({
+      tenantId: current.order.tenantId,
+      orderId: input.orderId,
+      number: input.number,
+      status: "issued",
+      totalMinor: current.order.totalMinor,
+    }),
+    Effect.catchTag("UniqueViolation", () => DuplicateInvoiceNumber.make({ number: input.number })),
+  )
+}))
+
+const payInvoiceSpec = BillingCommand.define({
   name: "payInvoice",
   payload: PayInvoiceInputSchema,
-  success: InvoicesResource.table.rowSchema,
+  success: Resource.table(InvoicesResource).rowSchema,
   errors: payInvoiceErrorSchema,
-  handler: Effect.fn("Billing.payInvoice")(function* (input) {
-    yield* requireInvoice(input.invoiceId)
-
-    return yield* InvoicesResource.repository.transition(input.invoiceId, "pay", undefined, input.expectedVersion)
-  }),
+  dependencies: [InvoicesResource],
 })
 
-const getOrder = BillingOperation.make({
+const payInvoice = Command.implement(payInvoiceSpec, Effect.fn("Billing.payInvoice")(function* (
+  input: typeof PayInvoiceInputSchema.Type,
+) {
+  yield* requireInvoice(input.invoiceId)
+
+  return yield* Resource.repository(InvoicesResource).transition(
+    input.invoiceId,
+    "pay",
+    undefined,
+    input.expectedVersion,
+  )
+}))
+
+const getOrderSpec = BillingCommand.define({
   name: "getOrder",
   payload: GetOrderInputSchema,
   success: OrderSummary,
   errors: OrderNotFound,
-  handler: Effect.fn("Billing.getOrder")(function* (input) {
-    return yield* requireOrder(input.orderId)
-  }),
+  dependencies: [OrdersResource, OrderLinesResource, InvoicesResource],
 })
 
-export const BillingOperations = Operation.bundle(createOrder, addLine, issueInvoice, payInvoice, getOrder)
+const getOrder = Command.implement(getOrderSpec, Effect.fn("Billing.getOrder")(function* (
+  input: typeof GetOrderInputSchema.Type,
+) {
+  return yield* requireOrder(input.orderId)
+}))
+
+export const BillingOperations = Command.bundle(
+  createOrder,
+  addLine,
+  issueInvoice,
+  payInvoice,
+  getOrder,
+)

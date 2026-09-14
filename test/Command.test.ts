@@ -5,11 +5,11 @@ import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
 import { Authorization, Forbidden, Unauthenticated } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
 class DeclaredFailure extends Schema.TaggedError<DeclaredFailure>()("DeclaredFailure", {}) {}
-class OperationUnavailable extends Schema.TaggedError<OperationUnavailable>()("OperationUnavailable", {}) {}
+class CommandUnavailable extends Schema.TaggedError<CommandUnavailable>()("CommandUnavailable", {}) {}
 class UnexpectedHandlerFailure extends Schema.TaggedError<UnexpectedHandlerFailure>()("UnexpectedHandlerFailure", {}) {}
 
 const FailurePayloadSchema = Schema.Literals(["declared", "unexpected"])
@@ -21,14 +21,14 @@ const makeFailures = (input: Schema.Schema.Type<typeof FailurePayloadSchema>) =>
   return Effect.die(unexpectedFailure)
 }
 
-const failures = Operation.make({
-  name: "operation.failures",
+const failuresSpec = Command.define({
+  name: "command.failures",
   payload: FailurePayloadSchema,
   success: Schema.String,
   errors: DeclaredFailure,
-  unavailable: OperationUnavailable,
-  handler: makeFailures,
+  unavailable: CommandUnavailable,
 })
+const failures = Command.implement(failuresSpec, makeFailures)
 
 
 const SubjectSchema = Schema.Struct({ userId: Schema.String })
@@ -41,50 +41,53 @@ const alicePredicate = subject.eq(subject.subject.userId, "alice")
 const aliceOnly = subject.policy(alicePredicate)
 const authenticatedUserId = (_input: void, authenticated: Subject) => Effect.succeed(authenticated.userId)
 
-const protectedFamily = Operation
-  .family("family.", OperationUnavailable)
+const protectedFamily = Command
+  .family("family.", CommandUnavailable)
   .authorized(aliceOnly)
 
-const familyMember = protectedFamily.make({
+const familyMemberSpec = protectedFamily.define({
   name: "member",
   success: Schema.String,
-  handler: authenticatedUserId,
 })
+const familyMember = Command.implement(familyMemberSpec, authenticatedUserId)
 
-const protectedOperation = Operation.make({
-  name: "operation.protected",
+const protectedCommandSpec = Command.define({
+  name: "command.protected",
   success: Schema.String,
   policy: aliceOnly,
-  unavailable: OperationUnavailable,
-  handler: authenticatedUserId,
+  unavailable: CommandUnavailable,
 })
+const protectedCommand = Command.implement(protectedCommandSpec, authenticatedUserId)
 
 const forbidden = Forbidden.make({})
 const denyInside = (_input: void, _authenticated: Subject) => Effect.fail(forbidden)
 
 // Nested denials stay Forbidden because the middleware already publishes that failure.
-const deniedInside = Operation.make({
-  name: "operation.deniedInside",
+const deniedInsideSpec = Command.define({
+  name: "command.deniedInside",
   success: Schema.String,
   policy: aliceOnly,
-  unavailable: OperationUnavailable,
-  handler: denyInside,
+  unavailable: CommandUnavailable,
 })
+const deniedInside = Command.implement(deniedInsideSpec, denyInside)
 
-const transactional = Operation.make({
-  name: "operation.transactional",
+const transactionalSpec = Command.define({
+  name: "command.transactional",
   success: Schema.Void,
   errors: DeclaredFailure,
   transaction: true,
-  unavailable: OperationUnavailable,
-  handler: Effect.fn("Operation.test.transactional")(function* () {
+  unavailable: CommandUnavailable,
+})
+const transactional = Command.implement(
+  transactionalSpec,
+  Effect.fn("Command.test.transactional")(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO operation_events (value) VALUES (${"written"})`
     return yield* DeclaredFailure.make({})
   }),
-})
+)
 
-const bundle = Operation.bundle(failures, protectedOperation, familyMember, transactional, deniedInside)
+const bundle = Command.bundle(failures, protectedCommand, familyMember, transactional, deniedInside)
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
 const authenticator = AuthorizationRpc.Authenticator.of({
@@ -105,23 +108,23 @@ const runtime = <A, E, R>(effect: Effect.Effect<A, E, R>) => pipe(
 
 const replacementFailures = Effect.gen(function* () {
   const client = yield* RpcTest.makeClient(bundle.group)
-  const declared = yield* pipe(client["operation.failures"]("declared"), Effect.flip)
+  const declared = yield* pipe(client["command.failures"]("declared"), Effect.flip)
   expect(declared._tag).toBe("DeclaredFailure")
-  const unavailable = yield* pipe(client["operation.failures"]("unexpected"), Effect.flip)
-  expect(unavailable._tag).toBe("OperationUnavailable")
+  const unavailable = yield* pipe(client["command.failures"]("unexpected"), Effect.flip)
+  expect(unavailable._tag).toBe("CommandUnavailable")
 })
 
 it.effect("replaces undeclared handler failures while preserving declared errors", () => runtime(replacementFailures))
 
 const subjectPolicy = Effect.gen(function* () {
   const client = yield* RpcTest.makeClient(bundle.group)
-  const anonymous = yield* pipe(client["operation.protected"](), Effect.flip)
+  const anonymous = yield* pipe(client["command.protected"](), Effect.flip)
   expect(anonymous._tag).toBe("Unauthenticated")
-  const result = yield* client["operation.protected"](undefined, { headers: { authorization: "alice" } })
+  const result = yield* client["command.protected"](undefined, { headers: { authorization: "alice" } })
   const familyResult = yield* client["family.member"](undefined, { headers: { authorization: "alice" } })
   expect(familyResult).toBe("alice")
   expect(result).toBe("alice")
-  const denied = yield* pipe(client["operation.deniedInside"](undefined, { headers: { authorization: "alice" } }), Effect.flip)
+  const denied = yield* pipe(client["command.deniedInside"](undefined, { headers: { authorization: "alice" } }), Effect.flip)
   expect(denied._tag).toBe("Forbidden")
 })
 
@@ -131,7 +134,7 @@ const transactionalRollback = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   yield* sql`CREATE TABLE operation_events (value TEXT NOT NULL)`
   const client = yield* RpcTest.makeClient(bundle.group)
-  const failed = yield* pipe(client["operation.transactional"](), Effect.flip)
+  const failed = yield* pipe(client["command.transactional"](), Effect.flip)
   expect(failed._tag).toBe("DeclaredFailure")
   const rows = yield* sql`SELECT value FROM operation_events`
   expect(rows).toEqual([])

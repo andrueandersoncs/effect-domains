@@ -12,6 +12,7 @@ import {
 } from "@effect-domains/example-web/html"
 import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
@@ -20,8 +21,8 @@ import { QuantitySchema, ReservationSchema, StockSchema } from "../domain.ts"
 import { ReservationResource, StockResource } from "../resources.ts"
 
 const ReservationWebRpcs = InventoryOperations.group
-  .merge(StockResource.group)
-  .merge(ReservationResource.group)
+  .merge(Resource.compile(StockResource).group)
+  .merge(Resource.compile(ReservationResource).group)
 
 export const WebClient = RpcService.make({ name: "reservations/WebClient", group: ReservationWebRpcs })
 export type WebClient = Type<typeof WebClient>

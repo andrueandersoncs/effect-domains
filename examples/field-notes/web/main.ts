@@ -8,6 +8,7 @@ import { dataTable, field, primaryButton, quietButton, shell, textInput, textare
 import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -20,9 +21,9 @@ import { FieldReportsResource } from "../resources.ts"
 
 type SessionClient = Type<typeof Session.Client>
 
-const FieldNotesRpcs = IdentityRpcs.merge(FieldReportsResource.group)
-const ReportSchema = Schema.toType(FieldReportsResource.table.rowSchema)
-const ReportPageSchema = FieldReportsResource.contracts.list.successSchema
+const FieldNotesRpcs = IdentityRpcs.merge(Resource.compile(FieldReportsResource).group)
+const ReportSchema = Schema.toType(Resource.table(FieldReportsResource).rowSchema)
+const ReportPageSchema = Resource.compile(FieldReportsResource).contracts.list.successSchema
 type Report = typeof ReportSchema.Type
 
 export const WebClient = RpcService.make({ name: "field-notes/WebClient", group: FieldNotesRpcs })

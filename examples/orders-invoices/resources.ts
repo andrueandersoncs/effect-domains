@@ -1,7 +1,6 @@
 import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { Table } from "effect-domains/table"
 import { Transitions } from "effect-domains/transitions"
 import { InvoiceSchema, InvoiceStatusSchema, OrderLineSchema, OrderSchema, OrderStatusSchema } from "./domain.ts"
 
@@ -34,16 +33,16 @@ const ordersAuthorization = ordersPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
-export const OrdersResource = Resource.make({
+export const OrdersResource = Resource.define({
   authorization: ordersAuthorization,
   name: "orders",
   schema: OrderSchema,
   version: "version",
   transitions: OrderTransitions,
-  operations: {
-    get: true,
-    list: { filter: ["number", "status"], limit: 100 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["number", "status"], limit: 100 }),
+  ),
   relations: {
     unique: [
       { fields: ["tenantId", "id"] },
@@ -62,16 +61,16 @@ const linesAuthorization = linesPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor },
 })
 
-const OrderIdReference = Table.reference(OrdersResource.table, ["id"])
+const OrderIdReference = Resource.reference(OrdersResource, ["id"])
 
-export const OrderLinesResource = Resource.make({
+export const OrderLinesResource = Resource.define({
   authorization: linesAuthorization,
   name: "order_lines",
   schema: OrderLineSchema,
-  operations: {
-    get: true,
-    list: { filter: ["orderId"], limit: 100 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["orderId"], limit: 100 }),
+  ),
   relations: {
     unique: [
       { fields: ["tenantId", "orderId", "lineNumber"] },
@@ -91,16 +90,16 @@ const invoicesAuthorization = invoicesPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
-export const InvoicesResource = Resource.make({
+export const InvoicesResource = Resource.define({
   authorization: invoicesAuthorization,
   name: "invoices",
   schema: InvoiceSchema,
   version: "version",
   transitions: InvoiceTransitions,
-  operations: {
-    get: true,
-    list: { filter: ["orderId", "number", "status"], limit: 100 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["orderId", "number", "status"], limit: 100 }),
+  ),
   relations: {
     unique: [
       { fields: ["tenantId", "id"] },

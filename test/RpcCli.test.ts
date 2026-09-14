@@ -40,6 +40,7 @@ const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields
       import { Command } from "effect/unstable/cli"
       import { FetchHttpClient } from "effect/unstable/http"
       import { Rpc, RpcClient, RpcGroup, RpcSerialization } from "effect/unstable/rpc"
+      import { Application, Part } from "effect-domains/application"
       import { RpcCli } from "effect-domains/rpc-cli"
       let observed
       const payload = Schema.Struct({
@@ -49,11 +50,15 @@ const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields
         return false
       }))
       const group = RpcGroup.make(Rpc.make("probe", { payload, success: Schema.Void }))
+      const application = Application.compile(Application.define({
+        name: "probe-cli",
+        parts: [Part.native({ group, handlers: Layer.empty })],
+      }))
       const protocol = RpcClient.layerProtocolHttp({ url: "http://127.0.0.1:1" }).pipe(
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(RpcSerialization.layerJson),
       )
-      const cli = RpcCli.make({ name: "probe-cli", group, protocol, subcommands: [] })
+      const cli = RpcCli.make({ application, protocol, subcommands: [] })
       await Effect.runPromise(Effect.gen(function* () {
         yield* Effect.exit(Command.runWith(cli, { version: "test", renderErrors: false })([
           "probe", "--input-json", '{"__proto__":{"effectDomainsProbe":"sentinel"}}',
@@ -92,6 +97,7 @@ it.effect(
       import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
       import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
       import { RpcCli } from "effect-domains/rpc-cli"
+      import { Application, Part } from "effect-domains/application"
       const observed = { pingPayloadIsVoid: false, emptyPayloadIsEmpty: false }
       const ping = Rpc.make("ping")
       const empty = Rpc.make("empty", { payload: Schema.Struct({}), success: Schema.Void })
@@ -100,6 +106,10 @@ it.effect(
         ping: (payload) => Effect.sync(() => { observed.pingPayloadIsVoid = payload === undefined }),
         empty: (payload) => Effect.sync(() => { observed.emptyPayloadIsEmpty = Object.keys(payload).length === 0 }),
       })
+      const application = Application.compile(Application.define({
+        name: "probe-cli",
+        parts: [Part.native({ group, handlers })],
+      }))
       const routes = RpcServer.layerHttp({ group, path: "/rpc", protocol: "http" }).pipe(
         Layer.provide(handlers),
         Layer.provide(RpcSerialization.layerJson),
@@ -110,7 +120,7 @@ it.effect(
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(RpcSerialization.layerJson),
       )
-      const cli = RpcCli.make({ name: "probe-cli", group, protocol, subcommands: [] })
+      const cli = RpcCli.make({ application, protocol, subcommands: [] })
       try {
         await Effect.runPromise(Effect.gen(function* () {
           const run = Command.runWith(cli, { version: "test", renderErrors: false })
@@ -205,6 +215,7 @@ it.effect(
       import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
       import { RpcCli } from "effect-domains/rpc-cli"
       class Endpoint extends Context.Service()("test/Endpoint") {}
+      import { Application, Part } from "effect-domains/application"
       class Prefix extends Context.Service()("test/Prefix") {}
       const text = Schema.String.pipe(Schema.decodeTo(Schema.String, {
         decode: SchemaGetter.transformOrFail(Effect.fn(function* (value) {
@@ -244,6 +255,10 @@ it.effect(
         reject: (amount) => Effect.fail({ _tag: "Rejected", amount }),
         scalar: Effect.succeed,
       })
+      const application = Application.compile(Application.define({
+        name: "probe-cli",
+        parts: [Part.native({ group, handlers })],
+      }))
       const routes = RpcServer.layerHttp({ group, path: "/rpc", protocol: "http" }).pipe(
         Layer.provide(handlers),
         Layer.provide(RpcSerialization.layerJson),
@@ -258,7 +273,7 @@ it.effect(
           Layer.provide(RpcSerialization.layerJson),
         )
       }))
-      const cli = RpcCli.make({ name: "probe-cli", group, protocol, subcommands: [] })
+      const cli = RpcCli.make({ application, protocol, subcommands: [] })
       const input = {
         inputJson: "wire:canonical", help: "ordinary field", fooBar: "camel", foo_bar: "snake",
         amount: "42", when: "2026-01-02T03:04:05.000Z",

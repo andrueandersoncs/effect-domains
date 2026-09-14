@@ -17,15 +17,17 @@ import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { BookFormatSchema, RatingSchema, ReadingListBookSchema, ReadingStatusSchema } from "../domain.ts"
 import { ReadingListResource } from "../resources.ts"
 
-const BookRowSchema = ReadingListResource.table.rowSchema
-const BookPageSchema = ReadingListResource.contracts.list.successSchema
-export const WebClient = RpcService.make({ name: "reading-list/WebClient", group: ReadingListResource.group })
+const ReadingListRuntime = Resource.compile(ReadingListResource)
+const BookRowSchema = ReadingListRuntime.table.rowSchema
+const BookPageSchema = ReadingListRuntime.contracts.list.successSchema
+export const WebClient = RpcService.make({ name: "reading-list/WebClient", group: ReadingListRuntime.group })
 export type WebClient = Type<typeof WebClient>
 
 const statuses = ["planned", "reading", "finished"] as const

@@ -2,9 +2,10 @@ import { BunRuntime } from "@effect/platform-bun"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { Config, Console, Effect, Schema, pipe } from "effect"
+import { Resource } from "effect-domains/resource"
 import { AssetsResource } from "./resources.ts"
 
-const CreatedAssetSchema = Schema.Struct({ result: AssetsResource.table.rowSchema })
+const CreatedAssetSchema = Schema.Struct({ result: Resource.table(AssetsResource).rowSchema })
 interface CreatedAsset extends Schema.Schema.Type<typeof CreatedAssetSchema> {}
 
 class WalkthroughError extends Schema.TaggedError<WalkthroughError>()("WalkthroughError", { message: Schema.String }) {}

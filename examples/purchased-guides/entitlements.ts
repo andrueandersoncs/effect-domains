@@ -1,6 +1,7 @@
 import { Effect, Equivalence, Record, Schema, pipe } from "effect"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { Entitlements } from "effect-domains/entitlements"
+import { Resource } from "effect-domains/resource"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { GuideIdSchema, GuidePurchaseSchema } from "./domain.ts"
 import { GuidePurchasesResource, GuidesResource } from "./resources.ts"
@@ -15,7 +16,7 @@ const entitlementGrant = (purchase: Schema.Schema.Type<typeof GuidePurchaseSchem
 
 const purchasedGuideEntitlement = new Entitlements.Source({
   name: "guides.read",
-  table: GuidePurchasesResource.table,
+  table: Resource.table(GuidePurchasesResource),
   subject: ExampleSubjectSchema,
   key: "guideId",
   where: entitlementWhere,
@@ -45,7 +46,7 @@ const otherTenantId = GuideIdSchema.make("guide-other-tenant")
 // Insert once because restart must preserve refunds and revoked purchase grants.
 export const seedPurchasedGuides = () => pipe(
   Effect.gen(function* () {
-    yield* GuidesResource.repository.ensure({
+    yield* Resource.repository(GuidesResource).ensure({
       id: sqlBasicsId,
       tenantId: "acme",
       title: "SQL field guide",
@@ -53,7 +54,7 @@ export const seedPurchasedGuides = () => pipe(
       body: "Use named columns, constrain tenant visibility, and keep purchase grants separate from report roles.",
     })
 
-    yield* GuidesResource.repository.ensure({
+    yield* Resource.repository(GuidesResource).ensure({
       id: auditTrailsId,
       tenantId: "acme",
       title: "Audit trail guide",
@@ -62,7 +63,7 @@ export const seedPurchasedGuides = () => pipe(
     })
 
     yield* pipe(
-      GuidesResource.repository.ensure({
+      Resource.repository(GuidesResource).ensure({
         id: otherTenantId,
         tenantId: "other",
         title: "Other tenant guide",
@@ -72,7 +73,7 @@ export const seedPurchasedGuides = () => pipe(
       Effect.provideService(AuthorizationSubject, otherAdministrator),
     )
 
-    yield* GuidePurchasesResource.repository.ensure({
+    yield* Resource.repository(GuidePurchasesResource).ensure({
       id: "purchase-bob-sql-basics",
       tenantId: "acme",
       userId: "bob",

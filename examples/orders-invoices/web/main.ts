@@ -6,6 +6,7 @@ import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, shell, textInput } from "@effect-domains/example-web/html"
 import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -28,7 +29,7 @@ import { BillingOperations } from "../sqlite.ts"
 type SessionClient = Type<typeof Session.Client>
 
 const BillingBrowserRpcs = IdentityRpcs.merge(BillingOperations.group)
-const OrderSchema = OrdersResource.table.rowSchema
+const OrderSchema = Resource.table(OrdersResource).rowSchema
 
 export const WebClient = RpcService.make({ name: "orders-invoices/WebClient", group: BillingBrowserRpcs })
 export type WebClient = Type<typeof WebClient>

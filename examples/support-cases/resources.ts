@@ -1,6 +1,5 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { Table } from "effect-domains/table"
 
 import {
   SupportAgentSchema,
@@ -10,43 +9,46 @@ import {
   SupportCustomerSchema,
 } from "./domain.ts"
 
-export const SupportCustomersResource = Resource.make({
+export const SupportCustomersResource = Resource.define({
   name: "support_customers",
   schema: SupportCustomerSchema,
   authorization: Authorization.public,
-  operations: { ...Resource.crud, patch: true },
+  capabilities: Resource.capabilities(...Resource.crud(), Resource.patch()),
 })
 
-export const SupportAgentsResource = Resource.make({
+export const SupportAgentsResource = Resource.define({
   name: "support_agents",
   schema: SupportAgentSchema,
   authorization: Authorization.public,
-  operations: { ...Resource.crud, patch: true },
+  capabilities: Resource.capabilities(...Resource.crud(), Resource.patch()),
 })
 
-const CustomerIdReference = Table.reference(SupportCustomersResource.table, ["id"])
-const AgentIdReference = Table.reference(SupportAgentsResource.table, ["id"])
+const CustomerIdReference = Resource.reference(SupportCustomersResource, ["id"])
+const AgentIdReference = Resource.reference(SupportAgentsResource, ["id"])
 
-export const SupportCasesResource = Resource.make({
+export const SupportCasesResource = Resource.define({
   name: "support_cases",
   schema: SupportCaseSchema,
   authorization: Authorization.public,
   version: "version",
   transitions: SupportCaseTransitions,
-  operations: {
-    get: true,
-    list: {
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({
       filter: ["customerId", "priority", "status", "assignedAgentId"],
       range: ["openedAt"],
       order: [["openedAt", "desc"]],
       limit: 50,
-    },
-    create: {
-      defaults: { priority: "normal", status: "open" },
-      generated: { openedAt: "now" },
+    }),
+    Resource.create({
+      sources: {
+        priority: Resource.default("normal"),
+        status: Resource.default("open"),
+        openedAt: Resource.generated("now"),
+      },
       publish: false,
-    },
-  },
+    }),
+  ),
   relations: {
     foreignKeys: [
       { fields: ["customerId"], references: CustomerIdReference },
@@ -61,25 +63,25 @@ export const SupportCasesResource = Resource.make({
   },
 })
 
-const CaseIdReference = Table.reference(SupportCasesResource.table, ["id"])
+const CaseIdReference = Resource.reference(SupportCasesResource, ["id"])
 
-export const SupportCaseEventsResource = Resource.make({
+export const SupportCaseEventsResource = Resource.define({
   name: "support_case_events",
   schema: SupportCaseEventSchema,
   authorization: Authorization.public,
-  operations: {
-    get: true,
-    list: {
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({
       filter: ["caseId", "kind", "agentId"],
       range: ["occurredAt"],
       order: [["occurredAt", "asc"]],
       limit: 100,
-    },
-    create: {
-      generated: { occurredAt: "now" },
+    }),
+    Resource.create({
+      sources: { occurredAt: Resource.generated("now") },
       publish: false,
-    },
-  },
+    }),
+  ),
   relations: {
     foreignKeys: [
       { fields: ["caseId"], references: CaseIdReference },

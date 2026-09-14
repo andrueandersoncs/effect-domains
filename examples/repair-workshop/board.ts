@@ -1,9 +1,9 @@
 import { Schema } from "effect"
-import { SqliteView } from "effect-domains/sqlite-view"
+import { ReadModel } from "effect-domains/read-model"
 import { CustomersResource, RepairJobsResource, TechniciansResource } from "./resources.ts"
 
-export const RepairBoard = SqliteView.make({
-  tables: { job: RepairJobsResource.table, customer: CustomersResource.table, technician: TechniciansResource.table },
+export const RepairBoard = ReadModel.define({
+  tables: ReadModel.sources({ job: RepairJobsResource, customer: CustomersResource, technician: TechniciansResource }),
   from: "job",
   joins: [
     { kind: "inner", table: "customer", on: [{ left: ["job", "customerId"], right: ["customer", "id"] }] },
@@ -23,11 +23,13 @@ export const RepairBoard = SqliteView.make({
   },
 })
 
-export const RepairBoardList = SqliteView.list({
-  view: RepairBoard,
+export const RepairBoardList = ReadModel.page({
+  model: RepairBoard,
   filter: ["status"],
   order: [["urgent", "desc"], ["id", "asc"]],
   limit: 50,
 })
+export const RepairBoardPage = ReadModel.compilePage(RepairBoardList)
 
-export const RepairBoardRowSchema = Schema.toType(RepairBoard.schema)
+
+export const RepairBoardRowSchema = Schema.toType(ReadModel.compile(RepairBoard).schema)

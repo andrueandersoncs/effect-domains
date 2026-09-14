@@ -7,6 +7,7 @@ import { dataTable, field, primaryButton, quietButton, selectInput, shell } from
 import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { identitySessionView } from "@effect-domains/example-web/session"
@@ -19,9 +20,9 @@ import { GuidesResource } from "../resources.ts"
 
 type SessionClient = Type<typeof Session.Client>
 
-const PurchasedGuidesRpcs = IdentityRpcs.merge(GuidesResource.group)
-const GuideSchema = GuidesResource.table.rowSchema
-const GuidePageSchema = GuidesResource.contracts.list.successSchema
+const PurchasedGuidesRpcs = IdentityRpcs.merge(Resource.compile(GuidesResource).group)
+const GuideSchema = Resource.table(GuidesResource).rowSchema
+const GuidePageSchema = Resource.compile(GuidesResource).contracts.list.successSchema
 type Guide = typeof GuideSchema.Type
 
 export const WebClient = RpcService.make({ name: "purchased-guides/WebClient", group: PurchasedGuidesRpcs })

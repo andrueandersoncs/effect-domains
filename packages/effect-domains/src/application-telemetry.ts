@@ -1,5 +1,6 @@
 import { Config, ConfigProvider, Duration, Effect, Layer, Option, Predicate, Record, Schema, flow, pipe } from "effect"
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
+import type { ApplicationIR } from "./application.ts"
 
 export type TelemetryOptions = Readonly<Omit<Parameters<typeof OtlpTracer.layer>[0], "url" | "context"> & Partial<{
   /** Full traces endpoint; unlike OTEL_EXPORTER_OTLP_ENDPOINT, no path is appended. */
@@ -19,7 +20,7 @@ const milliseconds = (duration: Option.Option<Duration.Input>) => pipe(
   Option.getOrUndefined,
 )
 
-const layer = (application: Readonly<{ name: string }>, options: false | TelemetryOptions = {}) => pipe(
+const layer = (application: ApplicationIR, options: false | TelemetryOptions = {}) => pipe(
   Effect.gen(function* () {
     if (Predicate.isBoolean(options)) return yield* Effect.succeed(Layer.empty)
     const current = yield* ConfigProvider.ConfigProvider

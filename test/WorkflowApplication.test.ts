@@ -5,7 +5,7 @@ import { RpcMiddleware, RpcTest } from "effect/unstable/rpc"
 import { Headers } from "effect/unstable/http"
 import { TestClock } from "effect/testing"
 import { Workflow, WorkflowEngine, WorkflowProxy, WorkflowProxyServer } from "effect/unstable/workflow"
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
 
 class OperatorRequired extends Schema.TaggedError<OperatorRequired>()("OperatorRequired", {}) {}
@@ -32,15 +32,15 @@ const prefix = { prefix: "workflow." } as const
 const group = WorkflowProxy.toRpcGroup(workflows, prefix).middleware(Operator)
 const proxyHandlers = WorkflowProxyServer.layerRpcHandlers(workflows, prefix)
 
-const workflowModule = Application.make({
+const workflowModule = Application.define({
   name: "exports",
-  parts: [{ group, handlers: proxyHandlers }],
+  parts: [Part.native({ group, handlers: proxyHandlers })],
 })
 
-const application = Application.make({
+const application = Application.compile(Application.define({
   name: "workflow-authorization",
-  parts: [workflowModule],
-})
+  parts: [Part.application(workflowModule)],
+}))
 
 it.effect("authorizes native workflow submissions and recovery before invoking the engine", Effect.fn("WorkflowApplication.test")(function* () {
   const executions = yield* Ref.make(0)

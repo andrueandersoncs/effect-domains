@@ -15,10 +15,11 @@ import {
   textareaInput,
 } from "@effect-domains/example-web/html"
 import { BrowserModel } from "effect-domains/browser-model"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
-import { SupportCaseBoardList, SupportCaseBoardRowSchema } from "../board.ts"
+import { SupportCaseBoardList, SupportCaseBoardPage, SupportCaseBoardRowSchema } from "../board.ts"
 import { SupportCaseDetail } from "../contracts.ts"
 import {
   SupportAgentSchema,
@@ -36,18 +37,18 @@ import {
 import { SupportCaseOperations } from "../sqlite.ts"
 
 const SupportCasesWebRpcs = RpcGroup.make().merge(
-  SupportCustomersResource.group,
-  SupportAgentsResource.group,
-  SupportCasesResource.group,
+  Resource.compile(SupportCustomersResource).group,
+  Resource.compile(SupportAgentsResource).group,
+  Resource.compile(SupportCasesResource).group,
   SupportCaseOperations.group,
 )
 
 export const WebClient = RpcService.make({ name: "support-cases/WebClient", group: SupportCasesWebRpcs })
 export type WebClient = Type<typeof WebClient>
 
-const CustomerRowSchema = SupportCustomersResource.table.rowSchema
-const AgentRowSchema = SupportAgentsResource.table.rowSchema
-const CaseRowSchema = SupportCasesResource.table.rowSchema
+const CustomerRowSchema = Resource.table(SupportCustomersResource).rowSchema
+const AgentRowSchema = Resource.table(SupportAgentsResource).rowSchema
+const CaseRowSchema = Resource.table(SupportCasesResource).rowSchema
 const statuses = ["open", "triaged", "assigned", "resolved"] as const
 const priorities = ["low", "normal", "high", "urgent"] as const
 const actions = ["triage", "assign", "resolve", "reopen"] as const
@@ -101,7 +102,7 @@ export const Message = defineMessageUnion({
   ClickedAdvanceCase: {},
   SucceededCustomers: { customers: Schema.Array(CustomerRowSchema), request: RequestTokenSchema },
   SucceededAgents: { agents: Schema.Array(AgentRowSchema), request: RequestTokenSchema },
-  SucceededBoard: { page: SupportCaseBoardList.success, request: RequestTokenSchema },
+  SucceededBoard: { page: SupportCaseBoardPage.success, request: RequestTokenSchema },
   SucceededDetail: { detail: SupportCaseDetail, request: RequestTokenSchema },
   SucceededCustomer: { customer: CustomerRowSchema, request: RequestTokenSchema },
   SucceededAgent: { agent: AgentRowSchema, request: RequestTokenSchema },

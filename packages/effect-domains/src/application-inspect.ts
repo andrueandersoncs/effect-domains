@@ -1,23 +1,15 @@
-import { Array, Context, Effect, Equivalence, flow, Function, Option, Record, Schema, Struct, pipe } from "effect"
-import { Table, TableSnapshot } from "./table.ts"
-import type { Resource } from "./resource.ts"
-import { Policy } from "./policy.ts"
-import { CreationInspectionSchema } from "./resource-creation.ts"
-import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
+import { Array, Context, Effect, Equivalence, flow, Function, Match, Option, Record, Schema, Struct, pipe } from "effect"
+import type { ApplicationIR } from "./application.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
-import { SqliteViewDescriptionSchema } from "./sqlite-view.ts"
-import { OperationDependencies } from "./operation.ts"
+import { Command, type CommandLive } from "./command.ts"
+import { CreationInspectionSchema } from "./resource-creation.ts"
+import { Policy } from "./policy.ts"
+import { ReadModel, ReadModelDescriptionSchema } from "./read-model.ts"
+import type { Resource } from "./resource.ts"
+import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
+import { Table, TableSnapshot } from "./table.ts"
 
-type InspectableApplication = Readonly<{
-  name: string
-  resources: ReadonlyArray<Resource>
-  group: Readonly<{
-    requests: Readonly<{
-      values: () => Iterable<RpcProcedure>
-    }>
-  }>
-}>
 
 const schemaDocument = flow(Schema.toCodecJson, Schema.toJsonSchemaDocument)
 const PhysicalTableJsonSchema = Schema.toCodecJson(TableSnapshot)
@@ -59,7 +51,7 @@ const OperationInspectionSchema = Schema.Struct({
   output: Schema.Unknown,
   error: Schema.Unknown,
   subjectPolicy: Schema.optionalKey(SubjectPolicyInspectionSchema),
-  views: Schema.optionalKey(Schema.Array(SqliteViewDescriptionSchema)),
+  views: Schema.optionalKey(Schema.Array(ReadModelDescriptionSchema)),
 })
 
 interface OperationInspection extends Schema.Schema.Type<typeof OperationInspectionSchema> {}
@@ -130,7 +122,10 @@ const inspectSubjectPolicy = (policy: SubjectPolicy) => {
   return SubjectPolicyInspectionSchema.make({ subject, rule, require: policy.require })
 }
 
-const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (procedure: RpcProcedure) {
+const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (
+  procedure: RpcProcedure,
+  command: Option.Option<CommandLive>,
+) {
   const compiled = compileUnaryRpc(procedure)
 
   const contract = yield* Effect.fromOption(
@@ -141,12 +136,23 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
   const input = schemaDocument(contract.payloadSchema)
   const output = schemaDocument(contract.successSchema)
   const error = schemaDocument(contract.errorSchema)
-  const policy = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
+  const nativePolicy = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
+  const declaredPolicy = pipe(command, Option.flatMap(({ spec }) => Option.fromNullishOr(spec.policy)))
+  const policy = Option.orElse(declaredPolicy, Function.constant(nativePolicy))
   const subjectPolicy = Option.map(policy, inspectSubjectPolicy)
 
+  const description = pipe(
+    Match.type<ReturnType<typeof Command.dependencies>["readModels"][number]>(),
+    Match.tagsExhaustive({
+      ReadModelSpec: ReadModel.describe,
+      CompiledReadModel: (model) => model.description,
+    }),
+  )
+
   const views = pipe(
-    Context.getOption(procedure.annotations, OperationDependencies),
-    Option.map(flow(Struct.get("views"), Array.map(Struct.get("description")))),
+    command,
+    Option.map(({ spec }) => Command.dependencies(spec.dependencies ?? [])),
+    Option.map(({ readModels }) => Array.map(readModels, description)),
   )
 
   return OperationInspectionSchema.make({
@@ -156,15 +162,31 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (pr
   })
 })
 
-const operation = flow(inspectOperation, Effect.runSync)
+const operation = (commands: Readonly<Record<string, CommandLive>>) =>
+  (procedure: RpcProcedure) => {
+    const command = Record.get(commands, procedure._tag)
+    return pipe(inspectOperation(procedure, command), Effect.runSync)
+  }
+
 const sameName = Equivalence.strictEqual<string>()
 
-const describe = <App extends InspectableApplication>(
-  application: App,
+const describe = (
+  application: ApplicationIR,
   selected: Option.Option<string> = Option.none(),
   localCommands: ReadonlyArray<string> = ["serve", "inspect"],
 ) => {
-  const operations = pipe(application.group.requests.values(), Array.fromIterable, Array.map(operation))
+  const commandEntries = Array.map(
+    application.commands,
+    (command) => [command.spec.name, command] as const,
+  )
+
+  const commandIndex = Record.fromEntries(commandEntries)
+
+  const operations = pipe(
+    application.group.requests.values(),
+    Array.fromIterable,
+    Array.map(operation(commandIndex)),
+  )
 
   const matchingOperations = Option.match(selected, {
     onNone: Function.constant(operations),

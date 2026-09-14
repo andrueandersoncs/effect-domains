@@ -1,8 +1,8 @@
-import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Match, Option, Predicate, Record, Schema, SchemaAST, Struct, Tuple, flow, pipe } from "effect"
+import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Match, Option, Predicate, Record, Schema, SchemaAST, Struct, flow, pipe } from "effect"
 import { type StructSchema } from "./domain.ts"
 import { OperandSchema, Policy, PolicyEnvironment, resolveScalarOperand, type Operand, type Policy as PolicySyntax, type PolicyF, PolicyEvaluationError, type Scalar } from "./policy.ts"
 import type { Table } from "./table.ts"
-import { ScalarSchema, ownValue, scalarChecks, type ScalarF } from "./schema-algebra.ts"
+import { FieldIR, SchemaField, type FieldCategory } from "./schema-field.ts"
 import { Entitlements, EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 
 export class AuthorizationSubject extends Context.Service<AuthorizationSubject, Readonly<Record<string, unknown>>>()("@effect-domains/AuthorizationSubject") {}
@@ -42,15 +42,7 @@ const isStruct = (value: unknown): value is StructSchema => Schema.isSchema(valu
 
 const PublicAuthorizationSchema = Schema.TaggedStruct("Public", {})
 const DenyAuthorizationSchema = Schema.TaggedStruct("Deny", {})
-type ScalarCategory = "string" | "number" | "boolean"
-
-class FieldDescription extends Data.Class<{
-  readonly category: Option.Option<ScalarCategory>
-  readonly nullable: boolean
-  readonly collection: boolean
-}> {}
-
-type FieldDescriptions = Readonly<Record<string, Option.Option<FieldDescription>>>
+type FieldDescriptions = Readonly<Record<string, Option.Option<FieldIR>>>
 
 class PolicyFields extends Data.Class<{
   readonly resource: FieldDescriptions
@@ -263,92 +255,11 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
   return { subject: policyFields<Subject, "SubjectField", "subject">(subject, "SubjectField"), eq, includes: membership, all, any, literal: literalOperand, entitlement, policy }
 }
 
-const finiteNumber = (ast: SchemaAST.Number) => pipe(scalarChecks(ast), Array.some((check) => {
-  const id = ownValue(check.annotations?.representation, "id")
-  return equals(id, "effect/schema/isFinite") || equals(id, "effect/schema/isInt")
-}))
-
-const describe = (category: Option.Option<ScalarCategory>, nullable = false, collection = false) =>
-  new FieldDescription({ category, nullable, collection })
-
-const emptyCategory = Option.none<ScalarCategory>()
-const neutralDescription = describe(emptyCategory)
-const nullDescription = describe(emptyCategory, true)
-const optionalNull = Option.some(nullDescription)
-const optionalString = pipe(Option.some<ScalarCategory>("string"), describe, Option.some)
-const optionalNumber = pipe(Option.some<ScalarCategory>("number"), describe, Option.some)
-const optionalBoolean = pipe(Option.some<ScalarCategory>("boolean"), describe, Option.some)
-
-const scalarLiteral = (value: unknown) => pipe(
-  Match.value(value),
-  Match.when(Predicate.isNull, Function.constant(optionalNull)),
-  Match.when(Predicate.isString, Function.constant(optionalString)),
-  Match.when(Predicate.isBoolean, Function.constant(optionalBoolean)),
-  Match.when(Schema.is(Schema.Finite), Function.constant(optionalNumber)),
-  Match.orElse(Option.none<FieldDescription>),
-)
-
-const asCollection = (description: FieldDescription) => new FieldDescription({ ...description, collection: true })
-
-const scalarAlgebra = (layer: ScalarF<Option.Option<FieldDescription>>): Option.Option<FieldDescription> => {
-  const classifyNumber = (number: SchemaAST.Number) => finiteNumber(number) ? optionalNumber : Option.none<FieldDescription>()
-
-  const leaf = (ast: SchemaAST.AST) => pipe(
-    Match.value(ast),
-    Match.tag("String", "TemplateLiteral", Function.constant(optionalString)),
-    Match.tag("Number", classifyNumber),
-    Match.tag("Boolean", Function.constant(optionalBoolean)),
-    Match.tag("Null", Function.constant(optionalNull)),
-    Match.tag("Literal", flow(Struct.get<SchemaAST.Literal, "literal">("literal"), scalarLiteral)),
-    Match.tag("Enum", flow(Struct.get<SchemaAST.Enum, "enums">("enums"), Array.map(flow(Tuple.get<readonly [string, string | number], 1>(1), scalarLiteral)), combineDescriptions)),
-    Match.orElse(Option.none<FieldDescription>),
-  )
-
-  return pipe(Match.value(layer), Match.tagsExhaustive({
-    Leaf: ({ ast }) => leaf(ast),
-    Unsupported: Option.none<FieldDescription>,
-    Encoding: Option.none<FieldDescription>,
-    Suspend: ({ value }) => value,
-    Union: ({ members }) => combineDescriptions(members),
-    Collection: ({ value }) => pipe(value, Option.filter(Predicate.not(Struct.get("collection"))), Option.map(asCollection)),
-  }))
-}
-
-const scalarDescription = ScalarSchema.fold("canonical", scalarAlgebra)
-
-const combineDescriptions = (descriptions: ReadonlyArray<Option.Option<FieldDescription>>) => {
-  const merge = (left: FieldDescription, right: FieldDescription) => {
-    const scalar = !right.collection
-    const compatible = sameCategory(left.category, right.category)
-    const valid = scalar && compatible
-    if (!valid) return Option.none<FieldDescription>()
-    const category = Option.orElse(left.category, Function.constant(right.category))
-    const nullable = left.nullable || right.nullable
-    return pipe(describe(category, nullable), Option.some)
-  }
-
-  const reduce = (state: Option.Option<FieldDescription>, next: Option.Option<FieldDescription>) => pipe(
-    Option.all([state, next] as const),
-    Option.flatMap(Function.tupled(merge)),
-  )
-
-  const initial = Option.some(neutralDescription)
-  return Array.reduce(descriptions, initial, reduce)
-}
-
-const fieldDescription = (schema: Schema.Constraint) => {
-  const ast = SchemaAST.toType(schema.ast)
-  return SchemaAST.isOptional(ast) ? Option.none() : scalarDescription(ast)
-}
-
-const literalDescription = (value: Scalar | ReadonlyArray<Scalar>) => Array.isArray(value)
-  ? pipe(value, Array.map(scalarLiteral), combineDescriptions, Option.map(asCollection))
-  : scalarLiteral(value)
-
-const describeFields = (schema: StructSchema): FieldDescriptions => Record.map(schema.fields, fieldDescription)
+const describeFields = (schema: StructSchema): FieldDescriptions =>
+  Record.map(schema.fields, SchemaField.compile)
 const fieldFor = (fields: FieldDescriptions, field: string) => pipe(Record.get(fields, field), Option.flatten)
 
-const sameCategory = (left: Option.Option<ScalarCategory>, right: Option.Option<ScalarCategory>) => {
+const sameFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) => {
   const unrestricted = Option.isNone(left) || Option.isNone(right)
   const same = Option.makeEquivalence(equals)(left, right)
   return unrestricted || same
@@ -375,7 +286,7 @@ const describeReference = (operand: Exclude<Operand, { readonly _tag: "Literal" 
 
 const describeOperand = (operand: Operand, fields: PolicyFields, allowed: HashSet.HashSet<PolicyPhase>) => pipe(
   Match.value(operand),
-  Match.tag("Literal", flow(Struct.get<Extract<Operand, { readonly _tag: "Literal" }>, "value">("value"), literalDescription, Option.match({
+  Match.tag("Literal", flow(Struct.get<Extract<Operand, { readonly _tag: "Literal" }>, "value">("value"), SchemaField.describeValue, Option.match({
     onNone: () => failure("policy literal must contain only finite scalar values"),
     onSome: Effect.succeed,
   }))),
@@ -396,7 +307,7 @@ const checkPair = Effect.fn("Authorization.checkPair")(function* (
   const collectionShape = equals(leftDescription.collection, inclusion)
   const validShape = collectionShape && scalarValue
   if (!validShape) return yield* failure(inclusion ? `${label} includes requires a scalar collection and scalar value` : `${label} equality operands must be scalar`)
-  if (!sameCategory(leftDescription.category, rightDescription.category)) return yield* failure(`${label} ${inclusion ? "includes" : "equality"} operands must have the same scalar type`)
+  if (!sameFieldCategory(leftDescription.category, rightDescription.category)) return yield* failure(`${label} ${inclusion ? "includes" : "equality"} operands must have the same scalar type`)
 })
 
 const checkPolicy = (policy: PolicySyntax, fields: PolicyFields, allowed: HashSet.HashSet<PolicyPhase>, label: string) => {
@@ -724,8 +635,8 @@ const compiledPolicy = Effect.fn("Authorization.compiledPolicy")(function* (auth
   return registered.runtime
 })
 
-const subjectBindingCompatible = (destination: FieldDescription, source: FieldDescription) => {
-  const category = sameCategory(destination.category, source.category)
+const subjectBindingCompatible = (destination: FieldIR, source: FieldIR) => {
+  const category = sameFieldCategory(destination.category, source.category)
   const collection = equals(destination.collection, source.collection)
   const required = !source.nullable
   const nullable = destination.nullable || required
@@ -778,7 +689,7 @@ const CompatibleSqlScalarSchema = Schema.Union([
 
 const isCompatibleSqlScalar = Schema.is(CompatibleSqlScalarSchema)
 
-const storageCompatible = (description: FieldDescription, field: Table["fields"][number]) => {
+const storageCompatible = (description: FieldIR, field: Table["fields"][number]) => {
   const nullable = equals(description.nullable, field.nullable)
   const category = Option.getOrNull(description.category)
   return nullable && isCompatibleSqlScalar([category, field.scalar])

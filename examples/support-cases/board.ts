@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { SqliteView } from "effect-domains/sqlite-view"
+import { ReadModel } from "effect-domains/read-model"
 
 import {
   SupportAgentsResource,
@@ -7,12 +7,12 @@ import {
   SupportCustomersResource,
 } from "./resources.ts"
 
-export const SupportCaseBoard = SqliteView.make({
-  tables: {
-    supportCase: SupportCasesResource.table,
-    customer: SupportCustomersResource.table,
-    agent: SupportAgentsResource.table,
-  },
+export const SupportCaseBoard = ReadModel.define({
+  tables: ReadModel.sources({
+    supportCase: SupportCasesResource,
+    customer: SupportCustomersResource,
+    agent: SupportAgentsResource,
+  }),
   from: "supportCase",
   joins: [
     {
@@ -41,12 +41,13 @@ export const SupportCaseBoard = SqliteView.make({
   },
 })
 
-export const SupportCaseBoardList = SqliteView.list({
-  view: SupportCaseBoard,
+export const SupportCaseBoardList = ReadModel.page({
+  model: SupportCaseBoard,
   filter: ["customerId", "priority", "status", "assignedAgentId"],
   range: ["openedAt"],
   order: [["openedAt", "desc"], ["id", "asc"]],
   limit: 50,
 })
 
-export const SupportCaseBoardRowSchema = Schema.toType(SupportCaseBoard.schema)
+export const SupportCaseBoardPage = ReadModel.compilePage(SupportCaseBoardList)
+export const SupportCaseBoardRowSchema = Schema.toType(ReadModel.compile(SupportCaseBoard).schema)

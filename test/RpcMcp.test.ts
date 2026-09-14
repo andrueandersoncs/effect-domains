@@ -7,6 +7,7 @@ import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { Application, Part } from "effect-domains/application"
 import { RpcMcp } from "effect-domains/rpc-mcp"
 
 
@@ -92,7 +93,14 @@ const clockHandlers = clock.toLayer({
   "clock.wire": (text) => Effect.succeed(`${text}!`),
 })
 
-const clockRoutes = pipe(RpcMcp.layerHttp({ name: "clock", group: clock, path: "/mcp" }), Layer.provide(clockHandlers))
+const clockApplication = Application.compile(Application.define({
+  name: "clock",
+  parts: [Part.native({ group: clock, handlers: clockHandlers })],
+}))
+const clockRoutes = pipe(
+  RpcMcp.layerHttp({ application: clockApplication, path: "/mcp" }),
+  Layer.provide(clockApplication.handlers),
+)
 const preservesCodecService = true satisfies Types.Equals<Layer.Services<typeof clockRoutes>, HttpRouter.HttpRouter | StoragePrefix>
 void preservesCodecService
 
@@ -154,9 +162,13 @@ it.effect("MCP uses handler-only codec context instead of its ambient context", 
       Layer.provide(innerPrefix),
     )
 
+    const application = Application.compile(Application.define({
+      name: "codec",
+      parts: [Part.native({ group, handlers })],
+    }))
     const handlerOnlyRoutes = pipe(
-      RpcMcp.layerHttp({ name: "codec", group, path: "/mcp" }),
-      Layer.provide(handlers),
+      RpcMcp.layerHttp({ application, path: "/mcp" }),
+      Layer.provide(application.handlers),
     )
 
     const handlerOnly = yield* makeServer(handlerOnlyRoutes as Layer.Layer<never, unknown, HttpRouter.HttpRouter>)
@@ -168,8 +180,8 @@ it.effect("MCP uses handler-only codec context instead of its ambient context", 
     expect(handlerOnlyFailure.result.content).toEqual([{ type: "text", text: '"inner:failure"' }])
 
     const routes = pipe(
-      RpcMcp.layerHttp({ name: "codec", group, path: "/mcp" }),
-      Layer.provide(handlers),
+      RpcMcp.layerHttp({ application, path: "/mcp" }),
+      Layer.provide(application.handlers),
       Layer.provide(outerPrefix),
     )
 
@@ -191,9 +203,13 @@ const identityHandlers = identity.toLayer({ "identity.subject": () => Authorizat
 
 const captured = Layer.succeed(AuthorizationSubject, { userId: "captured" })
 
+const identityApplication = Application.compile(Application.define({
+  name: "identity",
+  parts: [Part.native({ group: identity, handlers: identityHandlers })],
+}))
 const identityRoutes = pipe(
-  RpcMcp.layerHttp({ name: "identity", group: identity, path: "/mcp" }),
-  Layer.provide(identityHandlers),
+  RpcMcp.layerHttp({ application: identityApplication, path: "/mcp" }),
+  Layer.provide(identityApplication.handlers),
   Layer.provide(AuthorizationRpc.layer),
   Layer.provide(captured),
 )
@@ -246,9 +262,13 @@ it.effect("MCP closes handler scopes after success and failure without closing t
 
     const handlers = group.toLayer({ scope: handler })
 
+    const application = Application.compile(Application.define({
+      name: "scope",
+      parts: [Part.native({ group, handlers })],
+    }))
     const routes = pipe(
-      RpcMcp.layerHttp({ name: "scope", group, path: "/mcp" }),
-      Layer.provide(handlers),
+      RpcMcp.layerHttp({ application, path: "/mcp" }),
+      Layer.provide(application.handlers),
     )
 
     const server = yield* makeServer(routes)

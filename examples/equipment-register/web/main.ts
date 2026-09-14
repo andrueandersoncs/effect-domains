@@ -8,15 +8,16 @@ import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { AssetConditionSchema, AssetSchema } from "../domain.ts"
 import { AssetsResource } from "../resources.ts"
 
-const AssetRowSchema = AssetsResource.table.rowSchema
-const AssetPageSchema = AssetsResource.contracts.list.successSchema
-export const WebClient = RpcService.make({ name: "equipment-register/WebClient", group: AssetsResource.group })
+const AssetRowSchema = Resource.table(AssetsResource).rowSchema
+const AssetPageSchema = Resource.compile(AssetsResource).contracts.list.successSchema
+export const WebClient = RpcService.make({ name: "equipment-register/WebClient", group: Resource.compile(AssetsResource).group })
 export type WebClient = Type<typeof WebClient>
 const conditions = ["in-service", "needs-repair", "retired"] as const
 const conditionChoices = [{ value: "", label: "Any condition" }, ...Array.map(conditions, (value) => ({ value, label: value }))]

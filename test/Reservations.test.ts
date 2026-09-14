@@ -19,6 +19,7 @@ import { InventoryMigrations } from "../examples/reservations/migrations.ts"
 import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
 import { seedStock } from "../examples/reservations/sqlite.ts"
 import { Application } from "effect-domains/application"
+import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { makeMigrationStore } from "effect-domains/sqlite-migrations"
@@ -78,9 +79,9 @@ const onlyOneConcurrentReservationAction = Effect.fn(
     available: 0,
   })
 
-  const stock = yield* StockResource.repository.get(sku)
+  const stock = yield* Resource.repository(StockResource).get(sku)
 
-  const storedReservation = yield* ReservationResource.repository.get(
+  const storedReservation = yield* Resource.repository(ReservationResource).get(
     reserved.success.id,
   )
 
@@ -109,7 +110,7 @@ const terminalTransitionsAction = Effect.fn(
   const held = yield* client.reserve(request)
   const heldInput = ReservationInputSchema.make({ id: held.id })
   const released = yield* client.release(heldInput)
-  const stockAfterRelease = yield* StockResource.repository.get(sku)
+  const stockAfterRelease = yield* Resource.repository(StockResource).get(sku)
 
   expect(released.status).toBe("released")
   expect(stockAfterRelease).toEqual({ sku, available: 1 })
@@ -119,7 +120,7 @@ const terminalTransitionsAction = Effect.fn(
   const repeatedRelease = yield* Effect.result(repeatedReleaseEffect)
   const repeatedReleaseFailure = ReservationStateTransitions.invalid("release", held.id, "released")
   const repeatedReleaseExpected = Result.fail(repeatedReleaseFailure)
-  const stockAfterRepeatedRelease = yield* StockResource.repository.get(sku)
+  const stockAfterRepeatedRelease = yield* Resource.repository(StockResource).get(sku)
 
   expect(repeatedRelease).toEqual(repeatedReleaseExpected)
   expect(stockAfterRepeatedRelease).toEqual({ sku, available: 1 })
@@ -135,8 +136,8 @@ const terminalTransitionsAction = Effect.fn(
   const invalidRelease = yield* Effect.result(invalidReleaseEffect)
   const invalidReleaseFailure = ReservationStateTransitions.invalid("release", next.id, "confirmed")
   const invalidReleaseExpected = Result.fail(invalidReleaseFailure)
-  const stockAfterInvalidRelease = yield* StockResource.repository.get(sku)
-  const storedReservation = yield* ReservationResource.repository.get(next.id)
+  const stockAfterInvalidRelease = yield* Resource.repository(StockResource).get(sku)
+  const storedReservation = yield* Resource.repository(ReservationResource).get(next.id)
 
   expect(invalidRelease).toEqual(invalidReleaseExpected)
   expect(stockAfterInvalidRelease).toEqual({ sku, available: 0 })
@@ -165,10 +166,10 @@ const failedInsertRollsBackStockAction = Effect.fn(
   const outcome = yield* Effect.result(reservationEffect)
   const inventoryUnavailable = InventoryUnavailable.make({})
   const expectedOutcome = Result.fail(inventoryUnavailable)
-  const stockAfterFailure = yield* StockResource.repository.get(sku)
+  const stockAfterFailure = yield* Resource.repository(StockResource).get(sku)
   yield* database`DROP TRIGGER reject_reservation`
   const recovered = yield* client.reserve(request)
-  const stockAfterRecovery = yield* StockResource.repository.get(sku)
+  const stockAfterRecovery = yield* Resource.repository(StockResource).get(sku)
 
   expect(outcome).toEqual(expectedOutcome)
   expect(stockAfterFailure).toEqual({ sku, available: 1 })
@@ -208,9 +209,9 @@ const historicalSecondsMigrationAction = Effect.fn(
   const historicalStock = StockSchema.make({ sku, available: 99 })
   yield* seedStock(historicalStock)
 
-  const reservation = yield* ReservationResource.repository.get(id)
+  const reservation = yield* Resource.repository(ReservationResource).get(id)
   const createdAtMillis = DateTime.toEpochMillis(reservation.createdAt)
-  const stock = yield* StockResource.repository.get(sku)
+  const stock = yield* Resource.repository(StockResource).get(sku)
   const wire = yield* encodeReservation(reservation)
 
   expect(createdAtMillis).toBe(seconds * 1000)
@@ -223,7 +224,7 @@ const historicalSecondsMigrationAction = Effect.fn(
 
   yield* client.release(historicalReservationInput)
 
-  const stockAfterRelease = yield* StockResource.repository.get(sku)
+  const stockAfterRelease = yield* Resource.repository(StockResource).get(sku)
 
   expect(stockAfterRelease).toEqual({ sku, available: 1 })
 })()

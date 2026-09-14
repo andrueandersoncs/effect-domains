@@ -1,40 +1,46 @@
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
-import { Table } from "effect-domains/table"
 import { CustomerSchema, RepairJobSchema, RepairJobTransitions, TechnicianSchema } from "./domain.ts"
 
-export const CustomersResource = Resource.make({
+export const CustomersResource = Resource.define({
   name: "customers",
   schema: CustomerSchema,
   authorization: Authorization.public,
-  operations: { ...Resource.crud, patch: true },
+  capabilities: Resource.capabilities(...Resource.crud(), Resource.patch()),
 })
 
-export const TechniciansResource = Resource.make({
+export const TechniciansResource = Resource.define({
   name: "technicians",
   schema: TechnicianSchema,
   authorization: Authorization.public,
-  operations: { ...Resource.crud, patch: true },
+  capabilities: Resource.capabilities(...Resource.crud(), Resource.patch()),
 })
 
-const CustomerIdReference = Table.reference(CustomersResource.table, ["id"])
-const TechnicianIdReference = Table.reference(TechniciansResource.table, ["id"])
+const CustomerIdReference = Resource.reference(CustomersResource, ["id"])
+const TechnicianIdReference = Resource.reference(TechniciansResource, ["id"])
 
-export const RepairJobsResource = Resource.make({
+export const RepairJobsResource = Resource.define({
   name: "repair_jobs",
   schema: RepairJobSchema,
   authorization: Authorization.public,
   transitions: RepairJobTransitions,
-  operations: {
-    ...Resource.crud,
-    patch: true,
-    transition: true,
-    create: { defaults: { urgent: false, status: "queued" } },
-    list: {
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({
       filter: ["status", "customerId", "technicianId"],
       order: [["urgent", "desc"]],
-    },
-  },
+    }),
+    Resource.create({
+      sources: {
+        urgent: Resource.default(false),
+        status: Resource.default("queued"),
+      },
+    }),
+    Resource.update(),
+    Resource.remove(),
+    Resource.patch(),
+    Resource.transition(),
+  ),
   relations: {
     foreignKeys: [
       { fields: ["customerId"], references: CustomerIdReference },

@@ -4,7 +4,7 @@ import { Array, Config, Context, Effect, Layer, Option, type PlatformError, Pred
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
-import { Application } from "./application.ts"
+import { Application, type ApplicationIR } from "./application.ts"
 import { ApplicationAdmin, type AdminOptions } from "./application-admin.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
@@ -39,7 +39,7 @@ type ProvidedRuntime = Layer.Success<ReturnType<typeof SqliteBunRuntime.sqlClien
 type ServiceRuntime<Services extends RuntimeLayer> = ProvidedRuntime | Layer.Success<Services>
 
 type RouteRuntime<
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Background extends RuntimeLayer,
 > = ServiceRuntime<Services> | Layer.Success<App["handlers"]> | Layer.Success<Background> | HttpRouter.HttpRouter
@@ -49,7 +49,7 @@ type RouteRequirements<Routes extends RuntimeLayer> =
   | Exclude<HttpRouter.Request.Only<"Requires", Layer.Services<Routes>> | HttpRouter.Request.Only<"GlobalRequires", Layer.Services<Routes>>, HttpRouter.GlobalProvided>
 
 type RunRequirements<
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
@@ -71,7 +71,7 @@ class AdminAssetsError extends Schema.TaggedError<AdminAssetsError>()(
 }
 
 type RunErrors<
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
@@ -108,7 +108,7 @@ const readAdminAssets = Effect.fn("ApplicationBun.readAdminAssets")(function* ()
 })
 
 const withApplicationRuntime = Effect.fn("ApplicationBun.runtime")(function* <
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
@@ -142,7 +142,7 @@ const withApplicationRuntime = Effect.fn("ApplicationBun.runtime")(function* <
 })
 
 const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
@@ -150,7 +150,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
 >(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
   const rpc = RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" })
-  const mcp = RpcMcp.layerHttp({ name: application.name, group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/mcp" })
+  const mcp = RpcMcp.layerHttp({ application, path: "/mcp" })
 
   const admin = yield* pipe(
     Option.fromNullishOr(options.admin),
@@ -182,7 +182,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
 })
 
 
-const inspectCommand = (application: Application, localCommands: ReadonlyArray<string>) => {
+const inspectCommand = (application: ApplicationIR, localCommands: ReadonlyArray<string>) => {
   const operation = pipe(Argument.string("operation"), Argument.optional)
 
   const inspect = Effect.fn("ApplicationBun.inspect")(function* ({ operation }: Readonly<{ operation: Option.Option<string> }>) {
@@ -218,7 +218,7 @@ const clientProtocol = (url: URL, token: Option.Option<Redacted.Redacted<string>
 )
 
 const runApplication = Effect.fn("ApplicationBun.run")(function* <
-  App extends Application,
+  App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
@@ -260,8 +260,7 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
   })
 
   const command = RpcCli.make({
-    name: application.name,
-    group: application.group,
+    application,
     protocol,
     subcommands,
   })
@@ -271,7 +270,7 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
 
 export const ApplicationBun = {
   run: Effect.fn("ApplicationBun.run")(function* <
-    App extends Application,
+    App extends ApplicationIR,
     Services extends RuntimeLayer = Layer.Layer<never, never, never>,
     Initialize extends Initialization = Effect.Effect<void>,
     Background extends RuntimeLayer = Layer.Layer<never, never, never>,

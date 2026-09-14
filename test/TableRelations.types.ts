@@ -8,7 +8,6 @@ const TenantSchema = Schema.Struct({ tenantId: Schema.String })
 const Tenants = Table.make({ name: "tenants", schema: TenantSchema })
 interface Relation extends Schema.Schema.Type<typeof RelationSchema> {}
 type TableOptions = Parameters<typeof Table.make<"relation_types", typeof RelationSchema>>[0]
-type ResourceOptions = Parameters<typeof Resource.make<"relation_resources", typeof RelationSchema>>[0]
 
 const implicitKey: TableOptions = {
   name: "relation_types",
@@ -16,16 +15,16 @@ const implicitKey: TableOptions = {
   relations: { unique: [{ fields: ["tenantId", "id"] }] },
 }
 
-const resourceOptions: ResourceOptions = {
+const resourceOptions = Resource.define({
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  operations: { get: true },
+  capabilities: Resource.capabilities(Resource.get()),
   relations: {
     indexes: [{ fields: ["tenantId", "number"] }],
     foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: Table.reference(Tenants, ["id"]) }],
   },
-}
+})
 
 const invalidTable: TableOptions = {
   name: "relation_types",
@@ -34,14 +33,14 @@ const invalidTable: TableOptions = {
   relations: { unique: [{ name: "bad_unique", fields: ["missing"] }] },
 }
 
-const invalidResource: ResourceOptions = {
+// @ts-expect-error because resource relation fields are not arbitrary strings.
+const invalidResource = Resource.define({
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  operations: {},
-  // @ts-expect-error because resource relation fields are not arbitrary strings.
+  capabilities: Resource.capabilities(),
   relations: { indexes: [{ name: "bad_index", fields: ["missing"] }] },
-}
+})
 
 // @ts-expect-error because referenced fields must exist on the target table.
 const invalidReference = Table.reference(Tenants, ["missing"])

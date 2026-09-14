@@ -6,6 +6,7 @@ import { evo } from "foldkit/struct"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput } from "@effect-domains/example-web/html"
 import { BrowserModel } from "effect-domains/browser-model"
 import { Form } from "effect-domains/form"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
@@ -13,14 +14,14 @@ import { ExpenseQueryInputSchema, ExpenseSchema, ExpenseTotalSchema } from "../d
 import { ExpensesResource } from "../resources.ts"
 import { ExpenseLedgerOperations } from "../sqlite.ts"
 
-const ExpenseRowSchema = ExpensesResource.table.rowSchema
+const ExpenseRowSchema = Resource.table(ExpensesResource).rowSchema
 const ExpenseTotalsSchema = Schema.Array(ExpenseTotalSchema)
 const categories = ["meals", "travel", "software", "supplies", "other"] as const
 const formCategoryChoices = Array.map(categories, (category) => ({ value: category, label: category }))
 const filterCategoryChoices = [{ value: "", label: "All categories" }, ...formCategoryChoices]
 const today = new Date().toISOString().slice(0, 10)
 
-const ExpenseLedgerWebRpcs = ExpensesResource.group.merge(
+const ExpenseLedgerWebRpcs = Resource.compile(ExpensesResource).group.merge(
   ExpenseLedgerOperations.group,
 )
 

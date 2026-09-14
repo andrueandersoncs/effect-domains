@@ -3,6 +3,7 @@ import { type Document, type HtmlBuilder } from "foldkit/html"
 import { dataTable, field, primaryButton, quietButton, selectInput, shell, textInput, textareaInput } from "@effect-domains/example-web/html"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { Form } from "effect-domains/form"
+import { Resource } from "effect-domains/resource"
 import { ResourceEditor } from "effect-domains/resource-editor"
 import { ArticleSchema, EditorialChannelSchema, NonNegativePrioritySchema } from "../domain.ts"
 import { DocumentsResource } from "../resources.ts"
@@ -17,7 +18,7 @@ const DocumentFormSchema = Schema.Struct({
 
 const Editor = ResourceEditor.make({
   name: "editorial-calendar/Documents",
-  resource: DocumentsResource,
+  resource: Resource.compile(DocumentsResource),
   form: DocumentFormSchema,
   empty: { heading: "", summary: "", priority: "0", channel: "website", plannedPublicationAt: "" },
   notices: {

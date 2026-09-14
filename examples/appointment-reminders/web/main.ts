@@ -7,6 +7,7 @@ import { dataTable, field, primaryButton, quietButton, shell, textInput } from "
 import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
+import { Resource } from "effect-domains/resource"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
@@ -18,8 +19,8 @@ import { AppointmentInboxNotificationResource } from "../resources.ts"
 
 type SessionClient = Type<typeof Session.Client>
 
-const ReminderWebRpcs = AppointmentRecipientProxy.merge(AppointmentInboxNotificationResource.group)
-const NotificationPageSchema = AppointmentInboxNotificationResource.contracts.list.successSchema
+const ReminderWebRpcs = AppointmentRecipientProxy.merge(Resource.compile(AppointmentInboxNotificationResource).group)
+const NotificationPageSchema = Resource.compile(AppointmentInboxNotificationResource).contracts.list.successSchema
 const hexByte = (byte: number) => byte.toString(16).padStart(2, "0")
 const uuidV7 = () => { const bytes = crypto.getRandomValues(new Uint8Array(16)); const timestamp = Date.now(); bytes[0] = Math.floor(timestamp / 2 ** 40) % 256; bytes[1] = Math.floor(timestamp / 2 ** 32) % 256; bytes[2] = Math.floor(timestamp / 2 ** 24) % 256; bytes[3] = Math.floor(timestamp / 2 ** 16) % 256; bytes[4] = Math.floor(timestamp / 2 ** 8) % 256; bytes[5] = timestamp % 256; bytes[6] = (bytes[6]! & 0x0f) | 0x70; bytes[8] = (bytes[8]! & 0x3f) | 0x80; const hex = globalThis.Array.from(bytes, hexByte).join(""); return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` }
 const defaultTimes = () => ({ reminderAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), appointmentAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() })

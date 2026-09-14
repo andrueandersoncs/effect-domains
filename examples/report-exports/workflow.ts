@@ -1,7 +1,7 @@
 import { Array, Cause, DateTime, Effect, Equivalence, Exit, Function, Match, Option, Schema, Struct, pipe } from "effect"
 import { RunnerStorage, Sharding } from "effect/unstable/cluster"
 import { Activity, DurableClock, DurableDeferred, DurableQueue, Workflow } from "effect/unstable/workflow"
-import { Operation } from "effect-domains/operation"
+import { Command } from "effect-domains/command"
 
 import {
   ReportArtifactConflict,
@@ -175,36 +175,39 @@ const selectGenerate = Effect.fn("ReportExports.selectGenerate")(function* (
   return yield* native(execution)
 })
 
-const ReportGenerationOperation = Operation
+const ReportGenerationCommand = Command
   .family("ReportExport.", ReportExportUnavailable)
   .authorized(ReportExportGenerationAuthorization)
 
-const ReportOperatorOperation = Operation
+const ReportOperatorCommand = Command
   .family("ReportExport.", ReportExportUnavailable)
   .authorized(ExampleRoles.admin)
 
-const generate = ReportGenerationOperation.make({
+const generateSpec = ReportGenerationCommand.define({
   name: "Generate",
   payload: ReportExportRequestSchema,
   success: ReportArtifactSchema,
-  handler: selectGenerate,
   errors: ReportExportGenerationErrorsSchema,
 })
+const generate = Command.implement(generateSpec, selectGenerate)
 
-const generateDiscard = ReportGenerationOperation.make({
+const generateDiscardSpec = ReportGenerationCommand.define({
   name: "GenerateDiscard",
   payload: ReportExportRequestSchema,
   success: Schema.String,
-  handler: selectGenerateDiscard,
   errors: ReportExportGenerationErrorsSchema,
 })
+const generateDiscard = Command.implement(generateDiscardSpec, selectGenerateDiscard)
 
-const resume = ReportOperatorOperation.make({
+const resumeSpec = ReportOperatorCommand.define({
   name: "GenerateResume",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Resume")(function* ({ executionId }) {
+})
+const resume = Command.implement(
+  resumeSpec,
+  Effect.fn("ReportExports.Resume")(function* ({ executionId }) {
     const executions = yield* ReportExportExecutionStore
     const execution = yield* executions.require(executionId)
     const terminalStatuses = ["cancelled", "failed", "succeeded"] as const
@@ -221,14 +224,17 @@ const resume = ReportOperatorOperation.make({
     const recovery = FinancialReportExport.resume(executionId)
     yield* native(recovery)
   }),
-})
+)
 
-const release = ReportOperatorOperation.make({
+const releaseSpec = ReportOperatorCommand.define({
   name: "Release",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
+})
+const release = Command.implement(
+  releaseSpec,
+  Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
     const executions = yield* ReportExportExecutionStore
     const execution = yield* executions.require(executionId)
 
@@ -239,20 +245,23 @@ const release = ReportOperatorOperation.make({
     const releasedBy = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(subject.userId)
     yield* releaseFinancialReportExport(executionId, releasedBy)
   }),
-})
+)
 
-const cancel = ReportOperatorOperation.make({
+const cancelSpec = ReportOperatorCommand.define({
   name: "Cancel",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Cancel")(function* ({ executionId }) {
+})
+const cancel = Command.implement(
+  cancelSpec,
+  Effect.fn("ReportExports.Cancel")(function* ({ executionId }) {
     const executions = yield* ReportExportExecutionStore
     yield* executions.cancel(executionId)
     const interruption = FinancialReportExport.interrupt(executionId)
     yield* native(interruption)
   }),
-})
+)
 
 const applicationPollResult = (execution: ReportExportExecution) => pipe(
   Match.value(execution.status),
@@ -289,12 +298,15 @@ const applicationPollResult = (execution: ReportExportExecution) => pipe(
   Match.orElse(() => Option.none()),
 )
 
-const poll = ReportOperatorOperation.make({
+const pollSpec = ReportOperatorCommand.define({
   name: "Poll",
   payload: ReportExportExecutionInputSchema,
   success: ReportExportPollResultSchema,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
+})
+const poll = Command.implement(
+  pollSpec,
+  Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
     const executions = yield* ReportExportExecutionStore
     const found = yield* executions.find(executionId)
     if (Option.isNone(found)) return ReportExportPollResultSchema.make({ _tag: "Unknown" })
@@ -349,14 +361,17 @@ const poll = ReportOperatorOperation.make({
       }),
     )
   }),
-})
+)
 
-const reconcile = ReportOperatorOperation.make({
+const reconcileSpec = ReportOperatorCommand.define({
   name: "Reconcile",
   payload: ReportExportExecutionInputSchema,
   success: ReportArtifactSchema,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Reconcile")(function* ({ executionId }) {
+})
+const reconcile = Command.implement(
+  reconcileSpec,
+  Effect.fn("ReportExports.Reconcile")(function* ({ executionId }) {
     const executions = yield* ReportExportExecutionStore
     const execution = yield* executions.require(executionId)
     const succeeded = sameStatus(execution.status, "succeeded")
@@ -372,13 +387,16 @@ const reconcile = ReportOperatorOperation.make({
     const job = makeReportExportJob(execution.request, executionId, retained.releasedBy)
     return yield* writeReportArtifact(job)
   }),
-})
+)
 
-const status = ReportOperatorOperation.make({
+const statusSpec = ReportOperatorCommand.define({
   name: "Status",
   success: ReportExportStatusSchema,
   errors: ReportExportOperatorErrorsSchema,
-  handler: Effect.fn("ReportExports.Status")(function* () {
+})
+const status = Command.implement(
+  statusSpec,
+  Effect.fn("ReportExports.Status")(function* () {
     const sharding = yield* Sharding.Sharding
     const storage = yield* RunnerStorage.RunnerStorage
 
@@ -400,9 +418,9 @@ const status = ReportOperatorOperation.make({
 
     return ReportExportStatusSchema.make({ ...snapshot, runners })
   }),
-})
+)
 
-export const ReportExportCommands = Operation.bundle(
+export const ReportExportCommands = Command.bundle(
   generate,
   generateDiscard,
   resume,

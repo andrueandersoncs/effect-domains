@@ -4,6 +4,7 @@ import { Config, Cron, DateTime, Effect, Equivalence, Layer, Schedule, pipe } fr
 import { replaceFileAtomically } from "@effect-domains/example-support/files"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { AuthorizationSubject } from "effect-domains/authorization"
+import { Resource } from "effect-domains/resource"
 
 import {
   AppointmentReminderDeliveryFailed,
@@ -54,7 +55,7 @@ const persistInboxNotification = Effect.fn("AppointmentReminders.persistInboxNot
   })
 
   return yield* pipe(
-    AppointmentInboxNotificationResource.repository.ensure(notification),
+    Resource.repository(AppointmentInboxNotificationResource).ensure(notification),
     Effect.provideService(AuthorizationSubject, operator),
     Effect.tapError((cause) => Effect.logError("Appointment inbox notification persistence failed", cause)),
     Effect.mapError(() => persistenceFailure(delivery)),
@@ -95,7 +96,7 @@ const writeInboxProjection = Effect.gen(function* () {
 
   const notifications = yield* database<Readonly<Record<string, unknown>>>`
     SELECT id, recipient, reminderId, appointmentId, appointmentAt, reminderAt, location, purpose, deliveredAt, archivedAt
-    FROM ${database(AppointmentInboxNotificationResource.table.name)}
+    FROM ${database(Resource.table(AppointmentInboxNotificationResource).name)}
     ORDER BY ${database("id")} ASC
   `
 
@@ -117,7 +118,7 @@ const archiveDeliveredNotifications = Effect.fn("AppointmentReminders.archiveDel
   const retentionBoundary = pipe(now, DateTime.subtractDuration("90 days"), DateTime.formatIso)
 
   yield* database`
-    UPDATE ${database(AppointmentInboxNotificationResource.table.name)}
+    UPDATE ${database(Resource.table(AppointmentInboxNotificationResource).name)}
     SET ${database("archivedAt")} = ${archivedAt}
     WHERE ${database("archivedAt")} IS NULL
       AND ${database("deliveredAt")} < ${retentionBoundary}

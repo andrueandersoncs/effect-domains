@@ -7,18 +7,21 @@ Add two books, move one from reading to finished, page through the backlog, and 
 This small public reading list uses one local canonical schema and generated CRUD. A book has a title, author, reading status, format, optional rating, and optional notes; title, author, and notes (when supplied) cannot be empty, and ratings are whole numbers from 1 through 5.
 
 ```ts
-export const ReadingListResource = Resource.make({
+export const ReadingListResource = Resource.define({
   authorization: Authorization.public,
   name: "books",
   schema: ReadingListBookSchema,
-  operations: {
-    ...Resource.crud,
-    list: { filter: ["status", "format"], limit: 25 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["status", "format"], limit: 25 }),
+    Resource.create(),
+    Resource.update(),
+    Resource.remove(),
+  ),
 })
 ```
 
-The resource derives the `books.create`, `books.get`, `books.list`, `books.update`, and `books.remove` RPCs, table, UUIDv7 identifier, request/result/error schemas, and handlers. There is no authored SQL or custom command layer.
+The specification is author intent only. `Resource.compile` derives the five `books.*` RPCs, table, UUIDv7 identifier, schemas, repository, and handlers; the application compiler contributes those products to one `ApplicationIR`.
 
 ## Run it
 

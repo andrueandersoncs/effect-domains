@@ -87,12 +87,9 @@ describe("Table", () => {
   const UnicodeLabelsSchema = Schema.Struct({ label: UnicodeLabelSchema })
   interface UnicodeLabels extends Schema.Schema.Type<typeof UnicodeLabelsSchema> {}
 
-  const UnicodeLabels = Resource.make({
-    name: "unicode_labels",
-    schema: UnicodeLabelsSchema,
-    authorization: Authorization.public,
-    operations: {},
-  })
+  const UnicodeLabels = Resource.define({ name: "unicode_labels",
+  schema: UnicodeLabelsSchema,
+  authorization: Authorization.public, capabilities: Resource.capabilities(),  })
 
   const NumberStringsSchema = Schema.Struct({ value: Schema.NumberFromString })
   interface NumberStrings extends Schema.Schema.Type<typeof NumberStringsSchema> {}
@@ -248,9 +245,9 @@ describe("Table", () => {
 
   it.effect("preserves canonical Unicode length semantics through SQLite", () => pipe(
     Effect.gen(function* () {
-      yield* prepareTables([UnicodeLabels.table])
-      const created = yield* UnicodeLabels.repository.create({ label: "😀" })
-      const loaded = yield* UnicodeLabels.repository.get(created.id)
+      yield* prepareTables([Resource.table(UnicodeLabels)])
+      const created = yield* Resource.repository(UnicodeLabels).create({ label: "😀" })
+      const loaded = yield* Resource.repository(UnicodeLabels).get(created.id)
       expect(loaded.label).toBe("😀")
     }),
     Effect.provide(sqlite),

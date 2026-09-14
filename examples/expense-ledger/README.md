@@ -107,7 +107,7 @@ This is a local expense register. It does not implement double-entry accounting,
 ## Read next
 
 - [Expense schemas and declared failures](domain.ts)
-- [Resource list declaration and `Operation.make` handlers](resources.ts) and [SQLite totals](sqlite.ts)
+- [Resource list declaration](resources.ts) and [`Command` contracts, implementations, and SQLite totals](sqlite.ts)
 - [Migration history](migrations.ts) and [runtime entry point](main.ts)
 - [Foldkit ledger UI](web/main.ts)
 - [Resource/list and implicit identifier contract](../../docs/reference/resources.md)

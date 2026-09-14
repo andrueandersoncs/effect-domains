@@ -8,7 +8,7 @@ The repository root is a private Bun workspace. `packages/effect-domains` is the
 
 ```ts
 import { Schema } from "effect"
-import { Application } from "effect-domains/application"
+import { Application, Part } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 
@@ -18,20 +18,20 @@ const BookSchema = Schema.Struct({
   status: Schema.Literals(["planned", "reading", "finished"]),
 })
 
-const Books = Resource.make({
+const Books = Resource.define({
   name: "books",
   schema: BookSchema,
   authorization: Authorization.public,
-  operations: Resource.crud,
+  capabilities: Resource.crud(),
 })
 
-export const Catalog = Application.make({
+export const Catalog = Application.compile(Application.define({
   name: "catalog",
-  parts: [Books],
-})
+  parts: [Part.resource(Books)],
+}))
 ```
 
-An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
+An application definition contains explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` flattens nested resources and rejects duplicate tables or RPC names. `Resource.compile(Books)` derives the UUIDv7 key, SQL columns, and selected `books.*` RPCs; `Resource.table(Books)` and `Resource.repository(Books)` expose the typed local products.
 
 `ApplicationBun.run(application, options)` returns the application Effect; execute it with the re-exported `ApplicationBun.runMain` boundary. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
 
@@ -57,19 +57,15 @@ Adding a supported scalar field to `BookSchema` changes the derived table, repos
 
 ## Resource and native RPC boundaries
 
-`Resource.make` supplies:
+`Resource.define` records author intent only. `Resource.compile` derives the table, repository, contracts, group, handlers, and exact publication record. Use `Resource.table(spec)` and `Resource.repository(spec)` when authored code needs those compiled products.
 
-- `table`: the derived table definition and row codecs;
-- `repository`: `find`, `get`, `list`, `create`, `update`, `patch`, and `remove` Effects;
-- `group` and `handlers`: only the operations selected in `operations`.
-
-`Resource.crud` is the frozen `{ get: true, list: true, create: true, update: true, remove: true }` selection. Use `patch: true` to add patch. `false` disables an operation; a configured `create` or `list` object with `publish: false` retains its local repository policy but omits its RPC. `operations: {}` keeps every repository method local.
+`Resource.crud()` returns the `get`, `list`, `create`, `update`, and `remove` capability declarations. Add `Resource.patch()` or `Resource.transition()` explicitly. `Resource.create({ publish: false })` and `Resource.list({ publish: false, ... })` retain local policy without publishing their RPC. `Resource.capabilities()` publishes none while every repository method remains available locally.
 
 `find` returns an `Option`; missing records use `ResourceNotFound`, and persistence/codec failures use `RepositoryError`. Creation applies declared defaults and runtime-generated fields. Update validates the complete row; patch preserves its identifier and validates the merged row transactionally. Every generated list returns bounded `{ items, nextCursor }`, including local repository `list`. The default limit is 50; declared list configuration can set a limit and equality filters. Order is identifier ascending only. There is no separate `page` method or unbounded generated list.
 
 Published patch payloads are `{ key, changes }`, independent of the identifier's field name. The local repository remains `patch(key, changes)`. Declared equality filters use compiled physical field codecs. Arbitrary ordering is not supported.
 
-Use native Effect RPCs for business operations:
+Use `Command.define` plus `Command.implement` for authored business commands, or native Effect RPCs for infrastructure-specific contracts:
 
 ```ts
 import { Effect, Schema } from "effect"
@@ -85,10 +81,13 @@ const LibraryHandlers = LibraryRpcs.toLayer({
   "library.health": () => Effect.succeed("ok"),
 })
 
-export const Library = Application.make({
+export const Library = Application.compile(Application.define({
   name: "library",
-  parts: [Catalog, { group: LibraryRpcs, handlers: LibraryHandlers }],
-})
+  parts: [
+    Part.resource(Books),
+    Part.native({ group: LibraryRpcs, handlers: LibraryHandlers }),
+  ],
+}))
 ```
 
 `Rpc.make` and `RpcGroup.make` retain their native contracts and annotations; `RpcGroup.toLayer` installs handlers. The reservation application exposes only resource reads; reserve, confirm, and release remain explicit native RPCs.
@@ -113,23 +112,29 @@ const authorization = p.policy({
     remove: owned,
   },
 })
-const Documents = Resource.make({
+const Documents = Resource.define({
   name: "documents",
   schema: DocumentSchema,
   authorization,
-  operations: {
-    ...Resource.crud,
-    patch: true,
-    create: {
-      fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
-    },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list(),
+    Resource.create({
+      sources: {
+        tenantId: Resource.fromSubject(p.subject.tenantId),
+        ownerId: Resource.fromSubject(p.subject.userId),
+      },
+    }),
+    Resource.update(),
+    Resource.remove(),
+    Resource.patch(),
+  ),
 })
 ```
 
 Missing actions deny access. Scope always applies, including to candidate rows. `row` is current state and `next` is the complete candidate, after creation defaults, subject bindings, generation, or patch merging. Read policies cannot reference `next`; create policies cannot reference `row`.
 
-`operations.create.fromSubject` derives named create fields from typed `p.subject` operands. Those fields are omitted from the generated create input and cannot be supplied by callers. The server injects trusted subject claims before checking the candidate policy.
+`Resource.create({ sources })` assigns one declarative source per field. `Resource.fromSubject(operand)` removes that field from caller input; the server injects the trusted subject value before checking candidate policy.
 
 Repositories enforce policy even when invoked by authored code. Hidden rows behave as missing; lists filter in SQL before pagination. Create/update/patch require a readable candidate, and returned rows are checked again. Checks and writes share a transaction, so a denied mutation leaves no changes. Missing or invalid identity yields `Unauthenticated`; denied actions yield `Forbidden`.
 

@@ -62,23 +62,29 @@ const authorization = p.policy({
   },
 })
 
-export const TasksResource = Resource.make({
+export const TasksResource = Resource.define({
   name: "todos",
   schema: TaskSchema,
   authorization,
-  operations: {
-    ...Resource.crud,
-    patch: true,
-    create: {
-      defaults: { completed: false, priority: "normal" },
-      fromSubject: { tenantId: p.subject.tenantId, ownerId: p.subject.userId },
-    },
-    list: { filter: ["project", "priority", "completed"], limit: 25 },
-  },
+  capabilities: Resource.capabilities(
+    Resource.get(),
+    Resource.list({ filter: ["project", "priority", "completed"], limit: 25 }),
+    Resource.create({
+      sources: {
+        completed: Resource.defaultValue(false),
+        priority: Resource.defaultValue("normal"),
+        tenantId: Resource.fromSubject(p.subject.tenantId),
+        ownerId: Resource.fromSubject(p.subject.userId),
+      },
+    }),
+    Resource.update(),
+    Resource.remove(),
+    Resource.patch(),
+  ),
 })
 ```
 
-`Authorization.subject(ExampleSubjectSchema).policy(...)` creates a reusable `SubjectPolicy`. Pass that policy directly as `scope` or any `allow` action; its expression and entitlement requirements are embedded in the resource policy. Reuse those policies in authored `Operation.make({ policy })` calls too. Use `.expression` only when combining a role policy with a row expression such as ownership.
+`Authorization.subject(ExampleSubjectSchema).policy(...)` creates a reusable `SubjectPolicy`. Pass that policy directly as `scope` or any `allow` action; its expression and entitlement requirements are embedded in the resource policy. Reuse those policies in authored command families with `.authorized(policy)` too.
 
 `includes` is literal-typed: `p.includes(p.subject.roles, "admin")` is valid only when the subject role schema declares the literal `"admin"`. This makes misspelled or undeclared role names fail at compile time.
 
