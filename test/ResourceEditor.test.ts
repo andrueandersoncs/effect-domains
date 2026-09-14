@@ -11,9 +11,16 @@ const TodoSchema = Schema.Struct({
   priority: Schema.Int,
 })
 
-const Todos = Resource.define({ name: "resource_editor_todos",
-schema: TodoSchema,
-authorization: Authorization.public, capabilities: Resource.crud(),  })
+const todoCapabilities = Resource.crud()
+
+const Todos = Resource.define({
+  name: "resource_editor_todos",
+  schema: TodoSchema,
+  authorization: Authorization.public,
+  capabilities: todoCapabilities,
+})
+
+const TodosRuntime = Resource.compile(Todos)
 
 const TodoFormSchema = Schema.Struct({
   title: Form.text(TodoSchema.fields.title),
@@ -22,7 +29,7 @@ const TodoFormSchema = Schema.Struct({
 
 const Editor = ResourceEditor.make({
   name: "test/TodoEditor",
-  resource: Resource.compile(Todos),
+  resource: TodosRuntime,
   form: TodoFormSchema,
   empty: { title: "", priority: "0" },
   notices: {

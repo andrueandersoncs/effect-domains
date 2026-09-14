@@ -7,17 +7,21 @@ import { ResourceEditor } from "effect-domains/resource-editor"
 const RecordSchema = Schema.Struct({ title: Schema.NonEmptyString })
 const FormSchema = Schema.Struct({ title: Form.text(RecordSchema.fields.title) })
 
+const listOnlyCapabilities = [Resource.list()]
+
 const ListOnly = Resource.define({
   name: "resource_editor_list_only",
   schema: RecordSchema,
   authorization: Authorization.public,
-  capabilities: Resource.capabilities(Resource.list()),
+  capabilities: listOnlyCapabilities,
 })
+
+const ListOnlyRuntime = Resource.compile(ListOnly)
 
 ResourceEditor.make({
   name: "test/ListOnlyEditor",
   // @ts-expect-error because an editor requires published create, update, and remove operations.
-  resource: Resource.compile(ListOnly),
+  resource: ListOnlyRuntime,
   form: FormSchema,
   empty: { title: "" },
   notices: { created: "Created", updated: "Updated", removed: "Removed" },

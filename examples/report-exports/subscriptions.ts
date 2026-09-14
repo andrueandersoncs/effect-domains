@@ -46,9 +46,11 @@ const subscriptionAccess = (
 const entitlementKey = (subject: typeof ExampleSubjectSchema.Type) =>
   Record.singleton("tenantId", subject.tenantId)
 
+const reportSubscriptionsTable = Resource.table(ReportSubscriptionsResource)
+
 const entitlementDefinition = new Entitlements.Source({
   name: "reports.generate",
-  table: Resource.table(ReportSubscriptionsResource),
+  table: reportSubscriptionsTable,
   subject: ExampleSubjectSchema,
   key: "tenantId",
   where: entitlementKey,

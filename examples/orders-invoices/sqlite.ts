@@ -35,12 +35,16 @@ import {
 
 type SqliteRow = Readonly<Record<string, unknown>>
 
+const ordersTable = Resource.table(OrdersResource)
+const orderLinesTable = Resource.table(OrderLinesResource)
+const invoicesTable = Resource.table(InvoicesResource)
+
 const OrderSummaryInputSchema = Schema.Struct({
   orderId: Schema.String,
   tenantId: TenantIdSchema,
 })
 
-const OrderProjection = Table.project(Resource.table(OrdersResource), [
+const OrderProjection = Table.project(ordersTable, [
   "id",
   "tenantId",
   "number",
@@ -50,7 +54,7 @@ const OrderProjection = Table.project(Resource.table(OrdersResource), [
   "version",
 ])
 
-const OrderLineProjection = Table.project(Resource.table(OrderLinesResource), [
+const OrderLineProjection = Table.project(orderLinesTable, [
   "id",
   "tenantId",
   "orderId",
@@ -60,7 +64,7 @@ const OrderLineProjection = Table.project(Resource.table(OrderLinesResource), [
   "unitAmountMinor",
 ])
 
-const InvoiceProjection = Table.project(Resource.table(InvoicesResource), [
+const InvoiceProjection = Table.project(invoicesTable, [
   "id",
   "tenantId",
   "orderId",
@@ -90,18 +94,18 @@ const orderSummaryForTenant = SqlSchema.findOneOption({
         COALESCE((
           SELECT json_group_array(${OrderLineProjection.object(sql, "l")})
           FROM (
-            SELECT * FROM ${sql(Resource.table(OrderLinesResource).name)}
+            SELECT * FROM ${sql(orderLinesTable.name)}
             WHERE ${sql("tenantId")} = o.${sql("tenantId")} AND ${sql("orderId")} = o.${sql("id")}
             ORDER BY ${sql("lineNumber")}
           ) l
         ), '[]') AS ${sql("lines")},
         (
           SELECT ${InvoiceProjection.object(sql, "i")}
-          FROM ${sql(Resource.table(InvoicesResource).name)} i
+          FROM ${sql(invoicesTable.name)} i
           WHERE i.${sql("tenantId")} = o.${sql("tenantId")} AND i.${sql("orderId")} = o.${sql("id")}
           LIMIT 1
         ) AS ${sql("invoice")}
-      FROM ${sql(Resource.table(OrdersResource).name)} o
+      FROM ${sql(ordersTable.name)} o
       WHERE o.${sql("id")} = ${input.orderId} AND o.${sql("tenantId")} = ${input.tenantId}
       LIMIT 1
     `
@@ -155,7 +159,7 @@ const BillingCommand = Command
 const createOrderSpec = BillingCommand.define({
   name: "createOrder",
   payload: CreateOrderInputSchema,
-  success: Resource.table(OrdersResource).rowSchema,
+  success: ordersTable.rowSchema,
   errors: DuplicateOrderNumber,
   dependencies: [OrdersResource],
 })
@@ -220,7 +224,7 @@ const addLine = Command.implement(addLineSpec, Effect.fn("Billing.addLine")(func
 const issueInvoiceSpec = BillingCommand.define({
   name: "issueInvoice",
   payload: IssueInvoiceInputSchema,
-  success: Resource.table(InvoicesResource).rowSchema,
+  success: invoicesTable.rowSchema,
   errors: issueInvoiceErrorSchema,
   dependencies: [OrdersResource, OrderLinesResource, InvoicesResource],
 })
@@ -256,7 +260,7 @@ const issueInvoice = Command.implement(issueInvoiceSpec, Effect.fn("Billing.issu
 const payInvoiceSpec = BillingCommand.define({
   name: "payInvoice",
   payload: PayInvoiceInputSchema,
-  success: Resource.table(InvoicesResource).rowSchema,
+  success: invoicesTable.rowSchema,
   errors: payInvoiceErrorSchema,
   dependencies: [InvoicesResource],
 })
@@ -288,10 +292,12 @@ const getOrder = Command.implement(getOrderSpec, Effect.fn("Billing.getOrder")(f
   return yield* requireOrder(input.orderId)
 }))
 
-export const BillingOperations = Command.bundle(
+const BillingOperations = Command.bundle(
   createOrder,
   addLine,
   issueInvoice,
   payInvoice,
   getOrder,
 )
+
+export { BillingOperations }

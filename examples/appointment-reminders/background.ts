@@ -86,6 +86,8 @@ const registerAppointmentRecipient = Effect.gen(function* () {
   return AppointmentRecipientEntity.toLayer(handlers)
 })
 
+const notificationTable = Resource.table(AppointmentInboxNotificationResource)
+
 const writeInboxProjection = Effect.gen(function* () {
   const database = yield* SqlClient.SqlClient
 
@@ -96,7 +98,7 @@ const writeInboxProjection = Effect.gen(function* () {
 
   const notifications = yield* database<Readonly<Record<string, unknown>>>`
     SELECT id, recipient, reminderId, appointmentId, appointmentAt, reminderAt, location, purpose, deliveredAt, archivedAt
-    FROM ${database(Resource.table(AppointmentInboxNotificationResource).name)}
+    FROM ${database(notificationTable.name)}
     ORDER BY ${database("id")} ASC
   `
 
@@ -118,7 +120,7 @@ const archiveDeliveredNotifications = Effect.fn("AppointmentReminders.archiveDel
   const retentionBoundary = pipe(now, DateTime.subtractDuration("90 days"), DateTime.formatIso)
 
   yield* database`
-    UPDATE ${database(Resource.table(AppointmentInboxNotificationResource).name)}
+    UPDATE ${database(notificationTable.name)}
     SET ${database("archivedAt")} = ${archivedAt}
     WHERE ${database("archivedAt")} IS NULL
       AND ${database("deliveredAt")} < ${retentionBoundary}

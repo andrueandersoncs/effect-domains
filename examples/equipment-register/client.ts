@@ -5,7 +5,8 @@ import { Config, Console, Effect, Schema, pipe } from "effect"
 import { Resource } from "effect-domains/resource"
 import { AssetsResource } from "./resources.ts"
 
-const CreatedAssetSchema = Schema.Struct({ result: Resource.table(AssetsResource).rowSchema })
+const assetsTable = Resource.table(AssetsResource)
+const CreatedAssetSchema = Schema.Struct({ result: assetsTable.rowSchema })
 interface CreatedAsset extends Schema.Schema.Type<typeof CreatedAssetSchema> {}
 
 class WalkthroughError extends Schema.TaggedError<WalkthroughError>()("WalkthroughError", { message: Schema.String }) {}

@@ -2,8 +2,14 @@ import { Schema } from "effect"
 import { ReadModel } from "effect-domains/read-model"
 import { CustomersResource, RepairJobsResource, TechniciansResource } from "./resources.ts"
 
+const repairBoardSources = ReadModel.sources({
+  job: RepairJobsResource,
+  customer: CustomersResource,
+  technician: TechniciansResource,
+})
+
 export const RepairBoard = ReadModel.define({
-  tables: ReadModel.sources({ job: RepairJobsResource, customer: CustomersResource, technician: TechniciansResource }),
+  tables: repairBoardSources,
   from: "job",
   joins: [
     { kind: "inner", table: "customer", on: [{ left: ["job", "customerId"], right: ["customer", "id"] }] },
@@ -29,7 +35,8 @@ export const RepairBoardList = ReadModel.page({
   order: [["urgent", "desc"], ["id", "asc"]],
   limit: 50,
 })
+
 export const RepairBoardPage = ReadModel.compilePage(RepairBoardList)
 
-
-export const RepairBoardRowSchema = Schema.toType(ReadModel.compile(RepairBoard).schema)
+const compiledRepairBoard = ReadModel.compile(RepairBoard)
+export const RepairBoardRowSchema = Schema.toType(compiledRepairBoard.schema)

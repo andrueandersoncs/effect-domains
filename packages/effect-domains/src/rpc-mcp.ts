@@ -115,6 +115,7 @@ const layerHttp = <App extends ApplicationIR>(options: Readonly<{
 }>) => {
   type Rpcs = RpcGroup.Rpcs<App["group"]>
   const { application } = options
+
   const server = McpServer.layerHttp({
     name: application.name,
     version: "0.1.0",

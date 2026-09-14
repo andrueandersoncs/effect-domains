@@ -65,7 +65,6 @@ it.effect("scalar folds retain encoding boundaries, homogeneous collections, and
 
 it.effect("storage and policy algebras keep their different scalar acceptance rules", () => Effect.sync(() => {
   const NumericSchema = Schema.Struct({ amount: Schema.Number })
-  interface Numeric extends Schema.Schema.Type<typeof NumericSchema> {}
   const ClaimsSchema = Schema.Struct({ amount: Schema.Int, roles: Schema.Array(Schema.String) })
   interface Claims extends Schema.Schema.Type<typeof ClaimsSchema> {}
   const p = Authorization.for({ resource: NumericSchema, subject: ClaimsSchema })

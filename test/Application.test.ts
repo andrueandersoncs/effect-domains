@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Function, Schema } from "effect"
+import { Array, Effect, Function, Schema, Struct } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Application, Part } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
@@ -16,31 +16,37 @@ it("rejects table and command collisions across nested applications", () => {
     name: "shared",
     schema: RowSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
 
-  const storage = Application.define({ name: "storage", parts: [Part.resource(resource)] })
-  const nestedStorage = Application.define({ name: "nested-storage", parts: [Part.application(storage)] })
-  expect(() => Application.compile(Application.define({
-    name: "collision",
-    parts: [Part.application(storage), Part.application(nestedStorage)],
-  }))).toThrow()
+  const storageParts = [Part.resource(resource)]
+  const storage = Application.define({ name: "storage", parts: storageParts })
+  const nestedStorageParts = [Part.application(storage)]
+  const nestedStorage = Application.define({ name: "nested-storage", parts: nestedStorageParts })
+  const collisionParts = [Part.application(storage), Part.application(nestedStorage)]
+  const collision = Application.define({ name: "collision", parts: collisionParts })
+  expect(() => Application.compile(collision)).toThrow()
 
   const ping = Rpc.make("ping")
   const group = RpcGroup.make(ping)
   const handlers = group.toLayer({ ping: Function.constant(Effect.void) })
+  const commandParts = [Part.native({ group, handlers })]
+
   const commands = Application.define({
     name: "commands",
-    parts: [Part.native({ group, handlers })],
+    parts: commandParts,
   })
+
+  const nestedCommandParts = [Part.application(commands)]
+
   const nestedCommands = Application.define({
     name: "nested-commands",
-    parts: [Part.application(commands)],
+    parts: nestedCommandParts,
   })
-  expect(() => Application.compile(Application.define({
-    name: "collision",
-    parts: [Part.application(commands), Part.application(nestedCommands)],
-  }))).toThrow()
+
+  const commandCollisionParts = [Part.application(commands), Part.application(nestedCommands)]
+  const commandCollision = Application.define({ name: "collision", parts: commandCollisionParts })
+  expect(() => Application.compile(commandCollision)).toThrow()
 })
 
 it("validates foreign keys against the exact registered table descriptor", () => {
@@ -51,14 +57,14 @@ it("validates foreign keys against the exact registered table descriptor", () =>
     name: "exact_parents",
     schema: ParentSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
 
   const Replacement = Resource.define({
     name: "exact_parents",
     schema: ParentSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
 
   const ParentIdReference = Resource.reference(Parent, ["id"])
@@ -67,20 +73,18 @@ it("validates foreign keys against the exact registered table descriptor", () =>
     name: "exact_children",
     schema: ChildSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
     relations: {
       foreignKeys: [{ fields: ["parentId"], references: ParentIdReference }],
     },
   })
 
-  const makeValid = () => Application.compile(Application.define({
-    name: "exact-valid",
-    parts: [Part.resource(Parent), Part.resource(Child)],
-  }))
-  const makeInvalid = () => Application.compile(Application.define({
-    name: "exact-invalid",
-    parts: [Part.resource(Replacement), Part.resource(Child)],
-  }))
+  const validParts = [Part.resource(Parent), Part.resource(Child)]
+  const valid = Application.define({ name: "exact-valid", parts: validParts })
+  const makeValid = () => Application.compile(valid)
+  const invalidParts = [Part.resource(Replacement), Part.resource(Child)]
+  const invalid = Application.define({ name: "exact-invalid", parts: invalidParts })
+  const makeInvalid = () => Application.compile(invalid)
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
   validExpectation.not.toThrow()
@@ -99,50 +103,52 @@ it("validates resource and table command dependencies by descriptor identity", (
     name: "resource_dependency",
     schema: RowSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
 
   const TableDependency = Resource.define({
     name: "table_dependency",
     schema: RowSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
 
   const Replacement = Resource.define({
     name: "resource_dependency",
     schema: RowSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
+
+  const tableDependency = Resource.table(TableDependency)
 
   const commandSpec = Command.define({
     name: "dependency.command",
     success: Schema.Void,
-    dependencies: [ResourceDependency, Resource.table(TableDependency)],
+    dependencies: [ResourceDependency, tableDependency],
     unavailable: ApplicationCommandUnavailable,
   })
+
   const command = Command.implement(commandSpec, Function.constant(Effect.void))
   const commands = Command.bundle(command)
 
-  const makeValid = () => Application.compile(Application.define({
-    name: "dependencies-valid",
-    parts: [
-      Part.resource(ResourceDependency),
-      Part.resource(TableDependency),
-      Part.command(commands),
-    ],
-  }))
+  const validParts = [
+    Part.resource(ResourceDependency),
+    Part.resource(TableDependency),
+    Part.command(commands),
+  ]
 
-  const makeInvalid = () => Application.compile(Application.define({
-    name: "dependencies-invalid",
-    parts: [
-      Part.resource(Replacement),
-      Part.resource(TableDependency),
-      Part.command(commands),
-    ],
-  }))
+  const valid = Application.define({ name: "dependencies-valid", parts: validParts })
+  const makeValid = () => Application.compile(valid)
 
+  const invalidParts = [
+    Part.resource(Replacement),
+    Part.resource(TableDependency),
+    Part.command(commands),
+  ]
+
+  const invalid = Application.define({ name: "dependencies-invalid", parts: invalidParts })
+  const makeInvalid = () => Application.compile(invalid)
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
   validExpectation.not.toThrow()
@@ -150,30 +156,51 @@ it("validates resource and table command dependencies by descriptor identity", (
 })
 
 it("keeps authoring specifications free of derived runtime products", () => {
+  const RowSchema = Schema.Struct({ value: Schema.String })
+
   const resource = Resource.define({
     name: "intent_only",
-    schema: Schema.Struct({ value: Schema.String }),
+    schema: RowSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
+
   const command = Command.define({
     name: "intent.command",
     success: Schema.Void,
     unavailable: ApplicationCommandUnavailable,
   })
+
+  const modelSources = ReadModel.sources({ value: resource })
+
   const model = ReadModel.define({
-    tables: ReadModel.sources({ value: resource }),
+    tables: modelSources,
     from: "value",
     joins: [],
     select: { value: ["value", "value"] },
   })
+
+  const applicationParts = [Part.resource(resource)]
+
   const application = Application.define({
     name: "intent",
-    parts: [Part.resource(resource)],
+    parts: applicationParts,
   })
+
   const forbidden = ["table", "repository", "contracts", "group", "handlers", "handler", "execute"]
 
-  for (const specification of [resource, command, model, application]) {
-    expect(forbidden.some((property) => Object.hasOwn(specification, property))).toBe(false)
+  const specificationKeys = [
+    Struct.keys(resource),
+    Struct.keys(command),
+    Struct.keys(model),
+    Struct.keys(application),
+  ]
+
+  const hasForbiddenProperty = (keys: ReadonlyArray<string>) => {
+    const isForbidden = (property: string) => Array.contains(keys, property)
+    return Array.some(forbidden, isForbidden)
   }
+
+  const forbiddenProperties = Array.map(specificationKeys, hasForbiddenProperty)
+  expect(forbiddenProperties).toEqual([false, false, false, false])
 })

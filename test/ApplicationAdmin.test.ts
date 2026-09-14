@@ -57,10 +57,9 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
       mutate: () => Ref.updateAndGet(writes, (value) => value + 1),
     })
 
-    const application = Application.compile(Application.define({
-      name: "identity",
-      parts: [Part.native({ group: identityGroup, handlers })],
-    }))
+    const parts = [Part.native({ group: identityGroup, handlers })]
+    const definition = Application.define({ name: "identity", parts })
+    const application = Application.compile(definition)
     const capturedSubject = Layer.succeed(AuthorizationSubject, { userId: "captured" })
     const authenticator = yield* AuthorizationRpc.Authenticator
     const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
@@ -150,10 +149,9 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
       broken: () => Effect.die("private database details"),
     })
 
-    const application = Application.compile(Application.define({
-      name: "clock",
-      parts: [Part.native({ group: clock, handlers })],
-    }))
+    const parts = [Part.native({ group: clock, handlers })]
+    const definition = Application.define({ name: "clock", parts })
+    const application = Application.compile(definition)
 
     const routes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -206,10 +204,9 @@ it.effect("admin isolates a slow call from an unrelated handler defect", () => p
       defect: () => Effect.die("unrelated defect"),
     })
 
-    const application = Application.compile(Application.define({
-      name: "isolation",
-      parts: [Part.native({ group, handlers })],
-    }))
+    const parts = [Part.native({ group, handlers })]
+    const definition = Application.define({ name: "isolation", parts })
+    const application = Application.compile(definition)
 
     const routes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -253,10 +250,9 @@ it.effect("admin uses handler-only codec context instead of its ambient context"
       Layer.provide(innerPrefix),
     )
 
-    const application = Application.compile(Application.define({
-      name: "codec",
-      parts: [Part.native({ group, handlers })],
-    }))
+    const parts = [Part.native({ group, handlers })]
+    const definition = Application.define({ name: "codec", parts })
+    const application = Application.compile(definition)
 
     const handlerOnlyRoutes = pipe(
       ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
@@ -290,10 +286,9 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const probe = Rpc.make("probe", { success: Schema.String }).middleware(AuthorizationRpc)
   const group = RpcGroup.make(probe)
   const handlers = group.toLayer({ probe: () => Effect.succeed("ok") })
-  const application = Application.compile(Application.define({
-    name: "probe",
-    parts: [Part.native({ group, handlers })],
-  }))
+  const parts = [Part.native({ group, handlers })]
+  const definition = Application.define({ name: "probe", parts })
+  const application = Application.compile(definition)
   const inspection = ApplicationInspect.describe(application)
   const middlewares = Array.fromIterable(probe.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))

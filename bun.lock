@@ -5,7 +5,7 @@
     "": {
       "name": "effect-domains",
       "devDependencies": {
-        "@better-typescript/better-typescript": "0.4.18",
+        "@better-typescript/better-typescript": "0.4.19",
         "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
@@ -235,9 +235,7 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.18", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.18", "@better-typescript/better-typescript-darwin-arm64": "0.4.18", "@better-typescript/better-typescript-linux-amd64": "0.4.18", "@better-typescript/better-typescript-linux-arm64": "0.4.18" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-1OV8tyRs36SYEQsfU8/z9qWamHcjS/e4utKlJb/KCIWHin+dZIkk2uexnt9E0AFL6sN1UYeaAB9Hq/GI+hahWA=="],
-
-    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.18", "", { "os": "linux", "cpu": "x64" }, "sha512-M1yWH0jhKiWKVS0w9wB+1hbbZLq0pO16vU6gCKo/ljVl2EN7zlx2M5zcA0ut5dcyyu8Px0sAIXu8apl5FA3xCA=="],
+    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.19", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.19", "@better-typescript/better-typescript-darwin-arm64": "0.4.19", "@better-typescript/better-typescript-linux-amd64": "0.4.19", "@better-typescript/better-typescript-linux-arm64": "0.4.19" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-i3XiRyfYuUJS7VB3ubPDwH670h7tSgvOfHWnHsxEHy6Qzn8u4T9u9PceLOgf3aH0FSyQysjDIP/zuwQo5+D66w=="],
 
     "@docsearch/css": ["@docsearch/css@3.8.2", "", {}, "sha512-y05ayQFyUmCXze79+56v/4HpycYF3uFqB78pLPrSV5ZKAlDuIAAJNhaRi8tTdRNXh05yxX/TyNnzD6LwSM89vQ=="],
 

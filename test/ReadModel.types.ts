@@ -10,12 +10,15 @@ const TechnicianSchema = Schema.Struct({ id: identifier(Schema.String), name: St
 const Jobs = Table.make({ name: "jobs", schema: JobSchema })
 const Technicians = Table.make({ name: "technicians", schema: TechnicianSchema })
 
+const modelSources = ReadModel.sources({ j: Jobs, t: Technicians })
+
 const model = ReadModel.define({
-  tables: ReadModel.sources({ j: Jobs, t: Technicians }),
+  tables: modelSources,
   from: "j",
   joins: [{ kind: "left", table: "t", on: [{ left: ["j", "technicianId"], right: ["t", "id"] }] }],
   select: { urgent: ["j", "urgent"], name: ["t", "name"] },
 })
+
 const view = ReadModel.compile(model)
 
 const row: typeof view.schema.Type = { urgent: true, name: null }
@@ -27,20 +30,26 @@ const badNull: typeof view.schema.Type = { urgent: null, name: "Sam" }
 const unselected: typeof view.schema.Type = { urgent: true, name: null, technicianId: "sam" }
 const decoderService = true satisfies Types.Equals<typeof view.schema.DecodingServices, StoragePrefix>
 const encoderService = true satisfies Types.Equals<typeof view.schema.EncodingServices, StoragePrefix>
-const noService = ReadModel.compile(ReadModel.define({
-  tables: ReadModel.sources({ t: Technicians }),
+const noServiceSources = ReadModel.sources({ t: Technicians })
+
+const noServiceDefinition = ReadModel.define({
+  tables: noServiceSources,
   from: "t",
   joins: [],
   select: { id: ["t", "id"] },
-}))
+})
+
+const noService = ReadModel.compile(noServiceDefinition)
 const omittedService = true satisfies Types.Equals<typeof noService.schema.DecodingServices, never>
 const nonnullable = true satisfies Types.Equals<typeof noService.schema.Type, { readonly id: string }>
 
-const listing = ReadModel.compilePage(ReadModel.page({
+const listingDefinition = ReadModel.page({
   model,
   filter: ["urgent"],
   order: [["urgent", "desc"]],
-}))
+})
+
+const listing = ReadModel.compilePage(listingDefinition)
 const listInput: typeof listing.payload.Type = { filter: { urgent: true }, limit: 10 }
 // @ts-expect-error because only declared filters are accepted.
 const invalidFilter: typeof listing.payload.Type = { filter: { name: "Sam" } }
@@ -57,12 +66,16 @@ view.column(sql, ["j", "missing"])
 // @ts-expect-error because aliases are declared, not arbitrary SQL strings.
 view.column(sql, ["absent", "name"])
 
-ReadModel.define({ tables: ReadModel.sources({ j: Jobs }), from: "j", joins: [], select: {
+const invalidSelectionSources = ReadModel.sources({ j: Jobs })
+
+ReadModel.define({ tables: invalidSelectionSources, from: "j", joins: [], select: {
   // @ts-expect-error because projections must reference existing fields.
   invalid: ["j", "name"],
 } })
 
-ReadModel.define({ tables: ReadModel.sources({ j: Jobs }),
+const invalidFromSources = ReadModel.sources({ j: Jobs })
+
+ReadModel.define({ tables: invalidFromSources,
   // @ts-expect-error because FROM must reference a declared alias.
   from: "unknown", joins: [], select: { urgent: ["j", "urgent"] },
 })

@@ -189,6 +189,7 @@ const generateSpec = ReportGenerationCommand.define({
   success: ReportArtifactSchema,
   errors: ReportExportGenerationErrorsSchema,
 })
+
 const generate = Command.implement(generateSpec, selectGenerate)
 
 const generateDiscardSpec = ReportGenerationCommand.define({
@@ -197,6 +198,7 @@ const generateDiscardSpec = ReportGenerationCommand.define({
   success: Schema.String,
   errors: ReportExportGenerationErrorsSchema,
 })
+
 const generateDiscard = Command.implement(generateDiscardSpec, selectGenerateDiscard)
 
 const resumeSpec = ReportOperatorCommand.define({
@@ -205,6 +207,7 @@ const resumeSpec = ReportOperatorCommand.define({
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const resume = Command.implement(
   resumeSpec,
   Effect.fn("ReportExports.Resume")(function* ({ executionId }) {
@@ -232,6 +235,7 @@ const releaseSpec = ReportOperatorCommand.define({
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const release = Command.implement(
   releaseSpec,
   Effect.fn("ReportExports.Release")(function* ({ executionId }, subject) {
@@ -253,6 +257,7 @@ const cancelSpec = ReportOperatorCommand.define({
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const cancel = Command.implement(
   cancelSpec,
   Effect.fn("ReportExports.Cancel")(function* ({ executionId }) {
@@ -304,6 +309,7 @@ const pollSpec = ReportOperatorCommand.define({
   success: ReportExportPollResultSchema,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const poll = Command.implement(
   pollSpec,
   Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
@@ -369,6 +375,7 @@ const reconcileSpec = ReportOperatorCommand.define({
   success: ReportArtifactSchema,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const reconcile = Command.implement(
   reconcileSpec,
   Effect.fn("ReportExports.Reconcile")(function* ({ executionId }) {
@@ -394,6 +401,7 @@ const statusSpec = ReportOperatorCommand.define({
   success: ReportExportStatusSchema,
   errors: ReportExportOperatorErrorsSchema,
 })
+
 const status = Command.implement(
   statusSpec,
   Effect.fn("ReportExports.Status")(function* () {

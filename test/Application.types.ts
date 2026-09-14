@@ -18,24 +18,28 @@ interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
 const StoredNoteSchema = Schema.Struct({ text: StoredTextSchema })
 interface StoredNote extends Schema.Schema.Type<typeof StoredNoteSchema> {}
 
+const noteCapabilities = Resource.crud()
+
 const Notes = Resource.define({
   name: "notes",
   schema: NoteSchema,
   storage: StoredNoteSchema,
   authorization: Authorization.public,
-  capabilities: Resource.crud(),
+  capabilities: noteCapabilities,
 })
+
+const noteParts = [Part.resource(Notes)]
 
 const NotesDefinition = Application.define({
   name: "codec-notes",
-  parts: [Part.resource(Notes)],
+  parts: noteParts,
 })
+
 const NotesApplication = Application.compile(NotesDefinition)
 
-const nestedNotes = Application.compile(Application.define({
-  name: "nested-notes",
-  parts: [Part.application(emptyDefinition), Part.application(NotesDefinition)],
-}))
+const nestedParts = [Part.application(emptyDefinition), Part.application(NotesDefinition)]
+const nestedDefinition = Application.define({ name: "nested-notes", parts: nestedParts })
+const nestedNotes = Application.compile(nestedDefinition)
 
 const missing = ApplicationBun.run(nestedNotes, {
   database: { migrations: [] },
@@ -50,10 +54,9 @@ const storedTextRpc = Rpc.make("stored-text", {
 })
 
 const storedTextGroup = RpcGroup.make(storedTextRpc)
-const storedTextApplication = Application.compile(Application.define({
-  name: "stored-text",
-  parts: [Part.native({ group: storedTextGroup, handlers: Layer.empty })],
-}))
+const storedTextParts = [Part.native({ group: storedTextGroup, handlers: Layer.empty })]
+const storedTextDefinition = Application.define({ name: "stored-text", parts: storedTextParts })
+const storedTextApplication = Application.compile(storedTextDefinition)
 
 const storedTextCli = ApplicationBun.run(storedTextApplication, {
   database: { migrations: [] },
@@ -111,10 +114,9 @@ const middlewareRpc = Rpc.make("middleware-requirement", {
 
 const middlewareGroup = RpcGroup.make(middlewareRpc).middleware(MiddlewareRequirement)
 
-const middlewareApplication = Application.compile(Application.define({
-  name: "middleware-requirement",
-  parts: [Part.native({ group: middlewareGroup, handlers: Layer.empty })],
-}))
+const middlewareParts = [Part.native({ group: middlewareGroup, handlers: Layer.empty })]
+const middlewareDefinition = Application.define({ name: "middleware-requirement", parts: middlewareParts })
+const middlewareApplication = Application.compile(middlewareDefinition)
 
 const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
   database: { migrations: [] },

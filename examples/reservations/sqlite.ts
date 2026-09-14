@@ -22,6 +22,8 @@ import {
 
 import { ReservationResource, StockResource } from "./resources.ts"
 
+const stockTable = Resource.table(StockResource)
+
 export const seedStock = Effect.fn("Inventory.seedStock")(function* (
   stock: Stock,
 ) {
@@ -39,7 +41,7 @@ const reserve = Effect.fn("Inventory.reserve")(function* (
   }
 
   const decremented = yield* database`
-    UPDATE ${database(Resource.table(StockResource).name)}
+    UPDATE ${database(stockTable.name)}
     SET ${database("available")} = ${database("available")} - ${input.quantity}
     WHERE ${database("sku")} = ${input.sku}
       AND ${database("available")} >= ${input.quantity}
@@ -65,7 +67,7 @@ const restoreStock = Effect.fn("Inventory.restoreStock")(function* (
   reservation: Reservation,
 ) {
   const replenished = yield* database`
-    UPDATE ${database(Resource.table(StockResource).name)}
+    UPDATE ${database(stockTable.name)}
     SET ${database("available")} = ${database("available")} + ${reservation.quantity}
     WHERE ${database("sku")} = ${reservation.sku}
       AND ${database("available")} <= ${Number.MAX_SAFE_INTEGER - reservation.quantity}

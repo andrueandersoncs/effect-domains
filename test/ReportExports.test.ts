@@ -37,9 +37,11 @@ const requestInput = {
 
 const RequestJsonSchema = Schema.toCodecJson(ReportExportRequestSchema)
 const requestEffect = Schema.decodeUnknownEffect(RequestJsonSchema)(requestInput)
+const reportExportExecutionsTable = Resource.table(ReportExportExecutionsResource)
+
 
 const executionStore = (filename: string) => {
-  const tables = prepareTables([Resource.table(ReportExportExecutionsResource)])
+  const tables = prepareTables([reportExportExecutionsTable])
   const preparedTables = Layer.effectDiscard(tables)
   const services = Layer.mergeAll(preparedTables, ReportExportExecutionStoreLive)
   const database = SqliteBunRuntime.sqlClient(filename, { migrations: [] })

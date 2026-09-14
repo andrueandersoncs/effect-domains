@@ -13,15 +13,17 @@ const authorization = policy.policy({
   allow: { read: ExampleRoles.admin, create: ExampleRoles.admin },
 })
 
+const notificationCapabilities = [
+  Resource.get(),
+  Resource.list({
+    filter: ["recipient", "appointmentId", "reminderId"],
+    limit: 100,
+  }),
+]
+
 export const AppointmentInboxNotificationResource = Resource.define({
   authorization,
   name: "appointment_notifications",
   schema: AppointmentInboxNotificationSchema,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({
-      filter: ["recipient", "appointmentId", "reminderId"],
-      limit: 100,
-    }),
-  ),
+  capabilities: notificationCapabilities,
 })

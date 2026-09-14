@@ -1,11 +1,11 @@
-import { Array, Cause, Effect, Equivalence, Function, Layer, Match, Option, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Cause, Data, Effect, Equivalence, Function, Layer, Match, Option, Record, Schema, Struct, flow, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import type { SqlError } from "effect/unstable/sql"
 import { AuthorizationSubject, type SubjectPolicy } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RepositoryError, RepositoryStore, ResourceNotFound, UniqueViolation, VersionConflict } from "./repository-store.ts"
 import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
-import { Resource, type AnyResourceSpec, type Resource as CompiledResource } from "./resource.ts"
+import { Resource, type ResourceSpec, type Resource as CompiledResource } from "./resource.ts"
 import type { CompiledReadModel, ReadModelSpec } from "./read-model.ts"
 import type { Table } from "./table.ts"
 
@@ -42,9 +42,6 @@ type Procedure<Name extends string, Payload extends Schema.Constraint | undefine
   Policy extends SubjectPolicy ? typeof AuthorizationRpc : never
 >
 
-type OperationRequirements<Transaction extends boolean | undefined, Requirements> =
-  | Exclude<Requirements, AuthorizationSubject>
-  | (Transaction extends true ? RepositoryStore : never)
 
 /** The empty-field error class that replaces every failure the contract does not declare. */
 interface UnavailableConstructor<Error extends Schema.Constraint> {
@@ -53,99 +50,87 @@ interface UnavailableConstructor<Error extends Schema.Constraint> {
 
 type Tagged = Readonly<Record<"_tag", string>>
 
-/** Failures the runtime owns; collapsing them into `unavailable` is the intended contract. */
-type InfrastructureFailure =
-  | SqlError.SqlError
-  | Schema.SchemaError
-  | RepositoryError
-  | ResourceNotFound
-  | UniqueViolation
-  | VersionConflict
-  | Cause.NoSuchElementError
-  | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
 
-/**
- * Domain-tagged failures the handler can raise but the contract does not declare. Untagged
- * failures and infrastructure failures are allowed because `unavailable` exists for them.
- */
-type UndeclaredFailure<Failure, Declared> = Failure extends Tagged
-  ? Failure extends Declared | InfrastructureFailure ? never : Failure
-  : never
 
-type DeclaresEveryFailure<Failure, Declared> = [UndeclaredFailure<Failure, Declared>] extends [never]
-  ? unknown
-  : Readonly<{ undeclaredFailure: UndeclaredFailure<Failure, Declared> }>
 
-type DeclaredFailure<Errors extends Schema.Constraint | undefined> =
-  Errors extends Schema.Constraint ? Errors["Type"] : never
-
-type OperationFailure<
-  Errors extends Schema.Constraint | undefined,
-  Unavailable extends Schema.Constraint,
-> = DeclaredFailure<Errors> | Unavailable["Type"]
-
-type OperationErrorSchema<
-  Errors extends Schema.Constraint | undefined,
-  Unavailable extends Schema.Constraint,
-> = Schema.Codec<
-  OperationFailure<Errors, Unavailable>,
-  (Errors extends Schema.Constraint ? Errors["Encoded"] : never) | Unavailable["Encoded"],
-  (Errors extends Schema.Constraint ? Errors["DecodingServices"] : never) | Unavailable["DecodingServices"],
-  (Errors extends Schema.Constraint ? Errors["EncodingServices"] : never) | Unavailable["EncodingServices"]
->
-
-export type CommandDependency =
-  | AnyResourceSpec
+type CommandDependency =
+  | ResourceSpec
   | CompiledResource
   | ReadModelSpec
   | CompiledReadModel
   | Table
 
-export interface CommandDependencySet {
+class CommandDependencySet extends Data.Class<{
   readonly tables: ReadonlyArray<Table>
   readonly readModels: ReadonlyArray<ReadModelSpec | CompiledReadModel>
-}
+}> {}
 
-const dependencyTable = Match.type<AnyResourceSpec | Table>().pipe(
+const dependencyTable = pipe(
+  Match.type<ResourceSpec | Table>(),
   Match.tagsExhaustive({
     ResourceSpec: Resource.table,
     Table: (table) => table,
   }),
 )
 
-const dependencyTables = Match.type<CommandDependency>().pipe(
+const dependenciesFrom: (dependency: CommandDependency) => ReadonlyArray<Table> = pipe(
+  Match.type<CommandDependency>(),
   Match.tagsExhaustive({
     ResourceSpec: (dependency) => [Resource.table(dependency)],
     CompiledResource: (dependency) => [dependency.table],
-    ReadModelSpec: (dependency) =>
-      Array.map(Record.values(dependency.definition.tables), dependencyTable),
-    CompiledReadModel: (dependency) => dependency.dependencies,
+    ReadModelSpec: (dependency) => {
+      const dependencies = Record.values(dependency.definition.tables)
+      return Array.map(dependencies, dependencyTable)
+    },
+    CompiledReadModel: Struct.get<CompiledReadModel, "dependencies">("dependencies"),
     Table: (dependency) => [dependency],
   }),
 )
 
+const readModelTags: ReadonlyArray<CommandDependency["_tag"]> = [
+  "ReadModelSpec",
+  "CompiledReadModel",
+]
+
 const isReadModel = (
   dependency: CommandDependency,
 ): dependency is ReadModelSpec | CompiledReadModel =>
-  dependency._tag === "ReadModelSpec" || dependency._tag === "CompiledReadModel"
+  Array.contains(readModelTags, dependency._tag)
 
 const dependencySet = (
   dependencies: ReadonlyArray<CommandDependency>,
 ): CommandDependencySet => {
   const readModels = Array.filter(dependencies, isReadModel)
-  const declaredTables = Array.flatMap(dependencies, dependencyTables)
+  const declaredTables = Array.flatMap(dependencies, dependenciesFrom)
+
   const tables = Array.dedupeWith(
     declaredTables,
     Equivalence.strictEqual<Table>(),
   )
 
-  return Object.freeze({
-    tables: Object.freeze([...tables]),
-    readModels: Object.freeze([...readModels]),
+  const frozenTables = Object.freeze([...tables])
+  const frozenReadModels = Object.freeze([...readModels])
+
+  return new CommandDependencySet({
+    tables: frozenTables,
+    readModels: frozenReadModels,
   })
 }
 
-export interface CommandSpec<
+
+type CommandSpecBoundary = Readonly<{
+  name: string
+  success: Schema.Constraint
+  unavailable: Schema.Constraint & UnavailableConstructor<Schema.Constraint>
+}> & Readonly<Partial<{
+  errors: Schema.Constraint
+  payload: Schema.Constraint
+  policy: SubjectPolicy
+  transaction: boolean
+  dependencies: ReadonlyArray<CommandDependency>
+}>>
+
+type CommandSpec<
   Name extends string = string,
   Payload extends Schema.Constraint | undefined = Schema.Constraint | undefined,
   Success extends Schema.Constraint = Schema.Constraint,
@@ -153,57 +138,15 @@ export interface CommandSpec<
   Unavailable extends Schema.Constraint = Schema.Constraint,
   Policy extends SubjectPolicy | undefined = SubjectPolicy | undefined,
   Transaction extends boolean | undefined = boolean | undefined,
-> {
-  readonly _tag: "CommandSpec"
-  readonly name: Name
-  readonly success: Success
-  readonly unavailable: Unavailable & UnavailableConstructor<Unavailable>
-  readonly errors?: Errors
-  readonly payload?: Payload
-  readonly policy?: Policy
-  readonly transaction?: Transaction
-  readonly dependencies?: ReadonlyArray<CommandDependency>
-  readonly _types?: Readonly<{
-    payload: Payload
-    success: Success
-    errors: Errors
-    unavailable: Unavailable
-    policy: Policy
-    transaction: Transaction
-  }>
-}
+> = CommandSpecBoundary & Readonly<{
+  name: Name
+  success: Success
+  unavailable: Unavailable & UnavailableConstructor<Unavailable>
+}> & (Payload extends Schema.Constraint ? Readonly<{ payload: Payload }> : unknown)
+  & (Errors extends Schema.Constraint ? Readonly<{ errors: Errors }> : unknown)
+  & (Policy extends SubjectPolicy ? Readonly<{ policy: Policy }> : unknown)
+  & (Transaction extends boolean ? Readonly<{ transaction: Transaction }> : unknown)
 
-type CommandDefinition<
-  Name extends string,
-  Payload extends Schema.Constraint | undefined,
-  Success extends Schema.Constraint,
-  Errors extends Schema.Constraint | undefined,
-  Unavailable extends Schema.Constraint,
-  Policy extends SubjectPolicy | undefined,
-  Transaction extends boolean | undefined,
-> = Omit<
-  CommandSpec<Name, Payload, Success, Errors, Unavailable, Policy, Transaction>,
-  "_tag"
->
-
-type AnyCommandFamilyDefinition = Readonly<{
-  name: string
-  success: Schema.Constraint
-}> & Readonly<Partial<{
-  errors: Schema.Constraint
-  payload: Schema.Constraint
-  dependencies: ReadonlyArray<CommandDependency>
-}>>
-
-type FamilyPayload<Definition> =
-  Definition extends { readonly payload: infer Payload extends Schema.Constraint }
-    ? Payload
-    : undefined
-
-type FamilyErrors<Definition> =
-  Definition extends { readonly errors: infer Errors extends Schema.Constraint }
-    ? Errors
-    : undefined
 
 const defineCommand = <
   const Name extends string,
@@ -214,16 +157,8 @@ const defineCommand = <
   const Policy extends SubjectPolicy | undefined = undefined,
   const Transaction extends boolean | undefined = undefined,
 >(
-  definition: CommandDefinition<
-    Name,
-    Payload,
-    Success,
-    Errors,
-    Unavailable,
-    Policy,
-    Transaction
-  >,
-): CommandSpec<
+  definition: CommandSpecBoundary & CommandSpec<Name, Payload, Success, Errors, Unavailable, Policy, Transaction>,
+) => Object.freeze({ ...definition }) as CommandSpec<
   Name,
   Payload,
   Success,
@@ -231,13 +166,12 @@ const defineCommand = <
   Unavailable,
   Policy,
   Transaction
-> => Object.freeze({ ...definition, _tag: "CommandSpec" as const })
+>
 
 
 /** A command specification paired with its translated Effect implementation. */
 export interface CommandLive<Contract extends RpcProcedure = RpcProcedure> {
-  readonly _tag: "CommandLive"
-  readonly spec: CommandSpec
+  readonly spec: CommandSpecBoundary
   readonly rpc: Contract
   readonly handler: (input: never) => Effect.Effect<unknown, unknown, unknown>
 }
@@ -263,34 +197,81 @@ const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.C
 const isMiddlewareFailure = Schema.is(AuthorizationRpc.errorSchema)
 const alwaysUndeclared = Function.constant(false)
 
-type CommandTypes<Spec extends CommandSpec> = NonNullable<Spec["_types"]>
-
 
 const compileCommand = <
-  const Spec extends CommandSpec,
+  const Spec extends CommandSpecBoundary,
   const Implementation = never,
 >(
   definition: Spec,
   implementation: Implementation & NoInfer<
     Handler<
-      CommandTypes<Spec>["payload"],
-      CommandTypes<Spec>["success"],
-      CommandTypes<Spec>["policy"],
+      Spec extends { readonly payload: infer Payload extends Schema.Constraint } ? Payload : void,
+      Spec["success"],
+      Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
       HandlerFailure<Implementation>,
       HandlerRequirements<Implementation>
     >
-      & DeclaresEveryFailure<
-        HandlerFailure<Implementation>,
-        OperationFailure<CommandTypes<Spec>["errors"], CommandTypes<Spec>["unavailable"]>
-      >
+      & ([HandlerFailure<Implementation> extends infer Failure
+        ? Failure extends Tagged
+          ? Failure extends
+            | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+              ? Errors["Type"]
+              : never)
+            | Spec["unavailable"]["Type"]
+            | SqlError.SqlError
+            | Schema.SchemaError
+            | RepositoryError
+            | ResourceNotFound
+            | UniqueViolation
+            | VersionConflict
+            | Cause.NoSuchElementError
+            | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+            ? never
+            : Failure
+          : never
+        : never] extends [never]
+        ? unknown
+        : Readonly<{ undeclaredFailure:
+          HandlerFailure<Implementation> extends infer Failure
+            ? Failure extends Tagged
+              ? Failure extends
+                | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+                  ? Errors["Type"]
+                  : never)
+                | Spec["unavailable"]["Type"]
+                | SqlError.SqlError
+                | Schema.SchemaError
+                | RepositoryError
+                | ResourceNotFound
+                | UniqueViolation
+                | VersionConflict
+                | Cause.NoSuchElementError
+                | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+                ? never
+                : Failure
+              : never
+            : never
+        }>)
   >,
 ) => {
-  type Payload = CommandTypes<Spec>["payload"]
-  type Success = CommandTypes<Spec>["success"]
-  type Errors = CommandTypes<Spec>["errors"]
-  type Unavailable = CommandTypes<Spec>["unavailable"]
-  type Policy = CommandTypes<Spec>["policy"]
-  type Transaction = CommandTypes<Spec>["transaction"]
+  type Payload = Spec extends { readonly payload: infer Value extends Schema.Constraint } ? Value : undefined
+  type Success = Spec["success"]
+  type Errors = Spec extends { readonly errors: infer Value extends Schema.Constraint } ? Value : undefined
+  type Unavailable = Spec["unavailable"]
+  type Policy = Spec extends { readonly policy: infer Value extends SubjectPolicy } ? Value : undefined
+  type Transaction = Spec extends { readonly transaction: infer Value extends boolean } ? Value : undefined
+
+  type Failure =
+    | (Errors extends Schema.Constraint ? Errors["Type"] : never)
+    | Unavailable["Type"]
+
+  type ErrorSchema = Schema.Codec<
+    Failure,
+    (Errors extends Schema.Constraint ? Errors["Encoded"] : never) | Unavailable["Encoded"],
+    (Errors extends Schema.Constraint ? Errors["DecodingServices"] : never) | Unavailable["DecodingServices"],
+    (Errors extends Schema.Constraint ? Errors["EncodingServices"] : never) | Unavailable["EncodingServices"]
+  >
+
   const payload = Option.fromNullishOr(definition.payload)
   const payloadSchema = Option.getOrElse(payload, Function.constant(Schema.Void))
   const payloadJsonSchema = Schema.toCodecJson(payloadSchema)
@@ -300,11 +281,10 @@ const compileCommand = <
   const errorSchema = Option.match(declaredErrors, {
     onNone: () => definition.unavailable,
     onSome: (errors) => Schema.Union([errors, definition.unavailable]),
-  }) as OperationErrorSchema<Errors, Unavailable>
+  }) as ErrorSchema
 
   const errorJsonSchema = Schema.toCodecJson(errorSchema)
   const contract = Rpc.make(definition.name, { payload: payloadJsonSchema, success: successJsonSchema, error: errorJsonSchema })
-
   const policy = Option.fromNullishOr(definition.policy)
 
   const rpc = Option.match(policy, {
@@ -352,13 +332,13 @@ const compileCommand = <
   const handler = flow(run, Effect.catchCause(translate), Effect.withSpan(definition.name))
 
   return {
-    _tag: "CommandLive" as const,
     spec: definition,
-    rpc: rpc as Procedure<Spec["name"], Payload, Success, OperationErrorSchema<Errors, Unavailable>, Policy>,
+    rpc: rpc as Procedure<Spec["name"], Payload, Success, ErrorSchema, Policy>,
     handler: handler as (input: PayloadType<Payload>) => Effect.Effect<
       Success["Type"],
-      OperationFailure<Errors, Unavailable>,
-      OperationRequirements<Transaction, HandlerRequirements<Implementation>>
+      Failure,
+      Exclude<HandlerRequirements<Implementation>, AuthorizationSubject>
+        | (Transaction extends true ? RepositoryStore : never)
     >,
   } satisfies CommandLive
 }
@@ -374,37 +354,38 @@ const defineFamily = <
   policy: Policy,
   transaction: Transaction,
 ) => {
-  const define = <const Definition extends AnyCommandFamilyDefinition>(
-    definition: Definition,
+  const define = <
+    const Name extends string,
+    const Success extends Schema.Constraint,
+    const Payload extends Schema.Constraint | undefined = undefined,
+    const Errors extends Schema.Constraint | undefined = undefined,
+  >(
+    definition: Readonly<{
+      name: Name
+      success: Success
+    }> & Readonly<Partial<{
+      errors: Errors
+      payload: Payload
+      dependencies: ReadonlyArray<CommandDependency>
+    }>>,
   ): CommandSpec<
-    `${Prefix}${Definition["name"]}`,
-    FamilyPayload<Definition>,
-    Definition["success"],
-    FamilyErrors<Definition>,
+    `${Prefix}${Name}`,
+    Payload,
+    Success,
+    Errors,
     Unavailable,
     Policy,
     Transaction
   > => {
-    const name = `${prefix}${definition.name}` as `${Prefix}${Definition["name"]}`
+    const name = `${prefix}${definition.name}` as `${Prefix}${Name}`
 
-    return defineCommand({
+    return Object.freeze({
+      ...definition,
       name,
-      success: definition.success,
-      errors: definition.errors,
-      payload: definition.payload,
-      dependencies: definition.dependencies,
       unavailable,
       policy,
       transaction,
-    } as CommandDefinition<
-      `${Prefix}${Definition["name"]}`,
-      FamilyPayload<Definition>,
-      Definition["success"],
-      FamilyErrors<Definition>,
-      Unavailable,
-      Policy,
-      Transaction
-    >)
+    }) as CommandSpec<`${Prefix}${Name}`, Payload, Success, Errors, Unavailable, Policy, Transaction>
   }
 
   return { define }
@@ -440,15 +421,15 @@ type CommandRequirements<Commands extends ReadonlyArray<CommandLive>> =
     AuthorizationSubject
   >
 
+
+
 export interface AnyCommandBundle extends RpcBundle {
-  readonly _tag: "CommandBundle"
   readonly commands: ReadonlyArray<CommandLive>
 }
 
-export type CommandBundle<
+type CommandBundle<
   Commands extends ReadonlyArray<CommandLive> = ReadonlyArray<CommandLive>,
 > = Readonly<{
-  readonly _tag: "CommandBundle"
   readonly commands: Commands
   readonly group: RpcGroup.RpcGroup<CommandContract<Commands>>
   readonly handlers: Layer.Layer<
@@ -471,12 +452,12 @@ const bundle = <const Commands extends ReadonlyArray<CommandLive>>(
 
   const layers = Array.map(commands, install)
   const handlers = Layer.mergeAll(Layer.empty, ...layers) as Layer.Layer<Rpc.ToHandler<Contract>, never, Requirements>
-  return Object.freeze({
-    _tag: "CommandBundle" as const,
-    commands: Object.freeze([...commands]) as unknown as Commands,
-    group,
-    handlers,
-  })
+  const frozenCommands = Object.freeze(commands)
+  const rpcBundle = RpcBundle.make(group)(handlers)
+
+  return Struct.assign(rpcBundle, {
+    commands: frozenCommands,
+  }) satisfies AnyCommandBundle
 }
 
 export const Command = {

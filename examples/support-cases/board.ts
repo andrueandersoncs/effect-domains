@@ -7,12 +7,14 @@ import {
   SupportCustomersResource,
 } from "./resources.ts"
 
+const supportCaseBoardSources = ReadModel.sources({
+  supportCase: SupportCasesResource,
+  customer: SupportCustomersResource,
+  agent: SupportAgentsResource,
+})
+
 export const SupportCaseBoard = ReadModel.define({
-  tables: ReadModel.sources({
-    supportCase: SupportCasesResource,
-    customer: SupportCustomersResource,
-    agent: SupportAgentsResource,
-  }),
+  tables: supportCaseBoardSources,
   from: "supportCase",
   joins: [
     {
@@ -50,4 +52,6 @@ export const SupportCaseBoardList = ReadModel.page({
 })
 
 export const SupportCaseBoardPage = ReadModel.compilePage(SupportCaseBoardList)
-export const SupportCaseBoardRowSchema = Schema.toType(ReadModel.compile(SupportCaseBoard).schema)
+
+const compiledSupportCaseBoard = ReadModel.compile(SupportCaseBoard)
+export const SupportCaseBoardRowSchema = Schema.toType(compiledSupportCaseBoard.schema)

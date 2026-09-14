@@ -92,6 +92,7 @@ export class FieldIR extends Data.Class<{
 }> {}
 
 const emptyCategory = Option.none<FieldCategory>()
+
 const describe = (
   category: Option.Option<FieldCategory>,
   nullable = false,
@@ -114,7 +115,7 @@ const finiteNumber = (ast: SchemaAST.Number) => pipe(scalarChecks(ast), Array.so
     || Equivalence.strictEqual<unknown>()(id, "effect/schema/isInt")
 }))
 
-export const describeLiteral = (value: unknown): Option.Option<FieldIR> => pipe(
+export const describeLiteral = (value: unknown) => pipe(
   Match.value(value),
   Match.when(Predicate.isNull, Function.constant(optionalNull)),
   Match.when(Predicate.isString, Function.constant(optionalString)),
@@ -138,14 +139,20 @@ const combineDescriptions = (
   const merge = (left: FieldIR, right: FieldIR) => {
     const scalar = !right.collection
     const compatible = sameCategory(left.category, right.category)
-    if (!scalar || !compatible) return Option.none<FieldIR>()
+    const unsupported = !scalar
+    const incompatible = !compatible
+
+    if (unsupported) return Option.none<FieldIR>()
     const category = Option.orElse(left.category, Function.constant(right.category))
-    return pipe(describe(
+
+    const combined = pipe(describe(
       category,
       left.nullable || right.nullable,
       left.collection,
       left.transformsStoredNull || right.transformsStoredNull,
     ), Option.some)
+
+    return compatible ? combined : Option.none<FieldIR>()
   }
 
   const reduce = (
@@ -153,7 +160,8 @@ const combineDescriptions = (
     next: Option.Option<FieldIR>,
   ) => pipe(Option.all([state, next] as const), Option.flatMap(Function.tupled(merge)))
 
-  return Array.reduce(descriptions, Option.some(neutralDescription), reduce)
+  const initial = Option.some(neutralDescription)
+  return Array.reduce(descriptions, initial, reduce)
 }
 
 const asCollection = (field: FieldIR) =>
@@ -199,7 +207,7 @@ const canonicalAlgebra = (
 
 export const describeValue = (
   value: unknown,
-): Option.Option<FieldIR> => Array.isArray(value)
+) => Array.isArray(value)
   ? pipe(value, Array.map(describeLiteral), combineDescriptions, Option.map(asCollection))
   : describeLiteral(value)
 
@@ -222,12 +230,13 @@ const transformsStoredNull = fold("storage", storageNullAlgebra)
 export const compileField = (schema: Schema.Constraint): Option.Option<FieldIR> => {
   const ast = SchemaAST.toType(schema.ast)
   if (SchemaAST.isOptional(ast)) return Option.none()
+
   return pipe(
     canonical(ast),
-    Option.map((field) => new FieldIR({
-      ...field,
-      transformsStoredNull: transformsStoredNull(schema.ast),
-    })),
+    Option.map((field) => {
+      const storedNull = transformsStoredNull(schema.ast)
+      return new FieldIR({ ...field, transformsStoredNull: storedNull })
+    }),
   )
 }
 
@@ -239,4 +248,5 @@ export const SchemaField = {
   transformsStoredNull,
   describeValue,
 }
+
 export const ScalarSchema = { map: transformLayer, fold }

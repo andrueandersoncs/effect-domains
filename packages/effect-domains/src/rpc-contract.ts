@@ -1,4 +1,4 @@
-import { Array, type Layer, Option, Record, Schema, Struct } from "effect"
+import { Array, Data, type Layer, Option, Schema, Struct } from "effect"
 import { Rpc, type RpcGroup, type RpcMiddleware, RpcSchema } from "effect/unstable/rpc"
 
 // Inspect only middleware errors because their service implementations are contravariant.
@@ -11,11 +11,18 @@ export interface RpcBundle {
   readonly handlers: Layer.Layer<never, any, any>
 }
 
-const emptyBundle = Record.empty<string, never>()
+class CompiledRpcBundle<
+  Group extends RpcBundle["group"],
+  Handlers extends RpcBundle["handlers"],
+> extends Data.Class<{
+  readonly group: Group
+  readonly handlers: Handlers
+}> {}
 
-// Build bundles here because the pair is a boundary value shared by resources, operations, and identity.
-const make = <Group extends RpcBundle["group"]>(group: Group) => <Handlers extends RpcBundle["handlers"]>(handlers: Handlers) =>
-  Struct.assign(emptyBundle, { group, handlers })
+// Build bundles here because the pair is a boundary value shared by resources, commands, and identity.
+const make = <Group extends RpcBundle["group"]>(group: Group) =>
+  <Handlers extends RpcBundle["handlers"]>(handlers: Handlers) =>
+    new CompiledRpcBundle<Group, Handlers>({ group, handlers })
 
 export const RpcBundle = { make }
 

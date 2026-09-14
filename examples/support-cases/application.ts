@@ -9,13 +9,14 @@ import {
 
 import { SupportCaseOperations } from "./sqlite.ts"
 
-export const SupportCasesApplication = Application.compile(Application.define({
-  name: "support-cases",
-  parts: [
-    Part.resource(SupportCustomersResource),
-    Part.resource(SupportAgentsResource),
-    Part.resource(SupportCasesResource),
-    Part.resource(SupportCaseEventsResource),
-    Part.command(SupportCaseOperations),
-  ],
-}))
+const parts = [
+  Part.resource(SupportCustomersResource),
+  Part.resource(SupportAgentsResource),
+  Part.resource(SupportCasesResource),
+  Part.resource(SupportCaseEventsResource),
+  Part.command(SupportCaseOperations),
+]
+
+const supportCases = Application.define({ name: "support-cases", parts })
+
+export const SupportCasesApplication = Application.compile(supportCases)

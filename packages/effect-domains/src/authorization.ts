@@ -257,6 +257,7 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
 
 const describeFields = (schema: StructSchema): FieldDescriptions =>
   Record.map(schema.fields, SchemaField.compile)
+
 const fieldFor = (fields: FieldDescriptions, field: string) => pipe(Record.get(fields, field), Option.flatten)
 
 const sameFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) => {

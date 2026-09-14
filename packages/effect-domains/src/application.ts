@@ -1,48 +1,54 @@
-import { Array, Effect, HashSet, Layer, Match, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, HashSet, Layer, Match, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import { Command, type AnyCommandBundle, type CommandLive } from "./command.ts"
 import { SchemaStore } from "./migrations.ts"
-import { Resource, type AnyResourceSpec, type Resource as CompiledResource, type ResourceRuntime } from "./resource.ts"
-import { type RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
+import { Resource, type ResourceSpec, type Resource as CompiledResource, type ResourceRuntime } from "./resource.ts"
+import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
 import { Table } from "./table.ts"
 
-type ApplicationPart =
-  | Readonly<{ readonly _tag: "ResourcePart"; readonly resource: AnyResourceSpec }>
-  | Readonly<{ readonly _tag: "CommandPart"; readonly bundle: AnyCommandBundle }>
-  | Readonly<{ readonly _tag: "NativePart"; readonly bundle: RpcBundle }>
-  | Readonly<{ readonly _tag: "ApplicationPart"; readonly application: ApplicationSpec }>
 
-export interface ApplicationSpec<
+type ApplicationPart = Data.TaggedEnum<{
+  ResourcePart: { readonly resource: ResourceSpec }
+  CommandPart: { readonly bundle: AnyCommandBundle }
+  NativePart: { readonly bundle: RpcBundle }
+  ApplicationPart: { readonly application: ApplicationSpec }
+}>
+
+class ApplicationSpec<
   Parts extends ReadonlyArray<ApplicationPart> = ReadonlyArray<ApplicationPart>,
-> {
-  readonly _tag: "ApplicationSpec"
+> extends Data.Class<{
   readonly name: string
   readonly parts: Parts
+}> {}
+
+const ApplicationParts = Data.taggedEnum<ApplicationPart>()
+
+const resourcePart = <const Spec extends ResourceSpec>(resource: Spec) => {
+  const part = ApplicationParts.ResourcePart({ resource })
+  return Struct.assign(part, { resource })
 }
 
-const resourcePart = <const Spec extends AnyResourceSpec>(
-  resource: Spec,
-) => Object.freeze({ _tag: "ResourcePart" as const, resource })
+const commandPart = <const Bundle extends AnyCommandBundle>(bundle: Bundle) => {
+  const part = ApplicationParts.CommandPart({ bundle })
+  return Struct.assign(part, { bundle })
+}
 
-const commandPart = <const Bundle extends AnyCommandBundle>(
-  bundle: Bundle,
-) => Object.freeze({ _tag: "CommandPart" as const, bundle })
+const nativePart = <const Bundle extends RpcBundle>(bundle: Bundle) => {
+  const part = ApplicationParts.NativePart({ bundle })
+  return Struct.assign(part, { bundle })
+}
 
-const nativePart = <const Bundle extends RpcBundle>(
-  bundle: Bundle,
-) => Object.freeze({ _tag: "NativePart" as const, bundle })
-
-const applicationPart = <const Spec extends ApplicationSpec>(
-  application: Spec,
-) => Object.freeze({ _tag: "ApplicationPart" as const, application })
+const applicationPart = <const Spec extends ApplicationSpec>(application: Spec) => {
+  const part = ApplicationParts.ApplicationPart({ application })
+  return Struct.assign(part, { application })
+}
 
 const define = <const Parts extends ReadonlyArray<ApplicationPart>>(
   definition: Readonly<{ name: string; parts: Parts }>,
-): ApplicationSpec<Parts> => Object.freeze({
-  _tag: "ApplicationSpec" as const,
-  name: definition.name,
-  parts: Object.freeze([...definition.parts]) as Parts,
-})
+): ApplicationSpec<Parts> => {
+  const parts = Object.freeze([...definition.parts]) as Parts
+  return new ApplicationSpec({ name: definition.name, parts })
+}
 
 class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitionError>()(
   "ApplicationDefinitionError",
@@ -53,27 +59,33 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   }
 }
 
-interface CompiledPart {
+class CompiledPart extends Data.Class<{
   readonly bundle: RpcBundle
   readonly resources: ReadonlyArray<CompiledResource>
   readonly commands: ReadonlyArray<CommandLive>
-}
+}> {}
 
 const noResources: ReadonlyArray<CompiledResource> = Object.freeze([])
 const noCommands: ReadonlyArray<CommandLive> = Object.freeze([])
 
 type ApplicationDepth = 0 | 1 | 2 | 3 | 4 | 5
-type PreviousDepth = { readonly 0: 0; readonly 1: 0; readonly 2: 1; readonly 3: 2; readonly 4: 3; readonly 5: 4 }
+
+type PreviousDepth<Depth extends ApplicationDepth> =
+  Depth extends 5 ? 4
+    : Depth extends 4 ? 3
+      : Depth extends 3 ? 2
+        : Depth extends 2 ? 1
+          : 0
 
 type PartBundle<Part, Depth extends ApplicationDepth = 5> =
-  Part extends { readonly _tag: "ResourcePart"; readonly resource: infer Spec extends AnyResourceSpec }
+  Part extends { readonly _tag: "ResourcePart"; readonly resource: infer Spec extends ResourceSpec }
     ? ResourceRuntime<Spec>
     : Part extends { readonly _tag: "CommandPart"; readonly bundle: infer Bundle extends AnyCommandBundle }
       ? Bundle
       : Part extends { readonly _tag: "NativePart"; readonly bundle: infer Bundle extends RpcBundle }
         ? Bundle
         : Part extends { readonly _tag: "ApplicationPart"; readonly application: infer Spec extends ApplicationSpec }
-          ? Depth extends 0 ? RpcBundle : ApplicationIRFor<Spec, PreviousDepth[Depth]>
+          ? Depth extends 0 ? RpcBundle : ApplicationIRFor<Spec, PreviousDepth<Depth>>
           : never
 
 type BundleRpcs<Bundle> =
@@ -88,7 +100,7 @@ type BundleRequirements<Bundle> = Layer.Services<BundleHandlers<Bundle>>
 
 type PartUnion<Spec extends ApplicationSpec> = Spec["parts"][number]
 
-export type ApplicationIRFor<
+type ApplicationIRFor<
   Spec extends ApplicationSpec,
   Depth extends ApplicationDepth = 5,
 > = Omit<ApplicationIR, "group" | "handlers"> & Readonly<{
@@ -103,13 +115,14 @@ export type ApplicationIRFor<
 }>
 
 export interface ApplicationIR extends RpcBundle {
-  readonly _tag: "ApplicationIR"
-  readonly definition: ApplicationSpec
   readonly name: string
   readonly resources: ReadonlyArray<CompiledResource>
   readonly commands: ReadonlyArray<CommandLive>
   readonly tables: ReadonlyArray<Table>
 }
+
+
+const containsTable = Array.containsWith(Equivalence.strictEqual<Table>())
 
 
 const validateApplication = Effect.fn("Application.validate")(function* (
@@ -129,7 +142,7 @@ const validateApplication = Effect.fn("Application.validate")(function* (
 
   yield* Effect.forEach(tables, Effect.fn("Application.validateRelationTargets")(function* (table) {
     yield* Effect.forEach(table.relationTargets, Effect.fn("Application.validateRelationTarget")(function* (target) {
-      if (!Array.contains(tables, target)) {
+      if (!containsTable(tables, target)) {
         return yield* ApplicationDefinitionError.make({
           reason: `Resource table ${table.name} references unregistered table ${target.name}; use the registered resource's table`,
         })
@@ -142,13 +155,14 @@ const validateApplication = Effect.fn("Application.validate")(function* (
 
   const proceduresForGroup = (group: RpcBundle["group"]) =>
     pipe(group.requests.values(), Array.fromIterable)
+
   const procedures = Array.flatMap(groups, proceduresForGroup)
 
   yield* Effect.forEach(commands, Effect.fn("Application.validateCommandDependencies")(function* (command) {
     const dependencies = Command.dependencies(command.spec.dependencies ?? [])
 
     yield* Effect.forEach(dependencies.tables, Effect.fn("Application.validateCommandTable")(function* (dependency) {
-      if (!Array.contains(tables, dependency)) {
+      if (!containsTable(tables, dependency)) {
         return yield* ApplicationDefinitionError.make({
           reason: `Command ${command.spec.name} reads unregistered table ${dependency.name}; use the registered resource definition`,
         })
@@ -171,31 +185,32 @@ const validateApplication = Effect.fn("Application.validate")(function* (
   return { tables, procedures }
 })
 
-const compileApplication = (definition: ApplicationSpec): ApplicationIR => {
-  const compilePart = (part: ApplicationPart): CompiledPart => pipe(
+function compileApplication<const Definition extends ApplicationSpec>(
+  definition: Definition,
+): ApplicationIRFor<Definition>
+
+function compileApplication(definition: ApplicationSpec): ApplicationIR
+
+function compileApplication(definition: ApplicationSpec): ApplicationIR {
+  const compilePart = (part: ApplicationPart) => pipe(
     Match.value(part),
     Match.tagsExhaustive({
       ResourcePart: ({ resource }) => {
         const compiled = Resource.compile(resource)
-        return { bundle: compiled, resources: [compiled], commands: noCommands }
+        return new CompiledPart({ bundle: compiled, resources: [compiled], commands: noCommands })
       },
-      CommandPart: ({ bundle }) => ({
-        bundle,
-        resources: noResources,
-        commands: bundle.commands,
-      }),
-      NativePart: ({ bundle }) => ({
-        bundle,
-        resources: noResources,
-        commands: noCommands,
-      }),
+      CommandPart: ({ bundle }) =>
+        new CompiledPart({ bundle, resources: noResources, commands: bundle.commands }),
+      NativePart: ({ bundle }) =>
+        new CompiledPart({ bundle, resources: noResources, commands: noCommands }),
       ApplicationPart: ({ application }) => {
         const compiled = compileApplication(application)
-        return {
+
+        return new CompiledPart({
           bundle: compiled,
           resources: compiled.resources,
           commands: compiled.commands,
-        }
+        })
       },
     }),
   )
@@ -205,34 +220,29 @@ const compileApplication = (definition: ApplicationSpec): ApplicationIR => {
   const resources = Array.flatMap(parts, Struct.get("resources"))
   const commands = Array.flatMap(parts, Struct.get("commands"))
   const groups = Array.map(bundles, Struct.get("group"))
-  const validation = Effect.runSync(validateApplication(resources, groups, commands))
+  const validationEffect = validateApplication(resources, groups, commands)
+  const validation = Effect.runSync(validationEffect)
   const group = RpcGroup.make().merge(...groups)
   const layers = Array.map(bundles, Struct.get("handlers"))
   const handlers = Layer.mergeAll(Layer.empty, ...layers)
+  const bundle = RpcBundle.make(group)(handlers)
 
-  return Object.freeze({
-    _tag: "ApplicationIR" as const,
-    definition,
+  return Struct.assign(bundle, {
     name: definition.name,
     resources,
     commands,
     tables: validation.tables,
-    group,
-    handlers,
-  }) as unknown as ApplicationIR
-}
-const compile = <const Definition extends ApplicationSpec>(
-  definition: Definition,
-): ApplicationIRFor<Definition> =>
-  compileApplication(definition) as unknown as ApplicationIRFor<Definition>
+  })
 
-const prepare = Effect.fn("Application.prepare")(function* (
+}
+
+const prepareApplication = function* (
   application: ApplicationIR,
 ) {
   const snapshots = Array.map(application.tables, Table.snapshot)
   const store = yield* SchemaStore
   yield* store.prepare(snapshots)
-})
+}
 
 export const Part = {
   resource: resourcePart,
@@ -241,4 +251,8 @@ export const Part = {
   application: applicationPart,
 }
 
-export const Application = { define, compile, prepare }
+export const Application = {
+  define,
+  compile: compileApplication,
+  prepare: Effect.fn("Application.prepare")(prepareApplication),
+}

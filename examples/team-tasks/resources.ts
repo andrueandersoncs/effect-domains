@@ -25,26 +25,28 @@ const authorization = p.policy({
   },
 })
 
+const taskCreateSources = {
+  completed: Resource.default(false),
+  priority: Resource.default("normal"),
+  tenantId: Resource.fromSubject(p.subject.tenantId),
+  ownerId: Resource.fromSubject(p.subject.userId),
+}
+
+const taskCapabilities = [
+  Resource.get(),
+  Resource.list({
+    filter: ["project", "priority", "completed"],
+    limit: 25,
+  }),
+  Resource.create({ sources: taskCreateSources }),
+  Resource.update(),
+  Resource.remove(),
+  Resource.patch(),
+]
+
 export const TasksResource = Resource.define({
   authorization,
   name: "todos",
   schema: TaskSchema,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({
-      filter: ["project", "priority", "completed"],
-      limit: 25,
-    }),
-    Resource.create({
-      sources: {
-        completed: Resource.default(false),
-        priority: Resource.default("normal"),
-        tenantId: Resource.fromSubject(p.subject.tenantId),
-        ownerId: Resource.fromSubject(p.subject.userId),
-      },
-    }),
-    Resource.update(),
-    Resource.remove(),
-    Resource.patch(),
-  ),
+  capabilities: taskCapabilities,
 })

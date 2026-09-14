@@ -30,6 +30,17 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-14: Better TypeScript lint completion
+
+The explicit compiler architecture now passes Better TypeScript across the framework, adapters, examples, and root integration fixtures without rule changes or exclusions. The cleanup removed the 296 diagnostics recorded at the compiler cutover: speculative exports and aliases were deleted, closed one-owner abstractions were collapsed, optional and unused type fields were removed, Effect collection and equality operations replaced native equivalents, and repeated derived values were named rather than recomputed through nested calls. Canonical domain models and declarative specifications did not gain persistence, transport, UI, or authorization concerns. ([Resource](../../packages/effect-domains/src/resource.ts); [Application](../../packages/effect-domains/src/application.ts); [compiler cutover](#2026-09-14-explicit-compiler-architecture-cutover))
+
+- `bun run lint` passed every workspace package, all thirteen examples, both browser packages, and the root suite with the existing configuration.
+- `bun run check` passed every workspace package and the root compiler fixtures. `bun run test` passed **140 tests in 30 files**.
+- `bun run build` precompiled the admin and example-web applications, and `bun run docs:build` rendered the documentation site.
+- A compile-cache smoke check established both sides of the identity contract: compiling the same Resource specification returns the cached runtime, while a separately authored structurally equal specification compiles to a distinct runtime. Application regressions separately reject foreign-key and command dependencies built from an unregistered descriptor.
+
+This closes the cutover's lint debt. It does not expand the framework's database, transport, distributed-compilation, or browser-reactivity claims.
+
 ### 2026-09-14: Explicit compiler architecture cutover
 
 The compiler boundary now separates author intent from derived runtime values. `Resource.define`, `Command.define`, `ReadModel.define`, and `Application.define` produce inspectable specifications; explicit compilation derives Resource runtime products and the sole `ApplicationIR`. Resource creation sources, capabilities, command dependencies, application parts, schema fields, and recursive read-model syntax use closed tagged vocabularies with exhaustive folds. Exact Resource identity is retained for relation and dependency validation. The superseded Operation, SqliteView, schema-algebra, and implicit application/resource constructor paths were deleted rather than retained as compatibility layers. ([Resource](../../packages/effect-domains/src/resource.ts); [Command](../../packages/effect-domains/src/command.ts); [ReadModel](../../packages/effect-domains/src/read-model.ts); [Application](../../packages/effect-domains/src/application.ts); [schema fields](../../packages/effect-domains/src/schema-field.ts))

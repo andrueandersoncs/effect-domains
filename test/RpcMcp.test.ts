@@ -93,14 +93,15 @@ const clockHandlers = clock.toLayer({
   "clock.wire": (text) => Effect.succeed(`${text}!`),
 })
 
-const clockApplication = Application.compile(Application.define({
-  name: "clock",
-  parts: [Part.native({ group: clock, handlers: clockHandlers })],
-}))
+const clockParts = [Part.native({ group: clock, handlers: clockHandlers })]
+const clockDefinition = Application.define({ name: "clock", parts: clockParts })
+const clockApplication = Application.compile(clockDefinition)
+
 const clockRoutes = pipe(
   RpcMcp.layerHttp({ application: clockApplication, path: "/mcp" }),
   Layer.provide(clockApplication.handlers),
 )
+
 const preservesCodecService = true satisfies Types.Equals<Layer.Services<typeof clockRoutes>, HttpRouter.HttpRouter | StoragePrefix>
 void preservesCodecService
 
@@ -162,10 +163,10 @@ it.effect("MCP uses handler-only codec context instead of its ambient context", 
       Layer.provide(innerPrefix),
     )
 
-    const application = Application.compile(Application.define({
-      name: "codec",
-      parts: [Part.native({ group, handlers })],
-    }))
+    const parts = [Part.native({ group, handlers })]
+    const definition = Application.define({ name: "codec", parts })
+    const application = Application.compile(definition)
+
     const handlerOnlyRoutes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),
       Layer.provide(application.handlers),
@@ -203,10 +204,10 @@ const identityHandlers = identity.toLayer({ "identity.subject": () => Authorizat
 
 const captured = Layer.succeed(AuthorizationSubject, { userId: "captured" })
 
-const identityApplication = Application.compile(Application.define({
-  name: "identity",
-  parts: [Part.native({ group: identity, handlers: identityHandlers })],
-}))
+const identityParts = [Part.native({ group: identity, handlers: identityHandlers })]
+const identityDefinition = Application.define({ name: "identity", parts: identityParts })
+const identityApplication = Application.compile(identityDefinition)
+
 const identityRoutes = pipe(
   RpcMcp.layerHttp({ application: identityApplication, path: "/mcp" }),
   Layer.provide(identityApplication.handlers),
@@ -261,11 +262,10 @@ it.effect("MCP closes handler scopes after success and failure without closing t
     })
 
     const handlers = group.toLayer({ scope: handler })
+    const parts = [Part.native({ group, handlers })]
+    const definition = Application.define({ name: "scope", parts })
+    const application = Application.compile(definition)
 
-    const application = Application.compile(Application.define({
-      name: "scope",
-      parts: [Part.native({ group, handlers })],
-    }))
     const routes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),
       Layer.provide(application.handlers),

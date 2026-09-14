@@ -5,7 +5,7 @@ import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type Subje
 import { Command, type CommandLive } from "./command.ts"
 import { CreationInspectionSchema } from "./resource-creation.ts"
 import { Policy } from "./policy.ts"
-import { ReadModel, ReadModelDescriptionSchema } from "./read-model.ts"
+import { ReadModel, ReadModelDescription, type CompiledReadModel } from "./read-model.ts"
 import type { Resource } from "./resource.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 import { Table, TableSnapshot } from "./table.ts"
@@ -51,7 +51,7 @@ const OperationInspectionSchema = Schema.Struct({
   output: Schema.Unknown,
   error: Schema.Unknown,
   subjectPolicy: Schema.optionalKey(SubjectPolicyInspectionSchema),
-  views: Schema.optionalKey(Schema.Array(ReadModelDescriptionSchema)),
+  views: Schema.optionalKey(Schema.Array(ReadModelDescription)),
 })
 
 interface OperationInspection extends Schema.Schema.Type<typeof OperationInspectionSchema> {}
@@ -145,7 +145,7 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (
     Match.type<ReturnType<typeof Command.dependencies>["readModels"][number]>(),
     Match.tagsExhaustive({
       ReadModelSpec: ReadModel.describe,
-      CompiledReadModel: (model) => model.description,
+      CompiledReadModel: Struct.get<CompiledReadModel, "description">("description"),
     }),
   )
 

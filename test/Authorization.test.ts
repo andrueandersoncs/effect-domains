@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equivalence, Option, Order, Result, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Option, Order, Result, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Authorization, AuthorizationSubject, AuthorizationValues, type PolicyAuthorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
@@ -31,6 +31,14 @@ const FabricatedPolicyShapeSchema = Schema.TaggedStruct("Policy", {
 
 const FabricatedPolicySchema = Schema.make<Schema.Codec<PolicyAuthorization>>(FabricatedPolicyShapeSchema.ast)
 
+const UnsafeResourceSourcesSchema = Schema.Record(Schema.String, Schema.Unknown)
+
+class UnsafeResourceDefinition extends Schema.Class<UnsafeResourceDefinition>("UnsafeResourceDefinition")({
+  name: Schema.String,
+  authorization: Schema.Unknown,
+  sources: UnsafeResourceSourcesSchema,
+}) {}
+
 const p = Authorization.for({ resource: OwnedDocumentSchema, subject: SubjectSchema })
 const unrestricted = p.all()
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
@@ -42,22 +50,26 @@ const edit = p.all(ownerOrAdmin, unchangedOwnership)
 const ownedCandidate = p.eq(p.next.ownerId, p.subject.userId)
 const policy = p.policy({ scope, allow: { read: ownerOrAdmin, create: ownedCandidate, update: edit, patch: edit, remove: ownerOrAdmin } })
 
+const documentCreateSources = {
+  tenantId: Resource.fromSubject(p.subject.tenantId),
+  ownerId: Resource.fromSubject(p.subject.userId),
+}
+
+const documentCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["ownerId"], limit: 2 }),
+  Resource.create({ sources: documentCreateSources }),
+  Resource.update(),
+  Resource.remove(),
+  Resource.patch(),
+]
+
 const Documents = Resource.define({
   name: "authorized_documents", schema: OwnedDocumentSchema, authorization: policy,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({ filter: ["ownerId"], limit: 2 }),
-    Resource.create({
-      sources: {
-        tenantId: Resource.fromSubject(p.subject.tenantId),
-        ownerId: Resource.fromSubject(p.subject.userId),
-      },
-    }),
-    Resource.update(),
-    Resource.remove(),
-    Resource.patch(),
-  ),
+  capabilities: documentCapabilities,
 })
+
+const documentsTable = Resource.table(Documents)
 
 const alice = SubjectSchema.make({ userId: "alice", tenantId: "a", roles: [] })
 const bob = SubjectSchema.make({ userId: "bob", tenantId: "a", roles: [] })
@@ -73,7 +85,7 @@ const rejectedTag = <A, E extends { readonly _tag: string }, R>(effect: Effect.E
   pipe(effect, Effect.flip, Effect.map(Struct.get<E, "_tag">("_tag")))
 
 const seed = Effect.gen(function* () {
-  yield* prepareTables([Resource.table(Documents)])
+  yield* prepareTables([documentsTable])
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`INSERT INTO authorized_documents (id, tenantId, ownerId, title) VALUES
@@ -202,33 +214,85 @@ it.effect("create update patch and remove enforce current and candidate authoriz
 ))
 
 it("rejects unsafe create subject binding definitions", () => {
-  const compileUnsafe = (
-    name: string,
-    authorization: unknown,
-    sources: Readonly<Record<string, unknown>>,
-  ) => {
-    const selectedAuthorization = typeof authorization === "string" && policyMarkerEquals(authorization, "policy")
-      ? policy
-      : authorization
-    const definition = {
-      name,
-      authorization: selectedAuthorization,
+  const authorizationFrom = (authorization: unknown) => {
+    if (typeof authorization !== "string") return authorization
+    return policyMarkerEquals(authorization, "policy") ? policy : authorization
+  }
+
+  const compileUnsafe = (definition: UnsafeResourceDefinition) => {
+    const authorization = authorizationFrom(definition.authorization)
+    const createCapability = new Data.Class({ _tag: "Create", sources: definition.sources })
+
+    const resourceDefinition = new Data.Class({
+      name: definition.name,
+      authorization,
       schema: OwnedDocumentSchema,
-      capabilities: [{ _tag: "Create", sources }],
-    }
-    const spec = Reflect.apply(Resource.define, null, [definition])
+      capabilities: [createCapability],
+    })
+
+    const spec = Reflect.apply(Resource.define, null, [resourceDefinition])
     return Resource.compile(spec)
   }
-  const subject = (field: string) => ({ _tag: "Subject", operand: { _tag: "SubjectField", field } })
 
-  expect(() => compileUnsafe("public_binding", Authorization.public, { ownerId: subject("userId") })).toThrow()
-  expect(() => compileUnsafe("deny_binding", Authorization.deny, { ownerId: subject("userId") })).toThrow()
-  expect(() => compileUnsafe("unknown_target_binding", "policy", { absent: subject("userId") })).toThrow()
-  expect(() => compileUnsafe("non_subject_binding", "policy", {
-    ownerId: { _tag: "Subject", operand: { _tag: "RowField", field: "ownerId" } },
-  })).toThrow()
-  expect(() => compileUnsafe("unknown_subject_binding", "policy", { ownerId: subject("absent") })).toThrow()
-  expect(() => compileUnsafe("incompatible_binding", "policy", { ownerId: subject("roles") })).toThrow()
+  const subject = (field: string) => {
+    const operand = new Data.Class({ _tag: "SubjectField", field })
+    return new Data.Class({ _tag: "Subject", operand })
+  }
+
+  const userSubject = subject("userId")
+  const absentSubject = subject("absent")
+  const rolesSubject = subject("roles")
+  const publicSources = new Data.Class<Record<string, unknown>>({ ownerId: userSubject })
+  const denySources = new Data.Class<Record<string, unknown>>({ ownerId: userSubject })
+  const unknownTargetSources = new Data.Class<Record<string, unknown>>({ absent: userSubject })
+  const rowOperand = new Data.Class({ _tag: "RowField", field: "ownerId" })
+  const rowSubject = new Data.Class({ _tag: "Subject", operand: rowOperand })
+  const nonSubjectSources = new Data.Class<Record<string, unknown>>({ ownerId: rowSubject })
+  const unknownSubjectSources = new Data.Class<Record<string, unknown>>({ ownerId: absentSubject })
+  const incompatibleSources = new Data.Class<Record<string, unknown>>({ ownerId: rolesSubject })
+
+  const publicBinding = UnsafeResourceDefinition.make({
+    name: "public_binding",
+    authorization: Authorization.public,
+    sources: publicSources,
+  })
+
+  const denyBinding = UnsafeResourceDefinition.make({
+    name: "deny_binding",
+    authorization: Authorization.deny,
+    sources: denySources,
+  })
+
+  const unknownTargetBinding = UnsafeResourceDefinition.make({
+    name: "unknown_target_binding",
+    authorization: "policy",
+    sources: unknownTargetSources,
+  })
+
+  const nonSubjectBinding = UnsafeResourceDefinition.make({
+    name: "non_subject_binding",
+    authorization: "policy",
+    sources: nonSubjectSources,
+  })
+
+  const unknownSubjectBinding = UnsafeResourceDefinition.make({
+    name: "unknown_subject_binding",
+    authorization: "policy",
+    sources: unknownSubjectSources,
+  })
+
+  const incompatibleBinding = UnsafeResourceDefinition.make({
+    name: "incompatible_binding",
+    authorization: "policy",
+    sources: incompatibleSources,
+  })
+
+  expect(() => compileUnsafe(publicBinding)).toThrow()
+  expect(() => compileUnsafe(denyBinding)).toThrow()
+  expect(() => compileUnsafe(unknownTargetBinding)).toThrow()
+  expect(() => compileUnsafe(nonSubjectBinding)).toThrow()
+  expect(() => compileUnsafe(unknownSubjectBinding)).toThrow()
+  expect(() => compileUnsafe(incompatibleBinding)).toThrow()
 })
 
 it.effect("populates nullable resource fields from required subject fields", () => pipe(
@@ -242,18 +306,24 @@ it.effect("populates nullable resource fields from required subject fields", () 
     const nullableOwner = Authorization.for({ resource: NullableOwnerSchema, subject: SubjectSchema })
     const all = nullableOwner.all()
     const policy = nullableOwner.policy({ scope: all, allow: { create: all, read: all } })
+    const nullableOwnerSource = Resource.fromSubject(nullableOwner.subject.userId)
+    const nullableOwnerSources = Object.freeze({ ownerId: nullableOwnerSource })
+
+    const nullableOwnerCapabilities = [Resource.create({
+      sources: nullableOwnerSources,
+      publish: false,
+    })]
 
     const resource = Resource.define({
       name: "nullable_owner_subject_binding",
       schema: NullableOwnerSchema,
       authorization: policy,
-      capabilities: Resource.capabilities(Resource.create({
-        sources: { ownerId: Resource.fromSubject(nullableOwner.subject.userId) },
-        publish: false,
-      })),
+      capabilities: nullableOwnerCapabilities,
     })
 
-    yield* prepareTables([Resource.table(resource)])
+    const nullableOwnerTable = Resource.table(resource)
+
+    yield* prepareTables([nullableOwnerTable])
     const created = yield* pipe(Resource.repository(resource).create({ id: "bound" }), asAlice)
     expect(created.ownerId).toBe("alice")
   }),
@@ -271,16 +341,21 @@ it("rejects nullable subject fields bound to required resource fields", () => {
   const nullableOwnerSubject = Authorization.for({ resource: OwnedDocumentSchema, subject: NullableOwnerSubjectSchema })
   const all = nullableOwnerSubject.all()
   const policy = nullableOwnerSubject.policy({ scope: all, allow: { create: all } })
+  const requiredOwnerSource = Resource.fromSubject(nullableOwnerSubject.subject.userId)
+  const requiredOwnerSources = Object.freeze({ ownerId: requiredOwnerSource })
 
-  const definition = {
+  const requiredOwnerCapabilities = [Resource.create({
+    sources: requiredOwnerSources,
+    publish: false,
+  })]
+
+  const definition = new Data.Class({
     name: "required_owner_subject_binding",
     schema: OwnedDocumentSchema,
     authorization: policy,
-    capabilities: Resource.capabilities(Resource.create({
-      sources: { ownerId: Resource.fromSubject(nullableOwnerSubject.subject.userId) },
-      publish: false,
-    })),
-  }
+    capabilities: requiredOwnerCapabilities,
+  })
+
   const spec = Reflect.apply(Resource.define, null, [definition])
   expect(() => Resource.compile(spec)).toThrow()
 })
@@ -293,11 +368,15 @@ const published = q.eq(q.row.state, "published")
 const publisher = q.includes(q.subject.roles, "publisher")
 const publicationPolicy = q.policy({ scope: unrestricted, allow: { read: published, create: publisher, patch: publisher } })
 
-const Publications = Resource.define({ name: "authorized_publications", schema: PublicationSchema, capabilities: Resource.crud(), authorization: publicationPolicy, })
+const publicationCapabilities = Resource.crud()
+
+const Publications = Resource.define({ name: "authorized_publications", schema: PublicationSchema, capabilities: publicationCapabilities, authorization: publicationPolicy })
+
+const publicationsTable = Resource.table(Publications)
 
 it.effect("write permission cannot expose an unreadable candidate and missing action rules deny", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(Publications)])
+    yield* prepareTables([publicationsTable])
     const subject = SubjectSchema.make({ ...alice, roles: ["publisher"] })
     const asPublisher = Effect.provideService(AuthorizationSubject, subject)
     const draft = yield* pipe(Resource.repository(Publications).create({ id: "draft", state: "draft", title: "hidden" }), asPublisher, rejectedTag)
@@ -315,14 +394,18 @@ it.effect("write permission cannot expose an unreadable candidate and missing ac
 
 const transferPolicy = p.policy({ scope, allow: { read: unrestricted, create: ownedCandidate, update: owned } })
 
-const Transfers = Resource.define({ name: "authorized_transfers", schema: OwnedDocumentSchema, capabilities: Resource.capabilities(), authorization: transferPolicy, })
+const transferCapabilities: ReadonlyArray<never> = []
+
+const Transfers = Resource.define({ name: "authorized_transfers", schema: OwnedDocumentSchema, capabilities: transferCapabilities, authorization: transferPolicy })
+
+const transfersTable = Resource.table(Transfers)
 
 const failureTag = <A, E extends { readonly _tag: string }>(result: Result.Result<A, E>) =>
   Result.isFailure(result) ? result.failure._tag : "Success"
 
 it.effect("concurrent transfers cannot both authorize against the previous owner", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(Transfers)])
+    yield* prepareTables([transfersTable])
     const initial = yield* pipe(Resource.repository(Transfers).create({ id: "transfer", tenantId: "a", ownerId: "alice", title: "transfer" }), asAlice)
     const store = yield* RepositoryStore
 
@@ -366,17 +449,21 @@ const authorizedTransitionPolicy = transitionPolicyDsl.policy({
   allow: { read: transitionPublisher, transition: transitionPublisher },
 })
 
+const authorizedTransitionCapabilities = [Resource.transition()]
+
 const AuthorizedTransitionResource = Resource.define({
   name: "authorized_transitions",
   schema: AuthorizedTransitionSchema,
   authorization: authorizedTransitionPolicy,
   transitions: AuthorizedTransitions,
-  capabilities: Resource.capabilities(Resource.transition()),
+  capabilities: authorizedTransitionCapabilities,
 })
+
+const authorizedTransitionTable = Resource.table(AuthorizedTransitionResource)
 
 it.effect("transitions use their own authorization action rather than patch permission", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(AuthorizedTransitionResource)])
+    yield* prepareTables([authorizedTransitionTable])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO authorized_transitions (id, state) VALUES ('publication', 'draft')`
     const subject = SubjectSchema.make({ userId: "publisher", tenantId: "a", roles: ["publisher"] })
@@ -408,12 +495,16 @@ const featureScope = flags.all()
 const featureRead = flags.all(enabled, enabledBySubject)
 const featurePermission = flags.policy({ scope: featureScope, allow: { read: featureRead } })
 
+const featurePermissionCapabilities = [Resource.list({ limit: 1 })]
+
 const FeaturePermissions = Resource.define({
   name: "feature_permissions",
   schema: FeaturePermissionSchema,
   authorization: featurePermission,
-  capabilities: Resource.capabilities(Resource.list({ limit: 1 })),
+  capabilities: featurePermissionCapabilities,
 })
+
+const featurePermissionsTable = Resource.table(FeaturePermissions)
 
 const enabledSubject = FeatureSubjectSchema.make({ enabled: true, enabledValues: [true] })
 const nullSubject = FeatureSubjectSchema.make({ enabled: null, enabledValues: [null] })
@@ -435,7 +526,7 @@ it.effect("native Boolean storage preserves equality, membership, subject, and n
     const denied = yield* pipe(Authorization.require(featurePermission, "read", withheld), asEnabled, rejectedTag)
     expect(denied).toBe("Forbidden")
 
-    yield* prepareTables([Resource.table(FeaturePermissions)])
+    yield* prepareTables([featurePermissionsTable])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO feature_permissions (id, enabled) VALUES ('disabled', 0), ('enabled', 1), ('unset', NULL)`
     const visible = yield* pipe(Resource.repository(FeaturePermissions).list(), asEnabled)

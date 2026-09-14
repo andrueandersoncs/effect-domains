@@ -8,12 +8,16 @@ import {
   SupportCustomersResource,
 } from "./resources.ts"
 
-const SupportAgentRowSchema = Schema.NullOr(Resource.table(SupportAgentsResource).rowSchema)
-const SupportCaseEventsSchema = Schema.Array(Resource.table(SupportCaseEventsResource).rowSchema)
+const supportAgentsTable = Resource.table(SupportAgentsResource)
+const supportCaseEventsTable = Resource.table(SupportCaseEventsResource)
+const supportCasesTable = Resource.table(SupportCasesResource)
+const supportCustomersTable = Resource.table(SupportCustomersResource)
+const SupportAgentRowSchema = Schema.NullOr(supportAgentsTable.rowSchema)
+const SupportCaseEventsSchema = Schema.Array(supportCaseEventsTable.rowSchema)
 
 export class SupportCaseDetail extends Schema.Class<SupportCaseDetail>("SupportCaseDetail")({
-  case: Resource.table(SupportCasesResource).rowSchema,
-  customer: Resource.table(SupportCustomersResource).rowSchema,
+  case: supportCasesTable.rowSchema,
+  customer: supportCustomersTable.rowSchema,
   agent: SupportAgentRowSchema,
   events: SupportCaseEventsSchema,
 }) {}

@@ -33,16 +33,18 @@ const ordersAuthorization = ordersPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
+const orderCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["number", "status"], limit: 100 }),
+]
+
 export const OrdersResource = Resource.define({
   authorization: ordersAuthorization,
   name: "orders",
   schema: OrderSchema,
   version: "version",
   transitions: OrderTransitions,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({ filter: ["number", "status"], limit: 100 }),
-  ),
+  capabilities: orderCapabilities,
   relations: {
     unique: [
       { fields: ["tenantId", "id"] },
@@ -61,16 +63,18 @@ const linesAuthorization = linesPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor },
 })
 
+const orderLineCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["orderId"], limit: 100 }),
+]
+
 const OrderIdReference = Resource.reference(OrdersResource, ["id"])
 
 export const OrderLinesResource = Resource.define({
   authorization: linesAuthorization,
   name: "order_lines",
   schema: OrderLineSchema,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({ filter: ["orderId"], limit: 100 }),
-  ),
+  capabilities: orderLineCapabilities,
   relations: {
     unique: [
       { fields: ["tenantId", "orderId", "lineNumber"] },
@@ -90,16 +94,18 @@ const invoicesAuthorization = invoicesPolicy.policy({
   allow: { read: ExampleRoles.reader, create: ExampleRoles.editor, patch: ExampleRoles.editor, transition: ExampleRoles.editor },
 })
 
+const invoiceCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["orderId", "number", "status"], limit: 100 }),
+]
+
 export const InvoicesResource = Resource.define({
   authorization: invoicesAuthorization,
   name: "invoices",
   schema: InvoiceSchema,
   version: "version",
   transitions: InvoiceTransitions,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({ filter: ["orderId", "number", "status"], limit: 100 }),
-  ),
+  capabilities: invoiceCapabilities,
   relations: {
     unique: [
       { fields: ["tenantId", "id"] },

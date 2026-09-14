@@ -1,5 +1,5 @@
 import { Authorization } from "effect-domains/authorization"
-import { type Effect, Schema } from "effect"
+import { Data, type Effect, Schema } from "effect"
 import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
@@ -8,32 +8,40 @@ import { Transitions } from "effect-domains/transitions"
 const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}
 
+const completedDefault = Resource.default(false)
+const typeProbeSources = Object.freeze({ completed: completedDefault })
+
+const typeProbeCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["completed"], publish: false }),
+  Resource.create({
+    sources: typeProbeSources,
+    publish: false,
+  }),
+  Resource.update(),
+  Resource.patch(),
+]
+
 const TypeProbe = Resource.define({
   authorization: Authorization.public,
   name: "resource_type_probe",
   schema: TypeProbeSchema,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list({ filter: ["completed"], publish: false }),
-    Resource.create({
-      sources: { completed: Resource.default(false) },
-      publish: false,
-    }),
-    Resource.update(),
-    Resource.patch(),
-  ),
+  capabilities: typeProbeCapabilities,
 })
+
 const TypeProbeRepository = Resource.repository(TypeProbe)
 const TypeProbeRuntime = Resource.compile(TypeProbe)
 
 const NoPolicyProbeSchema = Schema.Struct({ id: identifier(Schema.String), value: Schema.Int })
 interface NoPolicyProbe extends Schema.Schema.Type<typeof NoPolicyProbeSchema> {}
+
 const NoPolicyProbe = Resource.define({
   authorization: Authorization.public,
   name: "resource_no_policy_probe",
   schema: NoPolicyProbeSchema,
-  capabilities: Resource.capabilities(),
+  capabilities: [],
 })
+
 const NoPolicyProbeRepository = Resource.repository(NoPolicyProbe)
 
 const noPolicyCreate: Parameters<typeof NoPolicyProbeRepository.create>[0] = {
@@ -91,23 +99,29 @@ const GeneratedProbeSchema = Schema.Struct({
 })
 
 interface GeneratedProbe extends Schema.Schema.Type<typeof GeneratedProbeSchema> {}
+const idGeneration = Resource.generated("uuidV7")
+const createdAtGeneration = Resource.generated("now")
+
+const generatedProbeSources = Object.freeze({
+  id: idGeneration,
+  createdAt: createdAtGeneration,
+})
+
+const generatedProbeCapabilities = [
+  Resource.get(),
+  Resource.list(),
+  Resource.create({ sources: generatedProbeSources }),
+  Resource.update(),
+  Resource.remove(),
+]
+
 const GeneratedProbe = Resource.define({
   authorization: Authorization.public,
   name: "generated_type_probe",
   schema: GeneratedProbeSchema,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.list(),
-    Resource.create({
-      sources: {
-        id: Resource.generated("uuidV7"),
-        createdAt: Resource.generated("now"),
-      },
-    }),
-    Resource.update(),
-    Resource.remove(),
-  ),
+  capabilities: generatedProbeCapabilities,
 })
+
 const GeneratedProbeRepository = Resource.repository(GeneratedProbe)
 const generatedInput: Parameters<typeof GeneratedProbeRepository.create>[0] = { title: "only authored input" }
 // @ts-expect-error because generated fields cannot be provided by callers.
@@ -143,13 +157,16 @@ const VersionedTypeProbeSchema = Schema.Struct({
   version: Schema.Int,
 })
 
+const versionedTypeProbeCapabilities = [Resource.create(), Resource.patch()]
+
 const VersionedTypeProbe = Resource.define({
   authorization: Authorization.public,
   name: "versioned_type_probe",
   schema: VersionedTypeProbeSchema,
   version: "version",
-  capabilities: Resource.capabilities(Resource.create(), Resource.patch()),
+  capabilities: versionedTypeProbeCapabilities,
 })
+
 const VersionedTypeProbeRepository = Resource.repository(VersionedTypeProbe)
 
 const nullableCreate: Parameters<typeof VersionedTypeProbeRepository.create>[0] = { id: "row", title: "required" }
@@ -171,14 +188,17 @@ const NullableGeneratedProbeSchema = Schema.Struct({
   note: Schema.NullOr(Schema.DateTimeUtc),
 })
 
+const nullableNoteGeneration = Resource.generated("now")
+const nullableGeneratedSources = Object.freeze({ note: nullableNoteGeneration })
+const nullableGeneratedCapabilities = [Resource.create({ sources: nullableGeneratedSources })]
+
 const NullableGeneratedProbe = Resource.define({
   authorization: Authorization.public,
   name: "nullable_generated_probe",
   schema: NullableGeneratedProbeSchema,
-  capabilities: Resource.capabilities(Resource.create({
-    sources: { note: Resource.generated("now") },
-  })),
+  capabilities: nullableGeneratedCapabilities,
 })
+
 const NullableGeneratedProbeRepository = Resource.repository(NullableGeneratedProbe)
 
 // @ts-expect-error because a nullable generated field remains protected from create input.
@@ -196,14 +216,17 @@ const TypeTransitions = Transitions.make({
 
 const TransitionTypeProbeSchema = Schema.Struct({ id: identifier(Schema.String), status: TransitionStatusSchema, version: Schema.Int })
 
+const transitionTypeProbeCapabilities = [Resource.transition()]
+
 const TransitionTypeProbe = Resource.define({
   authorization: Authorization.public,
   name: "transition_type_probe",
   schema: TransitionTypeProbeSchema,
   version: "version",
   transitions: TypeTransitions,
-  capabilities: Resource.capabilities(Resource.transition()),
+  capabilities: transitionTypeProbeCapabilities,
 })
+
 const TransitionTypeProbeRuntime = Resource.compile(TransitionTypeProbe)
 
 TypeTransitions.field satisfies "status"

@@ -17,6 +17,7 @@ const declaredSpec = Command.define({
   errors: DeclaredFailure,
   unavailable: CommandUnavailable,
 })
+
 Command.implement(declaredSpec, declared)
 Command.implement(declaredSpec, infrastructure)
 Command.implement(declaredSpec, untagged)
@@ -27,5 +28,6 @@ const forgottenSpec = Command.define({
   errors: DeclaredFailure,
   unavailable: CommandUnavailable,
 })
+
 // @ts-expect-error because a domain-tagged failure the contract does not declare would be hidden as unavailable.
 Command.implement(forgottenSpec, forgotten)

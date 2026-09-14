@@ -31,11 +31,13 @@ const purchaseAuthorization = purchasePolicy.policy({
   },
 })
 
+const guideCapabilities = [Resource.get(), Resource.list({ limit: 25 })]
+
 export const GuidesResource = Resource.define({
   authorization: guideAuthorization,
   name: "guides",
   schema: GuideSchema,
-  capabilities: Resource.capabilities(Resource.get(), Resource.list({ limit: 25 })),
+  capabilities: guideCapabilities,
 })
 
 export const GuidePurchasesResource = Resource.define({

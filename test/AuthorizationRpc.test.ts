@@ -20,15 +20,22 @@ const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unrestrictedScope = p.all()
 const policy = p.policy({ scope: unrestrictedScope, allow: { read: owned, create: candidateOwned } })
 
+const noteCreateSources = { ownerId: Resource.fromSubject(p.subject.userId) }
+
+const noteCapabilities = [
+  Resource.get(),
+  Resource.create({ sources: noteCreateSources }),
+]
+
 const Notes = Resource.define({
   name: "private_notes",
   schema: PrivateNoteSchema,
   authorization: policy,
-  capabilities: Resource.capabilities(
-    Resource.get(),
-    Resource.create({ sources: { ownerId: Resource.fromSubject(p.subject.userId) } }),
-  ),
+  capabilities: noteCapabilities,
 })
+
+const notesTable = Resource.table(Notes)
+
 const NotesRuntime = Resource.compile(Notes)
 
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)
@@ -48,7 +55,7 @@ const bobHeaders = { authorization: "Bearer bob-session" }
 
 it.effect("RPC authentication overrides captured identity and isolates concurrent requests", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(Notes)])
+    yield* prepareTables([notesTable])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO private_notes (id, ownerId, text) VALUES ('alice-note', 'alice', 'alice secret'), ('bob-note', 'bob', 'bob secret')`
     const client = yield* RpcTest.makeClient(NotesRuntime.group)
@@ -103,12 +110,17 @@ const operatorPolicy = operator.policy(allowedOperator)
 const unrestrictedRead = p.all()
 const protectedNotesPolicy = p.policy({ scope: operatorPolicy.expression, allow: { read: unrestrictedRead } })
 
+const operatorNoteCapabilities = [Resource.get()]
+
 const OperatorNotes = Resource.define({
   name: "operator_notes",
   schema: PrivateNoteSchema,
   authorization: protectedNotesPolicy,
-  capabilities: Resource.capabilities(Resource.get()),
+  capabilities: operatorNoteCapabilities,
 })
+
+const operatorNotesTable = Resource.table(OperatorNotes)
+
 const OperatorNotesRuntime = Resource.compile(OperatorNotes)
 
 const changeNote = Rpc.make("operator.change", { payload: { text: Schema.String }, success: Schema.Void })
@@ -134,7 +146,7 @@ const protectedHandlers = Layer.merge(OperatorNotesRuntime.handlers, operatorHan
 
 it.effect("a shared subject policy protects resource reads and authored writes without leaking between RPCs", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(OperatorNotes)])
+    yield* prepareTables([operatorNotesTable])
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO operator_notes (id, ownerId, text) VALUES ('one', 'alice', 'original')`
     const client = yield* RpcTest.makeClient(operatorGroup)

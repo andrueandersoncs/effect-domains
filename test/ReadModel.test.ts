@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Data, Effect, Equivalence, Record, Schema, SchemaGetter, pipe } from "effect"
+import { Data, Effect, Equivalence, Function, Record, Schema, SchemaGetter, pipe } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { Application, Part } from "effect-domains/application"
@@ -27,8 +27,10 @@ const Jobs = Table.make({ name: "jobs.work", schema: JobSchema })
 const Technicians = Table.make({ name: 'people"records', schema: TechnicianSchema })
 const database = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 
+const jobListSources = ReadModel.sources({ job: Jobs })
+
 const JobListModel = ReadModel.define({
-  tables: ReadModel.sources({ job: Jobs }),
+  tables: jobListSources,
   from: "job",
   joins: [],
   select: {
@@ -37,6 +39,7 @@ const JobListModel = ReadModel.define({
     urgent: ["job", "is.urgent"],
   },
 })
+
 const JobListView = ReadModel.compile(JobListModel)
 
 const JobListPageSpec = ReadModel.page({
@@ -46,6 +49,7 @@ const JobListPageSpec = ReadModel.page({
   order: [["urgent", "desc"], ["id", "asc"]],
   limit: 2,
 })
+
 const JobListPage = ReadModel.compilePage(JobListPageSpec)
 
 class JobListUnavailable extends Schema.TaggedError<JobListUnavailable>()("JobListUnavailable", {}) {}
@@ -55,6 +59,7 @@ const JobListCommand = ReadModel.publish({
   unavailable: JobListUnavailable,
   page: JobListPageSpec,
 })
+
 const JobListBundle = Command.bundle(JobListCommand)
 
 it.effect("decodes composite left joins without losing booleans, service codecs, or unmatched rows", () => pipe(
@@ -64,8 +69,10 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('assigned', 'acme', 'sam', 1), ('waiting', 'acme', NULL, 0)`
     yield* sql`INSERT INTO "people""records" (id, tenant, localId, name, onCall) VALUES ('a', 'acme', 'sam', 'stored:Sam', 1), ('b', 'other', 'sam', 'stored:Not Sam', 0)`
 
+    const sources = ReadModel.sources({ "base.jobs": Jobs, 'joined"people': Technicians })
+
     const model = ReadModel.define({
-      tables: ReadModel.sources({ "base.jobs": Jobs, 'joined"people': Technicians }),
+      tables: sources,
       from: "base.jobs",
       joins: [{ kind: "left", table: 'joined"people', on: [
         { left: ["base.jobs", "tenant"], right: ['joined"people', "tenant"] },
@@ -76,6 +83,7 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
         'technician.name"': ['joined"people', "name"], onCall: ['joined"people', "onCall"],
       },
     })
+
     const view = ReadModel.compile(model)
 
     const query = SqlSchema.findAll({
@@ -158,12 +166,15 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('job', 'acme', NULL, 0)`
     const select = Record.singleton("value", ["j", "tenant"] as const)
+    const sources = ReadModel.sources({ j: Jobs })
+
     const model = ReadModel.define({
-      tables: ReadModel.sources({ j: Jobs }),
+      tables: sources,
       from: "j",
       joins: [],
       select,
     })
+
     const view = ReadModel.compile(model)
     yield* Effect.sync(() => Reflect.set(select.value, "1", "id"))
     const rows = yield* sql<Readonly<Record<string, unknown>>>`${view.select(sql)}`
@@ -177,53 +188,66 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
 it("rejects ambiguous or disconnected joins rather than silently changing result cardinality", () => {
   const base = new Data.Class({ tables: { j: Jobs, t: Technicians }, from: "j", select: { id: ["j", "id"] } })
   const join = new Data.Class({ kind: "inner", table: "t", on: [{ left: ["j", "technicianId"], right: ["t", "localId"] }] })
-  const compile = (definition: object) =>
-    ReadModel.compile(Reflect.apply(ReadModel.define, null, [definition]))
-  expect(() => compile({ ...base, joins: [join], select: { unknown: ["t", "missing"] } })).toThrow()
-  expect(() => compile({ ...base, joins: [{ ...join, on: [] }] })).toThrow()
-  expect(() => compile({ ...base, joins: [{ ...join, on: [{ left: ["t", "id"], right: ["t", "localId"] }] }] })).toThrow()
-  expect(() => compile({ ...base, joins: [{ ...join, on: [{ left: ["j", "is.urgent"], right: ["t", "localId"] }] }] })).toThrow()
-  expect(() => compile({ ...base, tables: { ...base.tables, J: Jobs }, joins: [join] })).toThrow()
-  expect(() => compile({ ...base, joins: [join], select: { label: ["j", "id"], LABEL: ["t", "id"] } })).toThrow()
+  const define = (definition: unknown) => Reflect.apply(ReadModel.define, null, [definition])
+  const compile = Function.flow(define, ReadModel.compile)
+  const unknownSelection = new Data.Class({ ...base, joins: [join], select: { unknown: ["t", "missing"] } })
+  const emptyJoin = new Data.Class({ ...base, joins: [{ ...join, on: [] }] })
+  const disconnectedJoin = new Data.Class({ ...base, joins: [{ ...join, on: [{ left: ["t", "id"], right: ["t", "localId"] }] }] })
+  const incompatibleJoin = new Data.Class({ ...base, joins: [{ ...join, on: [{ left: ["j", "is.urgent"], right: ["t", "localId"] }] }] })
+  const duplicateTable = new Data.Class({ ...base, tables: { ...base.tables, J: Jobs }, joins: [join] })
+  const duplicateSelection = new Data.Class({ ...base, joins: [join], select: { label: ["j", "id"], LABEL: ["t", "id"] } })
+  expect(() => compile(unknownSelection)).toThrow()
+  expect(() => compile(emptyJoin)).toThrow()
+  expect(() => compile(disconnectedJoin)).toThrow()
+  expect(() => compile(incompatibleJoin)).toThrow()
+  expect(() => compile(duplicateTable)).toThrow()
+  expect(() => compile(duplicateSelection)).toThrow()
 })
 
 it("rejects a command whose read-model source is absent or replaced by a same-named definition", () => {
   const PersonSchema = Schema.Struct({ name: Schema.String })
+
   const People = Resource.define({
     name: "people",
     schema: PersonSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
+
+  const sources = ReadModel.sources({ p: People })
+
   const model = ReadModel.define({
-    tables: ReadModel.sources({ p: People }),
+    tables: sources,
     from: "p",
     joins: [],
     select: { name: ["p", "name"] },
   })
+
   const page = ReadModel.page({ model, order: [["name", "asc"]] })
+
   const command = ReadModel.publish({
     name: "people.names",
     unavailable: JobListUnavailable,
     page,
   })
+
   const commands = Command.bundle(command)
-  expect(() => Application.compile(Application.define({
-    name: "missing",
-    parts: [Part.command(commands)],
-  }))).toThrow()
+  const missingParts = [Part.command(commands)]
+  const missing = Application.define({ name: "missing", parts: missingParts })
+  expect(() => Application.compile(missing)).toThrow()
 
   const WrongPersonSchema = Schema.Struct({ name: Schema.Int })
+
   const WrongPeople = Resource.define({
     name: "people",
     schema: WrongPersonSchema,
     authorization: Authorization.public,
-    capabilities: Resource.capabilities(),
+    capabilities: [],
   })
-  expect(() => Application.compile(Application.define({
-    name: "mismatch",
-    parts: [Part.resource(WrongPeople), Part.command(commands)],
-  }))).toThrow()
+
+  const mismatchParts = [Part.resource(WrongPeople), Part.command(commands)]
+  const mismatch = Application.define({ name: "mismatch", parts: mismatchParts })
+  expect(() => Application.compile(mismatch)).toThrow()
 })
 
 it("rejects left projections when stored null has application-defined decoding semantics", () => {
@@ -237,11 +261,14 @@ it("rejects left projections when stored null has application-defined decoding s
 
   const PersonSchema = Schema.Struct({ id: identifier(Schema.String), name: StoredNameSchema })
   const People = Table.make({ name: "optional_people", schema: PersonSchema })
+  const sources = ReadModel.sources({ j: Jobs, p: People })
 
-  expect(() => ReadModel.compile(ReadModel.define({
-    tables: ReadModel.sources({ j: Jobs, p: People }),
+  const model = ReadModel.define({
+    tables: sources,
     from: "j",
     joins: [{ kind: "left", table: "p", on: [{ left: ["j", "technicianId"], right: ["p", "id"] }] }],
     select: { name: ["p", "name"] },
-  }))).toThrow()
+  })
+
+  expect(() => ReadModel.compile(model)).toThrow()
 })

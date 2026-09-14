@@ -15,14 +15,17 @@ const implicitKey: TableOptions = {
   relations: { unique: [{ fields: ["tenantId", "id"] }] },
 }
 
+const resourceCapabilities = [Resource.get()]
+const tenantReference = Table.reference(Tenants, ["id"])
+
 const resourceOptions = Resource.define({
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  capabilities: Resource.capabilities(Resource.get()),
+  capabilities: resourceCapabilities,
   relations: {
     indexes: [{ fields: ["tenantId", "number"] }],
-    foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: Table.reference(Tenants, ["id"]) }],
+    foreignKeys: [{ scope: ["tenantId"], fields: ["number"], references: tenantReference }],
   },
 })
 
@@ -38,7 +41,7 @@ const invalidResource = Resource.define({
   name: "relation_resources",
   schema: RelationSchema,
   authorization: Authorization.public,
-  capabilities: Resource.capabilities(),
+  capabilities: [],
   relations: { indexes: [{ name: "bad_index", fields: ["missing"] }] },
 })
 

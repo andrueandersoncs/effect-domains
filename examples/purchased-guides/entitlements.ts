@@ -14,9 +14,11 @@ const entitlementWhere = (subject: Schema.Schema.Type<typeof ExampleSubjectSchem
 const entitlementGrant = (purchase: Schema.Schema.Type<typeof GuidePurchaseSchema>) =>
   statusEquals(purchase.status, "granted")
 
+const guidePurchasesTable = Resource.table(GuidePurchasesResource)
+
 const purchasedGuideEntitlement = new Entitlements.Source({
   name: "guides.read",
-  table: Resource.table(GuidePurchasesResource),
+  table: guidePurchasesTable,
   subject: ExampleSubjectSchema,
   key: "guideId",
   where: entitlementWhere,

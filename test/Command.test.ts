@@ -28,6 +28,7 @@ const failuresSpec = Command.define({
   errors: DeclaredFailure,
   unavailable: CommandUnavailable,
 })
+
 const failures = Command.implement(failuresSpec, makeFailures)
 
 
@@ -49,6 +50,7 @@ const familyMemberSpec = protectedFamily.define({
   name: "member",
   success: Schema.String,
 })
+
 const familyMember = Command.implement(familyMemberSpec, authenticatedUserId)
 
 const protectedCommandSpec = Command.define({
@@ -57,6 +59,7 @@ const protectedCommandSpec = Command.define({
   policy: aliceOnly,
   unavailable: CommandUnavailable,
 })
+
 const protectedCommand = Command.implement(protectedCommandSpec, authenticatedUserId)
 
 const forbidden = Forbidden.make({})
@@ -69,6 +72,7 @@ const deniedInsideSpec = Command.define({
   policy: aliceOnly,
   unavailable: CommandUnavailable,
 })
+
 const deniedInside = Command.implement(deniedInsideSpec, denyInside)
 
 const transactionalSpec = Command.define({
@@ -78,6 +82,7 @@ const transactionalSpec = Command.define({
   transaction: true,
   unavailable: CommandUnavailable,
 })
+
 const transactional = Command.implement(
   transactionalSpec,
   Effect.fn("Command.test.transactional")(function* () {

@@ -1,9 +1,9 @@
-import { Array, Effect, Equivalence, Function, HashSet, Match, Option, Record, Schema, Struct, Tuple, flow, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Record, Schema, Struct, Tuple, flow, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { PageLimitSchema } from "./domain.ts"
 import { Page } from "./page.ts"
 import { Command } from "./command.ts"
-import { Resource, type AnyResourceSpec, type ResourceSpec, type ResourceTable } from "./resource.ts"
+import { Resource, type ResourceSpec, type ResourceTable } from "./resource.ts"
 import { quoteIdentifier } from "./sqlite-ddl.ts"
 import { RepositoryOrder, RepositorySelect } from "./repository-store.ts"
 import { SqliteList } from "./sqlite-list.ts"
@@ -15,26 +15,30 @@ const ReferenceSchema = Schema.Tuple([NameSchema, NameSchema])
 const ConditionSchema = Schema.Struct({ left: ReferenceSchema, right: ReferenceSchema })
 const JoinSchema = Schema.Struct({ kind: Schema.Literals(["inner", "left"]), table: NameSchema, on: Schema.Array(ConditionSchema) })
 const SelectionSchema = Schema.Record(NameSchema, ReferenceSchema)
+const DescriptionTablesSchema = Schema.Record(NameSchema, NameSchema)
+const DescriptionJoinsSchema = Schema.Array(JoinSchema)
 
-export const ReadModelDescriptionSchema = Schema.Struct({
-  tables: Schema.Record(NameSchema, NameSchema),
+export class ReadModelDescription extends Schema.Class<ReadModelDescription>("ReadModelDescription")({
+  tables: DescriptionTablesSchema,
   from: NameSchema,
-  joins: Schema.Array(JoinSchema),
+  joins: DescriptionJoinsSchema,
   select: SelectionSchema,
-}).annotate({ parseOptions: { onExcessProperty: "error" } })
+}) {}
 
-interface Description extends Schema.Schema.Type<typeof ReadModelDescriptionSchema> {}
 interface Join extends Schema.Schema.Type<typeof JoinSchema> {}
 interface Condition extends Schema.Schema.Type<typeof ConditionSchema> {}
 type Reference = Schema.Schema.Type<typeof ReferenceSchema>
-type TableSource = Table | AnyResourceSpec
+type TableSource = Table | ResourceSpec
 type Tables = Readonly<Record<string, TableSource>>
 type CompiledTables = Readonly<Record<string, Table>>
+
 type SourceTable<Source extends TableSource> =
-  Source extends AnyResourceSpec ? ResourceTable<Source> : Source
+  Source extends ResourceSpec ? ResourceTable<Source> : Source
+
 type CompiledSources<Sources extends Tables> = {
   readonly [Key in keyof Sources]: SourceTable<Sources[Key]>
 }
+
 type Alias<Sources extends Tables> = Extract<keyof Sources, string>
 
 const ColumnEvidenceSchema = Schema.Struct({
@@ -51,13 +55,15 @@ const TableEvidenceSchema = Schema.Struct({
 
 
 const DefinitionSchema = Schema.Struct({
-  ...ReadModelDescriptionSchema.fields,
+  ...ReadModelDescription.fields,
   tables: Schema.Record(NameSchema, Schema.Unknown),
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
 
-type Definition = Omit<Description, "tables"> & { readonly tables: CompiledTables }
+class CompiledDefinition extends Data.Class<
+  Omit<ReadModelDescription, "tables"> & Readonly<{ tables: CompiledTables }>
+> {}
 
-export type ReadModelF<A> =
+type ReadModelF<A> =
   | Readonly<{ readonly _tag: "Scan"; readonly alias: string; readonly table: TableSource }>
   | Readonly<{
     readonly _tag: "Join"
@@ -81,7 +87,7 @@ export type ReadModelF<A> =
     readonly limit: number
   }>
 
-export type ReadModelSyntax =
+type ReadModelSyntax =
   | Readonly<{ readonly _tag: "Scan"; readonly alias: string; readonly table: TableSource }>
   | Readonly<{
     readonly _tag: "Join"
@@ -105,48 +111,76 @@ export type ReadModelSyntax =
     readonly limit: number
   }>
 
-const ReadModelLayer = <A, E>(child: Schema.Codec<A, E>) => Schema.TaggedUnion({
-  Scan: { alias: NameSchema, table: Schema.Unknown },
-  Join: {
+const ScanSyntaxSchema = Schema.TaggedStruct("Scan", {
+  alias: NameSchema,
+  table: Schema.Unknown,
+})
+
+const ReadModelLayer = <A, E>(child: Schema.Codec<A, E>) => {
+  const JoinSyntaxSchema = Schema.TaggedStruct("Join", {
     source: child,
     kind: Schema.Literals(["inner", "left"]),
     alias: NameSchema,
     table: Schema.Unknown,
     on: Schema.Array(ConditionSchema),
-  },
-  Project: { source: child, select: SelectionSchema },
-  Page: {
+  })
+
+  const ProjectSyntaxSchema = Schema.TaggedStruct("Project", {
+    source: child,
+    select: SelectionSchema,
+  })
+
+  const PageSyntaxSchema = Schema.TaggedStruct("Page", {
     source: child,
     filter: Schema.Array(NameSchema),
     range: Schema.Array(NameSchema),
     order: Schema.Array(Schema.Tuple([NameSchema, Schema.Literals(["asc", "desc"])])),
     limit: PageLimitSchema,
-  },
-})
+  })
+
+  return Schema.Union([ScanSyntaxSchema, JoinSyntaxSchema, ProjectSyntaxSchema, PageSyntaxSchema])
+}
 
 export const ReadModelSyntaxSchema: Schema.Codec<ReadModelSyntax> = Schema.suspend(
   (): Schema.Codec<ReadModelSyntax> =>
     ReadModelLayer(ReadModelSyntaxSchema) as Schema.Codec<ReadModelSyntax>,
 )
 
-const mapReadModelF = <A, B>(
+const transformReadModelF = <A, B>(
   layer: ReadModelF<A>,
   child: (value: A) => B,
-): ReadModelF<B> => pipe(
-  Match.value(layer),
-  Match.tag("Scan", (node) => node),
-  Match.tag("Join", "Project", "Page", (node) => ({
-    ...node,
-    source: child(node.source),
-  })),
-  Match.exhaustive,
-)
+): ReadModelF<B> => {
+  const transformJoin = (node: Extract<ReadModelF<A>, { readonly _tag: "Join" }>) => {
+    const source = child(node.source)
+    return Struct.assign(node, { source })
+  }
 
-export type ReadModelAlgebra<A> = (layer: ReadModelF<A>) => A
+  const transformProject = (node: Extract<ReadModelF<A>, { readonly _tag: "Project" }>) => {
+    const source = child(node.source)
+    return Struct.assign(node, { source })
+  }
+
+  const transformPage = (node: Extract<ReadModelF<A>, { readonly _tag: "Page" }>) => {
+    const source = child(node.source)
+    return Struct.assign(node, { source })
+  }
+
+  return pipe(
+    Match.value(layer),
+    Match.tag("Scan", (node) => node),
+    Match.tag("Join", transformJoin),
+    Match.tag("Project", transformProject),
+    Match.tag("Page", transformPage),
+    Match.exhaustive,
+  )
+}
+
+type ReadModelAlgebra<A> = (layer: ReadModelF<A>) => A
 
 const foldReadModel = <A>(algebra: ReadModelAlgebra<A>) => {
-  const interpret = (syntax: ReadModelSyntax): A =>
-    algebra(mapReadModelF<ReadModelSyntax, A>(syntax, interpret))
+  const interpret = (syntax: ReadModelSyntax) =>
+    pipe(transformReadModelF<ReadModelSyntax, A>(syntax, interpret), algebra)
+
   return interpret
 }
 
@@ -197,10 +231,28 @@ type ViewSchema<Sources extends Tables, Joins, Selection extends SelectionFor<So
   SelectedField<Sources, Selection[keyof Selection]>["EncodingServices"]
 > & Readonly<{ fields: Readonly<Record<keyof Selection, Schema.Constraint>> }>
 
-export interface CompiledReadModel {
+type ListableSchema = Schema.Constraint & Readonly<{
+  fields: Readonly<Record<string, Schema.Constraint>>
+}>
+
+export interface CompiledReadModel<
+  View extends ListableSchema = ListableSchema,
+  Ref extends Reference = Reference,
+> {
   readonly _tag: "CompiledReadModel"
-  readonly description: Description
+  readonly description: ReadModelDescription
   readonly dependencies: ReadonlyArray<Table>
+  readonly schema: View
+  readonly projected: Readonly<Record<string, Readonly<{ orderable: boolean }>>>
+  readonly column: (
+    sql: SqlClient.SqlClient,
+    reference: Ref,
+  ) => ReturnType<SqlClient.SqlClient["literal"]>
+  readonly select: (sql: SqlClient.SqlClient) => ReturnType<SqlClient.SqlClient["literal"]>
+  readonly outputField: (
+    sql: SqlClient.SqlClient,
+    field: string,
+  ) => ReturnType<SqlClient.SqlClient["literal"]>
 }
 
 
@@ -247,7 +299,7 @@ const uniqueNames = (kind: string) => (names: ReadonlyArray<string>) =>
     return HashSet.add(seen, normalized)
   }))
 
-const compile = Effect.fn("ReadModel.compile")(function* (definition: Definition) {
+const compile = Effect.fn("ReadModel.compile")(function* (definition: CompiledDefinition) {
   const input = yield* pipe(decodeDefinition(definition), Effect.mapError(decodeFailure))
   const tableNames = Record.keys(input.tables)
   if (Array.isReadonlyArrayEmpty(tableNames)) return yield* definitionError("tables must be nonempty")
@@ -331,7 +383,7 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: Definition
   const joins = Object.freeze(frozenJoins)
   const frozenSelection = Record.map(input.select, freezeReference)
   const selection = Object.freeze(frozenSelection)
-  const description: Description = Object.freeze({ tables, from: input.from, joins, select: selection })
+  const description = ReadModelDescription.make({ tables, from: input.from, joins, select: selection })
   const entries = Record.toEntries(description.select)
 
   const fields = yield* Effect.forEach(entries, Effect.fn("ReadModel.projection")(function* ([output, reference]) {
@@ -339,8 +391,6 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: Definition
     const field = yield* fieldFor(reference)
     const nullable = HashSet.has(leftAliases, alias)
     const nullableStorage = nullable && field.metadata.nullable
-
-
     const ambiguous = nullableStorage && field.transformsStoredNull
 
     if (ambiguous) {
@@ -400,9 +450,10 @@ const compileDefinition = <
   from: Alias<Sources>
   joins: Joins
   select: Selection
-}>) => {
+}>): CompiledReadModel<ViewSchema<Sources, Joins, Selection>, ReferenceFor<Sources>> => {
   const { tables, from, joins, select } = definition
-  const compilation = compile({ tables, from, joins, select })
+  const compiledDefinition = new CompiledDefinition({ tables, from, joins, select })
+  const compilation = compile(compiledDefinition)
   const result = Effect.runSync(compilation)
   const column = (sql: SqlClient.SqlClient, reference: ReferenceFor<Sources>) => result.column(sql, reference)
 
@@ -413,35 +464,36 @@ const compileDefinition = <
     (reference) => result.column(sql, reference),
   )
 
-  const output = (sql: SqlClient.SqlClient, field: Extract<keyof Selection, string>) =>
-    outputField(sql, field)
 
   return Object.freeze({
     _tag: "CompiledReadModel" as const,
-    ...result,
-    schema: result.schema as ViewSchema<Sources, Joins, Selection>,
+    description: result.description,
     column,
-    output,
+    dependencies: result.dependencies,
     outputField,
+    projected: result.projected,
+    schema: result.schema as ViewSchema<Sources, Joins, Selection>,
+    select: result.select,
   })
 }
 
-interface PageConfiguration {
+class PageConfiguration extends Data.Class<{
   readonly filter: ReadonlyArray<string>
   readonly range: ReadonlyArray<string>
   readonly order: ReadonlyArray<readonly [string, "asc" | "desc"]>
   readonly limit: number
-}
+}> {}
 
-interface ReadModelPlan {
-  readonly definition: Definition
+class ReadModelPlan extends Data.Class<{
+  readonly definition: CompiledDefinition
   readonly page: Option.Option<PageConfiguration>
-}
+}> {}
 
 const emptySelection: Readonly<Record<string, Reference>> = Object.freeze({})
 const noPage = Option.none<PageConfiguration>()
 
-const compileSource = Match.type<TableSource>().pipe(
+const compileSource = pipe(
+  Match.type<TableSource>(),
   Match.tagsExhaustive({
     Table: (table) => table,
     ResourceSpec: Resource.table,
@@ -451,31 +503,37 @@ const compileSource = Match.type<TableSource>().pipe(
 const planAlgebra: ReadModelAlgebra<ReadModelPlan> = (layer) => pipe(
   Match.value(layer),
   Match.tagsExhaustive({
-    Scan: ({ alias, table }) => ({
-      definition: {
-        tables: Record.singleton(alias, compileSource(table)),
+    Scan: ({ alias, table }) => {
+      const compiledTable = compileSource(table)
+      const tables = Record.singleton(alias, compiledTable)
+
+      const definition = new CompiledDefinition({
+        tables,
         from: alias,
         joins: [],
         select: emptySelection,
-      },
-      page: noPage,
-    }),
-    Join: ({ source, kind, alias, table, on }) => ({
-      definition: {
-        ...source.definition,
-        tables: Record.set(source.definition.tables, alias, compileSource(table)),
-        joins: Array.append(source.definition.joins, { kind, table: alias, on }),
-      },
-      page: source.page,
-    }),
-    Project: ({ source, select }) => ({
-      definition: { ...source.definition, select },
-      page: source.page,
-    }),
-    Page: ({ source, filter, range, order, limit }) => ({
-      definition: source.definition,
-      page: Option.some({ filter, range, order, limit }),
-    }),
+      })
+
+      return new ReadModelPlan({ definition, page: noPage })
+    },
+    Join: ({ source, kind, alias, table, on }) => {
+      const compiledTable = compileSource(table)
+      const tables = Record.set(source.definition.tables, alias, compiledTable)
+      const join = JoinSchema.make({ kind, table: alias, on })
+      const joins = Array.append(source.definition.joins, join)
+      const definition = new CompiledDefinition({ ...source.definition, tables, joins })
+
+      return new ReadModelPlan({ definition, page: source.page })
+    },
+    Project: ({ source, select }) => {
+      const definition = new CompiledDefinition({ ...source.definition, select })
+      return new ReadModelPlan({ definition, page: source.page })
+    },
+    Page: ({ source, filter, range, order, limit }) => {
+      const page = new PageConfiguration({ filter, range, order, limit })
+      const configuredPage = Option.some(page)
+      return new ReadModelPlan({ definition: source.definition, page: configuredPage })
+    },
   }),
 )
 
@@ -483,11 +541,11 @@ const dependencyAlgebra: ReadModelAlgebra<ReadonlyArray<Table>> = (layer) => pip
   Match.value(layer),
   Match.tagsExhaustive({
     Scan: ({ table }) => [compileSource(table)],
-    Join: ({ source, table }) =>
-      Array.dedupeWith(
-        Array.append(source, compileSource(table)),
-        Equivalence.strictEqual<Table>(),
-      ),
+    Join: ({ source, table }) => {
+      const dependency = compileSource(table)
+      const dependencies = Array.append(source, dependency)
+      return Array.dedupeWith(dependencies, Equivalence.strictEqual<Table>())
+    },
     Project: ({ source }) => source,
     Page: ({ source }) => source,
   }),
@@ -496,12 +554,13 @@ const dependencyAlgebra: ReadModelAlgebra<ReadonlyArray<Table>> = (layer) => pip
 const compilePlan = foldReadModel(planAlgebra)
 const readModelDependencies = foldReadModel(dependencyAlgebra)
 
-const describeReadModel = (spec: ReadModelSpec): Description => {
+const describeReadModel = (spec: ReadModelSpec): ReadModelDescription => {
   const plan = compilePlan(spec.syntax)
-  return {
+
+  return ReadModelDescription.make({
     ...plan.definition,
     tables: Record.map(plan.definition.tables, Struct.get("name")),
-  }
+  })
 }
 
 const readModelSources = <const Sources extends Tables>(
@@ -523,16 +582,16 @@ const defineReadModel = <
     Option.getOrThrow,
   )
 
-  const scan: ReadModelSyntax = {
+  const scan = ReadModelSyntaxSchema.make({
     _tag: "Scan",
     alias: definition.from,
     table: source,
-  }
+  })
 
   const joined = Array.reduce<JoinFor<Sources>, ReadModelSyntax>(
     definition.joins,
     scan,
-    (syntax, join) => ({
+    (syntax, join) => ReadModelSyntaxSchema.make({
       _tag: "Join",
       source: syntax,
       kind: join.kind,
@@ -542,70 +601,88 @@ const defineReadModel = <
     }),
   )
 
-  const projected: ReadModelSyntax = {
+  const syntax = ReadModelSyntaxSchema.make({
     _tag: "Project",
     source: joined,
     select: definition.select as Readonly<Record<string, Reference>>,
-  }
+  })
 
-  const syntax = Schema.decodeUnknownSync(ReadModelSyntaxSchema)(projected)
   return Object.freeze({
     _tag: "ReadModelSpec" as const,
     syntax,
     definition,
   })
+
 }
 
 type CompiledReadModelFor<Spec extends ReadModelSpec> =
   Spec extends ReadModelSpec<infer Sources, infer Joins, infer Selection>
     ? ReturnType<typeof compileDefinition<Sources, Joins, Selection>>
     : never
-type ReadModelField<Model extends ReadModelSpec> = Extract<
-  keyof CompiledReadModelFor<Model>["schema"]["fields"],
-  string
->
+
+
 
 const compileReadModel = <const Spec extends ReadModelSpec>(
   spec: Spec,
 ): CompiledReadModelFor<Spec> => {
   const plan = compilePlan(spec.syntax)
   const declaredAliases = Record.keys(spec.definition.tables)
-  Effect.runSync(uniqueNames("table alias")(declaredAliases))
+  const validateAliases = uniqueNames("table alias")
+  const aliasValidation = validateAliases(declaredAliases)
+  Effect.runSync(aliasValidation)
+
   const compiledAliases = Record.keys(plan.definition.tables)
+
   if (declaredAliases.length !== compiledAliases.length) {
     pipe(
       definitionError("every table alias must be the from alias or appear in a join"),
       Effect.runSync,
     )
   }
+
   const compiled = compileDefinition(plan.definition as never)
   const dependencies = readModelDependencies(spec.syntax)
   return Object.freeze({ ...compiled, dependencies }) as CompiledReadModelFor<Spec>
 }
 
-interface ReadModelPageSpec<
+class ReadModelPageSpec<
   Model extends ReadModelSpec = ReadModelSpec,
-  Filter extends ReadonlyArray<string> = ReadonlyArray<string>,
-  Range extends ReadonlyArray<string> = ReadonlyArray<string>,
-  Order extends ReadonlyArray<readonly [string, "asc" | "desc"]> =
-    ReadonlyArray<readonly [string, "asc" | "desc"]>,
-> {
-  readonly _tag: "ReadModelPageSpec"
+  Filter extends ReadonlyArray<
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>
+  > = ReadonlyArray<Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>>,
+  Range extends ReadonlyArray<
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>
+  > = ReadonlyArray<Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>>,
+  Order extends ReadonlyArray<readonly [
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>,
+    "asc" | "desc",
+  ]> = ReadonlyArray<readonly [
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>,
+    "asc" | "desc",
+  ]>,
+> extends Data.Class<{
   readonly model: Model
-  readonly syntax: ReadModelSyntax
   readonly filter: Filter
   readonly range: Range
   readonly order: Order
   readonly limit: number
-}
+}> {}
 
 const pageReadModel = <
   const Model extends ReadModelSpec,
-  const Filter extends ReadonlyArray<ReadModelField<Model>> = readonly [],
-  const Range extends ReadonlyArray<ReadModelField<Model>> = readonly [],
-  const Order extends ReadonlyArray<
-    readonly [ReadModelField<Model>, "asc" | "desc"]
-  > = ReadonlyArray<readonly [ReadModelField<Model>, "asc" | "desc"]>,
+  const Filter extends ReadonlyArray<
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>
+  > = readonly [],
+  const Range extends ReadonlyArray<
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>
+  > = readonly [],
+  const Order extends ReadonlyArray<readonly [
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>,
+    "asc" | "desc",
+  ]> = ReadonlyArray<readonly [
+    Extract<keyof CompiledReadModelFor<Model>["schema"]["fields"], string>,
+    "asc" | "desc",
+  ]>,
 >(definition: Readonly<{
   model: Model
   order: Order
@@ -613,49 +690,41 @@ const pageReadModel = <
   filter: Filter
   range: Range
   limit: number
-}>>): ReadModelPageSpec<Model, Filter, Range, Order> => {
-  const filter = definition.filter ?? [] as unknown as Filter
-  const range = definition.range ?? [] as unknown as Range
+}>>): ReadModelPageSpec<Model, Filter | readonly [], Range | readonly [], Order> => {
+  const filter = definition.filter ?? []
+  const range = definition.range ?? []
   const limit = definition.limit ?? 50
-  const syntax = Schema.decodeUnknownSync(ReadModelSyntaxSchema)({
-    _tag: "Page",
-    source: definition.model.syntax,
-    filter,
-    range,
-    order: definition.order,
-    limit,
-  })
 
-  return Object.freeze({
-    _tag: "ReadModelPageSpec" as const,
-    model: definition.model,
-    syntax,
+  return new ReadModelPageSpec({
     filter,
-    range,
-    order: definition.order,
     limit,
+    model: definition.model,
+    order: definition.order,
+    range,
   })
 }
 
-type ListableView = CompiledReadModel & Readonly<{
-  schema: Schema.Constraint & Readonly<{ fields: Readonly<Record<string, Schema.Constraint>> }>
-  projected: Readonly<Record<string, Readonly<{ orderable: boolean }>>>
-  select: (sql: SqlClient.SqlClient) => ReturnType<SqlClient.SqlClient["literal"]>
-  outputField: (sql: SqlClient.SqlClient, field: string) => ReturnType<SqlClient.SqlClient["literal"]>
-}>
 
-type ViewField<View extends ListableView> = Extract<keyof View["schema"]["Type"], string>
-type ViewRow<View extends ListableView> = View["schema"]["Type"]
+type ViewField<View extends CompiledReadModel> =
+  Extract<keyof View["schema"]["Type"], string>
 
-type ViewFilter<View extends ListableView, Fields extends ReadonlyArray<ViewField<View>>> =
-  Readonly<Partial<Pick<ViewRow<View>, Fields[number]>>>
+type ViewFilter<
+  View extends CompiledReadModel,
+  Fields extends ReadonlyArray<ViewField<View>>,
+> = Readonly<Partial<Pick<View["schema"]["Type"], Fields[number]>>>
 
-type ViewRange<View extends ListableView, Fields extends ReadonlyArray<ViewField<View>>> = Readonly<Partial<{
-  [Field in Fields[number]]: Readonly<Partial<{ from: ViewRow<View>[Field]; to: ViewRow<View>[Field] }>>
+type ViewRange<
+  View extends CompiledReadModel,
+  Fields extends ReadonlyArray<ViewField<View>>,
+> = Readonly<Partial<{
+  [Field in Fields[number]]: Readonly<Partial<{
+    from: View["schema"]["Type"][Field]
+    to: View["schema"]["Type"][Field]
+  }>>
 }>>
 
 type ViewListRequest<
-  View extends ListableView,
+  View extends CompiledReadModel,
   Filter extends ReadonlyArray<ViewField<View>>,
   Range extends ReadonlyArray<ViewField<View>>,
 > = Readonly<Partial<{
@@ -675,32 +744,33 @@ const freezeOrder = <Field extends string>(
 const orderField = <Field extends string>(entry: readonly [Field, "asc" | "desc"]) =>
   Tuple.get(entry, 0)
 
-const compilePageDefinition = <
-  const View extends ListableView,
-  const Filter extends ReadonlyArray<ViewField<View>> = readonly [],
-  const Range extends ReadonlyArray<ViewField<View>> = readonly [],
-  const Order extends ReadonlyArray<readonly [ViewField<View>, "asc" | "desc"]> = ReadonlyArray<
-    readonly [ViewField<View>, "asc" | "desc"]
-  >,
->(definition: Readonly<{
-  view: View
-  order: Order
-}> & Readonly<Partial<{
-  filter: Filter
-  range: Range
-  limit: number
-}>>) => {
-  const sourceFilterFields: ReadonlyArray<ViewField<View>> = definition.filter ?? []
-  const copiedFilterFields = Array.fromIterable(sourceFilterFields)
+const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
+  spec: Spec,
+) => {
+  const view = compileReadModel(spec.model) as PageView<Spec>
+  type View = PageView<Spec>
+  type Filter = PageFilter<Spec>
+  type Range = PageRange<Spec>
+
+  const copiedFilterFields = Array.fromIterable(
+    spec.filter as ReadonlyArray<ViewField<View>>,
+  )
+
   const filterFields = Object.freeze(copiedFilterFields)
-  const sourceRangeFields: ReadonlyArray<ViewField<View>> = definition.range ?? []
-  const copiedRangeFields = Array.fromIterable(sourceRangeFields)
+
+  const copiedRangeFields = Array.fromIterable(
+    spec.range as ReadonlyArray<ViewField<View>>,
+  )
+
   const rangeFields = Object.freeze(copiedRangeFields)
-  const copiedOrderSource = Array.fromIterable(definition.order)
+
+  const copiedOrderSource = Array.fromIterable(
+    spec.order as ReadonlyArray<readonly [ViewField<View>, "asc" | "desc"]>,
+  )
+
   const copiedOrder = Array.map(copiedOrderSource, freezeOrder)
   const order = Object.freeze(copiedOrder)
-  const maximum = definition.limit ?? 50
-  const validMaximum = Schema.is(PageLimitSchema)(maximum)
+  const validMaximum = Schema.is(PageLimitSchema)(spec.limit)
 
   if (!validMaximum) pipe(definitionError("list limit must be between 1 and 100"), Effect.runSync)
   if (Array.isReadonlyArrayEmpty(order)) pipe(definitionError("list order must contain at least one field"), Effect.runSync)
@@ -708,7 +778,7 @@ const compilePageDefinition = <
   const orderFields = Array.map(order, orderField)
   const filterAndRangeFields = Array.appendAll(filterFields, rangeFields)
   const allFields = Array.appendAll(filterAndRangeFields, orderFields)
-  const isMissing = (field: ViewField<View>) => !Record.has(definition.view.projected, field)
+  const isMissing = (field: ViewField<View>) => !Record.has(view.projected, field)
   const missing = Array.findFirst(allFields, isMissing)
 
   if (Option.isSome(missing)) {
@@ -724,7 +794,7 @@ const compilePageDefinition = <
   const rangeAndOrderFields = Array.appendAll(rangeFields, orderFields)
 
   const isNotOrderable = (field: ViewField<View>) => {
-    const projected = pipe(Record.get(definition.view.projected, field), Option.getOrThrow)
+    const projected = pipe(Record.get(view.projected, field), Option.getOrThrow)
     return !projected.orderable
   }
 
@@ -735,7 +805,7 @@ const compilePageDefinition = <
   }
 
   const schemaFor = (field: string) => pipe(
-    Record.get(definition.view.schema.fields, field),
+    Record.get(view.schema.fields, field),
     Option.getOrThrow,
   )
 
@@ -748,13 +818,13 @@ const compilePageDefinition = <
   const repositoryOrder = Object.freeze(repositoryOrderEntries)
 
   const cursorScope = JSON.stringify({
-    view: definition.view.description,
+    view: view.description,
     filter: filterFields,
     range: rangeFields,
     order,
   })
 
-  const MaximumLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(maximum))
+  const MaximumLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(spec.limit))
   const invalidListLimit = (limit: number) => invalidList(`list limit must be between 1 and ${limit}`)
   const invalidListFilter = (field: string) => invalidList(`filter ${field} is not declared`)
   const invalidListRange = (field: string) => invalidList(`range ${field} is not declared`)
@@ -770,7 +840,7 @@ const compilePageDefinition = <
     filter: filterFields,
     range: rangeFields,
     order: repositoryOrder,
-    maximum,
+    maximum: spec.limit,
     scope: cursorScope,
     canonicalField,
     storageField: schemaFor,
@@ -787,17 +857,17 @@ const compilePageDefinition = <
   })
 
   const payloadSchema = Schema.make<Schema.Codec<ViewListRequest<View, Filter, Range>, unknown>>(listPlan.input.ast)
-  const CanonicalRowSchema = Schema.toType(definition.view.schema)
+  const CanonicalRowSchema = Schema.toType(view.schema)
   const SuccessShapeSchema = Page.schema(CanonicalRowSchema)
 
   const successSchema = Schema.make<Schema.Codec<
-    Readonly<{ items: ReadonlyArray<ViewRow<View>>; nextCursor: string | null }>,
+    Readonly<{ items: ReadonlyArray<View["schema"]["Type"]>; nextCursor: string | null }>,
     typeof SuccessShapeSchema.Encoded,
     typeof SuccessShapeSchema.DecodingServices,
     typeof SuccessShapeSchema.EncodingServices
   >>(SuccessShapeSchema.ast)
 
-  const decodeRows = Schema.decodeUnknownEffect(Schema.Array(definition.view.schema))
+  const decodeRows = Schema.decodeUnknownEffect(Schema.Array(view.schema))
 
   const execute = Effect.fn("ReadModel.page")(function* (
     input: ViewListRequest<View, Filter, Range>,
@@ -815,7 +885,7 @@ const compilePageDefinition = <
       requestedCursor,
     )
 
-    const column = (field: string) => definition.view.outputField(sql, field)
+    const column = (field: string) => view.outputField(sql, field)
 
     const rendered = SqliteList.render(
       sql,
@@ -824,7 +894,7 @@ const compilePageDefinition = <
     )
 
     const rows = yield* sql<Readonly<Record<string, unknown>>>`
-      ${definition.view.select(sql)}
+      ${view.select(sql)}
       WHERE ${rendered.where}
       ORDER BY ${rendered.order}
       LIMIT ${prepared.query.limit}
@@ -838,8 +908,7 @@ const compilePageDefinition = <
     | View["schema"]["DecodingServices"]
     | View["schema"]["EncodingServices"]
 
-  type HandlerError = Effect.Error<ReturnType<typeof execute>>
-  const frozenDependencies = Object.freeze([definition.view])
+  const frozenDependencies = Object.freeze([view])
 
   return Object.freeze({
     payload: payloadSchema,
@@ -848,71 +917,20 @@ const compilePageDefinition = <
     dependencies: frozenDependencies,
     handler: execute as (
       input: ViewListRequest<View, Filter, Range>
-    ) => Effect.Effect<typeof successSchema.Type, HandlerError, HandlerRequirements>,
+    ) => Effect.Effect<typeof successSchema.Type, Effect.Error<ReturnType<typeof execute>>, HandlerRequirements>,
   })
 }
 
 type PageView<Spec extends ReadModelPageSpec> =
   CompiledReadModelFor<Spec["model"]>
 
-type PageRow<Spec extends ReadModelPageSpec> =
-  PageView<Spec>["schema"]["Type"]
+type PageFilter<Spec extends ReadModelPageSpec> =
+  Extract<Spec["filter"], ReadonlyArray<ViewField<PageView<Spec>>>>
 
-type PageFilterFields<Spec extends ReadModelPageSpec> =
-  Extract<Spec["filter"][number], keyof PageRow<Spec>>
+type PageRange<Spec extends ReadModelPageSpec> =
+  Extract<Spec["range"], ReadonlyArray<ViewField<PageView<Spec>>>>
 
-type PageRangeFields<Spec extends ReadModelPageSpec> =
-  Extract<Spec["range"][number], keyof PageRow<Spec>>
-
-type PageRequestFor<Spec extends ReadModelPageSpec> = Readonly<Partial<{
-  filter: Readonly<Partial<Pick<PageRow<Spec>, PageFilterFields<Spec>>>>
-  range: Readonly<Partial<{
-    [Field in PageRangeFields<Spec>]: Readonly<Partial<{
-      from: PageRow<Spec>[Field]
-      to: PageRow<Spec>[Field]
-    }>>
-  }>>
-  limit: number
-  cursor: string
-}>>
-
-type RawCompiledPage = ReturnType<typeof compilePageDefinition>
-type RawPageEffect = ReturnType<RawCompiledPage["handler"]>
-
-type CompiledPageFor<Spec extends ReadModelPageSpec> =
-  Omit<RawCompiledPage, "payload" | "success" | "handler"> & Readonly<{
-    payload: Schema.Codec<PageRequestFor<Spec>, unknown>
-    success: Schema.Codec<
-      Page<PageRow<Spec>>,
-      unknown,
-      PageView<Spec>["schema"]["DecodingServices"],
-      PageView<Spec>["schema"]["EncodingServices"]
-    >
-    handler: (
-      input: PageRequestFor<Spec>,
-    ) => Effect.Effect<
-      Page<PageRow<Spec>>,
-      Effect.Error<RawPageEffect>,
-      SqlClient.SqlClient | PageView<Spec>["schema"]["DecodingServices"]
-    >
-  }>
-
-const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
-  spec: Spec,
-): CompiledPageFor<Spec> => {
-  const view = compileReadModel(spec.model)
-  type Field = ViewField<typeof view>
-
-  return compilePageDefinition({
-    view,
-    filter: spec.filter as ReadonlyArray<Field>,
-    range: spec.range as ReadonlyArray<Field>,
-    order: spec.order as ReadonlyArray<readonly [Field, "asc" | "desc"]>,
-    limit: spec.limit,
-  }) as CompiledPageFor<Spec>
-}
-
-const publishReadModel = <
+const commandFromPage = <
   const Name extends string,
   const Unavailable extends Schema.Constraint,
   const Page extends ReadModelPageSpec,
@@ -925,12 +943,21 @@ const publishReadModel = <
     page: Page
   }>,
 ) => {
-  const compiled = compileReadModelPage(definition.page)
-  const { handler, ...contract } = compiled
+  const {
+    dependencies,
+    errors: errorsSchema,
+    handler,
+    payload: payloadSchema,
+    success: successSchema,
+  } = compileReadModelPage(definition.page)
+
   const spec = Command.define({
+    dependencies,
+    errors: errorsSchema,
     name: definition.name,
+    payload: payloadSchema,
+    success: successSchema,
     unavailable: definition.unavailable,
-    ...contract,
   })
 
   return Command.implement(spec, handler)
@@ -944,8 +971,8 @@ export const ReadModel = {
   page: pageReadModel,
   compile: compileReadModel,
   compilePage: compileReadModelPage,
-  publish: publishReadModel,
+  publish: commandFromPage,
   fold: foldReadModel,
-  map: mapReadModelF,
-  DescriptionSchema: ReadModelDescriptionSchema,
+  map: transformReadModelF,
+  DescriptionSchema: ReadModelDescription,
 }

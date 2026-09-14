@@ -30,7 +30,12 @@ import {
 
 type SqliteRow = Readonly<Record<string, unknown>>
 
-const SupportCaseProjection = Table.project(Resource.table(SupportCasesResource), [
+const supportCasesTable = Resource.table(SupportCasesResource)
+const supportCustomersTable = Resource.table(SupportCustomersResource)
+const supportAgentsTable = Resource.table(SupportAgentsResource)
+const supportCaseEventsTable = Resource.table(SupportCaseEventsResource)
+
+const SupportCaseProjection = Table.project(supportCasesTable, [
   "id",
   "customerId",
   "subject",
@@ -41,10 +46,10 @@ const SupportCaseProjection = Table.project(Resource.table(SupportCasesResource)
   "version",
 ])
 
-const SupportCustomerProjection = Table.project(Resource.table(SupportCustomersResource), ["id", "name"])
-const SupportAgentProjection = Table.project(Resource.table(SupportAgentsResource), ["id", "name", "onDuty"])
+const SupportCustomerProjection = Table.project(supportCustomersTable, ["id", "name"])
+const SupportAgentProjection = Table.project(supportAgentsTable, ["id", "name", "onDuty"])
 
-const SupportCaseEventProjection = Table.project(Resource.table(SupportCaseEventsResource), [
+const SupportCaseEventProjection = Table.project(supportCaseEventsTable, [
   "id",
   "caseId",
   "kind",
@@ -74,20 +79,20 @@ const supportCaseDetail = SqlSchema.findOneOption({
         ${SupportCustomerProjection.object(sql, "customer")} AS ${sql("customer")},
         (
           SELECT ${SupportAgentProjection.object(sql, "agent")}
-          FROM ${sql(Resource.table(SupportAgentsResource).name)} agent
+          FROM ${sql(supportAgentsTable.name)} agent
           WHERE agent.${sql("id")} = support_case.${sql("assignedAgentId")}
           LIMIT 1
         ) AS ${sql("agent")},
         COALESCE((
           SELECT json_group_array(${SupportCaseEventProjection.object(sql, "event")})
           FROM (
-            SELECT * FROM ${sql(Resource.table(SupportCaseEventsResource).name)}
+            SELECT * FROM ${sql(supportCaseEventsTable.name)}
             WHERE ${sql("caseId")} = support_case.${sql("id")}
             ORDER BY ${sql("occurredAt")}, ${sql("id")}
           ) event
         ), '[]') AS ${sql("events")}
-      FROM ${sql(Resource.table(SupportCasesResource).name)} support_case
-      INNER JOIN ${sql(Resource.table(SupportCustomersResource).name)} customer
+      FROM ${sql(supportCasesTable.name)} support_case
+      INNER JOIN ${sql(supportCustomersTable.name)} customer
         ON customer.${sql("id")} = support_case.${sql("customerId")}
       WHERE support_case.${sql("id")} = ${input.caseId}
       LIMIT 1
@@ -160,7 +165,7 @@ const SupportTransaction = SupportCommand.transactional()
 const openCaseSpec = SupportTransaction.define({
   name: "openCase",
   payload: OpenSupportCaseInputSchema,
-  success: Resource.table(SupportCasesResource).rowSchema,
+  success: supportCasesTable.rowSchema,
   errors: SupportCustomerNotFound,
   dependencies: [SupportCustomersResource, SupportCasesResource, SupportCaseEventsResource],
 })
@@ -206,7 +211,7 @@ const advanceCaseErrorsSchema = Schema.Union([
 const advanceCaseSpec = SupportTransaction.define({
   name: "advanceCase",
   payload: AdvanceSupportCaseInputSchema,
-  success: Resource.table(SupportCasesResource).rowSchema,
+  success: supportCasesTable.rowSchema,
   errors: advanceCaseErrorsSchema,
   dependencies: [SupportCasesResource, SupportAgentsResource, SupportCaseEventsResource],
 })
@@ -274,11 +279,13 @@ const caseDetail = Command.implement(caseDetailSpec, Effect.fn("SupportCases.cas
   input: typeof GetSupportCaseInputSchema.Type,
 ) {
   yield* requireCase(input.caseId)
+
   const detail = yield* supportCaseDetail(input)
 
   if (Option.isNone(detail)) {
     return yield* SupportCaseNotFound.make({ caseId: input.caseId })
   }
+
   return detail.value
 }))
 

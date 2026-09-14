@@ -27,19 +27,26 @@ const purchase = p.entitlement({ name: "purchased_report", key: p.row.id })
 const account = p.entitlement({ name: "report_exports", key: p.subject.tenantId })
 const purchasedPolicy = p.policy({ scope, allow: { read: access }, require: { read: [purchase] } })
 
+const purchasedReportCapabilities = [Resource.get(), Resource.list({ limit: 2 })]
+
 const PurchasedReports = Resource.define({
   name: "purchased_reports", schema: ReportSchema, authorization: purchasedPolicy,
-  capabilities: Resource.capabilities(Resource.get(), Resource.list({ limit: 2 })),
+  capabilities: purchasedReportCapabilities,
 })
 
 const accountPolicy = p.policy({ scope, allow: { read: access }, require: { read: [account] } })
+
+const accountReportCapabilities = [Resource.list()]
 
 const AccountReports = Resource.define({
   name: "account_reports",
   schema: ReportSchema,
   authorization: accountPolicy,
-  capabilities: Resource.capabilities(Resource.list()),
+  capabilities: accountReportCapabilities,
 })
+
+const accountReportsTable = Resource.table(AccountReports)
+
 const AccountReportsRuntime = Resource.compile(AccountReports)
 
 const WriteSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, visible: Schema.Boolean })
@@ -55,12 +62,15 @@ const paidWritePolicy = w.policy({
   require: { create: [publish], read: [readGrant] },
 })
 
+const paidWriteCapabilities = [Resource.create()]
+
 const PaidWrites = Resource.define({
   name: "paid_writes",
   schema: WriteSchema,
   authorization: paidWritePolicy,
-  capabilities: Resource.capabilities(Resource.create()),
+  capabilities: paidWriteCapabilities,
 })
+
 const s = Authorization.subject(SubjectSchema)
 const aliceOnly = s.eq(s.subject.userId, "alice")
 const subjectAccess = s.all()
@@ -73,9 +83,12 @@ const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const denied = Entitlements.of({ has: () => Effect.succeed(false) })
 const admitted = Entitlements.of({ has: () => Effect.succeed(true) })
 
+const purchasedReportsTable = Resource.table(PurchasedReports)
+const paidWritesTable = Resource.table(PaidWrites)
+
 const reportSubscriptionSource = new Entitlements.Source({
   name: "reports.subscription",
-  table: Resource.table(AccountReports),
+  table: accountReportsTable,
   subject: SubjectSchema,
   key: "id",
   where: whereReportTenantMatches,
@@ -87,7 +100,7 @@ const tableEntitlements = Entitlements.fromTables([reportSubscriptionSource])
 
 it.effect("table entitlement resolvers grant matching records, deny misses, and ignore unknown names", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(AccountReports)])
+    yield* prepareTables([accountReportsTable])
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO account_reports (id, tenantId, title) VALUES
@@ -109,7 +122,7 @@ it.effect("table entitlement resolvers grant matching records, deny misses, and 
 
 it.effect("account gates reject empty lists, distinguish resolver outages, and observe revocation", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(AccountReports)])
+    yield* prepareTables([accountReportsTable])
     const locked = yield* pipe(Resource.repository(AccountReports).list(), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
     expect(locked._tag).toBe("EntitlementRequired")
     const missing = yield* pipe(Resource.repository(AccountReports).list(), asAlice, Effect.flip)
@@ -133,7 +146,7 @@ it.effect("account gates reject empty lists, distinguish resolver outages, and o
 
 it.effect("purchase gates preserve hidden rows and pagination without filtering locked items", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(PurchasedReports)])
+    yield* prepareTables([purchasedReportsTable])
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO purchased_reports (id, tenantId, title) VALUES
@@ -157,7 +170,7 @@ it.effect("purchase gates preserve hidden rows and pagination without filtering 
 
 it.effect("denied writes and entitlement revocation during a write leave no partial state", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(PaidWrites)])
+    yield* prepareTables([paidWritesTable])
     const deniedInput = WriteSchema.make({ id: "denied", tenantId: "a", visible: true })
     const deniedWrite = yield* pipe(Resource.repository(PaidWrites).create(deniedInput), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
     expect(deniedWrite._tag).toBe("EntitlementRequired")
@@ -241,7 +254,7 @@ const accountResolver = Entitlements.of({ has: ({ subject, key }) => Effect.sync
 
 it.effect("RPC gates isolate request identity and return typed entitlement errors", () => pipe(
   Effect.gen(function* () {
-    yield* prepareTables([Resource.table(AccountReports)])
+    yield* prepareTables([accountReportsTable])
     const client = yield* RpcTest.makeClient(AccountReportsRuntime.group)
     const aliceRequest = client["account_reports.list"]({}, { headers: { authorization: "Bearer alice" } })
     const bobRequest = pipe(client["account_reports.list"]({}, { headers: { authorization: "Bearer bob" } }), Effect.flip)

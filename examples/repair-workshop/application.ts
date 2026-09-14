@@ -8,12 +8,13 @@ import {
 
 import { RepairWorkshopOperations } from "./sqlite.ts"
 
-export const RepairWorkshopApplication = Application.compile(Application.define({
-  name: "repair-workshop",
-  parts: [
-    Part.resource(CustomersResource),
-    Part.resource(TechniciansResource),
-    Part.resource(RepairJobsResource),
-    Part.command(RepairWorkshopOperations),
-  ],
-}))
+const parts = [
+  Part.resource(CustomersResource),
+  Part.resource(TechniciansResource),
+  Part.resource(RepairJobsResource),
+  Part.command(RepairWorkshopOperations),
+]
+
+const repairWorkshop = Application.define({ name: "repair-workshop", parts })
+
+export const RepairWorkshopApplication = Application.compile(repairWorkshop)

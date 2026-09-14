@@ -1,4 +1,6 @@
 import { Application, Part } from "effect-domains/application"
 import { AssetsResource } from "./resources.ts"
 
-export const EquipmentRegisterApplication = Application.compile(Application.define({ name: "equipment-register", parts: [Part.resource(AssetsResource)] }))
+const parts = [Part.resource(AssetsResource)]
+const equipmentRegister = Application.define({ name: "equipment-register", parts })
+export const EquipmentRegisterApplication = Application.compile(equipmentRegister)

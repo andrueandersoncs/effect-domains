@@ -456,9 +456,11 @@ const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
   const transformsStoredNull = SchemaField.transformsStoredNull(schema.ast)
   const compiled = yield* compileScalar(table, field, schema.ast)
   if (Option.isNone(compiled.scalar)) return yield* unsupportedTableScalar(table, field)
+
   if (Option.isNone(compiled.storageCodec)) {
     return { ...compiled, canonical, transformsStoredNull, storageSchema: schema }
   }
+
   const typeAst = SchemaAST.toType(schema.ast)
   const decoded = yield* compileScalar(table, field, typeAst)
   if (Option.isNone(decoded.storageCodec)) return yield* unsupportedTableScalar(table, field)
@@ -526,6 +528,7 @@ const compileField = <S extends StructSchema>(table: string, schema: S) =>
 
     const fieldOption = sourceField(schema)(property.name)
     const fieldSchema = Option.getOrThrow(fieldOption)
+
     const {
       canonical,
       transformsStoredNull,
@@ -535,6 +538,7 @@ const compileField = <S extends StructSchema>(table: string, schema: S) =>
       checks,
       orderable,
     } = yield* storageFieldFor(table, property.name, fieldSchema)
+
     if (Option.isNone(scalar)) return yield* unsupportedTableScalar(table, property.name)
     const field = TableField.make({ name: property.name, scalar: scalar.value, nullable, generation: NoGeneration, checks })
     return new CompiledField({ field, storageSchema, orderable, canonical, transformsStoredNull })
@@ -578,6 +582,7 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const implicit = Option.isNone(identifier)
   const hasId = Array.some(compiled, namedIdentifierField)
   const ambiguousId = implicit && hasId
+
   if (ambiguousId) {
     return yield* failTableDefinition(
       name,
@@ -585,16 +590,20 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
     )
   }
 
-  const rowSchema = implicit ? withImplicitIdentifier(schema) : schema
 
-  const key = pipe(identifier, Option.getOrElse(() => new CompiledField({
+  const rowSchema = implicit ? withImplicitIdentifier(schema) : schema
+  const defaultCanonical = SchemaField.compile(UuidV7Schema)
+  const defaultTransformsStoredNull = SchemaField.transformsStoredNull(UuidV7Schema.ast)
+
+  const defaultKey = new CompiledField({
     field: DefaultIdentifierField,
     storageSchema: UuidV7Schema,
     orderable: true,
-    canonical: SchemaField.compile(UuidV7Schema),
-    transformsStoredNull: SchemaField.transformsStoredNull(UuidV7Schema.ast),
-  })))
+    canonical: defaultCanonical,
+    transformsStoredNull: defaultTransformsStoredNull,
+  })
 
+  const key = pipe(identifier, Option.getOrElse(Function.constant(defaultKey)))
   const storedFields = implicit ? Array.prepend(compiled, key) : compiled
   const identifierSchema = pipe(sourceField(rowSchema)(key.field.name), Option.getOrThrow)
   const insertSchema = compileStorageSchema(schema, compiled)

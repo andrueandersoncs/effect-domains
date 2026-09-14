@@ -90,7 +90,8 @@ export class ReportExportExecutionStore extends Context.Service<ReportExportExec
 
 const storeUnavailable = (_cause: unknown) => ReportExportUnavailable.make({})
 const sameStatus = Equivalence.strictEqual<typeof ReportExportExecutionStatusSchema.Type>()
-const encodeExecution = Schema.encodeUnknownEffect(Resource.table(ReportExportExecutionsResource).storageSchema)
+const executionTable = Resource.table(ReportExportExecutionsResource)
+const encodeExecution = Schema.encodeUnknownEffect(executionTable.storageSchema)
 const decodeExecution = Schema.decodeUnknownEffect(StoredExecutionResultSchema)
 const encodeArtifact = Schema.encodeUnknownEffect(StoredReportArtifactSchema)
 
@@ -110,7 +111,7 @@ const knownCancelError = (error: unknown) => isKnownStoreError(error)
 
 const makeExecutionStore = Effect.gen(function* () {
   const database = yield* SqlClient.SqlClient
-  const table = database(Resource.table(ReportExportExecutionsResource).name)
+  const table = database(executionTable.name)
 
   const find = Effect.fn("ReportExports.ExecutionStore.find")(function* (executionId: string) {
     const rows = yield* database<Readonly<Record<string, unknown>>>`
