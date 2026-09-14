@@ -129,16 +129,20 @@ A singleton rewrites `APPOINTMENT_REMINDERS_PROJECTION_FILE` every five seconds 
 
 The `notifications` array contains every current row ordered by identifier, including delivered and archived rows with their `archivedAt` values; it is empty only before any deliveries. This is a projection, not a second inbox store. The default UTC cron expression `0 0 * * *` marks notifications whose `deliveredAt` is more than 90 days old by setting `archivedAt`. It does not delete them. Set `APPOINTMENT_REMINDERS_RETENTION_CRON` to a valid cron expression only when intentionally replacing that schedule.
 
-Application data defaults to `data/appointment-reminders.sqlite`; the native execution store defaults to `data/appointment-reminders.execution.sqlite`; the projection defaults to `data/appointment-reminders.notifications.json`. The application and execution stores have separate transaction boundaries. Back up both databases for recovery, but do not infer a cross-database transaction, automatic outbox, or exactly-once delivery guarantee for arbitrary external systems. Inbox insertion is deduplicated in the application database; the scope of that behavior is the durable in-app row described here.
+Application data defaults to `data/appointment-reminders.sqlite`; the native execution store defaults to `data/appointment-reminders-execution.sqlite`; the projection defaults to `data/appointment-reminders.notifications.json`. The application and execution stores have separate transaction boundaries. Back up both databases for recovery, but do not infer a cross-database transaction, outbox, or exactly-once delivery guarantee for arbitrary external systems. Inbox insertion is deduplicated in the application database; the scope of that behavior is the durable in-app row described here.
 
 `EFFECT_DOMAINS_DEMO_PASSWORD` is required for each server start and `APPOINTMENT_REMINDERS_IDENTITY_DB` defaults to `data/appointment-reminders-identity.sqlite`; never point it at the application or execution database.
 
-A given execution store has one native `SingleRunner`: run **either** `appointment-reminders:server` or `appointment-reminders:worker` with it, never both concurrently. To continue an accepted future reminder, the projection loop, and retention without HTTP, stop the server and start a worker with the same database and projection environment:
+The default `EFFECT_CLUSTER_MODE=single` keeps a local one-process runner. For colocated HTTP runners, start one or more worker processes with `EFFECT_CLUSTER_MODE=runner`, distinct `EFFECT_CLUSTER_PORT` / `EFFECT_CLUSTER_LISTEN_PORT` values, and the same application and execution databases. Start the HTTP application with `EFFECT_CLUSTER_MODE=client`; client mode does not install Entity, Singleton, or ClusterCron registrations:
 
 ```bash
-bun run appointment-reminders:worker
+EFFECT_CLUSTER_MODE=runner EFFECT_CLUSTER_PORT=34431 \
+  EFFECT_CLUSTER_LISTEN_PORT=34431 bun run appointment-reminders:worker
+EFFECT_CLUSTER_MODE=runner EFFECT_CLUSTER_PORT=34432 \
+  EFFECT_CLUSTER_LISTEN_PORT=34432 bun run appointment-reminders:worker
+EFFECT_CLUSTER_MODE=client PORT=3002 bun run appointment-reminders:server
 ```
 
-Start `appointment-reminders:server` again with those same paths when you need remote inbox reads. Do not point the execution and application environment variables at the same SQLite file; the shared database layer checks file identity before native execution initializes.
+This topology is bounded to colocated processes sharing SQLite; it is not a cross-host deployment. Startup rejects topology-version, shard-count, or shard-group drift. Same-topology binaries may replace runners one at a time. Topology or native execution-store compatibility changes require stopping every process, backing up both stores and the projection, applying the supported storage migration, advancing the version in `clusterRuntimeLayer("appointment-reminders", ...)`, and running the documented topology compare-and-set before starting one upgraded runner and exercising a reminder. Never run mixed topology versions. Do not point execution and application environment variables at the same SQLite file; the shared database layer checks file identity before native execution initializes. Follow the [topology-change procedure](../../docs/reference/runtime.md#change-durable-topology), substituting the appointment application name and `APPOINTMENT_REMINDERS_EXECUTION_DB`.
 
 For source details, see the [entity contract](appointment-reminder-entity.ts), [delivery and background work](background.ts), [notification schema and errors](domain.ts), [resource policy](resources.ts), [runtime entrypoint](main.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).

@@ -4,6 +4,7 @@ import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ReportExportsApplication } from "./application.ts"
+import { ReportExportExecutionStoreLive } from "./executions.ts"
 import { ReportExportMigrations } from "./migrations.ts"
 import { ReportExportRoutes } from "./routes.ts"
 import { ReportExportBackground, ReportExportExecution, ReportExportServices } from "./runtime.ts"
@@ -24,6 +25,7 @@ const identity = ExampleIdentity.layer("report-exports")
 const services = Layer.mergeAll(
   identity,
   ReportExportServices,
+  ReportExportExecutionStoreLive,
   execution,
 )
 

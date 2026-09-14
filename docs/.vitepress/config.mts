@@ -43,6 +43,7 @@ export default defineConfig({
         items: [
           { text: "Resources and operations", link: "/reference/resources" },
           { text: "Runtime and clients", link: "/reference/runtime" },
+          { text: "Durable execution", link: "/reference/runtime#durable-execution" },
         ],
       },
       {

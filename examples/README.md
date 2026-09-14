@@ -57,7 +57,7 @@ Treat it as a secret. The CLI sends `<APP>_TOKEN` as a bearer credential. `ident
 
 ### Durable execution storage
 
-Report exports and appointment reminders have separate native execution stores. `SqliteBunRuntime.privateClient({ application, purpose: "execution" })` uses `<APP>_EXECUTION_DB`, defaulting to `data/<application>-execution.sqlite`, and rejects the application database file or inode. Run either `serve` or `worker` against one execution store, never both concurrently.
+Report exports and appointment reminders have separate native execution stores. `SqliteBunRuntime.privateClient({ application, purpose: "execution" })` uses `<APP>_EXECUTION_DB`, defaulting to `data/<application>-execution.sqlite`, and rejects the application database file or inode. `EFFECT_CLUSTER_MODE` selects default local `single`, Bun HTTP `runner`, or client-only `client` execution. Multiple runners are supported only as colocated processes sharing one execution SQLite file; use distinct advertised/listen ports and follow each application's topology-upgrade runbook.
 
 ## Shared structure
 

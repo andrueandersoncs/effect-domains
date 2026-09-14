@@ -24,7 +24,7 @@ This example belongs beside the reading list's `resources.ts`. In your applicati
 
 ## Bun runner
 
-Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to `BunRuntime.runMain` in a Bun entrypoint.
+Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
 
 | Option | Contract |
 | --- | --- |
@@ -51,6 +51,11 @@ The prefix comes from `application.name`: uppercase, with each non-alphanumeric 
 | `<PREFIX>_TOKEN` | Remote CLI | Absent; when set, sent as a bearer token |
 | `<PREFIX>_IDENTITY_DB` | `SqliteIdentity.layer` | `data/<application-name>-identity.sqlite` |
 | `<PREFIX>_EXECUTION_DB` | `SqliteBunRuntime.privateClient({ purpose: "execution" })` | `data/<application-name>-execution.sqlite` |
+| `EFFECT_CLUSTER_MODE` | Durable server / worker | `single`; accepts `single`, `runner`, or `client` |
+| `EFFECT_CLUSTER_HOST` | Advertised HTTP runner address | `127.0.0.1` |
+| `EFFECT_CLUSTER_PORT` | Advertised HTTP runner address | `34431` |
+| `EFFECT_CLUSTER_LISTEN_HOST` | HTTP runner listener | `EFFECT_CLUSTER_HOST` |
+| `EFFECT_CLUSTER_LISTEN_PORT` | HTTP runner listener | `EFFECT_CLUSTER_PORT` |
 | `EFFECT_DOMAINS_DEMO_PASSWORD` | Example account bootstrap | Required; no fallback |
 | `EFFECT_DOMAINS_SESSION_LIFETIME` | Example issued-session lifetime | `8 hours`; must be positive and finite |
 
@@ -199,7 +204,7 @@ Protected tools require bearer credentials on every call. Tool discovery exposes
 
 ### Example Foldkit clients
 
-Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, and display error formatting. `BrowserRuntime.run` is an `Effect` that injects the required root container while constructing and starting Foldkit. `StaticSpa.site` declares a title, accent, and example `web/` base URL; `StaticSpa.layerHttp` reads and serves its explicitly prebuilt JavaScript and CSS.
+Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, and display error formatting. `BrowserRuntime.run` is an `Effect` that injects the required root container while constructing and starting Foldkit. `StaticSpa.layerHttp({ title, accent, base })` validates the site declaration and serves its explicitly prebuilt JavaScript and CSS.
 
 The client modules stay narrow:
 
@@ -211,6 +216,8 @@ The client modules stay narrow:
 - `ResourceEditor.make` derives a public CRUD editor only when `list`, `create`, `update`, and `remove` are all published. Form codecs, copy, error display, and complete presentation remain authored.
 
 Applications still own authorization, filter semantics, mutation refresh policy, and business state transitions. [`packages/example-web`](../../packages/example-web/) now contains build and HTML presentation support, not RPC, paging, identity, runtime, or static-serving mechanics.
+
+The Field Notes native-integration slice separately uses `AtomRpc.Service`: a mounted read-model query declares the `field-notes` reactivity key, and a successful save mutation invalidates that key. Native Atom reactivity performs the refetch; the canonical report schema and generated Resource metadata remain unaware of browser cache policy.
 
 ### Browser admin
 
@@ -224,7 +231,63 @@ The generated admin is a generic bearer-entry surface: it accepts a real issued 
 
 ## Durable execution
 
-The runner composes native Effect layers; it does not supply a job system. The report and reminder examples use native SingleRunner with `SqliteBunRuntime.privateClient({ application, purpose: "execution" })`; that store defaults to `<APP>_EXECUTION_DB`. Run **either** their server or worker against one execution store, not both concurrently. See [durable examples](/examples#durable-work) for application-specific setup and limits.
+The runner composes native Effect layers; the framework does not supply a job system. `@effect-domains/example-support/cluster-runtime` is the version-sensitive native integration boundary used by the report and reminder examples. The Effect and platform packages are pinned to the same exact release candidate.
+
+`EFFECT_CLUSTER_MODE` selects `single` (default local runner), `runner` (Bun HTTP runner), or `client` (client-only sharding). Runner address/listen settings use `EFFECT_CLUSTER_HOST`, `EFFECT_CLUSTER_PORT`, `EFFECT_CLUSTER_LISTEN_HOST`, and `EFFECT_CLUSTER_LISTEN_PORT`. Multiple runners are supported only as colocated processes sharing the same execution SQLite file; this does not claim cross-host SQLite distribution. `clusterWorkerLayer` prevents client-only application servers from installing runner registrations while still allowing application-owned relay processes.
+
+Every runtime startup compares application topology version, shard count, and sorted shard groups against metadata in the execution store before background work begins. Same-topology binaries can roll one runner at a time. Mixed topology versions are rejected.
+
+### Change durable topology
+
+A topology or native execution-store compatibility change requires a maintenance window:
+
+1. Stop every client and runner.
+2. Back up the application database, execution database, and external artifacts or projections as one recovery set.
+3. Apply the migration supported by the pinned native Effect version when its execution schema changes.
+4. Update the application's `clusterRuntimeLayer(application, topologyVersion)` call and prepare a one-use deployment Effect with the same new version, shard count, and sorted groups.
+5. Run the compare-and-set against the execution database. It succeeds only when `fromVersion` is still current and `toVersion` is greater.
+6. Start one upgraded runner. Verify report runner health through `ReportExport.Status`, or exercise one scheduled reminder for the reminder application.
+7. Start the remaining runners and clients, then remove the one-use deployment file.
+
+For example, save the following as `.tmp/upgrade-report-cluster.ts` while upgrading report exports from topology 1 to 2:
+
+```ts
+import { Config, Effect, pipe } from "effect"
+import { advanceClusterTopology } from "@effect-domains/example-support/cluster-runtime"
+import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+
+const upgrade = Effect.gen(function* () {
+  const filename = yield* Config.string("REPORT_EXPORTS_EXECUTION_DB")
+  const database = SqliteBunRuntime.sqlClient(filename, { migrations: [] })
+
+  yield* pipe(
+    advanceClusterTopology({
+      application: "report-exports",
+      fromVersion: 1,
+      toVersion: 2,
+      shardsPerGroup: 64,
+      shardGroups: ["default"],
+    }),
+    Effect.provide(database),
+    Effect.scoped,
+  )
+})
+
+await Effect.runPromise(upgrade)
+```
+
+Run it once with the same explicit execution file used by the stopped deployment:
+
+```bash
+REPORT_EXPORTS_EXECUTION_DB="$PWD/data/report-exports-execution.sqlite" \
+  bun run .tmp/upgrade-report-cluster.ts
+```
+
+Do not rerun it with altered expectations, start version 2 code before it succeeds, or use it as a general migration mechanism. Appointment reminders use `application: "appointment-reminders"` and `APPOINTMENT_REMINDERS_EXECUTION_DB`; their runtime call must advance to the same `toVersion`.
+
+Report acceptance is an application-database transaction that writes an execution/outbox row. A scoped relay dispatches it at least once to native workflow storage using a deterministic ID. Recoverable infrastructure defects suspend, and an authorized resume continues the same execution. Cancellation is explicit and cannot race past the artifact-writing transition. The artifact sink is immutable and idempotent; reconciliation recreates missing bytes and rejects different bytes. These bounded guarantees do not create a cross-database transaction or general exactly-once delivery.
+
+The Field Notes synchronization slice uses a native SQL `EventJournal`, typed `EventLog` events, remote replay, and a SQL projection. Concurrent edits converge by the authored `(revision, replicaId)` maximum; journal timestamps only identify native conflicts. Projection rebuild replays the persisted journal. EventLog and AtomRpc remain application-level seams, not canonical Resource metadata.
 
 ## Sources
 
@@ -243,3 +306,7 @@ The runner composes native Effect layers; it does not supply a job system. The r
 - [Identity session controller](../../packages/effect-domains/src/identity-session.ts)
 - [Static SPA routes](../../packages/effect-domains/src/static-spa.ts)
 - [Example HTML presentation](../../packages/example-web/src/)
+- [Native Cluster runtime boundary](../../packages/example-support/src/cluster-runtime.ts)
+- [Report execution outbox](../../examples/report-exports/executions.ts)
+- [Field Notes EventLog synchronization](../../examples/field-notes/sync.ts)
+- [Field Notes AtomRpc slice](../../examples/field-notes/reactive.ts)

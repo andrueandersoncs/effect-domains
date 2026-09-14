@@ -74,7 +74,7 @@ Operation.bundle ┤
                 └── Optional browser admin
 ```
 
-`ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to `BunRuntime.runMain` in a Bun entrypoint. See [runtime and clients](/reference/runtime).
+`ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint. See [runtime and clients](/reference/runtime).
 
 ## One contract, several clients
 

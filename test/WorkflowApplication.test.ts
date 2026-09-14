@@ -1,7 +1,9 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Function, Layer, Ref, Schema, pipe } from "effect"
+import { Effect, Equivalence, Exit, Function, Layer, Match, Option, Ref, Schema, pipe } from "effect"
+import { ClusterWorkflowEngine, TestRunner } from "effect/unstable/cluster"
 import { RpcMiddleware, RpcTest } from "effect/unstable/rpc"
 import { Headers } from "effect/unstable/http"
+import { TestClock } from "effect/testing"
 import { Workflow, WorkflowEngine, WorkflowProxy, WorkflowProxyServer } from "effect/unstable/workflow"
 import { Application } from "effect-domains/application"
 import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
@@ -69,8 +71,69 @@ it.effect("authorizes native workflow submissions and recovery before invoking t
   }), Effect.provide(handlers), Effect.scoped)
 }))
 
-const reportExportInputSchema = Schema.toCodecJson(ReportExportRequestSchema)
+const recoverableWorkflow = Workflow.make("RecoverableExport", {
+  payload: { requestId: Schema.String },
+  success: Schema.String,
+  idempotencyKey: ({ requestId }) => requestId,
+}).annotate(Workflow.SuspendOnFailure, true)
 
+it.effect("suspends interrupted workflow failures and resumes the same execution", Effect.fn("WorkflowApplication.recovery")(function* () {
+  const attempts = yield* Ref.make(0)
+
+  const get = Effect.fn("WorkflowApplication.get")(function* () {
+    const attempt = yield* Ref.getAndUpdate(attempts, (count) => count + 1)
+    const firstAttempt = Equivalence.strictEqual<number>()(attempt, 0)
+
+    if (firstAttempt) return yield* Effect.die("simulated runner interruption")
+
+    return "recovered"
+  })
+
+  const cluster = pipe(ClusterWorkflowEngine.layer, Layer.provideMerge(TestRunner.layer))
+  const runtime = pipe(recoverableWorkflow.toLayer(get), Layer.provideMerge(cluster))
+
+  yield* pipe(Effect.gen(function* () {
+    const executionId = yield* recoverableWorkflow.execute({ requestId: "recoverable" }, { discard: true })
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("100 millis")
+    const suspended = yield* recoverableWorkflow.poll(executionId)
+    const hasSuspended = Option.isSome(suspended)
+
+    expect(hasSuspended).toBe(true)
+
+    yield* recoverableWorkflow.resume(executionId)
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("100 millis")
+    const completed = yield* recoverableWorkflow.poll(executionId)
+    const hasCompleted = Option.isSome(completed)
+
+    expect(hasCompleted).toBe(true)
+
+    if (Option.isNone(completed)) return yield* Effect.die("Workflow result missing after resume")
+
+    const exit = yield* pipe(
+      Match.value(completed.value),
+      Match.tagsExhaustive({
+        Suspended: () => Effect.die("Workflow remained suspended after resume"),
+        Complete: ({ exit }) => Effect.succeed(exit),
+      }),
+    )
+
+    const successful = Exit.isSuccess(exit)
+
+    expect(successful).toBe(true)
+
+    if (!successful) return yield* Effect.die("Workflow completed with a failure after resume")
+
+    const recovered = Equivalence.strictEqual<string>()(exit.value, "recovered")
+    const attemptsCount = yield* Ref.get(attempts)
+
+    expect(recovered).toBe(true)
+    expect(attemptsCount).toBe(2)
+  }), Effect.provide(runtime), Effect.scoped)
+}))
+
+const reportExportInputSchema = Schema.toCodecJson(ReportExportRequestSchema)
 
 it.effect("rejects report exports outside supported currencies or an ordered period", Effect.fn("WorkflowApplication.reportExportInput")(function* () {
   const request = yield* Schema.decodeUnknownEffect(reportExportInputSchema)({

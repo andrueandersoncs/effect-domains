@@ -113,7 +113,6 @@ export const LibraryMigrations = SqliteMigrations.history(initial)
 Create `scratch-library/main.ts`:
 
 ```ts
-import { BunRuntime } from "@effect/platform-bun"
 import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { Library } from "./application.ts"
@@ -121,10 +120,10 @@ import { LibraryMigrations } from "./migrations.ts"
 
 pipe(ApplicationBun.run(Library, {
   database: { migrations: LibraryMigrations },
-}), BunRuntime.runMain)
+}), ApplicationBun.runMain)
 ```
 
-`ApplicationBun.run` supplies the `serve` command and generated CLI; `BunRuntime.runMain` runs its Effect. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
+`ApplicationBun.run` supplies the `serve` command and generated CLI; `ApplicationBun.runMain` runs its Effect. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
 
 ## 4. Run and exercise the resource
 

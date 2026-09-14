@@ -1,13 +1,15 @@
-import { Effect, Path } from "effect"
+import { Effect, Equivalence, FileSystem, Path, pipe } from "effect"
 import { replaceFileAtomically } from "@effect-domains/example-support/files"
-import { ReportArtifactSchema, type ReportExportJob } from "./contracts.ts"
+import { ReportArtifactConflict, ReportArtifactSchema, type ReportExportJob } from "./contracts.ts"
 import { ReportArtifactOutput } from "./output.ts"
 
 const isSafeExecutionId = (value: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
+const sameContents = Equivalence.strictEqual<string>()
 
 export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact")(
   function* (input: ReportExportJob) {
     const output = yield* ReportArtifactOutput
+    const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
 
     if (!isSafeExecutionId(input.executionId)) {
@@ -16,7 +18,17 @@ export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact"
 
     const directory = path.resolve(output.directory)
     const artifactPath = path.join(directory, `${input.executionId}.json`)
-    yield* replaceFileAtomically({ path: artifactPath, contents: input.contents })
+    const exists = yield* pipe(fileSystem.exists(artifactPath), Effect.orDie)
+
+    if (!exists) {
+      yield* pipe(replaceFileAtomically({ path: artifactPath, contents: input.contents }), Effect.orDie)
+    }
+
+    const contents = yield* pipe(fileSystem.readFileString(artifactPath), Effect.orDie)
+
+    if (!sameContents(contents, input.contents)) {
+      return yield* ReportArtifactConflict.make({ path: artifactPath })
+    }
 
     return ReportArtifactSchema.make({
       artifactPath,
@@ -30,5 +42,4 @@ export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact"
       totalCreditMinor: input.totalCreditMinor,
     })
   },
-  Effect.orDie,
 )

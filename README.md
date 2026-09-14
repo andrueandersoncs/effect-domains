@@ -33,10 +33,9 @@ export const Catalog = Application.make({
 
 An application composes a `parts` array of resources, native RPC bundles, and other applications. Nested resources are flattened; duplicate tables or RPC operation names are rejected. This supplies a generated UUIDv7 key, SQL columns and supported checks, a typed `Books.repository`, and the selected `books.*` RPC operations. There is no second storage schema, CRUD query implementation, or transport model.
 
-`ApplicationBun.run(application, options)` returns the application Effect; execute it with native `BunRuntime.runMain`. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
+`ApplicationBun.run(application, options)` returns the application Effect; execute it with the re-exported `ApplicationBun.runMain` boundary. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
 
 ```ts
-import { BunRuntime } from "@effect/platform-bun"
 import { Effect, pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteMigrations } from "effect-domains/sqlite-migrations"
@@ -49,7 +48,7 @@ const program = Effect.gen(function* () {
     admin: true,
   })
 })
-pipe(program, BunRuntime.runMain)
+pipe(program, ApplicationBun.runMain)
 ```
 
 Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [reading-list](examples/reading-list/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
@@ -156,7 +155,7 @@ Without `identifier`, a table adds a persistence-only UUIDv7 `id`; the canonical
 
 ## Migrations
 
-`SqliteMigrations.make({ id, from, to, steps })` constructs an explicit frozen artifact. `initial({ id, tables })` derives fresh creation, and `snapshot(tables)` captures physical metadata. Schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies` express changes and source/value/expression rebuild mappings with `.make(...)`. There is no inferred `plan`, `generate`, migration intent DSL, or schema CLI.
+`SqliteMigrations.make({ id, to, steps })` constructs an explicit frozen artifact. `initial({ id, tables })` derives fresh creation, and `snapshot(tables)` captures physical metadata. Schema constructors under `SqliteMigrations.steps` and `SqliteMigrations.copies` express changes and source/value/expression rebuild mappings with `.make(...)`. There is no inferred `plan`, `generate`, migration intent DSL, or schema CLI.
 
 `SqliteMigrations.decodeHistory(raw)` validates an ordered array of imported artifact JSONs as an Effect. Runtime accepts `database: { migrations, filename? }` with the decoded history. There is no manifest file, `load`, or `database.manifest` option. Authors review and append new artifacts and imports; already-applied history is never regenerated from current models.
 
@@ -166,7 +165,7 @@ See the [explicit authoring walkthrough](examples/README.md#review-schema-change
 
 ## Native execution composition
 
-Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, with explicit `Layer.provide` of a private SQLite layer. There is no `execution` option. Native `background`, `routes`, `initialize`, and the worker command remain. The examples' [database helper](packages/example-support/src/databases.ts) checks opened file paths and inodes before native execution tables initialize; the framework does not supply a pre-open URL or dangling-symlink guard. Application and execution transactions remain separate. See the [report export runbook](examples/report-exports/README.md).
+Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, provide the execution database with `SqliteBunRuntime.privateClient({ application, purpose: "execution" })`, and register workers through `background`. There is no `execution` option. The version-sensitive [`cluster-runtime`](packages/example-support/src/cluster-runtime.ts) boundary selects local, colocated HTTP runner, or client-only execution and prevents client-only servers from registering workers. The private client rejects the application database file or inode before native execution initializes. Application and execution transactions remain separate; report acceptance bridges them with an application-owned outbox and deterministic at-least-once dispatch rather than a cross-database transaction. See the [runtime reference](docs/reference/runtime.md#durable-execution), [report export runbook](examples/report-exports/README.md), and [appointment reminder runbook](examples/appointment-reminders/README.md).
 
 ## Run the reservation application
 

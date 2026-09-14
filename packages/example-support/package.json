@@ -5,13 +5,15 @@
   "exports": {
     "./subject": "./src/subject.ts",
     "./identity": "./src/identity.ts",
-    "./files": "./src/files.ts"
+    "./files": "./src/files.ts",
+    "./cluster-runtime": "./src/cluster-runtime.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript"
   },
   "dependencies": {
+    "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
     "effect": "catalog:",
     "effect-domains": "workspace:*"

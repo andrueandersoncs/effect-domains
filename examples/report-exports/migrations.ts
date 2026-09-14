@@ -1,4 +1,5 @@
 import { SqliteMigrations } from "effect-domains/sqlite-migrations"
 import initial from "./migrations/001_initial.json" with { type: "json" }
+import executionOutbox from "./migrations/002_execution_outbox.json" with { type: "json" }
 
-export const ReportExportMigrations = SqliteMigrations.history(initial)
+export const ReportExportMigrations = SqliteMigrations.history(initial, executionOutbox)

@@ -1,0 +1,39 @@
+{
+  "id": "002_execution_outbox",
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "report_subscriptions",
+        "identifier": "tenantId",
+        "fields": [
+          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["active", "canceled"] }] },
+          { "_tag": "TableField", "name": "validUntil", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "graceUntil", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+        ]
+      },
+      {
+        "name": "report_export_executions",
+        "identifier": "id",
+        "fields": [
+          { "_tag": "TableField", "name": "id", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "tenantId", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "request", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "status", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [{ "_tag": "OneOf", "values": ["accepted", "dispatched", "writing", "succeeded", "cancelled", "failed"] }] },
+          { "_tag": "TableField", "name": "artifact", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "failure", "scalar": "string", "nullable": true, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "createdAt", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] },
+          { "_tag": "TableField", "name": "updatedAt", "scalar": "string", "nullable": false, "generation": { "_id": "Option", "_tag": "None" }, "checks": [] }
+        ],
+        "relations": {
+          "indexes": [{ "name": "report_export_executions_status_created_at_idx", "fields": ["status", "createdAt"] }]
+        }
+      }
+    ]
+  },
+  "steps": [
+    { "_tag": "SqliteCreateTable", "table": "report_export_executions" },
+    { "_tag": "SqliteCreateIndex", "table": "report_export_executions", "name": "report_export_executions_status_created_at_idx" }
+  ]
+}

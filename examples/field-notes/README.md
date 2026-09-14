@@ -114,6 +114,14 @@ Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Fold
 
 The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Paste a real issued credential into admin; MCP tools likewise use the same policy and arguments `{ "input": <RPC payload> }`.
 
+## Native synchronization and reactive read-model slices
+
+[`sync.ts`](sync.ts) defines a separate typed `NoteEdited` EventLog slice backed by native SQL `EventJournal` storage and a SQL projection. Two replicas exchange journal entries through native remote replay. Concurrent values converge by the explicit maximum `(revision, replicaId)`: higher revision wins, and a lexicographically higher replica ID breaks equal-revision ties. The policy is order-independent and separate from native journal timestamps. Replaying the retained journal rebuilds the projection after restart; repeating the same remote snapshot is deduplicated.
+
+[`reactive.ts`](reactive.ts) defines two typed RPCs for a minimal note read model and save mutation, then exposes them through native `AtomRpc.Service`. The mounted query and successful mutation share the `field-notes` reactivity key, so native Atom reactivity refetches the query without reducer-level reload wiring.
+
+These are concrete integration slices, not additional public operations on the running Field Notes server. They deliberately remain outside `FieldReportsResource`: synchronization conflict policy and client-cache invalidation are not lossless facts derivable from the canonical report schema. The focused regressions are [`EventLogSync.test.ts`](../../test/EventLogSync.test.ts) and [`AtomRpcFieldNotes.test.ts`](../../test/AtomRpcFieldNotes.test.ts).
+
 ## Encryption, persistence, and settings
 
 Only the stored `body` field is transformed. [`storage.ts`](storage.ts) JSON-encodes the canonical string and encrypts it with AES-256-GCM using a fresh random 96-bit nonce. SQLite holds a canonical Base64URL envelope:

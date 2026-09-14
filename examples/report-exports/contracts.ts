@@ -1,5 +1,4 @@
 import { DateTime, Schema, pipe } from "effect"
-import { ClusterError } from "effect/unstable/cluster"
 import { Forbidden } from "effect-domains/authorization"
 import { SafeIntSchema } from "effect-domains/domain"
 import { EntitlementRequired, EntitlementUnavailable } from "effect-domains/entitlements"
@@ -74,6 +73,13 @@ export const ReportArtifactSchema = Schema.Struct({
   totalCreditMinor: MoneyMinorSchema,
 })
 
+export class ReportArtifactConflict extends Schema.TaggedError<ReportArtifactConflict>()(
+  "ReportArtifactConflict",
+  {
+    path: Schema.String,
+  },
+) {}
+
 export const ReportExportJobSchema = Schema.Struct({
   executionId: Schema.String,
   report: FinancialReportSchema,
@@ -88,19 +94,48 @@ export const ReportReleaseSchema = Schema.Struct({
   releasedBy: Schema.NonEmptyString,
 })
 
-export const ReleaseReportSchema = Schema.Struct({
+export const ReportExportExecutionInputSchema = Schema.Struct({
   executionId: Schema.String,
 })
 
-export const PollReportExportSchema = Schema.Struct({
-  executionId: Schema.String,
-})
+export const ReportExportExecutionStatusSchema = Schema.Literals([
+  "accepted",
+  "dispatched",
+  "writing",
+  "succeeded",
+  "cancelled",
+  "failed",
+])
 
 export const ReportExportPollResultSchema = Schema.Union([
-  Schema.TaggedStruct("PendingOrUnknown", {}),
+  Schema.TaggedStruct("Unknown", {}),
+  Schema.TaggedStruct("Pending", { stage: ReportExportExecutionStatusSchema }),
+  Schema.TaggedStruct("Recoverable", { reason: Schema.String }),
   Schema.TaggedStruct("Succeeded", ReportArtifactSchema.fields),
+  Schema.TaggedStruct("Cancelled", {}),
   Schema.TaggedStruct("Failed", { reason: Schema.String }),
 ])
+
+export class ReportExportNotFound extends Schema.TaggedError<ReportExportNotFound>()(
+  "ReportExportNotFound",
+  { executionId: Schema.String },
+) {}
+
+export class ReportExportCancellationRejected extends Schema.TaggedError<ReportExportCancellationRejected>()(
+  "ReportExportCancellationRejected",
+  {
+    executionId: Schema.String,
+    status: ReportExportExecutionStatusSchema,
+  },
+) {}
+
+export class ReportExportRecoveryRejected extends Schema.TaggedError<ReportExportRecoveryRejected>()(
+  "ReportExportRecoveryRejected",
+  {
+    executionId: Schema.String,
+    status: ReportExportExecutionStatusSchema,
+  },
+) {}
 
 export const ReportExportRunnerStatusSchema = Schema.Struct({
   host: Schema.String,
@@ -124,12 +159,16 @@ export class ReportExportUnavailable extends Schema.TaggedError<ReportExportUnav
 export const ReportExportGenerationErrorsSchema = Schema.Union([
   Forbidden,
   EntitlementRequired,
+  ReportArtifactConflict,
   EntitlementUnavailable,
 ])
 
 export const ReportExportOperatorErrorsSchema = Schema.Union([
   Forbidden,
-  ClusterError.PersistenceError,
+  ReportArtifactConflict,
+  ReportExportCancellationRejected,
+  ReportExportNotFound,
+  ReportExportRecoveryRejected,
 ])
 
 export interface ReportExportRequest extends Schema.Schema.Type<typeof ReportExportRequestSchema> {}
@@ -139,4 +178,3 @@ interface FinancialReportLine extends Schema.Schema.Type<typeof FinancialReportL
 interface ReportingPeriod extends Schema.Schema.Type<typeof ReportingPeriodSchema> {}
 interface ReportArtifact extends Schema.Schema.Type<typeof ReportArtifactSchema> {}
 interface ReportRelease extends Schema.Schema.Type<typeof ReportReleaseSchema> {}
-interface ReleaseReport extends Schema.Schema.Type<typeof ReleaseReportSchema> {}

@@ -59,13 +59,14 @@ bun run report-exports ReportExport.GenerateDiscard --input-json "{\"report\":{\
 export EXECUTION_ID='returned-execution-id'
 ```
 
-`GenerateDiscard` means **accepted**, not completed. The workflow waits five seconds before rendering; with `operatorApproval`, it then waits for an explicit release. A first poll can therefore return:
+`GenerateDiscard` means **durably accepted**, not completed. Acceptance and dispatch are separate: the application transaction inserts an `accepted` outbox row, and a scoped relay retries native workflow dispatch with the deterministic execution ID. The workflow waits five seconds before rendering; with `operatorApproval`, it then waits for an explicit release. Polling distinguishes the application and engine states:
 
-```json
-{ "_tag": "PendingOrUnknown" }
-```
-
-That tag deliberately covers both a still-suspended export and an execution ID this runner does not know. It is not a confirmation that the artifact exists.
+- `{ "_tag": "Pending", "stage": "accepted" | "dispatched" | "writing" }`
+- `{ "_tag": "Recoverable", "reason": "..." }` for a suspended infrastructure failure
+- `{ "_tag": "Cancelled" }`
+- `{ "_tag": "Failed", "reason": "..." }`
+- `{ "_tag": "Unknown" }` only when the application execution row does not exist
+- `{ "_tag": "Succeeded", ... }` only after the durable artifact result is recorded
 
 ### Poll and release as the operator
 
@@ -97,7 +98,7 @@ Keep polling until the result has `_tag: "Succeeded"`. Its complete result shape
 }
 ```
 
-Open the returned `artifactPath`. Its JSON has `report`, `release`, `lines`, and `totals` keys. For this request the `release` value records `policy: "operatorApproval"` and `releasedBy: "admin"`; `totals` keeps debit and credit separate. Artifact writing creates `<REPORT_EXPORTS_OUTPUT_DIR>/<executionId>.json` with an atomic replacement. A failed workflow instead returns `{ "_tag": "Failed", "reason": "..." }` from `Poll`.
+Open the returned `artifactPath`. Its JSON has `report`, `release`, `lines`, and `totals` keys. For this request the `release` value records `policy: "operatorApproval"` and `releasedBy: "admin"`; `totals` keeps debit and credit separate. Artifact writing creates `<REPORT_EXPORTS_OUTPUT_DIR>/<executionId>.json` atomically. Repeating the same content returns the existing artifact; different content for that immutable execution path fails with `ReportArtifactConflict` instead of overwriting it.
 
 `ReportExport.Status` is an operator diagnostic snapshot with `activeEntities`, `shuttingDown`, and `runners`. Each runner has `host`, `port`, `healthy`, `groups`, and `weight`; it does not report artifact completion.
 
@@ -105,14 +106,14 @@ Open the returned `artifactPath`. Its JSON has `report`, `release`, `lines`, and
 
 For an export that does not need operator approval, use a **new** report ID and set `releasePolicy` to `automatic` in the same request. It still observes the five-second durable delay, but it bypasses the release barrier; poll it as admin until it succeeds. An automatic artifact has `releasedBy: null`.
 
-`ReportExport.Generate` takes the identical request but waits for completion, which is useful for the automatic path. It returns the report result directly (`artifactPath`, totals, and the other result fields), without `Poll`'s `_tag` wrapper. Do not use it alone for an approval-gated report: it remains waiting until an operator releases that execution from another client. `ReportExport.GenerateResume` accepts `{ "executionId": "..." }` and lets an admin resume that existing execution; it does not create a replacement report or make an unknown execution valid.
+`ReportExport.Generate` takes the identical request but waits for completion, which is useful for the automatic path. It returns the report result directly (`artifactPath`, totals, and the other result fields), without `Poll`'s `_tag` wrapper. Do not use it alone for an approval-gated report: it remains waiting until an operator releases that execution from another client. `ReportExport.GenerateResume` resumes a `Recoverable` execution with the same execution ID and durable journal; it does not create replacement work. `ReportExport.Cancel` cancels `accepted` or `dispatched` work and safely interrupts a dispatched native execution. Cancellation is rejected after artifact writing starts. `ReportExport.Reconcile` is valid only for a succeeded execution: it recreates a missing deterministic artifact, returns an identical existing artifact, and rejects conflicting bytes.
 
 ## Identity, access, and safe retries
 
 The caller never sends an account ID. Generation derives it from the authenticated subject's tenant, and the durable execution key is the pair of that account and `report.reportId`. Consequently:
 
 - Repeating the same report ID for the same account addresses the same execution. It is not an update or a replacement for changed lines. Use a fresh report ID for different source data.
-- Alice's issued Acme editor credential can generate in the newly seeded database. An issued Bob credential is a reader and fails the editor policy. An issued `outsider` credential is an editor in the `other` account but has no seeded paid subscription, so generation fails its `reports.generate` entitlement. The issued Admin credential is the global operator for polling, release, resume, status, and `GET /operator/metrics`; operator access does not require a subscription.
+- Alice's issued Acme editor credential can generate in the newly seeded database. An issued Bob credential is a reader and fails the editor policy. An issued `outsider` credential is an editor in the `other` account but has no seeded paid subscription, so generation fails its `reports.generate` entitlement. The issued Admin credential is the global operator for polling, release, cancellation, recovery, reconciliation, status, and `GET /operator/metrics`; operator access does not require a subscription.
 - The subscription resolver checks the stored row and clock on each generation request. Cancellation retains access until `validUntil`; a canceled row can use a non-null `graceUntil` until that exclusive timestamp. Restarting never renews, restores, or seeds over an existing subscription.
 - Once a workflow has been accepted, its durable steps do not re-check the generation entitlement. That lets already accepted work continue after the subscription changes; it does not authorize a new generation.
 
@@ -120,17 +121,28 @@ The request is deliberately constrained: report IDs start alphanumeric and may t
 
 ## Web, MCP, and operations
 
-At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the shared login form. It uses canonical native clients and retains issued bearer tokens only in memory. An editor can submit a generated request; an administrator can enter an execution ID to poll, release, or inspect runner status. Session changes clear drafts and prior execution state, and field errors are shown for invalid form values. The page has no generated admin area. The same published operations are available as protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every tool call and wrap a request as `{ "input": <RPC payload> }`. A successful MCP tool result is `structuredContent.result`; declared errors have `isError: true`.
+At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the shared login form. It uses canonical native clients and retains issued bearer tokens only in memory. An editor can submit a generated request; an administrator can enter an execution ID to poll, release, cancel, resume, reconcile, or inspect runner status. Session changes clear drafts and prior execution state, and field errors are shown for invalid form values. The page has no generated admin area. The same published operations are available as protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every tool call and wrap a request as `{ "input": <RPC payload> }`. A successful MCP tool result is `structuredContent.result`; declared errors have `isError: true`.
 
-The durable engine uses one native `SingleRunner` for an execution store. Run **either** `report-exports:server` **or** `report-exports:worker` with a given `REPORT_EXPORTS_EXECUTION_DB`, never both concurrently. Worker mode hosts the same execution/background layers without HTTP; stop the server and run this in the same terminal, retaining all three path variables:
+The default `EFFECT_CLUSTER_MODE=single` keeps the local one-process workflow. `runner` starts a native Bun HTTP runner and all workflow/queue workers. `client` starts application HTTP/RPC plus the outbox relay, but not runner registrations. Colocated runners coordinate through one execution SQLite file:
 
 ```bash
-bun run report-exports:worker
+# terminal 1
+EFFECT_CLUSTER_MODE=runner EFFECT_CLUSTER_PORT=34431 \
+  EFFECT_CLUSTER_LISTEN_PORT=34431 bun run report-exports:worker
+
+# terminal 2
+EFFECT_CLUSTER_MODE=runner EFFECT_CLUSTER_PORT=34432 \
+  EFFECT_CLUSTER_LISTEN_PORT=34432 bun run report-exports:worker
+
+# terminal 3
+EFFECT_CLUSTER_MODE=client PORT=3001 bun run report-exports:server
 ```
 
-Interruption caveat (2026-09-11): stopping immediately after an automatic `GenerateDiscard` acknowledgement produced a persisted `Failed` result with `EntityNotAssignedToRunner` in the documentation smoke. Starting the worker did not publish that artifact, and an explicit `GenerateResume` followed by `Poll` still reported failure. Do not assume every accepted execution will recover across arbitrary stop points; inspect `Poll` and its `reason`, and require `Succeeded` plus the artifact before treating an export as complete. See the [verification record](../../docs/wiki/validation-strategy.md#2026-09-11-standalone-example-guides).
+All three processes must share `REPORT_EXPORTS_DB`, `REPORT_EXPORTS_EXECUTION_DB`, `REPORT_EXPORTS_IDENTITY_DB`, and `REPORT_EXPORTS_OUTPUT_DIR`. This is a colocated SQLite deployment, not cross-host storage. Runner addresses must be distinct and reachable. `EFFECT_CLUSTER_HOST` and `EFFECT_CLUSTER_LISTEN_HOST` default to `127.0.0.1`; the advertised and listen ports default to `EFFECT_CLUSTER_PORT` and `34431`.
 
-Return to `report-exports:server` with those paths to poll or release remotely. The application database defaults to `data/report-exports.sqlite`; execution storage defaults to `data/report-exports-execution.sqlite`; `REPORT_EXPORTS_OUTPUT_DIR` is required. Back up the application and execution databases together, but recognize their transaction boundaries are separate. There is no cross-database transaction, automatic outbox, or exactly-once claim for arbitrary external services. The queue makes the artifact's execution-ID file durable and writes it via atomic rename; it does not turn a broader multi-system workflow into exactly-once delivery.
+Startup records topology version, shard count, and sorted shard groups in the execution database and rejects drift before background work starts. Same-topology binary upgrades may replace runners one at a time after a backup and a health check. Any topology, shard-count, or native execution-store compatibility change requires a maintenance window: stop clients and runners, back up both databases and artifacts, apply the native Effect-supported storage migration, advance the version in `clusterRuntimeLayer("report-exports", ...)`, and run the documented `advanceClusterTopology` compare-and-set against the stopped execution database before starting version-matched processes. Never start mixed topology versions. Follow the exact [topology-change procedure and runnable deployment Effect](../../docs/reference/runtime.md#change-durable-topology).
+
+The application database defaults to `data/report-exports.sqlite`; execution storage defaults to `data/report-exports-execution.sqlite`; `REPORT_EXPORTS_OUTPUT_DIR` is required. Back up application and execution databases plus artifacts as one recovery set, while recognizing their transaction boundaries are separate. The application-owned execution row is a transactional outbox for acceptance and at-least-once dispatch. Deterministic native IDs make repeat dispatch safe. The immutable artifact sink and `Reconcile` make its exercised external effect idempotent; none of this promises general exactly-once behavior across arbitrary external systems.
 
 `EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `REPORT_EXPORTS_IDENTITY_DB` defaults to `data/report-exports-identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
 

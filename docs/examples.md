@@ -15,7 +15,7 @@ Run commands from the repository root after `bun install`. Run `bun run build` b
 | [Reading list](../examples/reading-list/README.md) | Generated CRUD, implicit nullable defaults, filters, and cursor lists | [First-run tutorial](/getting-started) |
 | [Team tasks](../examples/team-tasks/README.md) | Tenant scope, reusable subject policies, and trusted identity fields | [Authorization guide](/guides/authorization) |
 | [Editorial calendar](../examples/editorial-calendar/README.md) | Version-2 artifacts, rebuild copies, and historical backfills | [Migration guide](/guides/migrations) |
-| [Field notes](../examples/field-notes/README.md) | Global role policy and encrypted report text at rest | [Authorization guide](/guides/authorization) |
+| [Field notes](../examples/field-notes/README.md) | Global role policy, encrypted report text, SQL EventLog replica synchronization, and AtomRpc invalidation | [Authorization guide](/guides/authorization) |
 
 For any example, `bun run <application> --help` lists its commands and `bun run <application> inspect` describes its contracts without starting the server.
 
@@ -69,21 +69,21 @@ The [purchased-guides guide](../examples/purchased-guides/README.md) contrasts a
 
 ## Durable work
 
-These examples use native Effect durable execution, composed through application-provided layers. Each has an application database and a separate execution database. Run either `serve` or `worker` against one execution store, **not both at once**.
+These examples use native Effect durable execution, composed through application-provided layers. Each has an application database and a separate execution database. The default is local `single` mode; `runner` plus `client` modes support colocated processes sharing one execution SQLite file. This is not cross-host SQLite distribution.
 
 ### Report exports
 
 Use this for work that waits for approval and then publishes a file. The workflow takes supplied financial lines, enforces account subscription access on generation, waits for an operator when requested, and writes a JSON report artifact.
 
-The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation payload, release commands, and polling instructions. Acceptance of an execution is not completion; wait for `Succeeded` and inspect the returned artifact path. It does not query a separate accounting system or provide a payment integration.
+The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation, cancellation, release, recovery, reconciliation, polling, and multi-runner instructions. Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path. The immutable file sink is idempotent, but the application does not query a separate accounting system or provide a payment integration.
 
 ### Appointment reminders
 
 Use this for durable scheduling and deduplicated application-side delivery. The example schedules an appointment reminder and later inserts a notification into an application inbox. It does not send email or SMS.
 
-The [appointment-reminders guide](../examples/appointment-reminders/README.md) creates future timestamps, submits a reminder, reads the delivered inbox row, and explains its projection and retention. It also shows how to stop the server and continue accepted work in worker mode.
+The [appointment-reminders guide](../examples/appointment-reminders/README.md) creates future timestamps, submits a reminder, reads the delivered inbox row, and explains its projection, retention, and colocated runner modes.
 
-Application and execution transactions are separate. These examples do not establish exactly-once behavior for arbitrary external services.
+Application and execution transactions are separate. Report outbox dispatch is at-least-once with deterministic native IDs, not one atomic cross-database commit. The demonstrated immutable artifact reconciliation does not establish exactly-once behavior for arbitrary external services.
 
 ## Navigate the source
 

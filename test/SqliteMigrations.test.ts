@@ -14,7 +14,6 @@ const sqliteClient = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const SqliteMigrationJsonSchema = Schema.toCodecJson(SqliteMigration)
 const encodeMigration = Schema.encodeUnknownSync(SqliteMigrationJsonSchema)
 const TitleSchema = Schema.Struct({ title: Schema.NonEmptyString })
-interface Title extends Schema.Schema.Type<typeof TitleSchema> {}
 
 const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAdditionsAndRenames")(function* () {
   const database = yield* SqlClient.SqlClient

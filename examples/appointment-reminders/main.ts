@@ -1,4 +1,4 @@
-import { SingleRunner } from "effect/unstable/cluster"
+import { clusterRuntimeLayer, clusterWorkerLayer } from "@effect-domains/example-support/cluster-runtime"
 import { Layer, pipe } from "effect"
 import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
@@ -14,7 +14,7 @@ const privateClient = SqliteBunRuntime.privateClient({
 })
 
 const execution = pipe(
-  SingleRunner.layer(),
+  clusterRuntimeLayer("appointment-reminders", 1),
   Layer.provide(privateClient),
 )
 
@@ -23,11 +23,12 @@ const web = StaticSpa.layerHttp({ title: "Appointment reminders", accent: "#9f12
 
 const identity = ExampleIdentity.layer("appointment-reminders")
 const services = Layer.mergeAll(identity, execution)
+const background = clusterWorkerLayer(AppointmentReminderBackground)
 
 const program = ApplicationBun.run(AppointmentRemindersApplication, {
   database: { migrations: AppointmentReminderMigrations },
   services,
-  background: AppointmentReminderBackground,
+  background,
   routes: web,
 })
 
