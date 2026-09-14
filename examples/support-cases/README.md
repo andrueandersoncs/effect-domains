@@ -4,6 +4,8 @@
 
 Register customers and agents, open support cases, and advance each case through triage, assignment, resolution, and reopening. The current board is a bounded `ReadModel`; the nested event history stays an authored SQL projection.
 
+The final runtime composes two sibling applications. `SupportDirectory` owns customers and agents; `CaseManagement` owns cases, events, the joined board, and authored lifecycle commands. Relations and command dependencies cross that child boundary and are validated only after `Application.compile` flattens the complete tree.
+
 ## Run it
 
 Use Bun from the repository root with a disposable SQLite file:
@@ -112,7 +114,8 @@ The imported `001_initial.json` artifact creates four tables, foreign keys, inde
 - [`board.ts`](board.ts): the flat customer/agent `ReadModel` and bounded keyset page.
 - [`contracts.ts`](contracts.ts): the nested case-detail result.
 - [`sqlite.ts`](sqlite.ts): transactional open/advance handlers and the authored nested history query.
-- [`application.ts`](application.ts), [`main.ts`](main.ts): application composition, frozen migration history, generated admin, and static browser routes.
+- [`application.ts`](application.ts): sibling directory/case-management applications and final composition.
+- [`main.ts`](main.ts): frozen migration history, generated admin, and static browser routes.
 - [`web/main.ts`](web/main.ts): the authored case-management workflow.
 
-This slice adds no framework API. It exercises the existing version, transition, list range/order, operation transaction, joined projection, and authored-query escape hatches together in another domain.
+This slice adds no framework API. It exercises the existing version, transition, list range/order, operation transaction, joined projection, authored-query, and sibling-application composition seams together in another domain.

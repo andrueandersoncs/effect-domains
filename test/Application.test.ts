@@ -6,11 +6,9 @@ import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 import { Command } from "effect-domains/command"
 import { ReadModel } from "effect-domains/read-model"
-import { Table } from "effect-domains/table"
 
 it("rejects table and command collisions across nested applications", () => {
   const RowSchema = Schema.Struct({ value: Schema.String })
-  interface Row extends Schema.Schema.Type<typeof RowSchema> {}
 
   const resource = Resource.define({
     name: "shared",
@@ -49,7 +47,7 @@ it("rejects table and command collisions across nested applications", () => {
   expect(() => Application.compile(commandCollision)).toThrow()
 })
 
-it("validates foreign keys against the exact registered table descriptor", () => {
+it("validates foreign keys across sibling applications by exact descriptor", () => {
   const ParentSchema = Schema.Struct({ name: Schema.String })
   const ChildSchema = Schema.Struct({ parentId: Schema.String })
 
@@ -79,10 +77,16 @@ it("validates foreign keys against the exact registered table descriptor", () =>
     },
   })
 
-  const validParts = [Part.resource(Parent), Part.resource(Child)]
+  const parentParts = [Part.resource(Parent)]
+  const parent = Application.define({ name: "exact-parent", parts: parentParts })
+  const childParts = [Part.resource(Child)]
+  const child = Application.define({ name: "exact-child", parts: childParts })
+  const validParts = [Part.application(parent), Part.application(child)]
   const valid = Application.define({ name: "exact-valid", parts: validParts })
   const makeValid = () => Application.compile(valid)
-  const invalidParts = [Part.resource(Replacement), Part.resource(Child)]
+  const replacementParts = [Part.resource(Replacement)]
+  const replacement = Application.define({ name: "exact-replacement", parts: replacementParts })
+  const invalidParts = [Part.application(replacement), Part.application(child)]
   const invalid = Application.define({ name: "exact-invalid", parts: invalidParts })
   const makeInvalid = () => Application.compile(invalid)
   const validExpectation = expect(makeValid)
@@ -96,7 +100,7 @@ class ApplicationCommandUnavailable extends Schema.TaggedError<ApplicationComman
   {},
 ) {}
 
-it("validates resource and table command dependencies by descriptor identity", () => {
+it("validates command dependencies across sibling applications by descriptor identity", () => {
   const RowSchema = Schema.Struct({ value: Schema.String })
 
   const ResourceDependency = Resource.define({
@@ -132,21 +136,33 @@ it("validates resource and table command dependencies by descriptor identity", (
   const command = Command.implement(commandSpec, Function.constant(Effect.void))
   const commands = Command.bundle(command)
 
-  const validParts = [
+  const dependencyParts = [
     Part.resource(ResourceDependency),
     Part.resource(TableDependency),
-    Part.command(commands),
   ]
 
+  const dependencies = Application.define({
+    name: "dependencies",
+    parts: dependencyParts,
+  })
+
+  const commandParts = [Part.command(commands)]
+  const commandApplication = Application.define({ name: "commands", parts: commandParts })
+  const validParts = [Part.application(dependencies), Part.application(commandApplication)]
   const valid = Application.define({ name: "dependencies-valid", parts: validParts })
   const makeValid = () => Application.compile(valid)
 
-  const invalidParts = [
+  const replacementParts = [
     Part.resource(Replacement),
     Part.resource(TableDependency),
-    Part.command(commands),
   ]
 
+  const replacements = Application.define({
+    name: "replacements",
+    parts: replacementParts,
+  })
+
+  const invalidParts = [Part.application(replacements), Part.application(commandApplication)]
   const invalid = Application.define({ name: "dependencies-invalid", parts: invalidParts })
   const makeInvalid = () => Application.compile(invalid)
   const validExpectation = expect(makeValid)

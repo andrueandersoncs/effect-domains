@@ -185,37 +185,38 @@ const validateApplication = Effect.fn("Application.validate")(function* (
   return { tables, procedures }
 })
 
+const compileParts = (
+  parts: ReadonlyArray<ApplicationPart>,
+): ReadonlyArray<CompiledPart> => {
+  const compileNestedParts = (part: ApplicationPart): ReadonlyArray<CompiledPart> => pipe(
+    Match.value(part),
+    Match.tagsExhaustive({
+      ResourcePart: ({ resource }) => {
+        const compiled = Resource.compile(resource)
+        return [new CompiledPart({ bundle: compiled, resources: [compiled], commands: noCommands })]
+      },
+      CommandPart: ({ bundle }) => [
+        new CompiledPart({ bundle, resources: noResources, commands: bundle.commands }),
+      ],
+      NativePart: ({ bundle }) => [
+        new CompiledPart({ bundle, resources: noResources, commands: noCommands }),
+      ],
+      ApplicationPart: ({ application }) => compileParts(application.parts),
+    }),
+  )
+
+  return Array.flatMap(parts, compileNestedParts)
+}
+
 function compileApplication<const Definition extends ApplicationSpec>(
   definition: Definition,
 ): ApplicationIRFor<Definition>
 
 function compileApplication(definition: ApplicationSpec): ApplicationIR
 
+
 function compileApplication(definition: ApplicationSpec): ApplicationIR {
-  const compilePart = (part: ApplicationPart) => pipe(
-    Match.value(part),
-    Match.tagsExhaustive({
-      ResourcePart: ({ resource }) => {
-        const compiled = Resource.compile(resource)
-        return new CompiledPart({ bundle: compiled, resources: [compiled], commands: noCommands })
-      },
-      CommandPart: ({ bundle }) =>
-        new CompiledPart({ bundle, resources: noResources, commands: bundle.commands }),
-      NativePart: ({ bundle }) =>
-        new CompiledPart({ bundle, resources: noResources, commands: noCommands }),
-      ApplicationPart: ({ application }) => {
-        const compiled = compileApplication(application)
-
-        return new CompiledPart({
-          bundle: compiled,
-          resources: compiled.resources,
-          commands: compiled.commands,
-        })
-      },
-    }),
-  )
-
-  const parts = Array.map(definition.parts, compilePart)
+  const parts = compileParts(definition.parts)
   const bundles = Array.map(parts, Struct.get("bundle"))
   const resources = Array.flatMap(parts, Struct.get("resources"))
   const commands = Array.flatMap(parts, Struct.get("commands"))

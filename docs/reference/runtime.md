@@ -24,6 +24,8 @@ Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, and 
 
 Use `Part.application(child)` when a domain module owns a coherent set of resources and commands but the runnable application adds integrations such as identity. Compilation recursively flattens the child into the same `ApplicationIR`, so adapters and dependency validation see one operation, resource, command, and table set. [Orders and invoices](../../examples/orders-invoices/application.ts) exercises this boundary with a nested billing domain and an outer native identity bundle.
 
+Sibling child applications may reference one another's exact Resource descriptors. Compilation gathers the full tree before validating foreign keys and command dependencies. [Support cases](../../examples/support-cases/application.ts) uses separate directory and case-management children: case relations and commands depend on resources registered by the directory sibling.
+
 ## Bun runner
 
 Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.

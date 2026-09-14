@@ -40,7 +40,7 @@ On 2026-09-11 the remaining research questions were sequenced: stay SQLite with 
 
 The [repair-workshop slice](../../examples/repair-workshop/README.md) supplies the first join/dependency evidence. Its current `ReadModel` declaration derives joined codecs, SQL metadata, a bounded page, and publication from one recursive syntax tree. ([Current contract](tables-and-queries.md#declared-joined-projections); [regression](../../test/ReadModel.test.ts))
 
-The [support-case slice](../../examples/support-cases/README.md) is the second joined-board consumer. It now composes Resource, Transitions, Command, ReadModel, and Table specifications through explicit compiler boundaries while case/event transactions and nested history SQL remain authored.
+The [support-case slice](../../examples/support-cases/README.md) is the second joined-board consumer and the second nested-composition shape. It composes directory and case-management sibling applications whose relations, read model, and commands cross the child boundary; final compilation validates the flattened tree while case/event transactions and nested history SQL remain authored. ([verification](validation-strategy.md#2026-09-14-nested-application-example-coverage))
 
 Generated Resource lists, `ReadModel.page`, and `RepositoryStore.select` share one private SQLite list kernel. Resource authorization and canonical validation, ReadModel joins/decoding, and store execution remain distinct interpretations.
 

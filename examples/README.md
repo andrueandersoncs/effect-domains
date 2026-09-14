@@ -13,7 +13,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 | [editorial-calendar](editorial-calendar/README.md) | Plan articles by channel and publication date | Version-2 migration history and rebuild copies |
 | [equipment-register](equipment-register/README.md) | Register and inspect equipment through MCP | Unique tags and generated tool contracts |
 | [repair-workshop](repair-workshop/README.md) | Track customer repairs and assignments | `ReadModel` joined reads and bounded projections |
-| [support-cases](support-cases/README.md) | Triage, assign, and resolve customer cases | A second joined view, versioned transitions, and authored event history |
+| [support-cases](support-cases/README.md) | Triage, assign, and resolve customer cases | Sibling application composition, joined reads, and transactional history |
 | [reservations](reservations/README.md) | Hold, confirm, or release stock | `Transitions.make` and transactional inventory |
 | [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Nested application composition, scoped relations, and optimistic versions |
 | [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a purchase | `Entitlements.fromTable` after row visibility |
