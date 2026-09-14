@@ -110,17 +110,15 @@ An undeclared filter (including `title`), a malformed cursor, a cursor made for 
 
 Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Foldkit report page. It starts signed out; use its login form with a seeded account password. The page uses the canonical native RPC client and retains the issued bearer token only in memory. It lists title, site, and identifier; **Open** fetches the full report and fills the edit form, while **File report** calls `reports.create` and **Save changes** calls full `reports.update`. Its form trims the identifier, title, site, and body, and shows field-specific validation failures.
 
-**Load more** appends later site-filtered pages. Changing the site filter or identity clears rows and invalidates stale requests; server authorization remains authoritative.
+The base report list is declared once with `RpcBrowser.query`. Login, logout, site-filter, and manual-refresh changes restart that Foldkit subscription. Save and remove use `RpcBrowser.mutation` with `FieldReportsResource` as their invalidation key, so a successful mutation automatically refetches the mounted list without a reducer-authored reload command. **Load more** remains an explicit cursor request; replacing the base page invalidates any older continuation. Server authorization remains authoritative.
 
 The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Paste a real issued credential into admin; MCP tools likewise use the same policy and arguments `{ "input": <RPC payload> }`.
 
-## Native synchronization and reactive read-model slices
+## Native synchronization slice
 
 [`sync.ts`](sync.ts) defines a separate typed `NoteEdited` EventLog slice backed by native SQL `EventJournal` storage and a SQL projection. Two replicas exchange journal entries through native remote replay. Concurrent values converge by the explicit maximum `(revision, replicaId)`: higher revision wins, and a lexicographically higher replica ID breaks equal-revision ties. The policy is order-independent and separate from native journal timestamps. Replaying the retained journal rebuilds the projection after restart; repeating the same remote snapshot is deduplicated.
 
-[`reactive.ts`](reactive.ts) defines two typed RPCs for a minimal note read model and save mutation, then exposes them through native `AtomRpc.Service`. The mounted query and successful mutation share the `field-notes` reactivity key, so native Atom reactivity refetches the query without reducer-level reload wiring.
-
-These are concrete integration slices, not additional public operations on the running Field Notes server. They deliberately remain outside `FieldReportsResource`: synchronization conflict policy and client-cache invalidation are not lossless facts derivable from the canonical report schema. The focused regressions are [`EventLogSync.test.ts`](../../test/EventLogSync.test.ts) and [`AtomRpcFieldNotes.test.ts`](../../test/AtomRpcFieldNotes.test.ts).
+The EventLog policy remains separate from `FieldReportsResource`: replica conflict semantics are not lossless facts derivable from the canonical report schema. Browser reactivity uses the Resource descriptor only as a local cache key; it does not turn the Resource into an event-sourced aggregate or provide server push/offline replication. Focused regressions are [`EventLogSync.test.ts`](../../test/EventLogSync.test.ts) and [`RpcBrowserReactivity.test.ts`](../../test/RpcBrowserReactivity.test.ts).
 
 ## Encryption, persistence, and settings
 

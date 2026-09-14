@@ -1,8 +1,14 @@
-import { Effect, Option, Schema, pipe } from "effect"
+import { Effect, Layer, Option, Schema, pipe } from "effect"
+import { Reactivity } from "effect/unstable/reactivity"
 import { Runtime } from "foldkit"
 
 type BrowserApplicationConfig<Model, Message, Resources> =
-  Omit<Runtime.ApplicationConfig<Model, Message, Resources>, "container">
+  Omit<
+    Runtime.ApplicationConfig<Model, Message, Resources | Reactivity.Reactivity>,
+    "container" | "resources"
+  > & Readonly<{
+    resources: Layer.Layer<Resources>
+  }>
 
 class BrowserContainerError extends Schema.TaggedError<BrowserContainerError>()("BrowserContainerError", {
   id: Schema.String,
@@ -23,7 +29,18 @@ export const BrowserRuntime = {
     options: BrowserApplicationConfig<Model, Message, Resources>,
   ) {
     const container = yield* Effect.sync(findContainer)
-    const configuration = { ...options, container }
+
+    const resources = Layer.mergeAll(
+      options.resources,
+      Reactivity.layer,
+    ) as Layer.Layer<Resources | Reactivity.Reactivity>
+
+    const configuration: Runtime.ApplicationConfig<Model, Message, Resources | Reactivity.Reactivity> = {
+      ...options,
+      resources,
+      container,
+    }
+
     const application = Runtime.makeApplication(configuration)
 
     yield* Effect.sync(() => Runtime.run(application))

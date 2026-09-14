@@ -38,7 +38,7 @@ const Editor = ResourceEditor.make({
 
 const todoId = "018f2520-1468-7e56-9f89-1b2d3c4e5f60"
 
-it("resource editor owns form conversion, stale replies, and mutation reloads", () => {
+it("resource editor consumes synchronized pages and settles mutations", () => {
   const initialized = Editor.init()
 
   expect(initialized.model).toMatchObject({
@@ -53,37 +53,10 @@ it("resource editor owns form conversion, stale replies, and mutation reloads", 
   const initialCommands = initialized.commands ?? []
   const initialCommandNames = Array.map(initialCommands, Struct.get("name"))
 
-  expect(initialCommandNames).toEqual(["test/TodoEditor.List"])
+  expect(initialCommandNames).toEqual([])
 
-  const pendingListIds = Record.values(initialized.model.requests.pending)
-  const listRequest = pipe(pendingListIds, Option.fromIterable, Option.getOrThrow)
-
-  const staleRequest = RequestTokenSchema.make({
-    epoch: initialized.model.requests.epoch,
-    id: listRequest - 1,
-    key: "resource_editor_todos.list",
-  })
-
-  const staleMessage = Editor.Message.SucceededList({
-    page: { items: [{ id: todoId, title: "Stale", priority: 9 }], nextCursor: null },
-    append: false,
-    request: staleRequest,
-  })
-
-  const stale = Editor.update(initialized.model, staleMessage)
-
-  expect(stale.model.items).toEqual([])
-
-  const request = RequestTokenSchema.make({
-    epoch: initialized.model.requests.epoch,
-    id: listRequest,
-    key: "resource_editor_todos.list",
-  })
-
-  const loadedMessage = Editor.Message.SucceededList({
+  const loadedMessage = Editor.Message.SynchronizedList({
     page: { items: [{ id: todoId, title: "Ship", priority: 2 }], nextCursor: "next" },
-    append: false,
-    request,
   })
 
   const loaded = Editor.update(initialized.model, loadedMessage)
@@ -126,28 +99,14 @@ it("resource editor owns form conversion, stale replies, and mutation reloads", 
   const reloadCommands = saved.commands ?? []
   const reloadCommandNames = Array.map(reloadCommands, Struct.get("name"))
 
-  expect(reloadCommandNames).toEqual(["test/TodoEditor.List"])
+  expect(reloadCommandNames).toEqual([])
 })
 
 it("resource editor preserves newer form edits when a save completes", () => {
   const initialized = Editor.init()
 
-  const listRequestId = pipe(
-    Record.values(initialized.model.requests.pending),
-    Option.fromIterable,
-    Option.getOrThrow,
-  )
-
-  const listRequest = RequestTokenSchema.make({
-    epoch: initialized.model.requests.epoch,
-    id: listRequestId,
-    key: "resource_editor_todos.list",
-  })
-
-  const listedMessage = Editor.Message.SucceededList({
+  const listedMessage = Editor.Message.SynchronizedList({
     page: { items: [{ id: todoId, title: "Before", priority: 1 }], nextCursor: null },
-    append: false,
-    request: listRequest,
   })
 
   const loaded = Editor.update(initialized.model, listedMessage)
@@ -184,7 +143,7 @@ it("resource editor preserves newer form edits when a save completes", () => {
   expect(completed.model.selectedId).toBe(todoId)
   expect(completed.model.notice).toEqual({ kind: "success", text: "Todo updated." })
   expect(completedSavePending).toBe(false)
-  expect(completedCommands).toEqual(["test/TodoEditor.List"])
+  expect(completedCommands).toEqual([])
 
   const resaveMessage = Editor.Message.ClickedSave()
   const resaving = Editor.update(completed.model, resaveMessage)

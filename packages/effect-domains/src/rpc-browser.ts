@@ -1,5 +1,6 @@
 import { Effect, Equivalence, Layer, Predicate, Record, Schema, pipe } from "effect"
-import { Command } from "foldkit"
+import { Reactivity } from "effect/unstable/reactivity"
+import { Command, Subscription } from "foldkit"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc"
 
@@ -91,6 +92,100 @@ interface BrowserCommandDefinition<
   readonly onFailure: (error: Error, args: RequestCommandArgs<Fields>) => Schema.Schema.Type<Failure>
 }
 
+type ReactivityKeys =
+  | ReadonlyArray<unknown>
+  | Readonly<Record<string, ReadonlyArray<unknown>>>
+
+const resolveReactivityKeys = <Args>(
+  keys: ReactivityKeys | ((args: Args) => ReactivityKeys),
+  args: Args,
+) => Predicate.isFunction(keys) ? keys(args) : keys
+
+interface BrowserMutationDefinition<
+  Fields extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Failure extends Schema.Top,
+  Output,
+  Error,
+  Requirements,
+> extends BrowserCommandDefinition<Fields, Success, Failure, Output, Error, Requirements> {
+  readonly invalidates: ReactivityKeys | ((args: RequestCommandArgs<Fields>) => ReactivityKeys)
+}
+
+interface BrowserQueryDefinition<
+  Model,
+  Message,
+  Fields extends Schema.Struct.Fields,
+  Output,
+  Error,
+  Requirements,
+> {
+  readonly dependencies: Fields
+  readonly modelToDependencies: (model: Model) => Schema.Schema.Type<Schema.Struct<Fields>>
+  readonly reactivityKeys:
+    | ReactivityKeys
+    | ((dependencies: Schema.Schema.Type<Schema.Struct<Fields>>) => ReactivityKeys)
+  readonly execute: (
+    dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
+  ) => Effect.Effect<Output, Error, Requirements>
+  readonly onSuccess: (
+    output: Output,
+    dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
+  ) => Message
+  readonly onFailure: (
+    error: Error,
+    dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
+  ) => Message
+}
+
+const query = <Model, Message>() => <
+  const Name extends string,
+  Fields extends Schema.Struct.Fields,
+  Output,
+  Error,
+  Requirements,
+>(
+  name: Name,
+  definition: BrowserQueryDefinition<Model, Message, Fields, Output, Error, Requirements>,
+) => {
+  type Dependencies = Schema.Schema.Type<Schema.Struct<Fields>>
+  type Services = Requirements | Reactivity.Reactivity
+
+  const dependenciesToStream = (dependencies: Dependencies) => {
+    const keys = resolveReactivityKeys(definition.reactivityKeys, dependencies)
+
+    const message = pipe(
+      definition.execute(dependencies),
+      Effect.match({
+        onSuccess: (output) => definition.onSuccess(output, dependencies),
+        onFailure: (error) => definition.onFailure(error, dependencies),
+      }),
+    )
+
+    return Reactivity.stream(message, keys)
+  }
+
+  type SubscriptionFactory = ReturnType<typeof Subscription.make<Model, Message, Services>>
+  type BuildSubscriptions = Parameters<SubscriptionFactory>[0]
+
+  const buildSubscriptions: BuildSubscriptions = (entry) => {
+    const subscription = entry(definition.dependencies, {
+      modelToDependencies: definition.modelToDependencies,
+      dependenciesToStream,
+    })
+
+    return Record.fromEntries([[name, subscription] as const]) as
+      Readonly<globalThis.Record<Name, typeof subscription>>
+  }
+
+  const subscriptions = Subscription.make<Model, Message, Services>()(buildSubscriptions)
+
+  return subscriptions as Readonly<Record<
+    Name,
+    Subscription.Subscription<Model, Message, Dependencies, Services>
+  >>
+}
+
 const command = <
   const Name extends string,
   Fields extends Schema.Struct.Fields,
@@ -125,4 +220,44 @@ const command = <
   >(name, config)
 }
 
-export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions, command }
+const mutation = <
+  const Name extends string,
+  Fields extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Failure extends Schema.Top,
+  Output,
+  Error,
+  Requirements,
+>(
+  name: Name,
+  definition: BrowserMutationDefinition<Fields, Success, Failure, Output, Error, Requirements>,
+) => {
+  const args = Record.set(definition.args, "request", RequestTokenSchema) as
+    Fields & globalThis.Record<"request", typeof RequestTokenSchema>
+
+  const selectMutation = (commandArgs: RequestCommandArgs<Fields>) => {
+    const keys = resolveReactivityKeys(definition.invalidates, commandArgs)
+    const effect = definition.execute(commandArgs)
+    const mutated = Reactivity.mutation(effect, keys)
+
+    return pipe(
+      mutated,
+      Effect.match({
+        onSuccess: (output) => definition.onSuccess(output, commandArgs),
+        onFailure: (error) => definition.onFailure(error, commandArgs),
+      }),
+    )
+  }
+
+  const messages = [definition.success, definition.failure] as const
+  const config = Object.freeze({ args, messages, execute: selectMutation })
+
+  return Command.define<
+    Name,
+    Fields & RequestCommandFieldSchema,
+    typeof messages,
+    ReturnType<typeof selectMutation>
+  >(name, config)
+}
+
+export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions, command, mutation, query }

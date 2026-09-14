@@ -35,6 +35,7 @@ export const Message = Editor.Message
 export type Message = typeof Message.Type
 export const update = Editor.update
 export const init = Editor.init
+export const subscriptions = Editor.subscriptions
 
 const channels = ["website", "newsletter", "print"] as const
 const channelChoices = Array.map(channels, (value) => ({ value, label: value }))

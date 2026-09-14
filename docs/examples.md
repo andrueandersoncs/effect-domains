@@ -14,8 +14,8 @@ Run commands from the repository root after `bun install`. Run `bun run build` b
 | --- | --- | --- |
 | [Reading list](../examples/reading-list/README.md) | Generated CRUD, implicit nullable defaults, filters, and cursor lists | [First-run tutorial](/getting-started) |
 | [Team tasks](../examples/team-tasks/README.md) | Tenant scope, reusable subject policies, and trusted identity fields | [Authorization guide](/guides/authorization) |
-| [Editorial calendar](../examples/editorial-calendar/README.md) | Version-2 artifacts, rebuild copies, and historical backfills | [Migration guide](/guides/migrations) |
-| [Field notes](../examples/field-notes/README.md) | Global role policy, encrypted report text, SQL EventLog replica synchronization, and AtomRpc invalidation | [Authorization guide](/guides/authorization) |
+| [Editorial calendar](../examples/editorial-calendar/README.md) | Contract-derived CRUD editor, automatic reactive refetch, and historical migration | [Migration guide](/guides/migrations) |
+| [Field notes](../examples/field-notes/README.md) | Authenticated reactive RPC queries/mutations, encrypted report text, and SQL EventLog replica synchronization | [Authorization guide](/guides/authorization) |
 
 For any example, `bun run <application> --help` lists its commands and `bun run <application> inspect` describes its contracts without starting the server.
 

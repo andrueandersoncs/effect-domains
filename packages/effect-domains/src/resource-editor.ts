@@ -1,10 +1,12 @@
 import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, flow, pipe } from "effect"
+import { Reactivity } from "effect/unstable/reactivity"
 import { Command, type Update } from "foldkit"
 import { defineMessageUnion } from "foldkit/message"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Authorization } from "./authorization.ts"
 import { BrowserModel } from "./browser-model.ts"
 import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "./requests.ts"
+import { RpcBrowser } from "./rpc-browser.ts"
 import { RpcService, type Type } from "./rpc-service.ts"
 import { Page, type Page as PageValue } from "./page.ts"
 import { ResourcePager } from "./resource-pager.ts"
@@ -112,6 +114,7 @@ const make = <
   const ModelSchema = Schema.Struct({
     items: Schema.Array(options.resource.table.rowSchema),
     nextCursor: CursorSchema,
+    refresh: Schema.Int,
     form: FormValueSchema,
     selectedId: OptionalIdentifierSchema,
     saving: SavingSchema,
@@ -136,13 +139,15 @@ const make = <
     ClickedSelect: { id: options.resource.table.identifierSchema },
     ClickedRemove: { id: options.resource.table.identifierSchema },
     SucceededList: { page: options.resource.contracts.list.successSchema, append: Schema.Boolean, request: RequestTokenSchema },
+    SynchronizedList: { page: options.resource.contracts.list.successSchema },
+    FailedList: { error: Schema.String },
     SucceededSave: { row: options.resource.table.rowSchema, created: Schema.Boolean, request: RequestTokenSchema },
     SucceededRemove: { id: options.resource.table.identifierSchema, request: RequestTokenSchema },
     Failed: { request: RequestTokenSchema, error: Schema.String, fieldErrors: BrowserModel.FieldErrorsSchema },
   })
 
   type Message = typeof MessageSchema.Type
-  type UpdateReturn = Update.Return<Model, Message, Client>
+  type UpdateReturn = Update.Return<Model, Message, Client | Reactivity.Reactivity>
 
   const result = (model: Model) =>
     UpdateResultSchema.make({ model }) as UpdateReturn
@@ -197,6 +202,40 @@ const make = <
 
   const List = Command.define(`${options.name}.List`, ListConfig)
 
+  class SyncDependencies extends Schema.Class<SyncDependencies>(`${options.name}/SyncDependencies`)({
+    refresh: Schema.Int,
+  }) {}
+
+  const selectSyncDependencies = (model: Model) =>
+    SyncDependencies.make({ refresh: model.refresh })
+
+  const selectSynchronizedPage = Effect.fn("ResourceEditor.selectSynchronizedPage")(
+    function* (_dependencies: SyncDependencies) {
+      const client = yield* Client
+      const input = Page.input(null)
+
+      return yield* invoke<PageValue<Row>>(client, listMethod, input)
+    },
+  )
+
+  const synchronizePage = (page: PageValue<Row>) =>
+    MessageSchema.SynchronizedList({ page })
+
+  const failSynchronization = (error: unknown) => {
+    const formatted = options.formatError(error)
+
+    return MessageSchema.FailedList({ error: formatted })
+  }
+
+  const subscriptions = RpcBrowser.query<Model, Message>()(`${options.name}.Sync`, {
+    dependencies: SyncDependencies.fields,
+    modelToDependencies: selectSyncDependencies,
+    reactivityKeys: [options.resource],
+    execute: selectSynchronizedPage,
+    onSuccess: synchronizePage,
+    onFailure: failSynchronization,
+  })
+
   class SaveArgs extends Schema.Class<SaveArgs>(`${options.name}/SaveArgs`)({
     selectedId: OptionalIdentifierSchema,
     form: FormValueSchema,
@@ -223,6 +262,7 @@ const make = <
 
       return MessageSchema.SucceededSave({ row, created, request })
     }),
+    Reactivity.mutation([options.resource]),
     recover(request),
   )
 
@@ -249,6 +289,7 @@ const make = <
 
       return MessageSchema.SucceededRemove({ id, request })
     }),
+    Reactivity.mutation([options.resource]),
     recover(request),
   )
 
@@ -287,7 +328,23 @@ const make = <
     return commanded(next, [command])
   }
 
-  const reload = (model: Model) => beginList(model, false)
+  const reload = (model: Model) => {
+    const invalidated = pager.invalidate({
+      page: { items: model.items, nextCursor: model.nextCursor },
+      requests: model.requests,
+    })
+
+    const next = ModelSchema.make({
+      ...model,
+      items: invalidated.page.items,
+      nextCursor: invalidated.page.nextCursor,
+      requests: invalidated.requests,
+      refresh: model.refresh + 1,
+      notice: null,
+    })
+
+    return result(next)
+  }
 
   const update = (model: Model, message: Message) => MessageSchema.match<UpdateReturn>(message, {
     ChangedField: ({ key, value }) => {
@@ -301,10 +358,7 @@ const make = <
 
       return result(next)
     },
-    ClickedReload: () => pipe(
-      ModelSchema.make({ ...model, notice: null }),
-      reload,
-    ),
+    ClickedReload: () => reload(model),
     ClickedNext: () => {
       const endReached = Predicate.isNull(model.nextCursor)
       const alreadyPending = Requests.pending(model.requests, listKey)
@@ -374,6 +428,25 @@ const make = <
 
       return commanded(next, [command])
     },
+    SynchronizedList: ({ page }) => {
+      const requests = Requests.invalidate(model.requests, listKey)
+
+      const next = ModelSchema.make({
+        ...model,
+        items: page.items,
+        nextCursor: page.nextCursor,
+        requests,
+      })
+
+      return result(next)
+    },
+    FailedList: ({ error }) => {
+      const requests = Requests.invalidate(model.requests, listKey)
+      const notice = BrowserModel.NoticeSchema.make({ kind: "error", text: error })
+      const next = ModelSchema.make({ ...model, requests, notice })
+
+      return result(next)
+    },
     SucceededList: ({ page, append, request }) => pipe(
       pager.receive(
         { page: { items: model.items, nextCursor: model.nextCursor }, requests: model.requests },
@@ -405,7 +478,7 @@ const make = <
       const notice = BrowserModel.NoticeSchema.make({ kind: "success", text })
       const settled = ModelSchema.make({ ...model, form, selectedId, requests, saving: null, notice })
 
-      return reload(settled)
+      return result(settled)
     },
     SucceededRemove: ({ id, request }) => {
       if (!Requests.accepts(model.requests, request)) return result(model)
@@ -418,7 +491,7 @@ const make = <
       const notice = BrowserModel.NoticeSchema.make({ kind: "success", text: options.notices.removed })
       const settled = ModelSchema.make({ ...model, form, selectedId, requests, notice })
 
-      return reload(settled)
+      return result(settled)
     },
     Failed: ({ request, error, fieldErrors }) => {
       if (!Requests.accepts(model.requests, request)) return result(model)
@@ -451,6 +524,7 @@ const make = <
     ModelSchema.make({
       items: [],
       nextCursor: null,
+      refresh: 0,
       form: options.empty,
       selectedId: null,
       saving: null,
@@ -458,7 +532,7 @@ const make = <
       fieldErrors: BrowserModel.emptyFieldErrors(),
       notice: null,
     }),
-    reload,
+    result,
   )
 
   const operationKey = (operation: "list" | "save" | "remove") => pipe(
@@ -474,7 +548,7 @@ const make = <
     return Requests.pending(model.requests, key)
   }
 
-  return { Client, Model: ModelSchema, Message: MessageSchema, init, update, pending }
+  return { Client, Model: ModelSchema, Message: MessageSchema, subscriptions, init, update, pending }
 }
 
 export const ResourceEditor = { make }

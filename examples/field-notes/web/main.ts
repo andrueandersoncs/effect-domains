@@ -1,4 +1,5 @@
 import { Effect, Option, Schema, pipe } from "effect"
+import { Reactivity } from "effect/unstable/reactivity"
 import { Command, Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
@@ -31,6 +32,7 @@ export const Model = Schema.Struct({
   session: Session.ModelSchema,
   requests: RequestStateSchema,
   reports: ReportPageSchema,
+  refresh: Schema.Int,
   filterSite: Schema.String,
   id: Schema.String,
   title: Schema.String,
@@ -55,13 +57,15 @@ export const Message = defineMessageUnion({
   ClickedSelect: { id: Schema.String },
   ClickedRemove: { id: Schema.String },
   SucceededList: { request: RequestTokenSchema, append: Schema.Boolean, page: ReportPageSchema },
+  SynchronizedList: { page: ReportPageSchema },
+  FailedList: { error: Schema.String },
   SucceededGet: { request: RequestTokenSchema, report: ReportSchema },
   SucceededSave: { request: RequestTokenSchema, report: ReportSchema, created: Schema.Boolean },
   SucceededRemove: { request: RequestTokenSchema, id: Schema.String },
   Failed: { request: RequestTokenSchema, error: Schema.String },
 })
 export type Message = typeof Message.Type
-type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
+type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient | Reactivity.Reactivity>
 
 const newReportId = () => `report_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`
 const emptyForm = () => ({ id: newReportId(), title: "", site: "", body: "", selectedId: null as string | null })
@@ -78,11 +82,36 @@ export const ListReports = Command.define("ListReports", {
         ...Page.input(cursor),
       }, RpcBrowser.requestOptions(token))
     }),
+
     Effect.match({
       onSuccess: (page) => Message.SucceededList({ request, append, page }),
       onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
     }),
   ),
+})
+
+export const subscriptions = RpcBrowser.query<Model, Message>()("reports", {
+  dependencies: {
+    token: Schema.NullOr(Schema.String),
+    filterSite: Schema.String,
+    refresh: Schema.Int,
+  },
+  modelToDependencies: (model) => ({
+    token: Session.token(model.session),
+    filterSite: model.filterSite,
+    refresh: model.refresh,
+  }),
+  reactivityKeys: [FieldReportsResource],
+  execute: ({ token, filterSite }) => token === null
+    ? Effect.succeed(Page.empty<Report>())
+    : WebClient.pipe(
+      Effect.flatMap((client) => client["reports.list"]({
+        filter: filterSite.trim() === "" ? {} : { site: filterSite.trim() },
+        limit: 50,
+      }, RpcBrowser.requestOptions(token))),
+    ),
+  onSuccess: (page) => Message.SynchronizedList({ page }),
+  onFailure: (error) => Message.FailedList({ error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 export const GetReport = Command.define("GetReport", {
@@ -100,37 +129,39 @@ export const GetReport = Command.define("GetReport", {
   ),
 })
 
-export const SaveReport = Command.define("SaveReport", {
-  args: { request: RequestTokenSchema, token: Schema.String, selectedId: Schema.NullOr(Schema.String), report: Schema.toEncoded(FieldReportSchema) },
-  messages: [Message.SucceededSave, Message.Failed],
-  execute: ({ request, token, selectedId, report }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      const decoded = yield* Schema.decodeUnknownEffect(FieldReportSchema)(report)
-      return selectedId === null
-        ? yield* client["reports.create"](decoded, RpcBrowser.requestOptions(token))
-        : yield* client["reports.update"](decoded, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: (report) => Message.SucceededSave({ request, report, created: selectedId === null }),
-      onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-    }),
-  ),
+export const SaveReport = RpcBrowser.mutation("SaveReport", {
+  args: {
+    token: Schema.String,
+    selectedId: Schema.NullOr(Schema.String),
+    report: Schema.toEncoded(FieldReportSchema),
+  },
+  success: Message.SucceededSave,
+  failure: Message.Failed,
+  invalidates: [FieldReportsResource],
+  execute: ({ token, selectedId, report }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const decoded = yield* Schema.decodeUnknownEffect(FieldReportSchema)(report)
+    return selectedId === null
+      ? yield* client["reports.create"](decoded, RpcBrowser.requestOptions(token))
+      : yield* client["reports.update"](decoded, RpcBrowser.requestOptions(token))
+  }),
+  onSuccess: (report, { request, selectedId }) =>
+    Message.SucceededSave({ request, report, created: selectedId === null }),
+  onFailure: (error, { request }) =>
+    Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
-export const RemoveReport = Command.define("RemoveReport", {
-  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
-  messages: [Message.SucceededRemove, Message.Failed],
-  execute: ({ request, token, id }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      yield* client["reports.remove"]({ id }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: () => Message.SucceededRemove({ request, id }),
-      onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-    }),
+export const RemoveReport = RpcBrowser.mutation("RemoveReport", {
+  args: { token: Schema.String, id: Schema.String },
+  success: Message.SucceededRemove,
+  failure: Message.Failed,
+  invalidates: [FieldReportsResource],
+  execute: ({ token, id }) => WebClient.pipe(
+    Effect.flatMap((client) => client["reports.remove"]({ id }, RpcBrowser.requestOptions(token))),
   ),
+  onSuccess: (_, { request, id }) => Message.SucceededRemove({ request, id }),
+  onFailure: (error, { request }) =>
+    Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 const ReportsPager = ResourcePager.make("reports.list")
@@ -142,6 +173,10 @@ const list = (model: Model, append: boolean) => {
     model: evo(model, { requests: () => started.requests, reports: () => started.page, notice: () => null }),
     commands: [ListReports({ request: started.request, token, filterSite: model.filterSite, cursor: started.cursor, append: started.append })],
   }
+}
+const resetReports = (model: Model) => {
+  const reset = ReportsPager.invalidate({ page: model.reports, requests: model.requests })
+  return evo(model, { requests: () => reset.requests, reports: () => reset.page })
 }
 const clearIdentity = (model: Model, session: typeof Session.ModelSchema.Type): Model => {
   const reset = ReportsPager.reset({ page: model.reports, requests: model.requests })
@@ -164,16 +199,18 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
     const changed = Session.generationChanged(model.session, child.model)
     const next = changed ? clearIdentity(model, child.model) : evo(model, { session: () => child.model })
-    if (!changed || child.model.token === null) return { model: next, commands: child.commands }
-    const listing = list(next, false)
-    return { model: listing.model, commands: [...child.commands, ...listing.commands] }
+    return { model: next, commands: child.commands }
   },
-  ChangedFilterSite: ({ value }) => list(evo(model, { filterSite: () => value }), false),
+  ChangedFilterSite: ({ value }) => ({
+    model: evo(resetReports(model), { filterSite: () => value, notice: () => null }),
+  }),
   ChangedId: ({ value }) => ({ model: evo(model, { id: () => value }) }),
   ChangedTitle: ({ value }) => ({ model: evo(model, { title: () => value }) }),
   ChangedSite: ({ value }) => ({ model: evo(model, { site: () => value }) }),
   ChangedBody: ({ value }) => ({ model: evo(model, { body: () => value }) }),
-  ClickedReload: () => list(model, false),
+  ClickedReload: () => ({
+    model: evo(resetReports(model), { refresh: () => model.refresh + 1, notice: () => null }),
+  }),
   ClickedMore: () => model.reports.nextCursor === null || ReportsPager.pending(model.requests) ? { model } : list(model, true),
   ClickedNew: () => ({ model: { ...model, ...emptyForm(), requests: Requests.invalidate(Requests.invalidate(model.requests, "reports.get"), "reports.save"), notice: null } }),
   ClickedSelect: ({ id }) => {
@@ -198,6 +235,18 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     const started = Requests.start(model.requests, "reports.remove")
     return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveReport({ request: started.request, token, id })] }
   },
+  SynchronizedList: ({ page }) => ({
+    model: evo(model, {
+      requests: () => Requests.invalidate(model.requests, "reports.list"),
+      reports: () => page,
+    }),
+  }),
+  FailedList: ({ error }) => ({
+    model: evo(model, {
+      requests: () => Requests.invalidate(model.requests, "reports.list"),
+      notice: () => ({ kind: "error" as const, text: error }),
+    }),
+  }),
   SucceededList: ({ request, append, page }) => Option.match(
     ReportsPager.receive({ page: model.reports, requests: model.requests }, request, page, append),
     {
@@ -214,7 +263,7 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
       requests: () => Requests.succeed(model.requests, request),
       notice: () => ({ kind: "success" as const, text: created ? "Report filed." : "Report updated." }),
     }), report)
-    return list(next, false)
+    return { model: next }
   },
   SucceededRemove: ({ request, id }) => {
     if (!Requests.accepts(model.requests, request)) return { model }
@@ -223,15 +272,15 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
       ...(model.selectedId === id ? Object.fromEntries(Object.entries(emptyForm()).map(([key, value]) => [key, () => value])) : {}),
       notice: () => ({ kind: "success" as const, text: "Report removed." }),
     })
-    return list(next, false)
+    return { model: next }
   },
   Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
     model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
   },
 })
 
-export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
-  model: { session: Session.empty(), requests: Requests.empty(), reports: Page.empty<Report>(), filterSite: "", ...emptyForm(), notice: null },
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient | Reactivity.Reactivity> = () => ({
+  model: { session: Session.empty(), requests: Requests.empty(), reports: Page.empty<Report>(), refresh: 0, filterSite: "", ...emptyForm(), notice: null },
 })
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({

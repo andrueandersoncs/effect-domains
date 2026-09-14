@@ -106,7 +106,7 @@ bun run editorial-calendar inspect documents.create
 
 With the server above:
 
-- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the Foldkit planning page. Its native client loads and appends up to 50 articles per page; **Load more** follows a returned cursor. Add, edit, and remove one article; blank summary/publication inputs become `null`, and field-specific validation errors are displayed. Saving or removing refreshes the list.
+- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the Foldkit planning page. `ResourceEditor` derives its native CRUD client, reactive base-list subscription, mutations, and cursor state from the published Resource contract. Successful save/remove commands invalidate the exact Resource descriptor and automatically refetch the list; **Load more** remains an explicit cursor continuation. Add, edit, and remove one article; blank summary/publication inputs become `null`, and field-specific validation errors are displayed.
 - [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) is the generated admin for the same operations. It needs the earlier `bun run build`.
 - `http://127.0.0.1:3000/mcp` is Streamable HTTP MCP. Its generated tools wrap the same canonical payload as `{ "input": <payload> }`; `/rpc/v1` is Effect JSON RPC, not REST.
 
