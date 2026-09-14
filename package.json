@@ -56,7 +56,7 @@
     "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.16",
+    "@better-typescript/better-typescript": "0.4.18",
     "@effect-domains/example-support": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",

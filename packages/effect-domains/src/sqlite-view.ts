@@ -4,6 +4,8 @@ import { PageLimitSchema } from "./domain.ts"
 import { Page } from "./page.ts"
 import { Operation } from "./operation.ts"
 import { quoteIdentifier } from "./sqlite-ddl.ts"
+import { RepositoryOrder, RepositorySelect } from "./repository-store.ts"
+import { SqliteList } from "./sqlite-list.ts"
 import { TableField, type Table } from "./table.ts"
 import { ScalarSchema, type ScalarF } from "./schema-algebra.ts"
 
@@ -349,17 +351,8 @@ type ViewListRequest<
   cursor: string
 }>>
 
-const StoredFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
-
-const StoredRangeBoundsSchema = Schema.Struct({
-  from: Schema.optionalKey(Schema.Unknown),
-  to: Schema.optionalKey(Schema.Unknown),
-})
-
-const StoredRangeSchema = Schema.Record(Schema.String, StoredRangeBoundsSchema)
 
 const invalidList = (reason: string) => SqliteViewListInputError.make({ reason })
-const unknownEquals = Equivalence.strictEqual<unknown>()
 
 const freezeOrder = <Field extends string>(
   [field, direction]: readonly [Field, "asc" | "desc"],
@@ -427,56 +420,59 @@ const list = <
     pipe(definitionError(`list field ${notOrderable.value} must preserve non-null storage ordering`), Effect.runSync)
   }
 
-  const schemaFor = (field: ViewField<View>) => pipe(
+  const schemaFor = (field: string) => pipe(
     Record.get(definition.view.schema.fields, field),
     Option.getOrThrow,
   )
 
-  const canonicalEntry = (field: ViewField<View>) =>
-    [field, Schema.optionalKey(Schema.toType(schemaFor(field)))] as const
+  const canonicalField = flow(schemaFor, Schema.toType)
 
-  const storageEntry = (field: ViewField<View>) =>
-    [field, Schema.optionalKey(schemaFor(field))] as const
+  const repositoryOrderEntry = ([field, direction]: readonly [ViewField<View>, "asc" | "desc"]) =>
+    new RepositoryOrder({ field, direction })
 
-  const canonicalFilterEntries = Array.map(filterFields, canonicalEntry)
-  const storageFilterEntries = Array.map(filterFields, storageEntry)
-  const canonicalFilterFields = Record.fromEntries(canonicalFilterEntries)
-  const storageFilterFields = Record.fromEntries(storageFilterEntries)
+  const repositoryOrderEntries = Array.map(order, repositoryOrderEntry)
+  const repositoryOrder = Object.freeze(repositoryOrderEntries)
 
-  const CanonicalFilterSchema = Schema.Struct(canonicalFilterFields)
-    .annotate({ parseOptions: { onExcessProperty: "error" } })
+  const cursorScope = JSON.stringify({
+    view: definition.view.description,
+    filter: filterFields,
+    range: rangeFields,
+    order,
+  })
 
-  const StorageFilterSchema = Schema.Struct(storageFilterFields)
-
-  const canonicalRangeEntry = (field: ViewField<View>) => [field, Schema.optionalKey(Schema.Struct({
-    from: Schema.optionalKey(Schema.toType(schemaFor(field))),
-    to: Schema.optionalKey(Schema.toType(schemaFor(field))),
-  }))] as const
-
-  const storageRangeEntry = (field: ViewField<View>) => [field, Schema.optionalKey(Schema.Struct({
-    from: Schema.optionalKey(schemaFor(field)),
-    to: Schema.optionalKey(schemaFor(field)),
-  }))] as const
-
-  const canonicalRangeEntries = Array.map(rangeFields, canonicalRangeEntry)
-  const storageRangeEntries = Array.map(rangeFields, storageRangeEntry)
-  const canonicalRangeFields = Record.fromEntries(canonicalRangeEntries)
-  const storageRangeFields = Record.fromEntries(storageRangeEntries)
-
-  const CanonicalRangeSchema = Schema.Struct(canonicalRangeFields)
-    .annotate({ parseOptions: { onExcessProperty: "error" } })
-
-  const StorageQueryRangeSchema = Schema.Struct(storageRangeFields)
   const MaximumLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(maximum))
+  const invalidListLimit = (limit: number) => invalidList(`list limit must be between 1 and ${limit}`)
+  const invalidListFilter = (field: string) => invalidList(`filter ${field} is not declared`)
+  const invalidListRange = (field: string) => invalidList(`range ${field} is not declared`)
+  const invalidCursorFailure = invalidList("invalid list cursor")
+  const cursorMismatchFailure = invalidList("list cursor does not match the requested filter or range")
+  const cursorEncodingFailure = invalidList("could not encode list cursor")
+  const invalidListCursor = Function.constant(invalidCursorFailure)
+  const listCursorMismatch = Function.constant(cursorMismatchFailure)
+  const cursorEncodingError = Function.constant(cursorEncodingFailure)
+  const codecError = (cause: Schema.SchemaError) => cause
 
-  const InputShapeSchema = Schema.Struct({
-    filter: Schema.optionalKey(CanonicalFilterSchema),
-    range: Schema.optionalKey(CanonicalRangeSchema),
-    limit: Schema.optionalKey(MaximumLimitSchema),
-    cursor: Schema.optionalKey(Schema.String),
-  }).annotate({ parseOptions: { onExcessProperty: "error" } })
+  const listPlan = SqliteList.make({
+    filter: filterFields,
+    range: rangeFields,
+    order: repositoryOrder,
+    maximum,
+    scope: cursorScope,
+    canonicalField,
+    storageField: schemaFor,
+    limitSchema: MaximumLimitSchema,
+    errors: {
+      limit: invalidListLimit,
+      filter: invalidListFilter,
+      range: invalidListRange,
+      invalidCursor: invalidListCursor,
+      cursorMismatch: listCursorMismatch,
+      codec: codecError,
+      cursorEncoding: cursorEncodingError,
+    },
+  })
 
-  const payloadSchema = Schema.make<Schema.Codec<ViewListRequest<View, Filter, Range>, unknown>>(InputShapeSchema.ast)
+  const payloadSchema = Schema.make<Schema.Codec<ViewListRequest<View, Filter, Range>, unknown>>(listPlan.input.ast)
   const CanonicalRowSchema = Schema.toType(definition.view.schema)
   const SuccessShapeSchema = Page.schema(CanonicalRowSchema)
 
@@ -487,190 +483,40 @@ const list = <
     typeof SuccessShapeSchema.EncodingServices
   >>(SuccessShapeSchema.ast)
 
-  const cursorEntry = (entry: readonly [ViewField<View>, "asc" | "desc"]) => {
-    const field = Tuple.get(entry, 0)
-    return [field, Schema.toEncoded(schemaFor(field))] as const
-  }
-
-  const cursorEntries = Array.map(order, cursorEntry)
-  const cursorAfterFields = Record.fromEntries(cursorEntries)
-  const CursorAfterShapeSchema = Schema.Struct(cursorAfterFields)
-
-  const CursorAfterSchema = Schema.make<Schema.Codec<
-    Readonly<Record<string, unknown>>,
-    unknown
-  >>(CursorAfterShapeSchema.ast)
-
-  const cursorScope = JSON.stringify({
-    view: definition.view.description,
-    filter: filterFields,
-    range: rangeFields,
-    order,
-  })
-
-  const cursorCodec = Page.cursor(cursorScope, CursorAfterSchema)
   const decodeRows = Schema.decodeUnknownEffect(Schema.Array(definition.view.schema))
-  const encodeFilter = Schema.encodeUnknownEffect(StorageFilterSchema)
-  const encodeRange = Schema.encodeUnknownEffect(StorageQueryRangeSchema)
-  const decodeFilter = Schema.decodeUnknownEffect(StoredFilterSchema)
-  const decodeRange = Schema.decodeUnknownEffect(StoredRangeSchema)
-  const isLimit = Schema.is(MaximumLimitSchema)
-  const noCursor = Option.none<typeof CursorAfterSchema.Type>()
-  const noCursorEffect = Effect.succeed(noCursor)
 
   const execute = Effect.fn("SqliteView.list")(function* (
     input: ViewListRequest<View, Filter, Range>,
   ) {
     const sql = yield* SqlClient.SqlClient
-    const limit = input.limit ?? maximum
-
-    if (!isLimit(limit)) return yield* invalidList(`list limit must be between 1 and ${maximum}`)
-
-    const rawFilter = yield* encodeFilter(input.filter ?? {})
-    const rawRange = yield* encodeRange(input.range ?? {})
-    const filter = yield* decodeFilter(rawFilter)
-    const range = yield* decodeRange(rawRange)
-    const expectedFilter = JSON.stringify(filter)
-    const expectedRange = JSON.stringify(range)
-
-    const decodeCursor = Effect.fn("SqliteView.decodeCursor")(function* (source: string) {
-      const decoded = yield* pipe(
-        cursorCodec.parse(source),
-        Effect.mapError(() => invalidList("invalid list cursor")),
-      )
-
-      const actualFilter = JSON.stringify(decoded.filter)
-      const actualRange = JSON.stringify(decoded.range)
-      const filterMatches = equals(actualFilter, expectedFilter)
-      const rangeMatches = equals(actualRange, expectedRange)
-      const filterMismatch = !filterMatches
-      const rangeMismatch = !rangeMatches
-      const cursorMismatch = filterMismatch || rangeMismatch
-
-      if (cursorMismatch) {
-        return yield* invalidList("list cursor does not match the requested filter or range")
-      }
-
-      return Option.some(decoded.after)
-    })
-
+    const requestedFilter = (input.filter ?? Record.empty()) as RepositorySelect["filter"]
+    const requestedRange = (input.range ?? Record.empty()) as RepositorySelect["range"]
+    const requestedLimit = Option.fromNullishOr(input.limit)
     const requestedCursor = Option.fromNullishOr(input.cursor)
 
-    const cursor = yield* Option.match(requestedCursor, {
-      onNone: Function.constant(noCursorEffect),
-      onSome: decodeCursor,
-    })
+    const prepared = yield* listPlan.prepare<View["schema"]["EncodingServices"]>(
+      requestedFilter,
+      requestedRange,
+      requestedLimit,
+      requestedCursor,
+    )
 
     const column = (field: string) => definition.view.outputField(sql, field)
 
-    const renderFilterCondition = ([field, value]: readonly [string, unknown]) =>
-      unknownEquals(value, null)
-        ? sql`${column(field)} IS NULL`
-        : sql`${column(field)} = ${value}`
-
-    const filterEntries = Record.toEntries(filter)
-    const filterPredicates = Array.map(filterEntries, renderFilterCondition)
-
-    const renderRangeConditions = ([field, bounds]: readonly [
-      string,
-      Readonly<Partial<{ from: unknown; to: unknown }>>,
-    ]) => {
-      const lower = "from" in bounds
-        ? Option.some(sql`${column(field)} >= ${bounds.from}`)
-        : Option.none()
-
-      const upper = "to" in bounds
-        ? Option.some(sql`${column(field)} <= ${bounds.to}`)
-        : Option.none()
-
-      return Array.getSomes([lower, upper])
-    }
-
-    const rangeEntries = Record.toEntries(range)
-    const rangePredicates = Array.flatMap(rangeEntries, renderRangeConditions)
-
-    const keysetFor = (after: typeof CursorAfterSchema.Type) => {
-      const renderKeysetCondition = ([field, direction]: readonly [ViewField<View>, "asc" | "desc"], index: number) => {
-        const previous = Array.take(order, index)
-
-        const equality = ([prior]: readonly [ViewField<View>, "asc" | "desc"]) =>
-          sql`${column(prior)} = ${after[prior]}`
-
-        const equalities = Array.map(previous, equality)
-
-        const comparison = equals(direction, "asc")
-          ? sql`${column(field)} > ${after[field]}`
-          : sql`${column(field)} < ${after[field]}`
-
-        const orderedComparison = Array.append(equalities, comparison)
-        return sql.and(orderedComparison)
-      }
-
-      return Array.map(order, renderKeysetCondition)
-    }
-
-    const keysetPredicates = Option.match(cursor, {
-      onNone: Array.empty,
-      onSome: keysetFor,
-    })
-
-    const predicates = Array.appendAll(filterPredicates, rangePredicates)
-    const cursorPredicate = sql.or(keysetPredicates)
-
-    const withCursor = Array.isReadonlyArrayEmpty(keysetPredicates)
-      ? predicates
-      : Array.append(predicates, cursorPredicate)
-
-    const noPredicate = Array.isReadonlyArrayEmpty(withCursor)
-    const truePredicate = sql.literal("1 = 1")
-    const where = noPredicate ? truePredicate : sql.and(withCursor)
-
-    const orderFragment = ([field, direction]: readonly [ViewField<View>, "asc" | "desc"]) => {
-      const directionName = equals(direction, "asc") ? "ASC" : "DESC"
-      const directionSql = sql.literal(directionName)
-      return sql`${column(field)} ${directionSql}`
-    }
-
-    const orderFragments = Array.map(order, orderFragment)
+    const rendered = SqliteList.render(
+      sql,
+      column,
+      prepared.query,
+    )
 
     const rows = yield* sql<Readonly<Record<string, unknown>>>`
       ${definition.view.select(sql)}
-      WHERE ${where}
-      ORDER BY ${sql.csv(orderFragments)}
-      LIMIT ${limit + 1}
+      WHERE ${rendered.where}
+      ORDER BY ${rendered.order}
+      LIMIT ${prepared.query.limit}
     `
 
-    const stored = Array.take(rows, limit)
-    const items = yield* decodeRows(stored)
-    const noLast = Option.none<Readonly<Record<string, unknown>>>()
-    const last = rows.length > limit ? Array.last(stored) : noLast
-
-    const renderCursor = Effect.fn("SqliteView.renderCursor")(function* (
-      row: Readonly<Record<string, unknown>>,
-    ) {
-      const afterEntry = (entry: readonly [ViewField<View>, "asc" | "desc"]) => {
-        const field = Tuple.get(entry, 0)
-        const value = pipe(Record.get(row, field), Option.getOrThrow)
-        return [field, value] as const
-      }
-
-      const afterEntries = Array.map(order, afterEntry)
-      const after = Record.fromEntries(afterEntries)
-
-      return yield* pipe(
-        cursorCodec.render({ filter, range, after }),
-        Effect.mapError(() => invalidList("could not encode list cursor")),
-      )
-    })
-
-    const noNextCursor = Effect.succeed<string | null>(null)
-
-    const nextCursor = yield* Option.match(last, {
-      onNone: Function.constant(noNextCursor),
-      onSome: renderCursor,
-    })
-
-    return { items, nextCursor }
+    return yield* listPlan.page(prepared, rows, decodeRows)
   })
 
   type HandlerRequirements =

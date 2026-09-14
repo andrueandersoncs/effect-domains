@@ -30,6 +30,14 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-14: Shared SQLite list kernel
+
+Generated Resource lists and declared joined views now compile through one private SQLite list kernel instead of independently implementing payload fields, storage encoding, cursor binding, page lookahead, continuation construction, predicates, and ordering. `RepositoryStore.select` uses the same renderer while retaining its policy predicate and table execution. Resource-specific authorization, entitlement checks, identifier ordering, and canonical decoding remain outside the kernel; `SqliteView` retains joins, projections, explicit ordering, and view decoding. No public module or alternate query API was added. ([Kernel](../../packages/effect-domains/src/sqlite-list.ts); [Resource](../../packages/effect-domains/src/resource.ts); [view](../../packages/effect-domains/src/sqlite-view.ts); [store](../../packages/effect-domains/src/sqlite-bun.ts))
+
+- Focused Resource, `SqliteView`, and Support Cases regressions passed **25 tests in 3 files**, covering equality/range encoding, ascending and descending continuation, cursor contract and request-state rejection, storage codecs, joined projection decoding, and policy-backed table execution.
+- A disposable in-memory Support Cases application traversed two generated `support_customers.list` pages and two filtered joined `support.board` pages with limit one. It returned distinct Resource identifiers `acme`, `beta` and joined subjects `Second case`, `First case`, with a cursor only on each first page.
+- Framework package typecheck and lint passed. This proves the exercised SQLite list contracts share mechanics without changing their caller-owned semantics; it does not establish a dialect-neutral query compiler, joins for Resource, or authorization for privileged views.
+
 ### 2026-09-14: Declarative Foldkit reactivity cutover
 
 The browser boundary now owns automatic local refetch as declarative client mechanics rather than reducer ceremony or an isolated prototype. `RpcBrowser.query` maps an authored dependency schema, Effect, and reactivity keys to a Foldkit subscription backed by native `Reactivity.stream`; `RpcBrowser.mutation` invalidates declared keys only after success. `BrowserRuntime.run` installs one shared Reactivity service automatically. The old Field Notes-only AtomRpc slice was removed. ([Browser RPC](../../packages/effect-domains/src/rpc-browser.ts); [browser runtime](../../packages/effect-domains/src/browser-runtime.ts))

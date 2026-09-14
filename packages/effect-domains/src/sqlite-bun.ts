@@ -16,6 +16,7 @@ import { Policy, PolicyEnvironment } from "./policy.ts"
 import { SchemaStore } from "./migrations.ts"
 import { makeMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
 import type { Table } from "./table.ts"
+import { SqliteList } from "./sqlite-list.ts"
 import { Value } from "./value.ts"
 
 class InsertReturnedNoRow extends Schema.TaggedError<InsertReturnedNoRow>()(
@@ -32,14 +33,15 @@ const repositoryFailure = (resource: string) => (cause: unknown) =>
   RepositoryError.make({ resource, cause })
 
 const unknownEquals = Equivalence.strictEqual<unknown>()
-const directionEquals = Equivalence.strictEqual<"asc" | "desc">()
 const emptyGuard = Record.empty<string, unknown>()
 
 const absentPolicyValue = Option.none<Readonly<Record<string, unknown>>>()
 
-
 const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
   unknownEquals(value, null) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
+
+
+
 
 const constraintColumn = (column: string) => {
   const segments = column.trim().split(".")
@@ -129,54 +131,6 @@ const persistenceFailure = (table: Table) => (
   }),
 )
 
-const rangeFragments = (sql: SqlClient.SqlClient) => (
-  range: Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>,
-) => {
-  const entries = Record.toEntries(range)
-
-  return Array.flatMap(entries, ([field, bounds]) => {
-    const hasFrom = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "from")
-    const hasTo = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "to")
-    const lower = hasFrom ? Option.some(sql`${sql(field)} >= ${bounds.from}`) : Option.none()
-    const upper = hasTo ? Option.some(sql`${sql(field)} <= ${bounds.to}`) : Option.none()
-    return Array.getSomes([lower, upper])
-  })
-}
-
-const keysetPreviousClause = (sql: SqlClient.SqlClient) => (
-  after: Readonly<Record<string, unknown>>,
-) => (prior: Readonly<{ field: string }>) => sql`${sql(prior.field)} = ${after[prior.field]}`
-
-const keysetClause = (sql: SqlClient.SqlClient) => (
-  after: Readonly<Record<string, unknown>>,
-) => (entry: Readonly<{ field: string; direction: "asc" | "desc" }>, index: number, order: ReadonlyArray<Readonly<{ field: string; direction: "asc" | "desc" }>>) => {
-  const previous = Array.take(order, index)
-  const before = Array.map(previous, keysetPreviousClause(sql)(after))
-  const ascending = directionEquals(entry.direction, "asc")
-
-  const comparison = ascending
-    ? sql`${sql(entry.field)} > ${after[entry.field]}`
-    : sql`${sql(entry.field)} < ${after[entry.field]}`
-
-  const clauses = Array.append(before, comparison)
-  return sql.and(clauses)
-}
-
-const keysetFragment = (
-  sql: SqlClient.SqlClient,
-  order: ReadonlyArray<Readonly<{ field: string; direction: "asc" | "desc" }>>,
-  after: Readonly<Record<string, unknown>>,
-) => {
-  const count = Array.length(order)
-  const indexes = Array.range(0, count)
-  const indexed = Array.zip(order, indexes)
-
-  const clause = ([entry, index]: readonly [Readonly<{ field: string; direction: "asc" | "desc" }>, number]) =>
-    keysetClause(sql)(after)(entry, index, order)
-
-  const clauses = Array.map(indexed, clause)
-  return sql.or(clauses)
-}
 
 const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClient: SqlClient.SqlClient) {
   const policyBinders = yield* pipe(HashMap.empty<Policy, ReturnType<typeof PolicySql.compile>>(), Ref.make)
@@ -211,34 +165,13 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
   return RepositoryStore.of({
     select: Effect.fn("RepositoryStore.select")(function* (table, query, access) {
       const policy = yield* policyBinding(table, access)
-      const filterEntries = Record.toEntries(query.filter)
-      const filters = Array.map(filterEntries, whereFragment(sqlClient))
-      const ranges = rangeFragments(sqlClient)(query.range)
-      const predicates = [...filters, ...ranges, policy]
-
-      const withAfter = (after: Readonly<Record<string, unknown>>) => {
-        const keyset = keysetFragment(sqlClient, query.order, after)
-        return Array.append(predicates, keyset)
-      }
-
-      const conditions = Option.match(query.after, {
-        onNone: Function.constant(predicates),
-        onSome: withAfter,
-      })
-
-      const renderOrder = ({ field, direction }: Readonly<{ field: string; direction: "asc" | "desc" }>) => {
-        const ascending = directionEquals(direction, "asc")
-        const keyword = ascending ? "ASC" : "DESC"
-        return sqlClient`${sqlClient(field)} ${sqlClient.literal(keyword)}`
-      }
-
-      const order = Array.map(query.order, renderOrder)
+      const rendered = SqliteList.render(sqlClient, sqlClient, query, [policy])
 
       return yield* pipe(
         sqlClient<Readonly<Record<string, unknown>>>`
           SELECT * FROM ${sqlClient(table.name)}
-          WHERE ${sqlClient.and(conditions)}
-          ORDER BY ${sqlClient.csv(order)}
+          WHERE ${rendered.where}
+          ORDER BY ${rendered.order}
           LIMIT ${query.limit}
         `,
         Effect.mapError(repositoryFailure(table.name)),

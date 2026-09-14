@@ -7,11 +7,10 @@ import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier, PageLimitSchema, type StructSchema } from "./domain.ts"
 import { Page } from "./page.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
+import { SqliteList } from "./sqlite-list.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import type { TransitionMachine } from "./transitions.ts"
-const OptionalLimitSchema = Schema.optionalKey(PageLimitSchema)
-const OptionalCursorSchema = Schema.optionalKey(Schema.String)
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch" | "transition"
@@ -193,12 +192,6 @@ const noChanges: Readonly<Record<string, never>> = Record.empty()
 const noVersion = Effect.succeed(noVersionValue)
 const isUniqueViolation = Predicate.isTagged("UniqueViolation")
 
-const rangeBounds = (schema: Schema.Constraint) => Schema.Struct({
-  from: Schema.optionalKey(schema),
-  to: Schema.optionalKey(schema),
-})
-
-const optionalRangeField = flow(rangeBounds, Schema.optionalKey)
 
 const sameString = (value: string) => (candidate: string) =>
   equals(candidate, value)
@@ -652,29 +645,6 @@ export const Resource = {
     })
 
     const storageField = (field: string) => table.columns[field as keyof typeof table.columns].storageSchema
-    const optionalFieldSchema = flow(storageField, Schema.optionalKey)
-    const fieldEntry = (field: string) => [field, optionalFieldSchema(field)] as const
-    const filterEntries = Array.map(filterFields, fieldEntry)
-    const presentFilterFields = Record.fromEntries(filterEntries)
-    const FilterSchema = Schema.Struct(presentFilterFields)
-    const filterCodecSchema = Schema.make<Schema.Codec<Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>, never, Storage["EncodingServices"]>>(FilterSchema.ast)
-    const encodeFilter = flow(Schema.encodeUnknownEffect(filterCodecSchema), Effect.mapError(repositoryFailure))
-
-    const rangeEntry = (field: string) => {
-
-      const boundSchema = Schema.Struct({
-        from: Schema.optionalKey(storageField(field)),
-        to: Schema.optionalKey(storageField(field)),
-      })
-
-      return [field, Schema.optionalKey(boundSchema)] as const
-    }
-
-    const rangeEntries = Array.map(rangeFields, rangeEntry)
-    const RangeBoundSchemas = Record.fromEntries(rangeEntries)
-    const RangeSchema = Schema.Struct(RangeBoundSchemas)
-    const rangeCodecSchema = Schema.make<Schema.Codec<Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>, Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>, never, Storage["EncodingServices"]>>(RangeSchema.ast)
-    const encodeRange = flow(Schema.encodeUnknownEffect(rangeCodecSchema), Effect.mapError(repositoryFailure))
     const identifierColumn = table.columns[table.identifier as keyof typeof table.columns]
     const storedIdentifier = storageSchema.fields[table.identifier]
     const sameIdentifier = implicitIdentifier || equals(canonicalIdentifierSchema, storedIdentifier)
@@ -687,7 +657,6 @@ export const Resource = {
       pipe(definitionFailure("list identifier must preserve canonical ordering in storage"), Effect.runSync)
     }
 
-
     const makeOrder = ([field, direction]: readonly [string, "asc" | "desc"]) =>
       new RepositoryOrder({ field, direction })
 
@@ -698,11 +667,6 @@ export const Resource = {
 
     const includesIdentifier = Array.some(configuredOrder, isIdentifierOrder)
     const order = includesIdentifier ? configuredOrder : Array.append(configuredOrder, identifierOrder)
-
-    const cursorEntry = (entry: RepositoryOrder) =>
-      [entry.field, Schema.toEncoded(storageField(entry.field))] as const
-
-    const cursorEntries = Array.map(order, cursorEntry)
     const cursorOrder = Array.map(order, ({ field, direction }) => [field, direction])
 
     const cursorScope = JSON.stringify({
@@ -712,75 +676,60 @@ export const Resource = {
       order: cursorOrder,
     })
 
-    const CursorAfterSchema = Schema.Struct(Record.fromEntries(cursorEntries))
-    const { parse: parseCursor, render: encodeCursor } = Page.cursor(cursorScope, CursorAfterSchema)
-    const renderCursor = flow(encodeCursor, Effect.mapError(repositoryFailure))
-    const MaximumPageLimitSchema = PageLimitSchema.check(Schema.isLessThanOrEqualTo(maximum))
-    const isLimit = Schema.is(MaximumPageLimitSchema)
-    const cursorFailure = inputFailure("invalid list cursor")
+    const canonicalField = (field: string) => pipe(
+      Record.get(options.schema.fields, field),
+      Option.getOrThrow,
+    )
+
+    const invalidListLimit = (limit: number) => inputFailure(`list limit must be between 1 and ${limit}`)
+    const invalidListFilter = (field: string) => inputFailure(`filter ${field} is not declared`)
+    const invalidListRange = (field: string) => inputFailure(`range ${field} is not declared`)
+    const invalidCursorError = inputFailure("invalid list cursor")
+    const invalidListCursor = Function.constant(invalidCursorError)
+
+    const listPlan = SqliteList.make({
+      filter: filterFields,
+      range: rangeFields,
+      order,
+      maximum,
+      scope: cursorScope,
+      canonicalField,
+      storageField,
+      limitSchema: PageLimitSchema,
+      errors: {
+        limit: invalidListLimit,
+        filter: invalidListFilter,
+        range: invalidListRange,
+        invalidCursor: invalidListCursor,
+        cursorMismatch: invalidListCursor,
+        codec: repositoryFailure,
+        cursorEncoding: repositoryFailure,
+      },
+    })
 
     const listAuthorized = Effect.fn("Repository.list")(function* (
       store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceListRequest<S, List> = {},
     ) {
       if (!orderableIdentifier) return yield* inputFailure("list identifier must preserve canonical ordering in storage")
-      const limit = input.limit ?? maximum
-      if (!isLimit(limit)) return yield* inputFailure(`list limit must be between 1 and ${maximum}`)
-      const requestedFilter = input.filter ?? Record.empty()
-      const requestedRange = input.range ?? Record.empty()
-      const requestedFilterFields = Record.keys(requestedFilter)
-      const requestedRangeFields = Record.keys(requestedRange)
+      const requestedFilter = (input.filter ?? Record.empty()) as RepositorySelect["filter"]
+      const requestedRange = (input.range ?? Record.empty()) as RepositorySelect["range"]
+      const requestedLimit = Option.fromNullishOr(input.limit)
+      const requestedCursor = Option.fromNullishOr(input.cursor)
 
-      const validateFilter = (field: string) => Array.contains(filterFields, field)
-        ? Effect.void : inputFailure(`filter ${field} is not declared`)
+      const prepared = yield* listPlan.prepare<Storage["EncodingServices"]>(
+        requestedFilter,
+        requestedRange,
+        requestedLimit,
+        requestedCursor,
+      )
 
+      const rows = yield* store.select(table, prepared.query, permission)
+      const readListRow = (row: Readonly<Record<string, unknown>>) => readable(permission.subject, row)
 
-      const validateRange = (field: string) => Array.contains(rangeFields, field)
-        ? Effect.void : inputFailure(`range ${field} is not declared`)
+      const decodeListRows = (stored: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
+        Effect.forEach(stored, readListRow)
 
-
-      yield* Effect.forEach(requestedFilterFields, validateFilter, { discard: true })
-      yield* Effect.forEach(requestedRangeFields, validateRange, { discard: true })
-
-      const filter = yield* encodeFilter(requestedFilter)
-      const range = yield* encodeRange(requestedRange)
-      const expectedFilter = JSON.stringify(filter)
-      const expectedRange = JSON.stringify(range)
-      const cursorInput = Option.fromNullishOr(input.cursor)
-      const emptyCursor = Option.none<Readonly<Record<string, unknown>>>()
-
-
-      const after = yield* Option.match(cursorInput, {
-        onNone: () => Effect.succeed(emptyCursor),
-        onSome: Effect.fn("Repository.cursor")(function* (source: string) {
-          const cursor = yield* pipe(parseCursor(source), Effect.mapError(Function.constant(cursorFailure)))
-          const actualFilter = JSON.stringify(cursor.filter)
-          const actualRange = JSON.stringify(cursor.range)
-          const filterMatches = equals(actualFilter, expectedFilter)
-          const rangeMatches = equals(actualRange, expectedRange)
-          const matches = filterMatches && rangeMatches
-          if (!matches) return yield* cursorFailure
-          return Option.some(cursor.after)
-        }),
-      })
-
-      const query = new RepositorySelect({ filter, range, order, after, limit: limit + 1 })
-      const rows = yield* store.select(table, query, permission)
-      const stored = Array.take(rows, limit)
-      const items = yield* Effect.forEach(stored, (row) => readable(permission.subject, row))
-      const hasMore = rows.length > limit
-      const last = hasMore ? Array.last(stored) : Option.none<Readonly<Record<string, unknown>>>()
-
-      const nextCursor = yield* Option.match(last, {
-        onNone: () => Effect.succeed(null),
-        onSome: (row) => {
-          const cursorEntry = (entry: RepositoryOrder) => [entry.field, row[entry.field]] as const
-          const entries = Array.map(order, cursorEntry)
-          const after = Record.fromEntries(entries)
-          return renderCursor({ filter, range, after })
-        },
-      })
-
-      return PageSchema.make({ items, nextCursor })
+      return yield* listPlan.page(prepared, rows, decodeListRows)
     })
 
     // Type the shared empty record once because the transition changes type is generic.
@@ -907,22 +856,7 @@ export const Resource = {
     const createWireSchema = Schema.toCodecJson(createInputSchema)
     const identifierWireSchema = Schema.toCodecJson(identifierRequestSchema)
     const PageSchema = Page.schema(canonicalRowWireSchema)
-
-    const isCanonicalFilterField = (_schema: Schema.Constraint, field: string) =>
-      Array.contains(filterFields, field)
-
-    const canonicalFilterFields = Record.filter(options.schema.fields, isCanonicalFilterField)
-    const optionalCanonicalFilterFields = Record.map(canonicalFilterFields, Schema.optionalKey)
-    const CanonicalFilterSchema = Schema.Struct(optionalCanonicalFilterFields).annotate({ parseOptions: { onExcessProperty: "error" } })
-
-    const isCanonicalRangeField = (_schema: Schema.Constraint, field: string) =>
-      Array.contains(rangeFields, field)
-
-    const canonicalRangeFields = Record.filter(options.schema.fields, isCanonicalRangeField)
-    const optionalCanonicalRangeFields = Record.map(canonicalRangeFields, optionalRangeField)
-    const CanonicalRangeSchema = Schema.Struct(optionalCanonicalRangeFields).annotate({ parseOptions: { onExcessProperty: "error" } })
-    const ListShapeSchema = Schema.Struct({ filter: Schema.optionalKey(CanonicalFilterSchema), range: Schema.optionalKey(CanonicalRangeSchema), limit: OptionalLimitSchema, cursor: OptionalCursorSchema })
-    const listInputSchema = Schema.make<Schema.Codec<ResourceListRequest<S, List>, unknown, S["DecodingServices"], S["EncodingServices"]>>(ListShapeSchema.ast)
+    const listInputSchema = Schema.make<Schema.Codec<ResourceListRequest<S, List>, unknown, S["DecodingServices"], S["EncodingServices"]>>(listPlan.input.ast)
     const listWireSchema = Schema.toCodecJson(listInputSchema)
     const canonicalMutableFields = Record.remove(options.schema.fields, table.identifier)
 
