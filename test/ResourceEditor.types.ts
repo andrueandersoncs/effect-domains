@@ -6,6 +6,7 @@ import { ResourceEditor } from "effect-domains/resource-editor"
 
 const RecordSchema = Schema.Struct({ title: Schema.NonEmptyString })
 const FormSchema = Schema.Struct({ title: Form.text(RecordSchema.fields.title) })
+const EmptyQuerySchema = Schema.Struct({})
 
 const listOnlyCapabilities = [Resource.list()]
 
@@ -24,6 +25,10 @@ ResourceEditor.make({
   resource: ListOnlyRuntime,
   form: FormSchema,
   empty: { title: "" },
+  query: {
+    form: EmptyQuerySchema,
+    empty: {},
+  },
   notices: { created: "Created", updated: "Updated", removed: "Removed" },
   formatError: String,
 })

@@ -1,6 +1,7 @@
 import { Array, Equivalence, Function, Option, Predicate, Record, Schema, SchemaGetter, SchemaIssue, flow, pipe } from "effect"
 
 const IntegerTextSchema = Schema.Trim.check(Schema.isPattern(/^[+-]?\d+$/))
+const NullableIntegerTextSchema = Schema.Trim.check(Schema.isPattern(/^(?:[+-]?\d+)?$/))
 const NumberTextSchema = Schema.Trim.check(Schema.isPattern(/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/))
 const FiniteNumberSchema = Schema.Number.check(Schema.isFinite())
 const IntegerValueSchema = pipe(IntegerTextSchema, Schema.decodeTo(Schema.NumberFromString), Schema.decodeTo(Schema.Int))
@@ -8,6 +9,8 @@ const NumberValueSchema = pipe(NumberTextSchema, Schema.decodeTo(Schema.NumberFr
 const sameString = Equivalence.strictEqual<string>()
 const stringToNullable = (value: string) => sameString(value, "") ? null : value
 const nullableStringToString = (value: string | null) => value ?? ""
+const stringToNullableInteger = (value: string) => sameString(value, "") ? null : Number(value)
+const nullableNumberToString = (value: number | null) => Predicate.isNull(value) ? "" : String(value)
 
 const text = <S extends Schema.Codec<string, string, unknown, unknown>>(target: S) =>
   pipe(Schema.Trim, Schema.decodeTo(target))
@@ -17,6 +20,14 @@ const integer = <S extends Schema.Codec<number, number, unknown, unknown>>(targe
 
 const number = <S extends Schema.Codec<number, number, unknown, unknown>>(target: S) =>
   pipe(NumberValueSchema, Schema.decodeTo(target))
+
+const nullableInteger = <S extends Schema.Codec<number, number, unknown, unknown>>(target: S) => pipe(
+  NullableIntegerTextSchema,
+  Schema.decodeTo(Schema.NullOr(target), {
+    decode: SchemaGetter.transform(stringToNullableInteger),
+    encode: SchemaGetter.transform(nullableNumberToString),
+  }),
+)
 
 const nullableText = <S extends Schema.Codec<unknown, string, unknown, unknown>>(target: S) => pipe(
   Schema.Trim,
@@ -50,4 +61,4 @@ const errors = (error: Schema.SchemaError): Readonly<Record<string, string>> => 
   return Record.fromEntries(entries)
 }
 
-export const Form = { text, integer, number, nullableText, errors }
+export const Form = { text, integer, nullableInteger, number, nullableText, errors }

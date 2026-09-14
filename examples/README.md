@@ -6,7 +6,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 
 | Application | Useful scenario | Principal boundary |
 | --- | --- | --- |
-| [reading-list](reading-list/README.md) | Maintain a reading backlog and ratings | Generated CRUD, implicit `null` defaults, and cursor lists |
+| [reading-list](reading-list/README.md) | Maintain a reading backlog and ratings | Filtered contract-derived editor, nullable form codecs, and cursor lists |
 | [expense-ledger](expense-ledger/README.md) | Record expenses and review totals by currency | Domain value schemas and authored range queries |
 | [team-tasks](team-tasks/README.md) | Track project work and completion | Tenant/owner scope and reusable subject policies |
 | [field-notes](field-notes/README.md) | Share encrypted site observations | Role policy independent of storage encryption |
@@ -17,7 +17,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 | [reservations](reservations/README.md) | Hold, confirm, or release stock | `Transitions.make` and transactional inventory |
 | [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Nested application composition, scoped relations, and optimistic versions |
 | [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a purchase | `Entitlements.fromTable` after row visibility |
-| [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Subscription gating and durable execution storage |
+| [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Subscription gating, durable execution, and worker telemetry |
 | [appointment-reminders](appointment-reminders/README.md) | Schedule an application notification | Durable scheduling and deduplicated delivery |
 
 ## Shared runtime

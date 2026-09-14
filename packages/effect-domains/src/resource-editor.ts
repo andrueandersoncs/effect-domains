@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, flow, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { Command, type Update } from "foldkit"
 import { defineMessageUnion } from "foldkit/message"
@@ -41,6 +41,8 @@ const make = <
   Row extends Draft & Readonly<Record<IdentifierKey, Identifier>>,
   FormValue extends Readonly<Record<string, unknown>>,
   Rpcs extends Rpc.Any,
+  Query extends Readonly<Record<string, unknown>>,
+  QueryForm extends Readonly<Record<string, unknown>>,
 >(options: Readonly<{
   name: Name
   resource: Readonly<{
@@ -65,6 +67,10 @@ const make = <
   }>
   form: Schema.Codec<Draft, FormValue, never, never>
   empty: FormValue
+  query: Readonly<{
+    form: Schema.Codec<Query, QueryForm, never, never>
+    empty: QueryForm
+  }>
   notices: Readonly<{ created: string; updated: string; removed: string }>
   formatError: (error: unknown) => string
 }>) => {
@@ -83,6 +89,7 @@ const make = <
   const updateMethod = `${options.resource.name}.${capabilities.update ? "update" : ""}`
   const removeMethod = `${options.resource.name}.${capabilities.remove ? "remove" : ""}`
   const FormValueSchema = Schema.toEncoded(options.form)
+  const QueryFormSchema = Schema.toEncoded(options.query.form)
   const OptionalIdentifierSchema = Schema.NullOr(options.resource.table.identifierSchema)
   const CursorSchema = Schema.NullOr(Schema.String)
 
@@ -92,6 +99,7 @@ const make = <
   }))
 
   const isFormValue = Schema.is(FormValueSchema)
+  const isQueryForm = Schema.is(QueryFormSchema)
   const sameIdentifier = Equivalence.strictEqual<Identifier>()
   const sameKey = Equivalence.strictEqual<string>()
   const sameForm = Schema.toEquivalence(FormValueSchema)
@@ -115,6 +123,7 @@ const make = <
     items: Schema.Array(options.resource.table.rowSchema),
     nextCursor: CursorSchema,
     refresh: Schema.Int,
+    query: QueryFormSchema,
     form: FormValueSchema,
     selectedId: OptionalIdentifierSchema,
     saving: SavingSchema,
@@ -132,6 +141,7 @@ const make = <
 
   const MessageSchema = defineMessageUnion({
     ChangedField: { key: Schema.String, value: Schema.Unknown },
+    ChangedQueryField: { key: Schema.String, value: Schema.Unknown },
     ClickedReload: {},
     ClickedNext: {},
     ClickedSave: {},
@@ -158,6 +168,13 @@ const make = <
   ) => UpdateResultSchema.make({ model, commands }) as UpdateReturn
 
   const rowIdentifier = (row: Row) => row[options.resource.table.identifier]
+  const decodeQuery = Schema.decodeUnknownEffect(options.query.form)
+
+  const listInput = (query: Query, cursor: string | null) => {
+    const page = Page.input(cursor)
+    return Struct.assign(query, page)
+  }
+
   const rowToForm = Schema.encodeUnknownSync(options.form)
 
   const savingIsCurrent = (model: Model) => pipe(
@@ -178,15 +195,17 @@ const make = <
   }
 
   class ListArgs extends Schema.Class<ListArgs>(`${options.name}/ListArgs`)({
+    query: QueryFormSchema,
     cursor: CursorSchema,
     append: Schema.Boolean,
     request: RequestTokenSchema,
   }) {}
 
-  const executeList = ({ cursor, append, request }: ListArgs) => pipe(
+  const loadPage = ({ query, cursor, append, request }: ListArgs) => pipe(
     Effect.gen(function* () {
       const client = yield* Client
-      const input = Page.input(cursor)
+      const decoded = yield* decodeQuery(query)
+      const input = listInput(decoded, cursor)
       const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
 
       return MessageSchema.SucceededList({ page, append, request })
@@ -197,22 +216,24 @@ const make = <
   const ListConfig = Object.freeze({
     args: ListArgs.fields,
     messages: [MessageSchema.SucceededList, MessageSchema.Failed],
-    execute: executeList,
+    execute: loadPage,
   })
 
   const List = Command.define(`${options.name}.List`, ListConfig)
 
   class SyncDependencies extends Schema.Class<SyncDependencies>(`${options.name}/SyncDependencies`)({
+    query: QueryFormSchema,
     refresh: Schema.Int,
   }) {}
 
   const selectSyncDependencies = (model: Model) =>
-    SyncDependencies.make({ refresh: model.refresh })
+    SyncDependencies.make({ query: model.query, refresh: model.refresh })
 
   const selectSynchronizedPage = Effect.fn("ResourceEditor.selectSynchronizedPage")(
-    function* (_dependencies: SyncDependencies) {
+    function* ({ query }: SyncDependencies) {
       const client = yield* Client
-      const input = Page.input(null)
+      const decoded = yield* decodeQuery(query)
+      const input = listInput(decoded, null)
 
       return yield* invoke<PageValue<Row>>(client, listMethod, input)
     },
@@ -320,6 +341,7 @@ const make = <
     })
 
     const command = List({
+      query: model.query,
       request: started.request,
       cursor: started.cursor,
       append: started.append,
@@ -355,6 +377,28 @@ const make = <
       if (!isFormValue(candidate)) return result(model)
 
       const next = ModelSchema.make({ ...model, form: candidate })
+
+      return result(next)
+    },
+    ChangedQueryField: ({ key, value }) => {
+      if (!Record.has(model.query, key)) return result(model)
+
+      const candidate = Record.set(model.query, key, value)
+      if (!isQueryForm(candidate)) return result(model)
+
+      const invalidated = pager.invalidate({
+        page: { items: model.items, nextCursor: model.nextCursor },
+        requests: model.requests,
+      })
+
+      const next = ModelSchema.make({
+        ...model,
+        query: candidate,
+        items: invalidated.page.items,
+        nextCursor: invalidated.page.nextCursor,
+        requests: invalidated.requests,
+        notice: null,
+      })
 
       return result(next)
     },
@@ -525,6 +569,7 @@ const make = <
       items: [],
       nextCursor: null,
       refresh: 0,
+      query: options.query.empty,
       form: options.empty,
       selectedId: null,
       saving: null,

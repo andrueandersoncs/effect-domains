@@ -91,7 +91,7 @@ bun run reading-list:server:otel
 
 That sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Use `bun run reading-list:otel …` for the matching CLI process so both sides of a trace export. With no endpoint, no collector is contacted and an externally supplied tracer is left intact.
 
-The [reading-list walkthrough](../../examples/reading-list/README.md#opentelemetry-traces) searches Jaeger service `reading-list` at [http://127.0.0.1:16686](http://127.0.0.1:16686/).
+The [reading-list walkthrough](../../examples/reading-list/README.md#opentelemetry-traces) searches Jaeger service `reading-list` at [http://127.0.0.1:16686](http://127.0.0.1:16686/). The [report-exports walkthrough](../../examples/report-exports/README.md#opentelemetry-traces) configures OTLP HTTP/JSON resource metadata on a durable application and runs the same exporter around its worker lifetime.
 
 For declarative configuration, add this option to `ApplicationBun.run`:
 
@@ -215,11 +215,11 @@ The client modules stay narrow:
 - `Requests` owns keyed monotonic request tokens, per-key pending/error state, session epochs, key-specific invalidation, and guarded settlement for imperative requests.
 - `Page` owns the shared `{ items, nextCursor }` value plus explicit replace/append and cursor input helpers.
 - `ResourcePager.make(key)` composes those two concerns for explicit continuation starts and stale-page rejection.
-- `Form` decodes strict integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths.
+- `Form` decodes strict integers, nullable integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths.
 - `IdentitySession` owns in-memory login/logout/expiry commands and generation changes. Credentials are never rendered or stored; the example-web package supplies only the styled session view.
-- `ResourceEditor.make` derives a public CRUD editor only when `list`, `create`, `update`, and `remove` are all published. Its base list is a reactive subscription keyed by the exact Resource descriptor, and successful save/remove commands invalidate that descriptor so the list refetches without reducer reload commands. Form codecs, copy, error display, and complete presentation remain authored.
+- `ResourceEditor.make` derives a public CRUD editor only when `list`, `create`, `update`, and `remove` are all published. Its required reversible query-form codec maps authored browser filter values to the Resource's generated list input; query changes replace the current page, while cursor continuation reuses the same decoded query. The base list is a reactive subscription keyed by the exact Resource descriptor, and successful save/remove commands invalidate that descriptor so the list refetches without reducer reload commands. Edit/query codecs, copy, error display, and complete presentation remain authored.
 
-Field Notes exercises the authored seam: session, filter, and manual-refresh changes restart its declared base-list subscription; save/remove mutations invalidate `FieldReportsResource`; and **Load more** remains an explicit cursor command. Editorial Calendar exercises the derived `ResourceEditor` path. Applications still own authorization, filter dependencies, continuation policy, reactivity-key selection for authored operations, and business state transitions.
+Field Notes exercises the authored seam: session, filter, and manual-refresh changes restart its declared base-list subscription; save/remove mutations invalidate `FieldReportsResource`; and **Load more** remains an explicit cursor command. Editorial Calendar exercises an unfiltered derived `ResourceEditor`; Reading List exercises the same derivation with reversible status/format query fields, cursor continuation, and nullable integer input. Applications still own authorization, query-form mappings, continuation policy, reactivity-key selection for authored operations, and business state transitions.
 
 This is browser-local invalidation and refetch over ordinary unary `/rpc/v1` requests. It does not provide server push, cross-tab notification, WebSocket/SSE transport, or offline synchronization; changes made by another client become visible on an explicit refresh unless an application supplies an external invalidation source. [`packages/example-web`](../../packages/example-web/) contains build and HTML presentation support, not RPC, paging, identity, runtime, or static-serving mechanics.
 

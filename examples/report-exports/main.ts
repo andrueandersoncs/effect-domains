@@ -41,6 +41,13 @@ const program = ApplicationBun.run(ReportExportsApplication, {
   initialize,
   background: ReportExportBackground,
   routes,
+  telemetry: {
+    protocol: "http/json",
+    resource: {
+      serviceName: "report-exports",
+      attributes: { "service.namespace": "effect-domains.examples" },
+    },
+  },
 })
 
 pipe(program, ApplicationBun.runMain)

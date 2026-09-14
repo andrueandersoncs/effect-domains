@@ -11,7 +11,13 @@ const TodoSchema = Schema.Struct({
   priority: Schema.Int,
 })
 
-const todoCapabilities = Resource.crud()
+const todoCapabilities = [
+  Resource.get(),
+  Resource.list({ filter: ["priority"] }),
+  Resource.create(),
+  Resource.update(),
+  Resource.remove(),
+]
 
 const Todos = Resource.define({
   name: "resource_editor_todos",
@@ -27,11 +33,21 @@ const TodoFormSchema = Schema.Struct({
   priority: Form.integer(TodoSchema.fields.priority),
 })
 
+const TodoQuerySchema = Schema.Struct({
+  filter: Schema.Struct({
+    priority: Schema.optionalKey(Schema.Int),
+  }),
+})
+
 const Editor = ResourceEditor.make({
   name: "test/TodoEditor",
   resource: TodosRuntime,
   form: TodoFormSchema,
   empty: { title: "", priority: "0" },
+  query: {
+    form: TodoQuerySchema,
+    empty: { filter: {} },
+  },
   notices: {
     created: "Todo created.",
     updated: "Todo updated.",
@@ -49,6 +65,7 @@ it("resource editor consumes synchronized pages and settles mutations", () => {
     items: [],
     nextCursor: null,
     form: { title: "", priority: "0" },
+    query: { filter: {} },
     selectedId: null,
     fieldErrors: {},
     notice: null,
@@ -104,6 +121,27 @@ it("resource editor consumes synchronized pages and settles mutations", () => {
   const reloadCommandNames = Array.map(reloadCommands, Struct.get("name"))
 
   expect(reloadCommandNames).toEqual([])
+})
+
+it("resource editor invalidates its page when query fields change", () => {
+  const initialized = Editor.init()
+
+  const listedMessage = Editor.Message.SynchronizedList({
+    page: { items: [{ id: todoId, title: "Ship", priority: 2 }], nextCursor: "next" },
+  })
+
+  const loaded = Editor.update(initialized.model, listedMessage)
+
+  const changedMessage = Editor.Message.ChangedQueryField({
+    key: "filter",
+    value: { priority: 2 },
+  })
+
+  const changed = Editor.update(loaded.model, changedMessage)
+
+  expect(changed.model.query).toEqual({ filter: { priority: 2 } })
+  expect(changed.model.items).toEqual([])
+  expect(changed.model.nextCursor).toBeNull()
 })
 
 it("resource editor preserves newer form edits when a save completes", () => {

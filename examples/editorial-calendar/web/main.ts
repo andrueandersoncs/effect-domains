@@ -21,6 +21,10 @@ const Editor = ResourceEditor.make({
   resource: Resource.compile(DocumentsResource),
   form: DocumentFormSchema,
   empty: { heading: "", summary: "", priority: "0", channel: "website", plannedPublicationAt: "" },
+  query: {
+    form: Schema.Struct({}),
+    empty: {},
+  },
   notices: {
     created: "Editorial plan added.",
     updated: "Updated.",

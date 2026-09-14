@@ -146,4 +146,16 @@ The application database defaults to `data/report-exports.sqlite`; execution sto
 
 `EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `REPORT_EXPORTS_IDENTITY_DB` defaults to `data/report-exports-identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
 
+## OpenTelemetry traces
+
+The runner declares OTLP HTTP/JSON telemetry with service name `report-exports` and `service.namespace=effect-domains.examples`. Supply a collector endpoint at deployment time; the same configuration wraps short-lived inspection/CLI commands, the HTTP server, initialization, the outbox relay, and the durable worker lifetime:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
+bun run report-exports inspect
+bun run report-exports:worker
+```
+
+Use the same endpoint for every server, client, and worker whose spans should reach that collector. The worker uses the storage and credential variables established above. Graceful interruption flushes its final `ApplicationBun.worker` and `ApplicationBun.run` spans; SQL polling and queue work appear under the same resource. The collector must accept OTLP HTTP/JSON. With no endpoint, this application makes no collector request. See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry-tracing) for headers, batching, shutdown, precedence, and opt-out behavior.
+
 For source details, see the [workflow and RPCs](workflow.ts), [contracts](contracts.ts), [authorization](authorization.ts), [subscription resolver](subscriptions.ts), [runtime layer](runtime.ts), [artifact writer](writer.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).

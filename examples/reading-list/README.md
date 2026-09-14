@@ -1,4 +1,4 @@
-# Reading list: generated book tracking
+# Reading list: contract-derived book editor
 
 [All examples](../README.md)
 
@@ -22,6 +22,25 @@ export const ReadingListResource = Resource.define({
 ```
 
 The specification is author intent only. `Resource.compile` derives the five `books.*` RPCs, table, UUIDv7 identifier, schemas, repository, and handlers; the application compiler contributes those products to one `ApplicationIR`.
+
+The authored Foldkit page derives its CRUD state machine from that compiled Resource. `ResourceEditor` owns request identity, cursor pages, mutation invalidation, and stale-result rejection; the page supplies reversible codecs for both edit fields and list filters:
+
+```ts
+const Editor = ResourceEditor.make({
+  name: "reading-list/Books",
+  resource: Resource.compile(ReadingListResource),
+  form: BookFormSchema,
+  empty: { title: "", author: "", status: "planned", format: "paperback", rating: "", notes: "" },
+  query: {
+    form: BookQuerySchema,
+    empty: { status: "", format: "" },
+  },
+  notices,
+  formatError: RpcBrowser.messageFromUnknown,
+})
+```
+
+`BookQuerySchema` decodes blank selectors to an empty canonical filter and nonblank selectors to the generated `status`/`format` equality filter with limit 25. `Form.nullableInteger` separately maps a blank rating to `null`. These are explicit, lossless browser-to-contract mappings; no UI metadata is added to the Book schema or Resource declaration.
 
 ## Run it
 
@@ -115,7 +134,7 @@ Remove has a void result, not a deleted book. The following get exits nonzero wi
 
 ## Use the browser or MCP
 
-At `/`, use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors refresh through the canonical native client and invalidate the prior query. **Reload** fetches current data after CLI changes, and **Load more books** appends a returned cursor page. Form validation, including invalid rating or notes, appears beside the relevant field; saves and removals refresh the list.
+At `/`, the authored view renders the `ResourceEditor` model. Use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors update the editor's declared query form, invalidate its prior page, and immediately fetch the matching canonical list. **Reload** fetches current data after CLI changes, and **Load more books** appends a returned cursor page using the current filters. Form validation, including invalid rating or notes, appears beside the relevant field; successful saves and removals invalidate the exact Resource key and refetch the list.
 
 The generated admin exposes the same five operations and their schemas. The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
 
@@ -163,6 +182,6 @@ Set the endpoint on both processes so CLI and server share a trace. In Jaeger, s
 - [`application.ts`](application.ts): resource registration.
 - [`main.ts`](main.ts): Bun runner and generated admin.
 - [`migrations.ts`](migrations.ts) and [artifacts](migrations/): frozen persistence history.
-- [`web/main.ts`](web/main.ts): authored Foldkit form, filters, and single-page list.
+- [`web/main.ts`](web/main.ts): authored Foldkit view plus contract-derived edit and query-form codecs.
 
 For the underlying derivation boundary, read [how the pieces fit](../../docs/concepts.md). For shared command, transport, and telemetry options, use the [runtime reference](../../docs/reference/runtime.md).

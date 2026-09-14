@@ -12,7 +12,7 @@ Run commands from the repository root after `bun install`. Run `bun run build` b
 
 | Application guide | What to look for | Related framework guide |
 | --- | --- | --- |
-| [Reading list](../examples/reading-list/README.md) | Generated CRUD, implicit nullable defaults, filters, and cursor lists | [First-run tutorial](/getting-started) |
+| [Reading list](../examples/reading-list/README.md) | Filtered contract-derived CRUD editor, nullable form codecs, and cursor lists | [First-run tutorial](/getting-started) |
 | [Team tasks](../examples/team-tasks/README.md) | Tenant scope, reusable subject policies, and trusted identity fields | [Authorization guide](/guides/authorization) |
 | [Editorial calendar](../examples/editorial-calendar/README.md) | Contract-derived CRUD editor, automatic reactive refetch, and historical migration | [Migration guide](/guides/migrations) |
 | [Field notes](../examples/field-notes/README.md) | Authenticated reactive RPC queries/mutations, encrypted report text, and SQL EventLog replica synchronization | [Authorization guide](/guides/authorization) |
@@ -75,7 +75,7 @@ These examples use native Effect durable execution, composed through application
 
 Use this for work that waits for approval and then publishes a file. The workflow takes supplied financial lines, enforces account subscription access on generation, waits for an operator when requested, and writes a JSON report artifact.
 
-The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation, cancellation, release, recovery, reconciliation, polling, and multi-runner instructions. Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path. The immutable file sink is idempotent, but the application does not query a separate accounting system or provide a payment integration.
+The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation, cancellation, release, recovery, reconciliation, polling, multi-runner instructions, and OTLP tracing for the worker lifetime. Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path. The immutable file sink is idempotent, but the application does not query a separate accounting system or provide a payment integration.
 
 ### Appointment reminders
 
