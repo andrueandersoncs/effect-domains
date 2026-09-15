@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { Context, Deferred, Effect, Fiber, Function, Layer, Ref, Schema, Stream, pipe } from "effect"
+import { Array, Context, Deferred, Effect, Fiber, Function, Layer, Option, Ref, Schema, Stream, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
-import { RequestTokenSchema } from "effect-domains/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 
 const NoteSchema = Schema.Struct({
@@ -11,6 +11,13 @@ const NoteSchema = Schema.Struct({
 
 const NotesSchema = Schema.Array(NoteSchema)
 const FieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
+const RejectArgumentsSchema = Schema.Struct({ value: Schema.String })
+
+
+const BrowserRequestModelSchema = Schema.Struct({
+  requests: RequestStateSchema,
+  notice: Schema.NullOr(Schema.String),
+})
 
 const ValidationFailurePayloadSchema = Schema.Struct({
   error: Schema.String,
@@ -96,6 +103,7 @@ const subscriptions = RpcBrowser.query<Model, typeof MessageSchema.Type>()("note
 })
 
 const Save = RpcBrowser.mutation("SaveNote", {
+  request: "notes.save",
   args: { note: NoteSchema },
   success: Saved,
   failure: MutationFailed,
@@ -104,11 +112,60 @@ const Save = RpcBrowser.mutation("SaveNote", {
 })
 
 const Reject = RpcBrowser.command("RejectNote", {
-  args: { value: Schema.String },
+  request: "notes.reject",
+  args: RejectArgumentsSchema.fields,
   success: Saved,
   failure: ValidationFailed,
   execute: rejectNote,
   failurePayload: validationFailurePayload,
+})
+
+const RejectByValue = RpcBrowser.command("RejectNoteByValue", {
+  request: {
+    key: { prefix: "notes.rejectByValue", fields: ["value"] },
+    concurrency: "latest",
+  },
+  args: RejectArgumentsSchema.fields,
+  success: Saved,
+  failure: ValidationFailed,
+  execute: rejectNote,
+  failurePayload: validationFailurePayload,
+})
+
+it("browser commands own request start and stale settlement", () => {
+  const initial = BrowserRequestModelSchema.make({ requests: Requests.empty(), notice: "ready" })
+  const started = Reject.start(initial, { value: "bad" }, { notice: null })
+  const command = pipe(started.commands, Array.head, Option.getOrThrow)
+  const request = RequestTokenSchema.make(command.args?.request)
+  const requestPending = Requests.pending(started.model.requests, "notes.reject")
+
+  expect(requestPending).toBe(true)
+  expect(started.model.notice).toBeNull()
+
+  const succeeded = RpcBrowser.succeed(started.model, request, { notice: "done" })
+  const stale = RpcBrowser.fail(succeeded.model, request, "late", { notice: "late" })
+  const requestSettled = Requests.pending(succeeded.model.requests, "notes.reject")
+
+  expect(requestSettled).toBe(false)
+  expect(succeeded.model.notice).toBe("done")
+  expect(stale.model).toEqual(succeeded.model)
+})
+
+it("field-derived request keys keep concurrent inputs independent", () => {
+  const initial = BrowserRequestModelSchema.make({ requests: Requests.empty(), notice: null })
+  const firstInput = RejectArgumentsSchema.make({ value: "first" })
+  const secondInput = RejectArgumentsSchema.make({ value: "second" })
+  const first = RejectByValue.start(initial, firstInput)
+  const second = RejectByValue.start(first.model, secondInput)
+  const firstKey = RejectByValue.key(firstInput)
+  const secondKey = RejectByValue.key(secondInput)
+  const firstPending = RejectByValue.pendingFor(second.model, firstInput)
+  const secondPending = RejectByValue.pendingFor(second.model, secondInput)
+
+  expect(firstKey).toBe("notes.rejectByValue.first")
+  expect(secondKey).toBe("notes.rejectByValue.second")
+  expect(firstPending).toBe(true)
+  expect(secondPending).toBe(true)
 })
 
 it.effect("a reactive RPC mutation automatically refetches its mounted Foldkit query", Effect.fn("RpcBrowser.reactivity")(function* () {
@@ -149,8 +206,14 @@ it.effect("a reactive RPC mutation automatically refetches its mounted Foldkit q
   yield* Deferred.await(firstRead)
 
   const request = RequestTokenSchema.make({ epoch: 0, id: 1, key: "notes.save" })
-  const command = Save({ note: { id: "note-1", title: "Declarative sync" }, request })
-  const saved = yield* Effect.provide(command.effect, context)
+  const note = NoteSchema.make({ id: "note-1", title: "Declarative sync" })
+  const command = Save.command({ note, request })
+
+  const saved = yield* pipe(
+    command.effect as Effect.Effect<typeof Saved.Type, never, NotesStore | Reactivity.Reactivity>,
+    Effect.provide(context),
+  )
+
   const messages = yield* Fiber.join(messagesFiber)
   const readCount = yield* Ref.get(reads)
 
@@ -173,7 +236,7 @@ it.effect(
   "browser commands derive failure messages and inject request tokens",
   Effect.fn("RpcBrowser.failurePayload")(function* () {
     const request = RequestTokenSchema.make({ epoch: 1, id: 2, key: "notes.reject" })
-    const command = Reject({ value: "bad", request })
+    const command = Reject.command({ value: "bad", request })
     const rejected = yield* command.effect
 
     const expected = ValidationFailed.make({

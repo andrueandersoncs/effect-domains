@@ -1,18 +1,16 @@
-import { Effect, Equivalence, Schema, pipe } from "effect"
+import { Effect, pipe } from "effect"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { Entitlements } from "effect-domains/entitlements"
 import { Resource } from "effect-domains/resource"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
-import { GuideIdSchema, GuidePurchaseSchema } from "./domain.ts"
+import { GuideIdSchema } from "./domain.ts"
 import { GuidePurchasesResource, GuidesResource } from "./resources.ts"
 
-const statusEquals = Equivalence.strictEqual<string>()
-
-
-const entitlementGrant = (purchase: Schema.Schema.Type<typeof GuidePurchaseSchema>) =>
-  statusEquals(purchase.status, "granted")
 
 const guidePurchasesTable = Resource.table(GuidePurchasesResource)
+const grants = Entitlements.for(guidePurchasesTable)
+const purchasedGrant = grants.eq(grants.row.status, "granted")
+
 
 const purchasedGuideEntitlement = new Entitlements.Source({
   name: "guides.read",
@@ -20,7 +18,7 @@ const purchasedGuideEntitlement = new Entitlements.Source({
   subject: ExampleSubjectSchema,
   key: "guideId",
   scope: { tenantId: "tenantId", userId: "userId" },
-  grant: entitlementGrant,
+  grant: purchasedGrant,
 })
 
 export const PurchasedGuideEntitlements = Entitlements.fromTable(purchasedGuideEntitlement)

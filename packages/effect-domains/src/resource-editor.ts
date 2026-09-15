@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import type { Update } from "foldkit"
 import { defineMessageUnion } from "foldkit/message"
@@ -202,6 +202,7 @@ const make = <
   })
 
   const List = RpcBrowser.command(`${options.name}.List`, {
+    request: listKey,
     args: ListArgs.fields,
     success: MessageSchema.SucceededList,
     failure: MessageSchema.Failed,
@@ -264,6 +265,7 @@ const make = <
   })
 
   const Save = RpcBrowser.mutation(`${options.name}.Save`, {
+    request: { key: saveKey, concurrency: "exhaust" },
     args: SaveArgs.fields,
     success: MessageSchema.SucceededSave,
     failure: MessageSchema.Failed,
@@ -287,6 +289,7 @@ const make = <
   })
 
   const Remove = RpcBrowser.mutation(`${options.name}.Remove`, {
+    request: { key: removeKey, concurrency: "exhaust" },
     args: RemoveArgs.fields,
     success: MessageSchema.SucceededRemove,
     failure: MessageSchema.Failed,
@@ -313,7 +316,7 @@ const make = <
       requests: started.requests,
     })
 
-    const command = List({
+    const command = List.command({
       query: model.query,
       request: started.request,
       cursor: started.cursor,
@@ -378,31 +381,23 @@ const make = <
     ClickedReload: () => reload(model),
     ClickedNext: () => {
       const endReached = Predicate.isNull(model.nextCursor)
-      const alreadyPending = Requests.pending(model.requests, listKey)
-      const unavailable = endReached || alreadyPending
+      const unavailable = endReached || List.pending(model)
 
       return unavailable ? result(model) : beginList(model, true)
     },
     ClickedSave: () => {
-      if (Requests.pending(model.requests, saveKey)) return result(model)
+      const fieldErrors = BrowserModel.emptyFieldErrors()
+      const saving = SavingSchema.make({ form: model.form, selectedId: model.selectedId })
+      const patch = Object.freeze({ fieldErrors, notice: null, saving })
 
-      const started = Requests.start(model.requests, saveKey)
-
-      const next = ModelSchema.make({
-        ...model,
-        requests: started.state,
-        fieldErrors: BrowserModel.emptyFieldErrors(),
-        notice: null,
-        saving: SavingSchema.make({ form: model.form, selectedId: model.selectedId }),
-      })
-
-      const command = Save({
+      const started = Save.start(model, {
         selectedId: model.selectedId,
         form: model.form,
-        request: started.request,
-      })
+      }, patch)
 
-      return commanded(next, [command])
+      const next = ModelSchema.make(started.model)
+
+      return commanded(next, started.commands)
     },
     ClickedNew: () => pipe(
       ModelSchema.make({
@@ -437,30 +432,24 @@ const make = <
       })
     },
     ClickedRemove: ({ id }) => {
-      if (Requests.pending(model.requests, removeKey)) return result(model)
-
-      const started = Requests.start(model.requests, removeKey)
-      const next = ModelSchema.make({ ...model, requests: started.state, notice: null })
-      const command = Remove({ id, request: started.request })
-
-      return commanded(next, [command])
+      const started = Remove.start(model, { id }, { notice: null })
+      const next = ModelSchema.make(started.model)
+      return commanded(next, started.commands)
     },
     SynchronizedList: ({ page }) => {
-      const requests = Requests.invalidate(model.requests, listKey)
 
-      const next = ModelSchema.make({
-        ...model,
+      const invalidated = RpcBrowser.invalidate(model, listKey, {
         items: page.items,
         nextCursor: page.nextCursor,
-        requests,
       })
 
+      const next = ModelSchema.make(invalidated.model)
       return result(next)
     },
     FailedList: ({ error }) => {
-      const requests = Requests.invalidate(model.requests, listKey)
       const notice = BrowserModel.NoticeSchema.make({ kind: "error", text: error })
-      const next = ModelSchema.make({ ...model, requests, notice })
+      const invalidated = RpcBrowser.invalidate(model, listKey, { notice })
+      const next = ModelSchema.make(invalidated.model)
 
       return result(next)
     },
@@ -485,53 +474,52 @@ const make = <
       }),
     ),
     SucceededSave: ({ row, created, request }) => {
-      if (!Requests.accepts(model.requests, request)) return result(model)
-
       const current = savingIsCurrent(model)
       const form = current ? rowToForm(row) : model.form
       const selectedId = current ? rowIdentifier(row) : model.selectedId
-      const requests = Requests.succeed(model.requests, request)
       const text = created ? options.notices.created : options.notices.updated
       const notice = BrowserModel.NoticeSchema.make({ kind: "success", text })
-      const settled = ModelSchema.make({ ...model, form, selectedId, requests, saving: null, notice })
+      const settled = RpcBrowser.succeed(model, request, { form, selectedId, saving: null, notice })
+      const next = ModelSchema.make(settled.model)
 
-      return result(settled)
+      return result(next)
     },
     SucceededRemove: ({ id, request }) => {
-      if (!Requests.accepts(model.requests, request)) return result(model)
-
       const matchesIdentifier = (selectedId: Identifier) => sameIdentifier(selectedId, id)
       const selected = pipe(Option.fromNullishOr(model.selectedId), Option.exists(matchesIdentifier))
       const form = selected ? options.empty : model.form
       const selectedId = selected ? null : model.selectedId
-      const requests = Requests.succeed(model.requests, request)
       const notice = BrowserModel.NoticeSchema.make({ kind: "success", text: options.notices.removed })
-      const settled = ModelSchema.make({ ...model, form, selectedId, requests, notice })
+      const settled = RpcBrowser.succeed(model, request, { form, selectedId, notice })
+      const next = ModelSchema.make(settled.model)
 
-      return result(settled)
+      return result(next)
     },
     Failed: ({ request, error, fieldErrors }) => {
-      if (!Requests.accepts(model.requests, request)) return result(model)
-
-      const saveRequest = sameKey(request.key, saveKey)
+      const saveRequest = sameKey(request.key, Save.requestKey)
       const savingChanged = !savingIsCurrent(model)
       const changedSinceSave = saveRequest && savingChanged
       const saving = saveRequest ? null : model.saving
 
       if (changedSinceSave) {
-        const requests = Requests.succeed(model.requests, request)
-        const next = ModelSchema.make({ ...model, requests, saving })
+        const settled = RpcBrowser.succeed(model, request, { saving })
+        const next = ModelSchema.make(settled.model)
         return result(next)
       }
-
-      const requests = Requests.fail(model.requests, request, error)
 
       const mergedErrors = Record.isEmptyRecord(fieldErrors)
         ? model.fieldErrors
         : Record.union(model.fieldErrors, fieldErrors, (_, incoming) => incoming)
 
       const notice = BrowserModel.NoticeSchema.make({ kind: "error", text: error })
-      const next = ModelSchema.make({ ...model, requests, saving, fieldErrors: mergedErrors, notice })
+
+      const settled = RpcBrowser.fail(model, request, error, {
+        saving,
+        fieldErrors: mergedErrors,
+        notice,
+      })
+
+      const next = ModelSchema.make(settled.model)
 
       return result(next)
     },
@@ -553,20 +541,12 @@ const make = <
     result,
   )
 
-  const operationKey = (operation: "list" | "save" | "remove") => pipe(
-    Match.value(operation),
-    Match.when("list", Function.constant(listKey)),
-    Match.when("save", Function.constant(saveKey)),
-    Match.when("remove", Function.constant(removeKey)),
-    Match.exhaustive,
-  )
+  const operations = Object.freeze({ list: List, save: Save, remove: Remove })
 
-  const pending = (model: Model, operation: "list" | "save" | "remove") => {
-    const key = operationKey(operation)
-    return Requests.pending(model.requests, key)
-  }
+  const pending = (model: Model, operation: keyof typeof operations) =>
+    operations[operation].pending(model)
 
-  return { Client, Model: ModelSchema, Message: MessageSchema, subscriptions, init, update, pending }
+  return Object.freeze({ Client, Model: ModelSchema, Message: MessageSchema, subscriptions, init, update, pending })
 }
 
 export const ResourceEditor = { make }

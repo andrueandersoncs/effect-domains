@@ -47,6 +47,7 @@ type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
 
 export const ListNotifications = RpcBrowser.command("ListNotifications", {
+  request: "inbox",
   args: {
     token: Schema.NullOr(Schema.String),
     recipient: Schema.String,
@@ -67,6 +68,7 @@ export const ListNotifications = RpcBrowser.command("ListNotifications", {
 })
 
 export const ScheduleReminder = RpcBrowser.command("ScheduleReminder", {
+  request: "schedule",
   args: {
     token: Schema.NullOr(Schema.String),
     recipient: Schema.String,
@@ -106,7 +108,7 @@ const startList = (model: Model, append: boolean) => {
   return {
     page: started.page,
     state: started.requests,
-    command: ListNotifications({
+    command: ListNotifications.command({
       request: started.request,
       token: currentToken(model.session),
       recipient: model.recipient.trim(),
@@ -115,7 +117,7 @@ const startList = (model: Model, append: boolean) => {
     }),
   }
 }
-const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
+const pending = (model: Model, ...keys: [] | [string]) => RpcBrowser.pending(model, ...keys)
 const resetIdentityState = (model: Model, session: typeof Session.ModelSchema.Type): Model => {
   const reset = InboxPager.reset(inboxState(model))
   return { ...model, ...emptyForm(), session, inbox: reset.page, recipient: currentToken(session) === null ? "" : session.username, requests: reset.requests, notice: null }
@@ -145,18 +147,31 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     const next = startList(model, true)
     return { model: evo(model, { inbox: () => next.page, requests: () => next.state, notice: () => null }), commands: [next.command] }
   },
-  ClickedSchedule: () => { const next = Requests.start(model.requests, "schedule"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [ScheduleReminder({ request: next.request, token: currentToken(model.session), recipient: model.recipient, reminderId: model.reminderId, appointmentId: model.appointmentId, appointmentAt: model.appointmentAt, reminderAt: model.reminderAt, location: model.location, purpose: model.purpose })] } },
+  ClickedSchedule: () => ScheduleReminder.start(model, {
+    token: currentToken(model.session),
+    recipient: model.recipient,
+    reminderId: model.reminderId,
+    appointmentId: model.appointmentId,
+    appointmentAt: model.appointmentAt,
+    reminderAt: model.reminderAt,
+    location: model.location,
+    purpose: model.purpose,
+  }, { notice: null }),
   SucceededList: ({ request, page, append }) => Option.match(InboxPager.receive(inboxState(model), request, page, append), {
     onNone: () => ({ model }),
     onSome: (received) => ({ model: evo(model, { inbox: () => received.page, requests: () => received.requests }) }),
   }),
   SucceededSchedule: ({ request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const settled = evo(model, { requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: "Reminder accepted. The inbox updates after its reminder time." }) })
-    const next = startList(settled, false)
-    return { model: evo(settled, { inbox: () => next.page, requests: () => next.state }), commands: [next.command] }
+    const notice = { kind: "success" as const, text: "Reminder accepted. The inbox updates after its reminder time." }
+    const settled = RpcBrowser.succeed(model, request, { notice })
+    if (!settled.accepted) return { model }
+
+    const next = startList(settled.model, false)
+    return { model: evo(settled.model, { inbox: () => next.page, requests: () => next.state }), commands: [next.command] }
   },
-  Failed: ({ request, error }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.fail(current, request, error), notice: () => ({ kind: "error" as const, text: error }) }) } : { model },
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({ model: { session: Session.empty(), inbox: Page.empty(), ...emptyForm(), requests: Requests.empty(), notice: null } })

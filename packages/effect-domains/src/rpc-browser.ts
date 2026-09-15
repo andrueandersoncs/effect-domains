@@ -1,10 +1,10 @@
-import { Effect, Equivalence, Layer, Predicate, Record, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Layer, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { Command, Subscription } from "foldkit"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc"
 
-import { RequestTokenSchema, type RequestToken } from "./requests.ts"
+import { Requests, RequestTokenSchema, type RequestState, type RequestToken } from "./requests.ts"
 
 const TaggedErrorSchema = Schema.Struct({ _tag: Schema.String })
 const BrowserGlobalSchema = Schema.Struct({ location: Schema.Struct({ href: Schema.String }) })
@@ -17,6 +17,128 @@ type RequestCommandFieldSchema = globalThis.Record<"request", typeof RequestToke
 
 type RequestCommandArgs<Fields extends Schema.Struct.Fields> =
   Schema.Schema.Type<Schema.Struct<Fields>> & Readonly<{ request: RequestToken }>
+
+type RequestModel = Readonly<{ requests: RequestState }>
+type RequestModelPatch<Model extends RequestModel> = Partial<Omit<Model, "requests">>
+
+type RequestKey<Input extends object> =
+  | string
+  | Readonly<{
+    prefix: string
+    fields: ReadonlyArray<Extract<keyof Input, string>>
+  }>
+
+type RequestPolicy<Input extends object> =
+  | string
+  | Readonly<{
+    key: RequestKey<Input>
+    concurrency: "latest" | "exhaust"
+  }>
+
+const SettlementResultSchema = Schema.Struct({
+  model: Schema.Unknown,
+  accepted: Schema.Boolean,
+})
+
+const ModelResultSchema = Schema.Struct({ model: Schema.Unknown })
+
+const StartResultSchema = Schema.Struct({
+  model: Schema.Unknown,
+  commands: Schema.Array(Schema.Unknown),
+})
+
+const settlementResult = <Model>(model: Model, accepted: boolean) =>
+  SettlementResultSchema.make({ model, accepted }) as Readonly<{ model: Model; accepted: boolean }>
+
+const modelResult = <Model>(model: Model) =>
+  ModelResultSchema.make({ model }) as Readonly<{ model: Model }>
+
+const startResult = <Model, Commands extends ReadonlyArray<unknown>>(model: Model, commands: Commands) =>
+  StartResultSchema.make({ model, commands }) as Readonly<{ model: Model; commands: Commands }>
+
+const baseRequestKey = <Input extends object>(policy: RequestPolicy<Input>) => {
+  if (Predicate.isString(policy)) return policy
+  return Predicate.isString(policy.key) ? policy.key : policy.key.prefix
+}
+
+const resolveRequestKey = <Input extends object>(
+  policy: RequestPolicy<Input>,
+  input: Input,
+) => {
+  if (Predicate.isString(policy)) return policy
+  if (Predicate.isString(policy.key)) return policy.key
+
+  const renderField = (field: Extract<keyof Input, string>) => String(input[field])
+  const values = Array.map(policy.key.fields, renderField)
+  const segments = Array.prepend(values, policy.key.prefix)
+  return Array.join(segments, ".")
+}
+
+const requestConcurrency = <Input extends object>(policy: RequestPolicy<Input>) =>
+  Predicate.isString(policy) ? "latest" as const : policy.concurrency
+
+const withRequestState = <Model extends RequestModel>(
+  model: Model,
+  requests: RequestState,
+  ...patches: [] | [RequestModelPatch<Model>]
+) => {
+  const patched = pipe(
+    Array.head(patches),
+    Option.match({
+      onNone: Function.constant(model),
+      onSome: (patch) => Struct.assign(model, patch),
+    }),
+  )
+
+  return Struct.assign(patched, { requests }) as Model
+}
+
+const succeed = <Model extends RequestModel>(
+  model: Model,
+  request: RequestToken,
+  ...patches: [] | [RequestModelPatch<Model>]
+) => {
+  if (!Requests.accepts(model.requests, request)) return settlementResult(model, false)
+
+  const requests = Requests.succeed(model.requests, request)
+  const next = withRequestState(model, requests, ...patches)
+  return settlementResult(next, true)
+}
+
+const fail = <Model extends RequestModel>(
+  model: Model,
+  request: RequestToken,
+  error: string,
+  ...patches: [] | [RequestModelPatch<Model>]
+) => {
+  if (!Requests.accepts(model.requests, request)) return settlementResult(model, false)
+
+  const requests = Requests.fail(model.requests, request, error)
+  const next = withRequestState(model, requests, ...patches)
+  return settlementResult(next, true)
+}
+
+const invalidate = <Model extends RequestModel>(
+  model: Model,
+  key: string,
+  ...patches: [] | [RequestModelPatch<Model>]
+) => {
+  const requests = Requests.invalidate(model.requests, key)
+  const next = withRequestState(model, requests, ...patches)
+  return modelResult(next)
+}
+
+const reset = <Model extends RequestModel>(
+  model: Model,
+  ...patches: [] | [RequestModelPatch<Model>]
+) => {
+  const requests = Requests.reset(model.requests)
+  const next = withRequestState(model, requests, ...patches)
+  return modelResult(next)
+}
+
+const pending = <Model extends RequestModel>(model: Model, ...keys: [] | [string]) =>
+  Requests.pending(model.requests, ...keys)
 
 type MessageConstructor<Output = unknown> = Schema.Top & Readonly<{
   make: (value: never) => Output
@@ -95,12 +217,12 @@ const resolveFailureFields = <
   definition: FailureHandling<Constructor, Error, Args>,
   error: Error,
   args: Args,
-): Readonly<Record<string, unknown>> => {
+) => {
   const hasCustomPayload = "failurePayload" in definition
     && Predicate.isFunction(definition.failurePayload)
 
   if (hasCustomPayload) {
-    return definition.failurePayload(error, args) as Readonly<Record<string, unknown>>
+    return definition.failurePayload(error, args)
   }
 
   const errorMessage = "formatError" in definition
@@ -153,6 +275,7 @@ type BrowserCommandDefinition<
   Error,
   Requirements,
 > = Readonly<{
+  request: RequestPolicy<Schema.Schema.Type<Schema.Struct<Fields>>>
   args: Fields
   success: Success
   failure: Failure
@@ -224,8 +347,7 @@ const query = <Model, Message>() => <
           (payload: QueryMessagePayload<Success>) => MessageOutput<Success>,
         onFailure: (error) => pipe(
           resolveFailureFields(definition, error, dependencies),
-          definition.failure.make.bind(definition.failure) as
-            (fields: Readonly<Record<string, unknown>>) => MessageOutput<Failure>,
+          () => definition.failure.make(definition.failure),
         ),
       }),
     )
@@ -297,8 +419,49 @@ const command = <
 
   const messages = [definition.success, definition.failure] as const
   const config = Object.freeze({ args, messages, execute: constructResult })
+  const compiled = Command.define(name, config)
+  const requestKey = baseRequestKey(definition.request)
 
-  return Command.define(name, config)
+  const start = <Model extends RequestModel>(
+    model: Model,
+    input: Schema.Schema.Type<Schema.Struct<Fields>>,
+    ...patches: [] | [RequestModelPatch<Model>]
+  ) => {
+    const key = resolveRequestKey(definition.request, input)
+    const concurrency = requestConcurrency(definition.request)
+    const exhaust = sameString(concurrency, "exhaust")
+    const alreadyPending = Requests.pending(model.requests, key)
+    const blocked = exhaust && alreadyPending
+    if (blocked) return startResult(model, [] as const)
+
+    const started = Requests.start(model.requests, key)
+    const command = compiled({ ...input, request: started.request } as RuntimeArgs)
+    const next = withRequestState(model, started.state, ...patches)
+    return startResult(next, [command] as const)
+  }
+
+  const key = (input: Schema.Schema.Type<Schema.Struct<Fields>>) =>
+    resolveRequestKey(definition.request, input)
+
+  const operationPending = <Model extends RequestModel>(model: Model) => Requests.pending(model.requests, requestKey)
+
+  const pendingFor = <Model extends RequestModel>(
+    model: Model,
+    input: Schema.Schema.Type<Schema.Struct<Fields>>,
+  ) => {
+    const request = resolveRequestKey(definition.request, input)
+    return Requests.pending(model.requests, request)
+  }
+
+
+  return Object.freeze({
+    requestKey,
+    key,
+    command: compiled,
+    start,
+    pending: operationPending,
+    pendingFor,
+  })
 }
 
 const mutation = <
@@ -351,8 +514,62 @@ const mutation = <
 
   const messages = [definition.success, definition.failure] as const
   const config = Object.freeze({ args, messages, execute: constructMutationResult })
+  const compiled = Command.define(name, config)
+  const requestKey = baseRequestKey(definition.request)
 
-  return Command.define(name, config)
+  const start = <Model extends RequestModel>(
+    model: Model,
+    input: Schema.Schema.Type<Schema.Struct<Fields>>,
+    ...patches: [] | [RequestModelPatch<Model>]
+  ) => {
+    const key = resolveRequestKey(definition.request, input)
+    const concurrency = requestConcurrency(definition.request)
+    const exhaust = sameString(concurrency, "exhaust")
+    const alreadyPending = Requests.pending(model.requests, key)
+    const blocked = exhaust && alreadyPending
+    if (blocked) return startResult(model, [] as const)
+
+    const started = Requests.start(model.requests, key)
+    const command = compiled({ ...input, request: started.request } as RuntimeArgs)
+    const next = withRequestState(model, started.state, ...patches)
+    return startResult(next, [command] as const)
+  }
+
+  const key = (input: Schema.Schema.Type<Schema.Struct<Fields>>) =>
+    resolveRequestKey(definition.request, input)
+
+  const operationPending = <Model extends RequestModel>(model: Model) => Requests.pending(model.requests, requestKey)
+
+  const pendingFor = <Model extends RequestModel>(
+    model: Model,
+    input: Schema.Schema.Type<Schema.Struct<Fields>>,
+  ) => {
+    const request = resolveRequestKey(definition.request, input)
+    return Requests.pending(model.requests, request)
+  }
+
+
+  return Object.freeze({
+    requestKey,
+    key,
+    command: compiled,
+    start,
+    pending: operationPending,
+    pendingFor,
+  })
 }
 
-export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions, command, mutation, query }
+export const RpcBrowser = {
+  messageFromUnknown,
+  layer,
+  protocol,
+  requestOptions,
+  command,
+  mutation,
+  query,
+  succeed,
+  fail,
+  invalidate,
+  reset,
+  pending,
+}

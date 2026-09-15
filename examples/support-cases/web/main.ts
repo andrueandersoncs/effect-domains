@@ -114,6 +114,7 @@ export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>
 
 export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
+  request: "customers",
   args: {},
   success: Message.SucceededCustomers,
   failure: Message.Failed,
@@ -125,6 +126,7 @@ export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
 })
 
 export const LoadAgents = RpcBrowser.command("LoadAgents", {
+  request: "agents",
   args: {},
   success: Message.SucceededAgents,
   failure: Message.Failed,
@@ -136,6 +138,7 @@ export const LoadAgents = RpcBrowser.command("LoadAgents", {
 })
 
 export const LoadBoard = RpcBrowser.command("LoadBoard", {
+  request: "board",
   args: { status: Schema.String },
   success: Message.SucceededBoard,
   failure: Message.Failed,
@@ -150,6 +153,7 @@ export const LoadBoard = RpcBrowser.command("LoadBoard", {
 })
 
 export const LoadDetail = RpcBrowser.command("LoadDetail", {
+  request: "detail",
   args: { id: Schema.String },
   success: Message.SucceededDetail,
   failure: Message.Failed,
@@ -161,6 +165,7 @@ export const LoadDetail = RpcBrowser.command("LoadDetail", {
 })
 
 export const CreateCustomer = RpcBrowser.command("CreateCustomer", {
+  request: { key: "mutation", concurrency: "exhaust" },
   args: { id: Schema.String, name: Schema.String },
   success: Message.SucceededCustomer,
   failure: Message.Failed,
@@ -175,6 +180,7 @@ export const CreateCustomer = RpcBrowser.command("CreateCustomer", {
 })
 
 export const CreateAgent = RpcBrowser.command("CreateAgent", {
+  request: { key: "mutation", concurrency: "exhaust" },
   args: { id: Schema.String, name: Schema.String, onDuty: Schema.Boolean },
   success: Message.SucceededAgent,
   failure: Message.Failed,
@@ -189,6 +195,7 @@ export const CreateAgent = RpcBrowser.command("CreateAgent", {
 })
 
 export const OpenCase = RpcBrowser.command("OpenCase", {
+  request: { key: "mutation", concurrency: "exhaust" },
   args: {
     customerId: Schema.String,
     subject: Schema.String,
@@ -211,6 +218,7 @@ export const OpenCase = RpcBrowser.command("OpenCase", {
 })
 
 export const AdvanceCase = RpcBrowser.command("AdvanceCase", {
+  request: { key: "mutation", concurrency: "exhaust" },
   args: {
     id: Schema.String,
     expectedVersion: Schema.Number,
@@ -237,30 +245,23 @@ export const AdvanceCase = RpcBrowser.command("AdvanceCase", {
 })
 
 const startRefresh = (model: Model) => {
-  const customers = Requests.start(model.requests, "customers")
-  const agents = Requests.start(customers.state, "agents")
-  const board = Requests.start(agents.state, "board")
+  const customers = LoadCustomers.start(model, {}, { board: [], notice: null })
+  const agents = LoadAgents.start(customers.model, {})
+  const board = LoadBoard.start(agents.model, { status: model.filterStatus })
 
   return {
-    state: board.state,
-    commands: [
-      LoadCustomers({ request: customers.request }),
-      LoadAgents({ request: agents.request }),
-      LoadBoard({ status: model.filterStatus, request: board.request }),
-    ],
+    model: board.model,
+    commands: [...customers.commands, ...agents.commands, ...board.commands],
   }
 }
 
 const startCaseRefresh = (model: Model, id: string) => {
-  const board = Requests.start(model.requests, "board")
-  const detail = Requests.start(board.state, "detail")
+  const board = LoadBoard.start(model, { status: model.filterStatus })
+  const detail = LoadDetail.start(board.model, { id })
 
   return {
-    state: detail.state,
-    commands: [
-      LoadBoard({ status: model.filterStatus, request: board.request }),
-      LoadDetail({ id, request: detail.request }),
-    ],
+    model: detail.model,
+    commands: [...board.commands, ...detail.commands],
   }
 }
 
@@ -271,7 +272,7 @@ const nextAction = (status: typeof SupportCaseStatusSchema.Type): typeof Support
   return "reopen"
 }
 
-const pending = (model: Model, key: string) => Requests.pending(model.requests, key)
+const pending = (model: Model, key: string) => RpcBrowser.pending(model, key)
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   ChangedCustomerId: ({ value }) => ({ model: evo(model, { customerId: () => value }) }),
@@ -286,135 +287,76 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
   ChangedTransitionAction: ({ value }) => ({ model: evo(model, { transitionAction: () => value as typeof SupportCaseTransitions.actions.Type }) }),
   ChangedTransitionAgentId: ({ value }) => ({ model: evo(model, { transitionAgentId: () => value }) }),
   ChangedTransitionNote: ({ value }) => ({ model: evo(model, { transitionNote: () => value }) }),
-  ClickedCreateCustomer: () => {
-    if (pending(model, "mutation")) return { model }
-    const started = Requests.start(model.requests, "mutation")
-    return {
-      model: evo(model, { requests: () => started.state, notice: () => null }),
-      commands: [CreateCustomer({ id: model.customerId, name: model.customerName, request: started.request })],
-    }
-  },
-  ClickedCreateAgent: () => {
-    if (pending(model, "mutation")) return { model }
-    const started = Requests.start(model.requests, "mutation")
-    return {
-      model: evo(model, { requests: () => started.state, notice: () => null }),
-      commands: [CreateAgent({ id: model.agentId, name: model.agentName, onDuty: model.agentOnDuty, request: started.request })],
-    }
-  },
-  ClickedOpenCase: () => {
-    if (pending(model, "mutation")) return { model }
-    const started = Requests.start(model.requests, "mutation")
-    return {
-      model: evo(model, { requests: () => started.state, notice: () => null }),
-      commands: [OpenCase({
-        customerId: model.caseCustomerId,
-        subject: model.caseSubject,
-        priority: model.casePriority,
-        request: started.request,
-      })],
-    }
-  },
-  ClickedReload: () => {
-    const refreshed = startRefresh(model)
-    return {
-      model: evo(model, { board: () => [], requests: () => refreshed.state, notice: () => null }),
-      commands: refreshed.commands,
-    }
-  },
-  ClickedInspectCase: ({ id }) => {
-    const started = Requests.start(model.requests, "detail")
-    return {
-      model: evo(model, { selectedCaseId: () => id, detail: () => null, requests: () => started.state, notice: () => null }),
-      commands: [LoadDetail({ id, request: started.request })],
-    }
-  },
-  ClickedAdvanceCase: () => {
-    if (model.detail === null || pending(model, "mutation")) return { model }
-    const started = Requests.start(model.requests, "mutation")
-    return {
-      model: evo(model, { requests: () => started.state, notice: () => null }),
-      commands: [AdvanceCase({
-        id: model.detail.case.id,
-        expectedVersion: model.detail.case.version,
-        action: model.transitionAction,
-        assignedAgentId: model.transitionAgentId,
-        note: model.transitionNote,
-        request: started.request,
-      })],
-    }
-  },
-  SucceededCustomers: ({ customers, request }) => Requests.accepts(model.requests, request)
-    ? { model: evo(model, { customers: () => customers, requests: (current) => Requests.succeed(current, request) }) }
-    : { model },
-  SucceededAgents: ({ agents, request }) => Requests.accepts(model.requests, request)
-    ? { model: evo(model, { agents: () => agents, requests: (current) => Requests.succeed(current, request) }) }
-    : { model },
-  SucceededBoard: ({ page, request }) => Requests.accepts(model.requests, request)
-    ? { model: evo(model, { board: () => page.items, requests: (current) => Requests.succeed(current, request) }) }
-    : { model },
-  SucceededDetail: ({ detail, request }) => Requests.accepts(model.requests, request)
-    ? { model: evo(model, {
-      detail: () => detail,
-      selectedCaseId: () => detail.case.id,
-      transitionAction: () => nextAction(detail.case.status),
-      transitionAgentId: () => detail.case.assignedAgentId ?? "",
-      requests: (current) => Requests.succeed(current, request),
-    }) }
-    : { model },
+  ClickedCreateCustomer: () => CreateCustomer.start(model, {
+    id: model.customerId,
+    name: model.customerName,
+  }, { notice: null }),
+  ClickedCreateAgent: () => CreateAgent.start(model, {
+    id: model.agentId,
+    name: model.agentName,
+    onDuty: model.agentOnDuty,
+  }, { notice: null }),
+  ClickedOpenCase: () => OpenCase.start(model, {
+    customerId: model.caseCustomerId,
+    subject: model.caseSubject,
+    priority: model.casePriority,
+  }, { notice: null }),
+  ClickedReload: () => startRefresh(model),
+  ClickedInspectCase: ({ id }) => LoadDetail.start(model, { id }, {
+    selectedCaseId: id,
+    detail: null,
+    notice: null,
+  }),
+  ClickedAdvanceCase: () => model.detail === null
+    ? { model }
+    : AdvanceCase.start(model, {
+      id: model.detail.case.id,
+      expectedVersion: model.detail.case.version,
+      action: model.transitionAction,
+      assignedAgentId: model.transitionAgentId,
+      note: model.transitionNote,
+    }, { notice: null }),
+  SucceededCustomers: ({ customers, request }) => RpcBrowser.succeed(model, request, { customers }),
+  SucceededAgents: ({ agents, request }) => RpcBrowser.succeed(model, request, { agents }),
+  SucceededBoard: ({ page, request }) => RpcBrowser.succeed(model, request, { board: page.items }),
+  SucceededDetail: ({ detail, request }) => RpcBrowser.succeed(model, request, {
+    detail,
+    selectedCaseId: detail.case.id,
+    transitionAction: nextAction(detail.case.status),
+    transitionAgentId: detail.case.assignedAgentId ?? "",
+  }),
   SucceededCustomer: ({ customer, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const settled = evo(model, {
-      customerId: () => "",
-      customerName: () => "",
-      caseCustomerId: () => customer.id,
-      requests: (current) => Requests.succeed(current, request),
-      notice: () => ({ kind: "success" as const, text: "Customer created." }),
+    const settled = RpcBrowser.succeed(model, request, {
+      customerId: "",
+      customerName: "",
+      caseCustomerId: customer.id,
+      notice: { kind: "success" as const, text: "Customer created." },
     })
-    const started = Requests.start(settled.requests, "customers")
-    return {
-      model: evo(settled, { requests: () => started.state }),
-      commands: [LoadCustomers({ request: started.request })],
-    }
+    return settled.accepted ? LoadCustomers.start(settled.model, {}) : { model }
   },
   SucceededAgent: ({ agent, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const settled = evo(model, {
-      agentId: () => "",
-      agentName: () => "",
-      transitionAgentId: () => agent.id,
-      requests: (current) => Requests.succeed(current, request),
-      notice: () => ({ kind: "success" as const, text: "Agent created." }),
+    const settled = RpcBrowser.succeed(model, request, {
+      agentId: "",
+      agentName: "",
+      transitionAgentId: agent.id,
+      notice: { kind: "success" as const, text: "Agent created." },
     })
-    const started = Requests.start(settled.requests, "agents")
-    return {
-      model: evo(settled, { requests: () => started.state }),
-      commands: [LoadAgents({ request: started.request })],
-    }
+    return settled.accepted ? LoadAgents.start(settled.model, {}) : { model }
   },
   SucceededCase: ({ supportCase, action, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const settled = evo(model, {
-      selectedCaseId: () => supportCase.id,
-      caseSubject: () => "",
-      transitionAction: () => nextAction(supportCase.status),
-      transitionAgentId: () => supportCase.assignedAgentId ?? model.transitionAgentId,
-      transitionNote: () => "",
-      requests: (current) => Requests.succeed(current, request),
-      notice: () => ({ kind: "success" as const, text: action }),
+    const settled = RpcBrowser.succeed(model, request, {
+      selectedCaseId: supportCase.id,
+      caseSubject: "",
+      transitionAction: nextAction(supportCase.status),
+      transitionAgentId: supportCase.assignedAgentId ?? model.transitionAgentId,
+      transitionNote: "",
+      notice: { kind: "success" as const, text: action },
     })
-    const refreshed = startCaseRefresh(settled, supportCase.id)
-    return {
-      model: evo(settled, { requests: () => refreshed.state }),
-      commands: refreshed.commands,
-    }
+    return settled.accepted ? startCaseRefresh(settled.model, supportCase.id) : { model }
   },
-  Failed: ({ request, error }) => Requests.accepts(model.requests, request)
-    ? { model: evo(model, {
-      requests: (current) => Requests.fail(current, request, error),
-      notice: () => ({ kind: "error" as const, text: error }),
-    }) }
-    : { model },
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
@@ -439,8 +381,7 @@ export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = ()
     requests: Requests.empty(),
     notice: null,
   }
-  const refreshed = startRefresh(model)
-  return { model: evo(model, { requests: () => refreshed.state }), commands: refreshed.commands }
+  return startRefresh(model)
 }
 
 const customerChoices = (model: Model) => [

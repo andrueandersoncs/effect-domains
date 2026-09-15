@@ -1,6 +1,7 @@
-import { Array, Clock, Context, Data, DateTime, Effect, Equivalence, Function, HashMap, Layer, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Clock, Context, Data, DateTime, Effect, Equivalence, Function, HashMap, Layer, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { StructSchema } from "./domain.ts"
+import type { Scalar } from "./policy.ts"
 import type { Table } from "./table.ts"
 
 type StringField<Value> = Extract<keyof Value, string>
@@ -20,6 +21,141 @@ type SubjectScope<
     CompatibleSubjectField<Subject["Type"], Source["storageSchema"]["Type"][Field]>
 }>>
 
+const GrantScalarSchema: Schema.Codec<Scalar> = Schema.Union([
+  Schema.String,
+  Schema.Finite,
+  Schema.Boolean,
+  Schema.Null,
+])
+
+const GrantLiteralSchema = Schema.TaggedStruct("Literal", { value: GrantScalarSchema })
+const GrantRowFieldSchema = Schema.TaggedStruct("RowField", { field: Schema.String })
+const GrantNowSchema = Schema.TaggedStruct("Now", {})
+const GrantOperandSchema = Schema.Union([GrantLiteralSchema, GrantRowFieldSchema, GrantNowSchema])
+type GrantOperand = Schema.Schema.Type<typeof GrantOperandSchema>
+
+const GrantEqualSchema = Schema.TaggedStruct("Equal", { left: GrantOperandSchema, right: GrantOperandSchema })
+const GrantLessThanSchema = Schema.TaggedStruct("LessThan", { left: GrantOperandSchema, right: GrantOperandSchema })
+type GrantTerminal = Schema.Schema.Type<typeof GrantEqualSchema> | Schema.Schema.Type<typeof GrantLessThanSchema>
+const grantAllLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("All", { children: Schema.Array(child) })
+const grantAnyLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("Any", { children: Schema.Array(child) })
+
+type Grant =
+  | GrantTerminal
+  | { readonly _tag: "All"; readonly children: ReadonlyArray<Grant> }
+  | { readonly _tag: "Any"; readonly children: ReadonlyArray<Grant> }
+
+export const GrantSchema: Schema.Codec<Grant> = Schema.suspend(() =>
+  Schema.Union([GrantEqualSchema, GrantLessThanSchema, GrantAllSchema, GrantAnySchema]))
+
+const GrantAllSchema = grantAllLayer(GrantSchema)
+const GrantAnySchema = grantAnyLayer(GrantSchema)
+
+declare const GrantValue: unique symbol
+type TypedGrantOperand<Value> = GrantOperand & Readonly<Record<typeof GrantValue, Value>>
+type GrantOperandValue<Value> = Value extends TypedGrantOperand<infer Inner> ? Inner : Value
+type GrantInput = TypedGrantOperand<unknown> | Scalar
+
+type GrantKind<Value> =
+  Exclude<Value, null> extends string ? "string"
+    : Exclude<Value, null> extends number ? "number"
+    : Exclude<Value, null> extends boolean ? "boolean"
+    : Exclude<Value, null> extends DateTime.Utc ? "datetime"
+    : never
+
+type CompatibleGrant<Left, Right> =
+  GrantKind<GrantOperandValue<Left>> extends GrantKind<GrantOperandValue<Right>> ? unknown : never
+
+const grantLiteral = <Value extends Scalar>(value: Value) =>
+  GrantOperandSchema.make({ _tag: "Literal", value }) as TypedGrantOperand<Value>
+
+const grantOperand = <Value extends GrantInput>(value: Value) =>
+  Predicate.hasProperty(value, "_tag") ? value as GrantOperand : grantLiteral(value as Scalar)
+
+const grantEqual = <Left extends GrantInput, Right extends GrantInput>(
+  left: Left,
+  right: Right & CompatibleGrant<Left, Right>,
+) => GrantSchema.make({ _tag: "Equal", left: grantOperand(left), right: grantOperand(right) })
+
+const grantLessThan = <Left extends GrantInput, Right extends GrantInput>(
+  left: Left,
+  right: Right & CompatibleGrant<Left, Right>,
+) => GrantSchema.make({ _tag: "LessThan", left: grantOperand(left), right: grantOperand(right) })
+
+const grantAll = (...children: ReadonlyArray<Grant>) => GrantSchema.make({ _tag: "All", children })
+const grantAny = (...children: ReadonlyArray<Grant>) => GrantSchema.make({ _tag: "Any", children })
+
+
+const GrantRowSchema = Schema.Record(Schema.String, Schema.Unknown)
+const UtcPairSchema = Schema.Tuple([Schema.DateTimeUtc, Schema.DateTimeUtc])
+const NumberPairSchema = Schema.Tuple([Schema.Number, Schema.Number])
+const StringPairSchema = Schema.Tuple([Schema.String, Schema.String])
+const isUtcPair = Schema.is(UtcPairSchema)
+const isNumberPair = Schema.is(NumberPairSchema)
+const isStringPair = Schema.is(StringPairSchema)
+
+const grantValue = (
+  operand: GrantOperand,
+  row: Readonly<Record<string, unknown>>,
+  now: DateTime.Utc,
+) => pipe(
+  Match.value(operand),
+  Match.tag("Literal", ({ value }) => value),
+  Match.tag("Now", Function.constant(now)),
+  Match.tag("RowField", ({ field }) => row[field]),
+  Match.exhaustive,
+)
+
+const grantValuesEqual = (left: unknown, right: unknown) => pipe(
+  [left, right] as const,
+  Match.value,
+  Match.when(isUtcPair, ([leftDate, rightDate]) => {
+    const leftMillis = DateTime.toEpochMillis(leftDate)
+    const rightMillis = DateTime.toEpochMillis(rightDate)
+    return Equivalence.strictEqual<number>()(leftMillis, rightMillis)
+  }),
+  Match.orElse(([leftValue, rightValue]) =>
+    Equivalence.strictEqual<unknown>()(leftValue, rightValue)),
+)
+
+const grantValueLessThan = (left: unknown, right: unknown) => pipe(
+  [left, right] as const,
+  Match.value,
+  Match.when(isUtcPair, ([leftDate, rightDate]) => {
+    const leftMillis = DateTime.toEpochMillis(leftDate)
+    const rightMillis = DateTime.toEpochMillis(rightDate)
+    return leftMillis < rightMillis
+  }),
+  Match.when(isNumberPair, ([leftNumber, rightNumber]) => leftNumber < rightNumber),
+  Match.when(isStringPair, ([leftString, rightString]) => leftString < rightString),
+  Match.orElse(Function.constant(false)),
+)
+
+const evaluateGrant = (
+  grant: Grant,
+  row: Readonly<Record<string, unknown>>,
+  now: DateTime.Utc,
+): boolean => {
+  const evaluateChild = (child: Grant) => evaluateGrant(child, row, now)
+
+  return pipe(
+    Match.value(grant),
+    Match.tag("Equal", ({ left, right }) => {
+      const leftValue = grantValue(left, row, now)
+      const rightValue = grantValue(right, row, now)
+      return grantValuesEqual(leftValue, rightValue)
+    }),
+    Match.tag("LessThan", ({ left, right }) => {
+      const leftValue = grantValue(left, row, now)
+      const rightValue = grantValue(right, row, now)
+      return grantValueLessThan(leftValue, rightValue)
+    }),
+    Match.tag("All", ({ children }) => Array.every(children, evaluateChild)),
+    Match.tag("Any", ({ children }) => Array.some(children, evaluateChild)),
+    Match.exhaustive,
+  )
+}
+
 class EntitlementSource<
   Subject extends StructSchema = StructSchema,
   Source extends Table = Table,
@@ -30,9 +166,7 @@ class EntitlementSource<
   readonly subject: Subject
   readonly key: Key
   readonly scope: SubjectScope<Subject, Source>
-  readonly grant: {
-    bivarianceHack(row: Source["storageSchema"]["Type"], now: DateTime.Utc): boolean
-  }["bivarianceHack"]
+  readonly grant: Grant
 }> {}
 
 export class EntitlementRequired extends Schema.TaggedError<EntitlementRequired>()("EntitlementRequired", { entitlement: Schema.String }) {}
@@ -51,7 +185,7 @@ interface AnyEntitlementSource {
   readonly subject: StructSchema
   readonly key: string
   readonly scope: Readonly<Partial<Record<string, string>>>
-  readonly grant: { bivarianceHack(row: unknown, now: DateTime.Utc): boolean }["bivarianceHack"]
+  readonly grant: Grant
 }
 
 const isEmptyName = (name: string) => {
@@ -145,12 +279,13 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
 
           const decoded = yield* pipe(
             Schema.decodeUnknownEffect(definition.table.storageSchema)(row.value),
+            Effect.flatMap(Schema.decodeUnknownEffect(GrantRowSchema)),
             Effect.mapError(unavailable),
           )
 
           const milliseconds = yield* Clock.currentTimeMillis
           const now = yield* pipe(DateTime.make(milliseconds), Effect.fromOption(unavailable))
-          return definition.grant(decoded, now)
+          return evaluateGrant(definition.grant, decoded, now)
         }),
       }))
     })
@@ -185,4 +320,24 @@ export class Entitlements extends Context.Service<Entitlements, {
   static readonly fromTables = fromTables
   static readonly fromTable = fromTable
   static readonly Source = EntitlementSource
+  static readonly GrantSchema = GrantSchema
+  static for<Source extends Table>(source: Source) {
+    const row = Record.map(source.columns, (_, field) =>
+      GrantOperandSchema.make({ _tag: "RowField", field })) as {
+      readonly [Field in StringField<Source["storageSchema"]["Type"]>]:
+        TypedGrantOperand<Source["storageSchema"]["Type"][Field]> & Readonly<{ readonly _tag: "RowField" }>
+    }
+
+    const now = GrantOperandSchema.make({ _tag: "Now" }) as TypedGrantOperand<DateTime.Utc>
+
+    return Object.freeze({
+      row,
+      now,
+      eq: grantEqual,
+      lt: grantLessThan,
+      all: grantAll,
+      any: grantAny,
+      literal: grantLiteral,
+    })
+  }
 }

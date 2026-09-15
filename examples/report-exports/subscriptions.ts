@@ -1,4 +1,4 @@
-import { DateTime, Effect, Equivalence, Option, Schema, pipe } from "effect"
+import { DateTime, Effect, Schema, pipe } from "effect"
 
 import { Authorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
@@ -27,24 +27,15 @@ export const ReportSubscriptionsResource = Resource.define({
   capabilities: [],
 })
 
-const subscriptionAccess = (
-  subscription: typeof ReportSubscriptionSchema.Type,
-  now: DateTime.Utc,
-) => {
-  const paidTerm = DateTime.isLessThan(now, subscription.validUntil)
-  const canceled = Equivalence.strictEqual()(subscription.status, "canceled")
-
-  const cancellationGrace = canceled
-    && pipe(
-      Option.fromNullishOr(subscription.graceUntil),
-      Option.exists((until) => DateTime.isLessThan(now, until)),
-    )
-
-  return paidTerm || cancellationGrace
-}
 
 
 const reportSubscriptionsTable = Resource.table(ReportSubscriptionsResource)
+const grants = Entitlements.for(reportSubscriptionsTable)
+const currentlyValid = grants.lt(grants.now, grants.row.validUntil)
+const canceled = grants.eq(grants.row.status, "canceled")
+const withinGrace = grants.lt(grants.now, grants.row.graceUntil)
+const canceledWithinGrace = grants.all(canceled, withinGrace)
+const subscriptionAccess = grants.any(currentlyValid, canceledWithinGrace)
 
 const entitlementDefinition = new Entitlements.Source({
   name: "reports.generate",

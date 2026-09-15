@@ -97,20 +97,24 @@ Use policy expressions for identity, tenant visibility, ownership, and roles. Us
 ```ts
 import { Entitlements } from "effect-domains/entitlements"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
+import { Resource } from "effect-domains/resource"
 import { GuidePurchasesResource } from "./resources.ts"
+
+const purchases = Resource.table(GuidePurchasesResource)
+const grants = Entitlements.for(purchases)
 
 const purchasedGuideEntitlement = new Entitlements.Source({
   name: "guides.read",
-  table: GuidePurchasesResource.table,
+  table: purchases,
   subject: ExampleSubjectSchema,
   key: "guideId",
   scope: { tenantId: "tenantId", userId: "userId" },
-  grant: (purchase) => purchase.status === "granted",
+  grant: grants.eq(grants.row.status, "granted"),
 })
 
 export const PurchasedGuideEntitlements = Entitlements.fromTable(purchasedGuideEntitlement)
 ```
 
-Use `Entitlements.fromTables([...])` for multiple names. Each source declares `scope` as storage-field-to-subject-field bindings; the type system rejects missing, optional, or scalar-incompatible subject fields. The resolver finds the requested `key` under those bindings, then calls the authored `grant(row, now)` business predicate. A missing grant yields `EntitlementRequired`; database or decoding failure yields `EntitlementUnavailable`. Neither one replaces resource scope or authentication.
+Use `Entitlements.fromTables([...])` for multiple names. Each source declares `scope` as storage-field-to-subject-field bindings; the type system rejects missing, optional, or scalar-incompatible subject fields. `Entitlements.for(table)` supplies typed row operands, `now`, equality and ordering comparisons, and `all`/`any` composition. `grant` is a closed `Entitlements.GrantSchema` expression, so status, expiration, and cancellation-grace decisions remain explicit and inspectable without an executable callback. The resolver finds the requested `key` under the declared bindings, decodes the row, and evaluates that expression. A missing grant yields `EntitlementRequired`; database or decoding failure yields `EntitlementUnavailable`. Neither one replaces resource scope or authentication.
 
 See the [team-task resource](../../examples/team-tasks/resources.ts), [purchased-guide entitlement](../../examples/purchased-guides/entitlements.ts), and [`Authorization`](../../packages/effect-domains/src/authorization.ts).

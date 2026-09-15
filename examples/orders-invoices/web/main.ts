@@ -90,6 +90,7 @@ type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 const failurePayload = (error: unknown) => BrowserModel.failure(error, errorText)
 
 export const LoadOrder = RpcBrowser.command("LoadOrder", {
+  request: "billing.load",
   args: { token: Schema.String, orderId: Schema.String },
   success: Message.SucceededSummary,
   failure: Message.Failed,
@@ -103,6 +104,7 @@ export const LoadOrder = RpcBrowser.command("LoadOrder", {
 })
 
 export const CreateOrder = RpcBrowser.command("CreateOrder", {
+  request: "billing.create",
   args: { token: Schema.String, number: Schema.String, customer: Schema.String },
   success: Message.SucceededCreate,
   failure: Message.Failed,
@@ -122,6 +124,7 @@ export const CreateOrder = RpcBrowser.command("CreateOrder", {
 })
 
 export const AddLine = RpcBrowser.command("AddLine", {
+  request: "billing.addLine",
   args: {
     token: Schema.String,
     orderId: Schema.String,
@@ -156,6 +159,7 @@ export const AddLine = RpcBrowser.command("AddLine", {
 })
 
 export const IssueInvoice = RpcBrowser.command("IssueInvoice", {
+  request: "billing.issue",
   args: {
     token: Schema.String,
     orderId: Schema.String,
@@ -180,6 +184,7 @@ export const IssueInvoice = RpcBrowser.command("IssueInvoice", {
 })
 
 export const PayInvoice = RpcBrowser.command("PayInvoice", {
+  request: "billing.pay",
   args: { token: Schema.String, invoiceId: Schema.String, expectedVersion: Schema.Int },
   success: Message.SucceededAction,
   failure: Message.Failed,
@@ -195,15 +200,10 @@ export const PayInvoice = RpcBrowser.command("PayInvoice", {
   failurePayload,
 })
 
-const start = (model: Model, key: string) => Requests.start(model.requests, key)
 const loadCurrent = (model: Model, notice = model.notice) => {
   const token = Session.token(model.session)
   if (token === null || model.summary === null) return { model }
-  const started = start(model, "billing.load")
-  return {
-    model: evo(model, { requests: () => started.state, notice: () => notice }),
-    commands: [LoadOrder({ request: started.request, token, orderId: model.summary.order.id })],
-  }
+  return LoadOrder.start(model, { token, orderId: model.summary.order.id }, { notice })
 }
 
 export const update = (model: Model, message: Message): UpdateReturn => Message.match<UpdateReturn>(message, {
@@ -211,20 +211,19 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     const child = Session.embed(model.session, message, (message) => Message.SessionChanged({ message }))
     const changed = Session.generationChanged(model.session, child.model)
     const next = changed
-      ? evo(model, {
-        session: () => child.model,
-        requests: () => Requests.reset(model.requests),
-        summary: () => null,
-        orderNumber: () => "",
-        customer: () => "",
-        lineNumber: () => "1",
-        description: () => "",
-        quantity: () => "1",
-        unitAmountMinor: () => "",
-        invoiceNumber: () => "",
-        fieldErrors: BrowserModel.emptyFieldErrors,
-        notice: () => null,
-      })
+      ? RpcBrowser.reset(model, {
+        session: child.model,
+        summary: null,
+        orderNumber: "",
+        customer: "",
+        lineNumber: "1",
+        description: "",
+        quantity: "1",
+        unitAmountMinor: "",
+        invoiceNumber: "",
+        fieldErrors: {},
+        notice: null,
+      }).model
       : evo(model, { session: () => child.model })
     return { model: next, commands: child.commands }
   },
@@ -238,63 +237,69 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
   ClickedCreate: () => {
     const token = Session.token(model.session)
     if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before creating an order." }) }) }
-    const started = start(model, "billing.create")
-    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [CreateOrder({ request: started.request, token, number: model.orderNumber, customer: model.customer })] }
+    return CreateOrder.start(model, { token, number: model.orderNumber, customer: model.customer }, {
+      fieldErrors: {},
+      notice: null,
+    })
   },
   ClickedAddLine: () => {
     const token = Session.token(model.session)
     if (token === null || model.summary === null) return { model }
-    const started = start(model, "billing.addLine")
-    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [AddLine({ request: started.request, token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, lineNumber: model.lineNumber, description: model.description, quantity: model.quantity, unitAmountMinor: model.unitAmountMinor })] }
+    return AddLine.start(model, { token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, lineNumber: model.lineNumber, description: model.description, quantity: model.quantity, unitAmountMinor: model.unitAmountMinor }, {
+      fieldErrors: {},
+      notice: null,
+    })
   },
   ClickedIssue: () => {
     const token = Session.token(model.session)
     if (token === null || model.summary === null) return { model }
-    const started = start(model, "billing.issue")
-    return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [IssueInvoice({ request: started.request, token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, number: model.invoiceNumber })] }
+    return IssueInvoice.start(model, { token, orderId: model.summary.order.id, expectedVersion: model.summary.order.version, number: model.invoiceNumber }, {
+      fieldErrors: {},
+      notice: null,
+    })
   },
   ClickedPay: () => {
     const token = Session.token(model.session)
     const invoice = model.summary?.invoice
     if (token === null || invoice === null || invoice === undefined) return { model }
-    const started = start(model, "billing.pay")
-    return {
-      model: evo(model, { requests: () => started.state, notice: () => null }),
-      commands: [PayInvoice({ request: started.request, token, invoiceId: invoice.id, expectedVersion: invoice.version })],
-    }
+    return PayInvoice.start(model, {
+      token,
+      invoiceId: invoice.id,
+      expectedVersion: invoice.version,
+    }, { notice: null })
   },
   ClickedReload: () => loadCurrent(model, null),
   SucceededCreate: ({ request, order }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const afterCreate = Requests.succeed(model.requests, request)
+    const settled = RpcBrowser.succeed(model, request, {
+      summary: null,
+      orderNumber: "",
+      customer: "",
+      notice: { kind: "success" as const, text: "Order created." },
+    })
+    if (!settled.accepted) return { model }
+
     const token = Session.token(model.session)
-    if (token === null) return { model: evo(model, { requests: () => afterCreate }) }
-    const started = Requests.start(afterCreate, "billing.load")
-    return {
-      model: evo(model, {
-        requests: () => started.state,
-        summary: () => null,
-        orderNumber: () => "",
-        customer: () => "",
-        notice: () => ({ kind: "success" as const, text: "Order created." }),
-      }),
-      commands: [LoadOrder({ request: started.request, token, orderId: order.id })],
-    }
+    return token === null
+      ? { model: settled.model }
+      : LoadOrder.start(settled.model, { token, orderId: order.id })
   },
-  SucceededSummary: ({ request, summary }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.succeed(model.requests, request), summary: () => summary, lineNumber: () => String(summary.lines.length + 1), description: () => "", quantity: () => "1", unitAmountMinor: () => "" }),
-  },
+  SucceededSummary: ({ request, summary }) => RpcBrowser.succeed(model, request, {
+    summary,
+    lineNumber: String(summary.lines.length + 1),
+    description: "",
+    quantity: "1",
+    unitAmountMinor: "",
+  }),
   SucceededAction: ({ request, text }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    return loadCurrent(evo(model, { requests: () => Requests.succeed(model.requests, request) }), { kind: "success", text })
+    const settled = RpcBrowser.succeed(model, request)
+    return settled.accepted
+      ? loadCurrent(settled.model, { kind: "success", text })
+      : { model }
   },
-  Failed: ({ request, error, fieldErrors }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, {
-      requests: () => Requests.fail(model.requests, request, error),
-      fieldErrors: () => fieldErrors,
-      notice: () => ({ kind: "error" as const, text: error }),
-    }),
-  },
+  Failed: ({ request, error, fieldErrors }) => RpcBrowser.fail(model, request, error, {
+    fieldErrors,
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
@@ -312,7 +317,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const summary = model.summary
   const invoice = summary?.invoice
   const isDraft = summary?.order.status === "draft"
-  const pending = Requests.pending(model.requests)
+  const pending = RpcBrowser.pending(model)
   return {
     title: "Orders and invoices",
     body: shell(h, {

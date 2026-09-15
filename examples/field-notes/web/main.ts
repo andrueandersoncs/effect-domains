@@ -72,6 +72,7 @@ const newReportId = () => `report_${crypto.randomUUID().replaceAll("-", "").slic
 const emptyForm = () => ({ id: newReportId(), title: "", site: "", body: "", selectedId: null as string | null })
 
 export const ListReports = RpcBrowser.command("ListReports", {
+  request: "reports.list",
   args: {
     token: Schema.String,
     filterSite: Schema.String,
@@ -118,6 +119,7 @@ export const subscriptions = RpcBrowser.query<Model, Message>()("reports", {
 })
 
 export const GetReport = RpcBrowser.command("GetReport", {
+  request: "reports.get",
   args: { token: Schema.String, id: Schema.String },
   success: Message.SucceededGet,
   failure: Message.Failed,
@@ -129,6 +131,7 @@ export const GetReport = RpcBrowser.command("GetReport", {
 })
 
 export const SaveReport = RpcBrowser.mutation("SaveReport", {
+  request: "reports.save",
   args: {
     token: Schema.String,
     selectedId: Schema.NullOr(Schema.String),
@@ -149,6 +152,7 @@ export const SaveReport = RpcBrowser.mutation("SaveReport", {
 })
 
 export const RemoveReport = RpcBrowser.mutation("RemoveReport", {
+  request: "reports.remove",
   args: { token: Schema.String, id: Schema.String },
   success: Message.SucceededRemove,
   failure: Message.Failed,
@@ -167,7 +171,7 @@ const list = (model: Model, append: boolean) => {
   const started = pipe(ReportsPager.begin(model.requests, model.reports, append), Option.getOrThrow)
   return {
     model: evo(model, { requests: () => started.requests, reports: () => started.page, notice: () => null }),
-    commands: [ListReports({ request: started.request, token, filterSite: model.filterSite, cursor: started.cursor, append: started.append })],
+    commands: [ListReports.command({ request: started.request, token, filterSite: model.filterSite, cursor: started.cursor, append: started.append })],
   }
 }
 const resetReports = (model: Model) => {
@@ -208,12 +212,16 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     model: evo(resetReports(model), { refresh: () => model.refresh + 1, notice: () => null }),
   }),
   ClickedMore: () => model.reports.nextCursor === null || ReportsPager.pending(model.requests) ? { model } : list(model, true),
-  ClickedNew: () => ({ model: { ...model, ...emptyForm(), requests: Requests.invalidate(Requests.invalidate(model.requests, "reports.get"), "reports.save"), notice: null } }),
+  ClickedNew: () => RpcBrowser.invalidate(
+    RpcBrowser.invalidate(model, GetReport.requestKey).model,
+    SaveReport.requestKey,
+    { ...emptyForm(), notice: null },
+  ),
   ClickedSelect: ({ id }) => {
     const token = Session.token(model.session)
     if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before opening a report." }) }) }
-    const started = Requests.start(Requests.invalidate(model.requests, "reports.save"), "reports.get")
-    return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [GetReport({ request: started.request, token, id })] }
+    const invalidated = RpcBrowser.invalidate(model, SaveReport.requestKey).model
+    return GetReport.start(invalidated, { token, id }, { notice: null })
   },
   ClickedSave: () => {
     const token = Session.token(model.session)
@@ -221,27 +229,17 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     if (model.id.trim() === "" || model.title.trim() === "" || model.site.trim() === "" || model.body.trim() === "") {
       return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Identifier, title, site, and report are required." }) }) }
     }
-    const started = Requests.start(model.requests, "reports.save")
     const report = { id: model.id.trim(), title: model.title.trim(), site: model.site.trim(), body: model.body.trim() }
-    return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [SaveReport({ request: started.request, token, selectedId: model.selectedId, report })] }
+    return SaveReport.start(model, { token, selectedId: model.selectedId, report }, { notice: null })
   },
   ClickedRemove: ({ id }) => {
     const token = Session.token(model.session)
     if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before removing a report." }) }) }
-    const started = Requests.start(model.requests, "reports.remove")
-    return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveReport({ request: started.request, token, id })] }
+    return RemoveReport.start(model, { token, id }, { notice: null })
   },
-  SynchronizedList: ({ page }) => ({
-    model: evo(model, {
-      requests: () => Requests.invalidate(model.requests, "reports.list"),
-      reports: () => page,
-    }),
-  }),
-  FailedList: ({ error }) => ({
-    model: evo(model, {
-      requests: () => Requests.invalidate(model.requests, "reports.list"),
-      notice: () => ({ kind: "error" as const, text: error }),
-    }),
+  SynchronizedList: ({ page }) => RpcBrowser.invalidate(model, ListReports.requestKey, { reports: page }),
+  FailedList: ({ error }) => RpcBrowser.invalidate(model, ListReports.requestKey, {
+    notice: { kind: "error" as const, text: error },
   }),
   SucceededList: ({ request, append, page }) => Option.match(
     ReportsPager.receive({ page: model.reports, requests: model.requests }, request, page, append),
@@ -250,29 +248,25 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
       onSome: (received) => ({ model: evo(model, { requests: () => received.requests, reports: () => received.page }) }),
     },
   ),
-  SucceededGet: ({ request, report }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: setReport(evo(model, { requests: () => Requests.succeed(model.requests, request), notice: () => null }), report),
+  SucceededGet: ({ request, report }) => {
+    const settled = RpcBrowser.succeed(model, request, { notice: null })
+    return settled.accepted ? { model: setReport(settled.model, report) } : { model }
   },
   SucceededSave: ({ request, report, created }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const next = setReport(evo(model, {
-      requests: () => Requests.succeed(model.requests, request),
-      notice: () => ({ kind: "success" as const, text: created ? "Report filed." : "Report updated." }),
-    }), report)
-    return { model: next }
+    const notice = { kind: "success" as const, text: created ? "Report filed." : "Report updated." }
+    const settled = RpcBrowser.succeed(model, request, { notice })
+    return settled.accepted ? { model: setReport(settled.model, report) } : { model }
   },
   SucceededRemove: ({ request, id }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const next = evo(model, {
-      requests: () => Requests.succeed(model.requests, request),
-      ...(model.selectedId === id ? Object.fromEntries(Object.entries(emptyForm()).map(([key, value]) => [key, () => value])) : {}),
-      notice: () => ({ kind: "success" as const, text: "Report removed." }),
+    const patch = model.selectedId === id ? emptyForm() : {}
+    return RpcBrowser.succeed(model, request, {
+      ...patch,
+      notice: { kind: "success" as const, text: "Report removed." },
     })
-    return { model: next }
   },
-  Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
-  },
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient | Reactivity.Reactivity> = () => ({
@@ -290,13 +284,13 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
       h.section([h.Class("panel stack")], [
         h.div([h.Class("actions")], [
           field(h, { id: "filter-site", label: "Site", children: textInput(h, { id: "filter-site", value: model.filterSite, type: "text", placeholder: "All sites", autocomplete: "off", onInput: (value) => Message.ChangedFilterSite({ value }) }) }),
-          primaryButton(h, { label: Requests.pending(model.requests, "reports.list") ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: Requests.pending(model.requests, "reports.list") }),
+          primaryButton(h, { label: ListReports.pending(model) ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: ListReports.pending(model) }),
         ]),
         dataTable(h, { caption: "Reports", columns: ["Title", "Site", "Identifier", ""], rows: model.reports.items, key: (report) => report.id, cells: (report) => [
           report.title, report.site, report.id,
-          h.div([h.Class("row-actions")], [quietButton(h, { label: "Open", message: Message.ClickedSelect({ id: report.id }), disabled: false }), quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: report.id }), disabled: Requests.pending(model.requests) })]),
+          h.div([h.Class("row-actions")], [quietButton(h, { label: "Open", message: Message.ClickedSelect({ id: report.id }), disabled: false }), quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: report.id }), disabled: RpcBrowser.pending(model) })]),
         ] }),
-        model.reports.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: Requests.pending(model.requests, "reports.list") }),
+        model.reports.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: ListReports.pending(model) }),
       ]),
       h.section([h.Class("panel")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSave())], [
         h.h2([], [model.selectedId === null ? "File a report" : "Edit report"]),
@@ -304,7 +298,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
         field(h, { id: "report-title", label: "Title", children: textInput(h, { id: "report-title", value: model.title, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedTitle({ value }) }) }),
         field(h, { id: "report-site", label: "Site", children: textInput(h, { id: "report-site", value: model.site, type: "text", placeholder: "", autocomplete: "off", onInput: (value) => Message.ChangedSite({ value }) }) }),
         field(h, { id: "report-body", label: "Report", children: textareaInput(h, { id: "report-body", value: model.body, rows: 7, onInput: (value) => Message.ChangedBody({ value }) }) }),
-        h.div([h.Class("actions")], [primaryButton(h, { label: model.selectedId === null ? "File report" : "Save changes", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests) }), quietButton(h, { label: "New report", message: Message.ClickedNew(), disabled: false })]),
+        h.div([h.Class("actions")], [primaryButton(h, { label: model.selectedId === null ? "File report" : "Save changes", message: Option.none(), type: "submit", disabled: RpcBrowser.pending(model) }), quietButton(h, { label: "New report", message: Message.ClickedNew(), disabled: false })]),
       ])]),
     ])],
   }),

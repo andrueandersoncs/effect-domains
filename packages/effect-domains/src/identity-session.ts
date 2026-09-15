@@ -89,6 +89,7 @@ const executeLogin = Effect.fn("IdentitySession.executeLogin")(function* ({ user
 })
 
 const Login = RpcBrowser.command("IdentitySession.login", {
+  request: { key: "identity.session", concurrency: "exhaust" },
   args: LoginArgs.fields,
   success: IdentitySessionMessageSchema.SucceededLogin,
   failure: IdentitySessionMessageSchema.Failed,
@@ -114,6 +115,7 @@ const executeLogout = Effect.fn("IdentitySession.executeLogout")(function* ({ to
 })
 
 const Logout = RpcBrowser.command("IdentitySession.logout", {
+  request: { key: "identity.session", concurrency: "exhaust" },
   args: LogoutArgs.fields,
   success: IdentitySessionMessageSchema.SucceededLogout,
   failure: IdentitySessionMessageSchema.Failed,
@@ -151,14 +153,16 @@ const empty = () => IdentitySessionModelSchema.make({
   requests: Requests.empty(),
 })
 
-const clear = (model: IdentitySessionModel) => IdentitySessionModelSchema.make({
-  ...model,
-  password: "",
-  token: null,
-  expiresAt: null,
-  generation: model.generation + 1,
-  requests: Requests.reset(model.requests),
-})
+const clear = (model: IdentitySessionModel) => {
+  const reset = RpcBrowser.reset(model, {
+    password: "",
+    token: null,
+    expiresAt: null,
+    generation: model.generation + 1,
+  })
+
+  return IdentitySessionModelSchema.make(reset.model)
+}
 
 const result = (model: IdentitySessionModel) =>
   UpdateResultSchema.make({ model }) as UpdateReturn
@@ -171,7 +175,7 @@ const commanded = (
 const update = (model: IdentitySessionModel, message: IdentitySessionMessage) =>
   IdentitySessionMessageSchema.match<UpdateReturn>(message, {
     ChangedUsername: ({ value }) => {
-      const pending = Requests.pending(model.requests)
+      const pending = RpcBrowser.pending(model)
 
       const next = pending
         ? model
@@ -180,7 +184,7 @@ const update = (model: IdentitySessionModel, message: IdentitySessionMessage) =>
       return result(next)
     },
     ChangedPassword: ({ value }) => {
-      const pending = Requests.pending(model.requests)
+      const pending = RpcBrowser.pending(model)
 
       const next = pending
         ? model
@@ -190,61 +194,60 @@ const update = (model: IdentitySessionModel, message: IdentitySessionMessage) =>
     },
     ClickedLogin: () => {
       const hasToken = Predicate.isNotNull(model.token)
-      const pending = Requests.pending(model.requests)
+      const pending = RpcBrowser.pending(model)
       const blocked = hasToken || pending
       if (blocked) return result(model)
 
-      const started = Requests.start(model.requests, "identity.session")
       const password = Redacted.make(model.password)
-      const command = Login({ request: started.request, username: model.username, password })
-      const next = IdentitySessionModelSchema.make({ ...model, password: "", requests: started.state })
 
-      return commanded(next, [command])
+      const started = Login.start(
+        model,
+        { username: model.username, password },
+        { password: "" },
+      )
+
+      const next = IdentitySessionModelSchema.make(started.model)
+
+      return commanded(next, started.commands)
     },
     ClickedLogout: () => {
       const missingToken = Predicate.isNull(model.token)
-      const pending = Requests.pending(model.requests)
+      const pending = RpcBrowser.pending(model)
       const blocked = missingToken || pending
       if (blocked) return result(model)
 
-      const started = Requests.start(model.requests, "identity.session")
       const token = Redacted.make(model.token)
-      const command = Logout({ request: started.request, token })
-      const next = IdentitySessionModelSchema.make({ ...model, requests: started.state })
+      const started = Logout.start(model, { token })
+      const next = IdentitySessionModelSchema.make(started.model)
 
-      return commanded(next, [command])
+      return commanded(next, started.commands)
     },
     SucceededLogin: ({ request, session }) => {
-      if (!Requests.accepts(model.requests, request)) return result(model)
-
       const generation = model.generation + 1
       const token = Redacted.value(session.token)
       const expiresAt = DateTime.formatIso(session.expiresAt)
-      const requests = Requests.succeed(model.requests, request)
 
-      const next = IdentitySessionModelSchema.make({
-        ...model,
+      const settled = RpcBrowser.succeed(model, request, {
         password: "",
         token,
         expiresAt,
         generation,
-        requests,
       })
 
+      if (!settled.accepted) return result(model)
+
       const command = Expire({ generation, expiresAt: session.expiresAt })
+      const next = IdentitySessionModelSchema.make(settled.model)
       return commanded(next, [command])
     },
     SucceededLogout: ({ request }) => {
-      const accepted = Requests.accepts(model.requests, request)
-      const next = accepted ? clear(model) : model
+      const settled = RpcBrowser.succeed(model, request)
+      const next = settled.accepted ? clear(settled.model) : model
       return result(next)
     },
     Failed: ({ request, error }) => {
-      const accepted = Requests.accepts(model.requests, request)
-      if (!accepted) return result(model)
-
-      const requests = Requests.fail(model.requests, request, error)
-      const next = IdentitySessionModelSchema.make({ ...model, password: "", requests })
+      const settled = RpcBrowser.fail(model, request, error, { password: "" })
+      const next = IdentitySessionModelSchema.make(settled.model)
       return result(next)
     },
     Expired: ({ generation }) => {
@@ -253,6 +256,7 @@ const update = (model: IdentitySessionModel, message: IdentitySessionMessage) =>
       return result(next)
     },
   })
+
 
 const generationChanged = (
   previous: IdentitySessionModel,
@@ -280,6 +284,7 @@ export const IdentitySession = {
   update,
   embed,
   generationChanged,
+  pending: Login.pending,
   token: Struct.get<IdentitySessionModel, "token">("token"),
   expiresAt: Struct.get<IdentitySessionModel, "expiresAt">("expiresAt"),
   generation: Struct.get<IdentitySessionModel, "generation">("generation"),

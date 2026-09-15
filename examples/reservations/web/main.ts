@@ -57,6 +57,7 @@ export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>
 
 export const GetStock = RpcBrowser.command("GetStock", {
+  request: "stock",
   args: { sku: Schema.String },
   success: Message.SucceededStock,
   failure: Message.Failed,
@@ -70,6 +71,7 @@ export const GetStock = RpcBrowser.command("GetStock", {
 })
 
 export const GetReservation = RpcBrowser.command("GetReservation", {
+  request: "reservation",
   args: { id: Schema.String },
   success: Message.SucceededLoadedReservation,
   failure: Message.Failed,
@@ -83,6 +85,7 @@ export const GetReservation = RpcBrowser.command("GetReservation", {
 })
 
 export const Reserve = RpcBrowser.command("Reserve", {
+  request: "reserve",
   args: { sku: Schema.String, quantity: Schema.String },
   success: Message.SucceededReservation,
   failure: Message.Failed,
@@ -97,6 +100,7 @@ export const Reserve = RpcBrowser.command("Reserve", {
 })
 
 const transition = (name: "confirm" | "release", action: string) => RpcBrowser.command(name, {
+  request: "transition",
   args: { id: ReservationSchema.fields.id },
   success: Message.SucceededReservation,
   failure: Message.Failed,
@@ -110,63 +114,60 @@ const transition = (name: "confirm" | "release", action: string) => RpcBrowser.c
 export const Confirm = transition("confirm", "Reservation confirmed.")
 export const Release = transition("release", "Reservation released and stock restored.")
 
-const starts = (model: Model, key: string) => Requests.start(model.requests, key)
-const requestPending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
+const requestPending = (model: Model, ...keys: [] | [string]) => RpcBrowser.pending(model, ...keys)
 
 export const update = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
-    ChangedSku: ({ value }) => ({ model: evo(model, { sku: () => value, stock: () => null, requests: (current) => Requests.invalidate(current, "stock"), notice: () => null }) }),
+    ChangedSku: ({ value }) => RpcBrowser.invalidate(model, GetStock.requestKey, { sku: value, stock: null, notice: null }),
     ChangedQuantity: ({ value }) => ({ model: evo(model, { quantity: () => value }) }),
-    ChangedReservationId: ({ value }) => ({ model: evo(model, { reservationId: () => value, reservation: () => null, requests: (current) => Requests.invalidate(current, "reservation"), notice: () => null }) }),
+    ChangedReservationId: ({ value }) => RpcBrowser.invalidate(model, GetReservation.requestKey, { reservationId: value, reservation: null, notice: null }),
     ClickedReloadStock: () => {
       const sku = model.sku.trim()
       if (sku === "") return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Enter a SKU." }) }) }
-      const { state, request } = starts(model, "stock")
-      return { model: evo(model, { requests: () => state, notice: () => null }), commands: [GetStock({ request, sku })] }
+      return GetStock.start(model, { sku }, { notice: null })
     },
     ClickedReserve: () => {
       const sku = model.sku.trim()
       if (sku === "") return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Enter a SKU." }) }) }
-      const { state, request } = starts(model, "reserve")
-      return { model: evo(model, { requests: () => state, notice: () => null }), commands: [Reserve({ request, sku, quantity: model.quantity })] }
+      return Reserve.start(model, { sku, quantity: model.quantity }, { notice: null })
     },
     ClickedGetReservation: () => {
       const id = model.reservationId.trim()
       if (id === "") return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Enter a reservation ID." }) }) }
-      const { state, request } = starts(model, "reservation")
-      return { model: evo(model, { requests: () => state, notice: () => null }), commands: [GetReservation({ request, id })] }
+      return GetReservation.start(model, { id }, { notice: null })
     },
     ClickedConfirm: () => {
       if (model.reservation === null) return { model }
-      const { state, request } = starts(model, "transition")
-      return { model: evo(model, { requests: () => state, notice: () => null }), commands: [Confirm({ request, id: model.reservation.id })] }
+      return Confirm.start(model, { id: model.reservation.id }, { notice: null })
     },
     ClickedRelease: () => {
       if (model.reservation === null) return { model }
-      const { state, request } = starts(model, "transition")
-      return { model: evo(model, { requests: () => state, notice: () => null }), commands: [Release({ request, id: model.reservation.id })] }
+      return Release.start(model, { id: model.reservation.id }, { notice: null })
     },
-    SucceededStock: ({ request, stock }) => Requests.accepts(model.requests, request)
-      ? { model: evo(model, { stock: () => stock, requests: (current) => Requests.succeed(current, request) }) }
-      : { model },
-    SucceededLoadedReservation: ({ request, reservation }) => Requests.accepts(model.requests, request)
-      ? { model: evo(model, { reservation: () => reservation, reservationId: () => reservation.id, requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: "Reservation loaded." }) }) }
-      : { model },
+    SucceededStock: ({ request, stock }) => RpcBrowser.succeed(model, request, { stock }),
+    SucceededLoadedReservation: ({ request, reservation }) => RpcBrowser.succeed(model, request, {
+      reservation,
+      reservationId: reservation.id,
+      notice: { kind: "success" as const, text: "Reservation loaded." },
+    }),
     SucceededReservation: ({ request, reservation, action }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
-      const settled = evo(model, { reservation: () => reservation, reservationId: () => reservation.id, requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: action }) })
-      const stockRequest = starts(settled, "stock")
-      return { model: evo(settled, { requests: () => stockRequest.state }), commands: [GetStock({ request: stockRequest.request, sku: settled.sku.trim() })] }
+      const settled = RpcBrowser.succeed(model, request, {
+        reservation,
+        reservationId: reservation.id,
+        notice: { kind: "success" as const, text: action },
+      })
+      if (!settled.accepted) return { model }
+
+      return GetStock.start(settled.model, { sku: settled.model.sku.trim() })
     },
-    Failed: ({ request, error }) => Requests.accepts(model.requests, request)
-      ? { model: evo(model, { requests: (current) => Requests.fail(current, request, error), notice: () => ({ kind: "error" as const, text: error }) }) }
-      : { model },
+    Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+      notice: { kind: "error" as const, text: error },
+    }),
   })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
   const model: Model = { stock: null, reservation: null, sku: "book", quantity: "1", reservationId: "", requests: Requests.empty(), notice: null }
-  const { state, request } = starts(model, "stock")
-  return { model: evo(model, { requests: () => state }), commands: [GetStock({ request, sku: model.sku })] }
+  return GetStock.start(model, { sku: model.sku })
 }
 
 const reservationCard = (reservation: typeof ReservationSchema.Type, model: Model, h: HtmlBuilder<Message>) => h.div(

@@ -1,4 +1,4 @@
-import { Schema, Struct } from "effect"
+import { Schema } from "effect"
 import { Authorization } from "effect-domains/authorization"
 import { Entitlements } from "effect-domains/entitlements"
 import { Table } from "effect-domains/table"
@@ -7,13 +7,17 @@ const ReportSchema = Schema.Struct({ id: Schema.String, tenantId: Schema.String,
 
 const SubjectSchema = Schema.Struct({ tenantId: Schema.String, nullableTenantId: Schema.NullOr(Schema.String), numberId: Schema.Int })
 const EntitlementRowSchema = Schema.Struct({ tenantId: Schema.String, active: Schema.Boolean })
-interface EntitlementRow extends Schema.Schema.Type<typeof EntitlementRowSchema> {}
-const activeGrant = Struct.get<EntitlementRow, "active">("active")
 
 const EntitlementRows = Table.make({
   name: "entitlement_rows",
   schema: EntitlementRowSchema,
 })
+
+const grants = Entitlements.for(EntitlementRows)
+const activeGrant = grants.eq(grants.row.active, true)
+
+// @ts-expect-error because equality operands must have compatible values.
+grants.eq(grants.row.active, "active")
 
 const reportSubscriptionSource = new Entitlements.Source({
   name: "reports.subscription",

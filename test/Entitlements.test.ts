@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equivalence, Function, Option, Predicate, Record, Ref, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, Option, Predicate, Record, Ref, Schema, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
@@ -12,12 +12,8 @@ import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { prepareTables } from "./prepare-tables.ts"
 
 const equals = Equivalence.strictEqual<unknown>()
-const stringEquals = Equivalence.strictEqual<string>()
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String })
 const ReportSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, title: Schema.String })
-const reportTitle = Struct.get<Schema.Schema.Type<typeof ReportSchema>, "title">("title")
-const isActive = (title: string) => stringEquals(title, "active")
-const activeReport = Function.flow(reportTitle, isActive)
 const p = Authorization.for({ resource: ReportSchema, subject: SubjectSchema })
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const access = p.all()
@@ -44,6 +40,31 @@ const AccountReports = Resource.define({
 })
 
 const accountReportsTable = Resource.table(AccountReports)
+const grants = Entitlements.for(accountReportsTable)
+const activeReport = grants.eq(grants.row.title, "active")
+
+const WindowSchema = Schema.Struct({
+  id: identifier(Schema.String),
+  tenantId: Schema.String,
+  status: Schema.Literals(["active", "canceled"]),
+  validUntil: Schema.DateTimeUtc,
+  graceUntil: Schema.NullOr(Schema.DateTimeUtc),
+})
+
+const AccessWindows = Resource.define({
+  name: "access_windows",
+  schema: WindowSchema,
+  authorization: Authorization.public,
+  capabilities: [],
+})
+
+const accessWindowsTable = Resource.table(AccessWindows)
+const windowGrants = Entitlements.for(accessWindowsTable)
+const beforeValidityEnd = windowGrants.lt(windowGrants.now, windowGrants.row.validUntil)
+const canceledWindow = windowGrants.eq(windowGrants.row.status, "canceled")
+const beforeGraceEnd = windowGrants.lt(windowGrants.now, windowGrants.row.graceUntil)
+const canceledWithinGrace = windowGrants.all(canceledWindow, beforeGraceEnd)
+const windowGrant = windowGrants.any(beforeValidityEnd, canceledWithinGrace)
 
 const AccountReportsRuntime = Resource.compile(AccountReports)
 
@@ -93,6 +114,17 @@ const reportSubscriptionSource = new Entitlements.Source({
   grant: activeReport,
 })
 
+const accessWindowSource = new Entitlements.Source({
+  name: "reports.window",
+  table: accessWindowsTable,
+  subject: SubjectSchema,
+  key: "id",
+  scope: { tenantId: "tenantId" },
+  grant: windowGrant,
+})
+
+const accessWindowEntitlements = Entitlements.fromTable(accessWindowSource)
+
 const tableEntitlements = Entitlements.fromTables([reportSubscriptionSource])
 
 
@@ -115,6 +147,29 @@ it.effect("table entitlement resolvers grant matching records, deny misses, and 
     expect(unknown).toBe(false)
   }),
   Effect.provide(tableEntitlements),
+  Effect.provide(sqlite),
+))
+
+it.effect("grant expressions compose time ordering with cancellation grace", () => pipe(
+  Effect.gen(function* () {
+    yield* prepareTables([accessWindowsTable])
+    const sql = yield* SqlClient.SqlClient
+
+    yield* sql`INSERT INTO access_windows (id, tenantId, status, validUntil, graceUntil) VALUES
+      ('active', 'a', 'active', '2099-01-01T00:00:00.000Z', NULL),
+      ('grace', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'),
+      ('expired', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '1900-01-02T00:00:00.000Z')`
+
+    const entitlements = yield* Entitlements
+    const active = yield* entitlements.has({ name: "reports.window", key: "active", subject: alice })
+    const grace = yield* entitlements.has({ name: "reports.window", key: "grace", subject: alice })
+    const expired = yield* entitlements.has({ name: "reports.window", key: "expired", subject: alice })
+
+    expect(active).toBe(true)
+    expect(grace).toBe(true)
+    expect(expired).toBe(false)
+  }),
+  Effect.provide(accessWindowEntitlements),
   Effect.provide(sqlite),
 ))
 

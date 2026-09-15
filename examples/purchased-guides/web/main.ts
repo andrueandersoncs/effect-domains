@@ -62,6 +62,7 @@ export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 export const GetGuide = RpcBrowser.command("GetGuide", {
+  request: "guides.get",
   args: { token: Schema.String, id: Schema.String },
   success: Message.SucceededGuide,
   failure: Message.Failed,
@@ -74,6 +75,7 @@ export const GetGuide = RpcBrowser.command("GetGuide", {
 })
 
 export const ListGuides = RpcBrowser.command("ListGuides", {
+  request: "guides.list",
   args: { token: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
   success: Message.SucceededList,
   failure: Message.Failed,
@@ -97,7 +99,7 @@ const list = (model: Model, append: boolean) => {
   const started = pipe(GuidesPager.begin(model.requests, model.guides, append), Option.getOrThrow)
   return {
     model: evo(model, { requests: () => started.requests, guides: () => started.page, notice: () => null }),
-    commands: [ListGuides({ request: started.request, token, cursor: started.cursor, append: started.append })],
+    commands: [ListGuides.command({ request: started.request, token, cursor: started.cursor, append: started.append })],
   }
 }
 
@@ -113,25 +115,26 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     const listing = list(next, false)
     return { model: listing.model, commands: [...child.commands, ...listing.commands] }
   },
-  SelectedGuide: ({ id }) => ({ model: evo(model, { requests: () => Requests.invalidate(model.requests, "guides.get"), selectedGuideId: () => id, guide: () => null, notice: () => null }) }),
+  SelectedGuide: ({ id }) => RpcBrowser.invalidate(model, GetGuide.requestKey, {
+    selectedGuideId: id,
+    guide: null,
+    notice: null,
+  }),
   ClickedLoad: () => {
     const token = Session.token(model.session)
     if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before loading a guide." }) }) }
-    const started = Requests.start(model.requests, "guides.get")
-    return { model: evo(model, { requests: () => started.state, guide: () => null, notice: () => null }), commands: [GetGuide({ request: started.request, token, id: model.selectedGuideId })] }
+    return GetGuide.start(model, { token, id: model.selectedGuideId }, { guide: null, notice: null })
   },
   ClickedList: () => list(model, false),
   ClickedMore: () => model.guides.nextCursor === null || GuidesPager.pending(model.requests) ? { model } : list(model, true),
-  SucceededGuide: ({ request, guide }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.succeed(model.requests, request), guide: () => guide }),
-  },
+  SucceededGuide: ({ request, guide }) => RpcBrowser.succeed(model, request, { guide }),
   SucceededList: ({ request, append, page }) => Option.match(GuidesPager.receive(guidesState(model), request, page, append), {
     onNone: () => ({ model }),
     onSome: (received) => ({ model: evo(model, { requests: () => received.requests, guides: () => received.page }) }),
   }),
-  Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
-  },
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
@@ -157,8 +160,8 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
         h.h2([], ["Open a guide"]),
         field(h, { id: "guide-id", label: "Guide", children: selectInput(h, { id: "guide-id", value: model.selectedGuideId, choices: guideChoices, onChange: (id) => Message.SelectedGuide({ id }) }) }),
         h.div([h.Class("actions")], [
-          primaryButton(h, { label: Requests.pending(model.requests, "guides.get") ? "Loading…" : "Load guide", message: Option.some(Message.ClickedLoad()), type: "button", disabled: Requests.pending(model.requests, "guides.get") }),
-          quietButton(h, { label: Requests.pending(model.requests, "guides.list") ? "Listing…" : "List guides", message: Message.ClickedList(), disabled: Requests.pending(model.requests, "guides.list") }),
+          primaryButton(h, { label: RpcBrowser.pending(model, "guides.get") ? "Loading…" : "Load guide", message: Option.some(Message.ClickedLoad()), type: "button", disabled: RpcBrowser.pending(model, "guides.get") }),
+          quietButton(h, { label: RpcBrowser.pending(model, "guides.list") ? "Listing…" : "List guides", message: Message.ClickedList(), disabled: RpcBrowser.pending(model, "guides.list") }),
         ]),
         model.guide === null ? h.p([h.Class("empty")], ["Choose a guide to read."]) : h.div([h.Class("stack")], [h.h3([], [model.guide.title]), h.p([], [model.guide.summary]), h.p([], [model.guide.body])]),
       ]),
@@ -168,7 +171,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
         dataTable(h, { caption: "Guides returned by guides.list", columns: ["Title", "Summary", ""], rows: model.guides.items, key: (guide) => guide.id, cells: (guide) => [
           guide.title, guide.summary, quietButton(h, { label: "Open", message: Message.SelectedGuide({ id: guide.id }), disabled: false }),
         ] }),
-        model.guides.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: Requests.pending(model.requests, "guides.list") }),
+        model.guides.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: RpcBrowser.pending(model, "guides.list") }),
       ]),
     ])],
   }),

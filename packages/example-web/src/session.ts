@@ -1,7 +1,6 @@
 import { Option } from "effect"
 import type { HtmlBuilder } from "foldkit/html"
 import { IdentitySession } from "effect-domains/identity-session"
-import { Requests } from "effect-domains/requests"
 import { field, notice, primaryButton, quietButton, textInput } from "./html.ts"
 
 type Model = typeof IdentitySession.ModelSchema.Type
@@ -12,7 +11,7 @@ export const identitySessionView = <Parent>(
   model: Model,
   onMessage: (message: Message) => Parent,
 ) => {
-  const busy = Requests.pending(model.requests)
+  const busy = IdentitySession.pending(model)
   const error = model.requests.errors["identity.session"]
   const status = error === undefined ? h.empty : notice(h, "error", error)
   if (model.token !== null) {

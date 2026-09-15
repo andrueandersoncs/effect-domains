@@ -111,6 +111,7 @@ const taskInput = (model: Model) => ({
 })
 
 export const ListTasks = RpcBrowser.command("ListTasks", {
+  request: "tasks.list",
   args: {
     token: Schema.String,
     filterProject: Schema.String,
@@ -137,6 +138,7 @@ export const ListTasks = RpcBrowser.command("ListTasks", {
 })
 
 export const SaveTask = RpcBrowser.command("SaveTask", {
+  request: "tasks.save",
   args: {
     token: Schema.String,
     selectedId: Schema.NullOr(Schema.String),
@@ -161,6 +163,7 @@ export const SaveTask = RpcBrowser.command("SaveTask", {
 })
 
 export const RemoveTask = RpcBrowser.command("RemoveTask", {
+  request: "tasks.remove",
   args: { token: Schema.String, id: Schema.String },
   success: Message.SucceededRemove,
   failure: Message.Failed,
@@ -183,7 +186,7 @@ const beginList = (model: Model, append: boolean) => {
       tasks: () => started.page,
       notice: () => null,
     }),
-    commands: [ListTasks({
+    commands: [ListTasks.command({
       request: started.request,
       token,
       filterProject: model.filterProject,
@@ -237,7 +240,6 @@ export const update = (model: Model, message: Message): UpdateReturn =>
       if (model.project.trim() === "" || model.title.trim() === "") {
         return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Project and title are required." }) }) }
       }
-      const started = Requests.start(model.requests, "tasks.save")
       const base = taskInput(model)
       const task = {
         completed: model.selectedId === null ? false : model.completed,
@@ -245,56 +247,46 @@ export const update = (model: Model, message: Message): UpdateReturn =>
         ownerId: model.ownerId,
         ...base,
       }
-      return {
-        model: evo(model, { requests: () => started.state, notice: () => null }),
-        commands: [SaveTask({ request: started.request, token, selectedId: model.selectedId, task })],
-      }
+      return SaveTask.start(model, { token, selectedId: model.selectedId, task }, { notice: null })
     },
-    ClickedNew: () => ({ model: { ...model, ...emptyForm, requests: Requests.invalidate(model.requests, "tasks.save"), notice: null } }),
+    ClickedNew: () => RpcBrowser.invalidate(model, SaveTask.requestKey, { ...emptyForm, notice: null }),
     ClickedSelect: ({ id }) => Option.match(Array.findFirst(model.tasks.items, (task) => task.id === id), {
       onNone: () => ({ model }),
-      onSome: (task) => ({
-        model: evo(model, {
-          requests: () => Requests.invalidate(model.requests, "tasks.save"),
-          selectedId: () => task.id, project: () => task.project, title: () => task.title,
-          detail: () => task.detail ?? "", priority: () => task.priority, dueDate: () => task.dueDate ?? "",
-          completed: () => task.completed, tenantId: () => task.tenantId, ownerId: () => task.ownerId, notice: () => null,
-        }),
+      onSome: (task) => RpcBrowser.invalidate(model, SaveTask.requestKey, {
+        selectedId: task.id, project: task.project, title: task.title,
+        detail: task.detail ?? "", priority: task.priority, dueDate: task.dueDate ?? "",
+        completed: task.completed, tenantId: task.tenantId, ownerId: task.ownerId, notice: null,
       }),
     }),
     ClickedRemove: ({ id }) => {
       const token = Session.token(model.session)
       if (token === null) return { model: evo(model, { notice: () => ({ kind: "error" as const, text: "Sign in before removing a task." }) }) }
-      const started = Requests.start(model.requests, "tasks.remove")
-      return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveTask({ request: started.request, token, id })] }
+      return RemoveTask.start(model, { token, id }, { notice: null })
     },
     SucceededList: ({ request, append, page }) => Option.match(TasksPager.receive(tasksState(model), request, page, append), {
       onNone: () => ({ model }),
       onSome: (received) => ({ model: evo(model, { requests: () => received.requests, tasks: () => received.page }) }),
     }),
     SucceededSave: ({ request, task, created }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
-      const next = evo(model, {
-        requests: () => Requests.succeed(model.requests, request),
-        selectedId: () => task.id, project: () => task.project, title: () => task.title, detail: () => task.detail ?? "",
-        priority: () => task.priority, dueDate: () => task.dueDate ?? "", completed: () => task.completed,
-        tenantId: () => task.tenantId, ownerId: () => task.ownerId,
-        notice: () => ({ kind: "success" as const, text: created ? "Task created." : "Task updated." }),
+      const settled = RpcBrowser.succeed(model, request, {
+        selectedId: task.id, project: task.project, title: task.title, detail: task.detail ?? "",
+        priority: task.priority, dueDate: task.dueDate ?? "", completed: task.completed,
+        tenantId: task.tenantId, ownerId: task.ownerId,
+        notice: { kind: "success" as const, text: created ? "Task created." : "Task updated." },
       })
-      return beginList(next, false)
+      return settled.accepted ? beginList(settled.model, false) : { model }
     },
     SucceededRemove: ({ request, id }) => {
-      if (!Requests.accepts(model.requests, request)) return { model }
-      const next = evo(model, {
-        requests: () => Requests.succeed(model.requests, request),
-        ...(model.selectedId === id ? Object.fromEntries(Object.entries(emptyForm).map(([key, value]) => [key, () => value])) : {}),
-        notice: () => ({ kind: "success" as const, text: "Task removed." }),
+      const patch = model.selectedId === id ? emptyForm : {}
+      const settled = RpcBrowser.succeed(model, request, {
+        ...patch,
+        notice: { kind: "success" as const, text: "Task removed." },
       })
-      return beginList(next, false)
+      return settled.accepted ? beginList(settled.model, false) : { model }
     },
-    Failed: ({ request, error }) => !Requests.accepts(model.requests, request)
-      ? { model }
-      : { model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }) },
+    Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+      notice: { kind: "error" as const, text: error },
+    }),
   })
 
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({
@@ -324,16 +316,16 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
             field(h, { id: "filter-project", label: "Project", children: textInput(h, { id: "filter-project", value: model.filterProject, onInput: (value) => Message.ChangedFilterProject({ value }), type: "text", placeholder: "", autocomplete: "off" }) }),
             field(h, { id: "filter-priority", label: "Priority", children: selectInput(h, { id: "filter-priority", value: model.filterPriority, onChange: (value) => Message.ChangedFilterPriority({ value: value as Model["filterPriority"] }), choices: priorityChoices }) }),
             field(h, { id: "filter-completed", label: "Status", children: selectInput(h, { id: "filter-completed", value: model.filterCompleted, onChange: (value) => Message.ChangedFilterCompleted({ value }), choices: completedChoices }) }),
-            primaryButton(h, { label: Requests.pending(model.requests, "tasks.list") ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: Requests.pending(model.requests, "tasks.list") }),
+            primaryButton(h, { label: RpcBrowser.pending(model, "tasks.list") ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: RpcBrowser.pending(model, "tasks.list") }),
           ]),
           dataTable(h, { caption: "Tasks", columns: ["Project", "Task", "Priority", "Due", "Status", ""], rows: model.tasks.items, key: (task) => task.id, cells: (task) => [
             task.project, task.title, task.priority, task.dueDate ?? "—", task.completed ? "Completed" : "Open",
             h.div([h.Class("row-actions")], [
               quietButton(h, { label: "Edit", message: Message.ClickedSelect({ id: task.id }), disabled: false }),
-              quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: task.id }), disabled: Requests.pending(model.requests) }),
+              quietButton(h, { label: "Remove", message: Message.ClickedRemove({ id: task.id }), disabled: RpcBrowser.pending(model) }),
             ]),
           ] }),
-          model.tasks.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: Requests.pending(model.requests, "tasks.list") }),
+          model.tasks.nextCursor === null ? h.empty : primaryButton(h, { label: "Load more", message: Option.some(Message.ClickedMore()), type: "button", disabled: RpcBrowser.pending(model, "tasks.list") }),
         ]),
         h.section([h.Class("panel")], [
           h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSave())], [
@@ -345,7 +337,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
             field(h, { id: "due-date", label: "Due date", children: textInput(h, { id: "due-date", type: "date", value: model.dueDate, onInput: (value) => Message.ChangedDueDate({ value }), placeholder: "", autocomplete: "off" }) }),
             ...(model.selectedId === null ? [] : [field(h, { id: "completed", label: "Status", children: selectInput(h, { id: "completed", value: String(model.completed), onChange: (value) => Message.ChangedCompleted({ value: value === "true" }), choices: completedChoices.slice(1) }) })]),
             h.div([h.Class("actions")], [
-              primaryButton(h, { label: model.selectedId === null ? "Create task" : "Save changes", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests) }),
+              primaryButton(h, { label: model.selectedId === null ? "Create task" : "Save changes", message: Option.none(), type: "submit", disabled: RpcBrowser.pending(model) }),
               quietButton(h, { label: "Clear", message: Message.ClickedNew(), disabled: false }),
             ]),
           ]),

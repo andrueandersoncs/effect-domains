@@ -51,6 +51,7 @@ const emptyTechnician = { technicianId: "", technicianName: "", technicianOnCall
 const emptyRepair = { repairCustomerId: "", repairItem: "", repairFault: "", repairUrgent: false, repairStatus: "queued" as const, repairTechnicianId: "" }
 
 export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
+  request: "customers.list",
   args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
   success: Message.SucceededCustomers,
   failure: Message.Failed,
@@ -64,6 +65,7 @@ export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
 })
 
 export const LoadTechnicians = RpcBrowser.command("LoadTechnicians", {
+  request: "technicians.list",
   args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
   success: Message.SucceededTechnicians,
   failure: Message.Failed,
@@ -77,6 +79,7 @@ export const LoadTechnicians = RpcBrowser.command("LoadTechnicians", {
 })
 
 export const LoadBoard = RpcBrowser.command("LoadBoard", {
+  request: "workshop.board",
   args: { status: Schema.String },
   success: Message.SucceededBoard,
   failure: Message.Failed,
@@ -93,6 +96,7 @@ export const LoadBoard = RpcBrowser.command("LoadBoard", {
 })
 
 export const SaveCustomer = RpcBrowser.command("SaveCustomer", {
+  request: "customers.save",
   args: {
     id: Schema.String,
     name: Schema.String,
@@ -117,6 +121,7 @@ export const SaveCustomer = RpcBrowser.command("SaveCustomer", {
 })
 
 export const SaveTechnician = RpcBrowser.command("SaveTechnician", {
+  request: "technicians.save",
   args: {
     id: Schema.String,
     name: Schema.String,
@@ -145,6 +150,7 @@ export const SaveTechnician = RpcBrowser.command("SaveTechnician", {
 })
 
 export const SaveRepair = RpcBrowser.command("SaveRepair", {
+  request: "repair_jobs.save",
   args: {
     customerId: Schema.String,
     item: Schema.String,
@@ -183,6 +189,7 @@ export const SaveRepair = RpcBrowser.command("SaveRepair", {
 })
 
 export const PatchRepairStatus = RpcBrowser.command("PatchRepairStatus", {
+  request: { key: { prefix: "repair_jobs.status", fields: ["id"] }, concurrency: "latest" },
   args: { id: Schema.String, status: RepairStatusSchema },
   success: Message.SucceededRepair,
   failure: Message.Failed,
@@ -196,6 +203,7 @@ export const PatchRepairStatus = RpcBrowser.command("PatchRepairStatus", {
 })
 
 export const PatchRepairTechnician = RpcBrowser.command("PatchRepairTechnician", {
+  request: { key: { prefix: "repair_jobs.technician", fields: ["id"] }, concurrency: "latest" },
   args: { id: Schema.String, technicianId: Schema.NullOr(Schema.String) },
   success: Message.SucceededRepair,
   failure: Message.Failed,
@@ -215,29 +223,29 @@ const techniciansState = (model: Model) => ({ page: { items: model.technicians, 
 const refresh = (model: Model) => {
   const customers = pipe(CustomersPager.begin(model.requests, customersState(model).page, false), Option.getOrThrow)
   const technicians = pipe(TechniciansPager.begin(customers.requests, techniciansState(model).page, false), Option.getOrThrow)
-  const board = Requests.start(technicians.requests, "workshop.board")
+  const board = LoadBoard.start({ ...model, requests: technicians.requests }, { status: model.filterStatus })
   return {
     customers: customers.page,
     technicians: technicians.page,
-    state: board.state,
+    state: board.model.requests,
     commands: [
-      LoadCustomers({ cursor: customers.cursor, append: customers.append, request: customers.request }),
-      LoadTechnicians({ cursor: technicians.cursor, append: technicians.append, request: technicians.request }),
-      LoadBoard({ status: model.filterStatus, request: board.request }),
+      LoadCustomers.command({ cursor: customers.cursor, append: customers.append, request: customers.request }),
+      LoadTechnicians.command({ cursor: technicians.cursor, append: technicians.append, request: technicians.request }),
+      ...board.commands,
     ],
   }
 }
 const beginCustomers = (model: Model, append: boolean) => {
   const started = pipe(CustomersPager.begin(model.requests, customersState(model).page, append), Option.getOrThrow)
-  return { page: started.page, state: started.requests, command: LoadCustomers({ cursor: started.cursor, append: started.append, request: started.request }) }
+  return { page: started.page, state: started.requests, command: LoadCustomers.command({ cursor: started.cursor, append: started.append, request: started.request }) }
 }
 const beginTechnicians = (model: Model, append: boolean) => {
   const started = pipe(TechniciansPager.begin(model.requests, techniciansState(model).page, append), Option.getOrThrow)
-  return { page: started.page, state: started.requests, command: LoadTechnicians({ cursor: started.cursor, append: started.append, request: started.request }) }
+  return { page: started.page, state: started.requests, command: LoadTechnicians.command({ cursor: started.cursor, append: started.append, request: started.request }) }
 }
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
-  ChangedFilterStatus: ({ value }) => ({ model: evo(model, { filterStatus: () => value, board: () => [], requests: () => Requests.invalidate(model.requests, "workshop.board") }) }), ChangedCustomerId: ({ value }) => ({ model: evo(model, { customerId: () => value }) }), ChangedCustomerName: ({ value }) => ({ model: evo(model, { customerName: () => value }) }), ChangedTechnicianId: ({ value }) => ({ model: evo(model, { technicianId: () => value }) }), ChangedTechnicianName: ({ value }) => ({ model: evo(model, { technicianName: () => value }) }), ChangedTechnicianOnCall: ({ value }) => ({ model: evo(model, { technicianOnCall: () => value === "true" }) }), ChangedRepairCustomer: ({ value }) => ({ model: evo(model, { repairCustomerId: () => value }) }), ChangedRepairItem: ({ value }) => ({ model: evo(model, { repairItem: () => value }) }), ChangedRepairFault: ({ value }) => ({ model: evo(model, { repairFault: () => value }) }), ChangedRepairUrgent: ({ value }) => ({ model: evo(model, { repairUrgent: () => value === "true" }) }), ChangedRepairStatus: ({ value }) => ({ model: evo(model, { repairStatus: () => value as Model["repairStatus"] }) }), ChangedRepairTechnician: ({ value }) => ({ model: evo(model, { repairTechnicianId: () => value }) }),
+  ChangedFilterStatus: ({ value }) => RpcBrowser.invalidate(model, LoadBoard.requestKey, { filterStatus: value, board: [] }), ChangedCustomerId: ({ value }) => ({ model: evo(model, { customerId: () => value }) }), ChangedCustomerName: ({ value }) => ({ model: evo(model, { customerName: () => value }) }), ChangedTechnicianId: ({ value }) => ({ model: evo(model, { technicianId: () => value }) }), ChangedTechnicianName: ({ value }) => ({ model: evo(model, { technicianName: () => value }) }), ChangedTechnicianOnCall: ({ value }) => ({ model: evo(model, { technicianOnCall: () => value === "true" }) }), ChangedRepairCustomer: ({ value }) => ({ model: evo(model, { repairCustomerId: () => value }) }), ChangedRepairItem: ({ value }) => ({ model: evo(model, { repairItem: () => value }) }), ChangedRepairFault: ({ value }) => ({ model: evo(model, { repairFault: () => value }) }), ChangedRepairUrgent: ({ value }) => ({ model: evo(model, { repairUrgent: () => value === "true" }) }), ChangedRepairStatus: ({ value }) => ({ model: evo(model, { repairStatus: () => value as Model["repairStatus"] }) }), ChangedRepairTechnician: ({ value }) => ({ model: evo(model, { repairTechnicianId: () => value }) }),
   ClickedReload: () => {
     const next = refresh(model)
     return { model: evo(model, { customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => null }), commands: next.commands }
@@ -250,15 +258,15 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     const next = beginTechnicians(model, true)
     return { model: evo(model, { technicians: () => next.page.items, technicianCursor: () => next.page.nextCursor, requests: () => next.state }), commands: [next.command] }
   })(),
-  ClickedSaveCustomer: () => { const started = Requests.start(model.requests, "customers.save"); return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [SaveCustomer({ id: model.customerId, name: model.customerName, editingId: model.editingCustomerId, request: started.request })] } },
+  ClickedSaveCustomer: () => SaveCustomer.start(model, { id: model.customerId, name: model.customerName, editingId: model.editingCustomerId }, { fieldErrors: {}, notice: null }),
   ClickedEditCustomer: ({ id }) => { const customer = model.customers.find((item) => item.id === id); return customer === undefined ? { model } : { model: evo(model, { customerId: () => customer.id, customerName: () => customer.name, editingCustomerId: () => customer.id, fieldErrors: () => ({}), notice: () => null }) } },
   ClickedClearCustomer: () => ({ model: evo(model, { customerId: () => "", customerName: () => "", editingCustomerId: () => null, fieldErrors: () => ({}), notice: () => null }) }),
-  ClickedSaveTechnician: () => { const started = Requests.start(model.requests, "technicians.save"); return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [SaveTechnician({ id: model.technicianId, name: model.technicianName, onCall: model.technicianOnCall, editingId: model.editingTechnicianId, request: started.request })] } },
+  ClickedSaveTechnician: () => SaveTechnician.start(model, { id: model.technicianId, name: model.technicianName, onCall: model.technicianOnCall, editingId: model.editingTechnicianId }, { fieldErrors: {}, notice: null }),
   ClickedEditTechnician: ({ id }) => { const technician = model.technicians.find((item) => item.id === id); return technician === undefined ? { model } : { model: evo(model, { technicianId: () => technician.id, technicianName: () => technician.name, technicianOnCall: () => technician.onCall, editingTechnicianId: () => technician.id, fieldErrors: () => ({}), notice: () => null }) } },
   ClickedClearTechnician: () => ({ model: evo(model, { technicianId: () => "", technicianName: () => "", technicianOnCall: () => false, editingTechnicianId: () => null, fieldErrors: () => ({}), notice: () => null }) }),
-  ClickedCreateRepair: () => { const started = Requests.start(model.requests, "repair_jobs.save"); return { model: evo(model, { requests: () => started.state, fieldErrors: () => ({}), notice: () => null }), commands: [SaveRepair({ customerId: model.repairCustomerId, item: model.repairItem, fault: model.repairFault, urgent: model.repairUrgent, status: model.repairStatus, technicianId: model.repairTechnicianId, request: started.request })] } },
-  ChangedBoardStatus: ({ id, value }) => { const started = Requests.start(model.requests, `repair_jobs.status.${id}`); return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [PatchRepairStatus({ id, status: value as Model["repairStatus"], request: started.request })] } },
-  ChangedBoardTechnician: ({ id, value }) => { const started = Requests.start(model.requests, `repair_jobs.technician.${id}`); return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [PatchRepairTechnician({ id, technicianId: value === "" ? null : value, request: started.request })] } },
+  ClickedCreateRepair: () => SaveRepair.start(model, { customerId: model.repairCustomerId, item: model.repairItem, fault: model.repairFault, urgent: model.repairUrgent, status: model.repairStatus, technicianId: model.repairTechnicianId }, { fieldErrors: {}, notice: null }),
+  ChangedBoardStatus: ({ id, value }) => PatchRepairStatus.start(model, { id, status: value as Model["repairStatus"] }, { notice: null }),
+  ChangedBoardTechnician: ({ id, value }) => PatchRepairTechnician.start(model, { id, technicianId: value === "" ? null : value }, { notice: null }),
   SucceededCustomers: ({ page, append, request }) => Option.match(CustomersPager.receive(customersState(model), request, page, append), {
     onNone: () => ({ model }),
     onSome: (received) => ({ model: evo(model, { customers: () => received.page.items, customerCursor: () => received.page.nextCursor, requests: () => received.requests }) }),
@@ -267,23 +275,29 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     onNone: () => ({ model }),
     onSome: (received) => ({ model: evo(model, { technicians: () => received.page.items, technicianCursor: () => received.page.nextCursor, requests: () => received.requests }) }),
   }),
-  SucceededBoard: ({ page, request }) => !Requests.accepts(model.requests, request) ? { model } : ({ model: evo(model, { board: () => page.items, requests: () => Requests.succeed(model.requests, request) }) }),
+  SucceededBoard: ({ page, request }) => RpcBrowser.succeed(model, request, { board: page.items }),
   SucceededCustomer: ({ created, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const next = refresh(evo(model, { requests: () => Requests.succeed(model.requests, request) }))
-    return { model: evo(model, { customerId: () => "", customerName: () => "", editingCustomerId: () => null, customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Customer created." : "Customer updated." }) }), commands: next.commands }
+    const settled = RpcBrowser.succeed(model, request)
+    if (!settled.accepted) return { model }
+    const next = refresh(settled.model)
+    return { model: evo(settled.model, { customerId: () => "", customerName: () => "", editingCustomerId: () => null, customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Customer created." : "Customer updated." }) }), commands: next.commands }
   },
   SucceededTechnician: ({ created, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const next = refresh(evo(model, { requests: () => Requests.succeed(model.requests, request) }))
-    return { model: evo(model, { technicianId: () => "", technicianName: () => "", technicianOnCall: () => false, editingTechnicianId: () => null, customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Technician created." : "Technician updated." }) }), commands: next.commands }
+    const settled = RpcBrowser.succeed(model, request)
+    if (!settled.accepted) return { model }
+    const next = refresh(settled.model)
+    return { model: evo(settled.model, { technicianId: () => "", technicianName: () => "", technicianOnCall: () => false, editingTechnicianId: () => null, customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Technician created." : "Technician updated." }) }), commands: next.commands }
   },
   SucceededRepair: ({ created, request }) => {
-    if (!Requests.accepts(model.requests, request)) return { model }
-    const next = refresh(evo(model, { requests: () => Requests.succeed(model.requests, request) }))
-    return { model: evo(model, { repairCustomerId: () => "", repairItem: () => "", repairFault: () => "", repairUrgent: () => false, repairStatus: () => "queued", repairTechnicianId: () => "", customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Repair created." : "Repair updated." }) }), commands: next.commands }
+    const settled = RpcBrowser.succeed(model, request)
+    if (!settled.accepted) return { model }
+    const next = refresh(settled.model)
+    return { model: evo(settled.model, { repairCustomerId: () => "", repairItem: () => "", repairFault: () => "", repairUrgent: () => false, repairStatus: () => "queued", repairTechnicianId: () => "", customers: () => next.customers.items, technicians: () => next.technicians.items, board: () => [], customerCursor: () => next.customers.nextCursor, technicianCursor: () => next.technicians.nextCursor, requests: () => next.state, notice: () => ({ kind: "success" as const, text: created ? "Repair created." : "Repair updated." }) }), commands: next.commands }
   },
-  Failed: ({ request, error, fieldErrors }) => !Requests.accepts(model.requests, request) ? { model } : ({ model: evo(model, { requests: () => Requests.fail(model.requests, request, error), fieldErrors: () => ({ ...model.fieldErrors, ...fieldErrors }), notice: () => ({ kind: "error" as const, text: error }) }) }),
+  Failed: ({ request, error, fieldErrors }) => RpcBrowser.fail(model, request, error, {
+    fieldErrors: { ...model.fieldErrors, ...fieldErrors },
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => {
   const model: Model = { customers: [], technicians: [], board: [], customerCursor: null, technicianCursor: null, filterStatus: "", ...emptyCustomer, ...emptyTechnician, ...emptyRepair, requests: Requests.empty(), fieldErrors: BrowserModel.emptyFieldErrors(), notice: null }
@@ -295,7 +309,7 @@ const customerChoices = (customers: ReadonlyArray<typeof CustomerRowSchema.Type>
 const repairTechnicianChoices = (technicians: ReadonlyArray<typeof TechnicianRowSchema.Type>, repair: typeof RepairBoardRowSchema.Type) => repair.technicianId === null || technicians.some((technician) => technician.id === repair.technicianId) ? technicianChoices(technicians) : [...technicianChoices(technicians), { value: repair.technicianId, label: `${repair.technicianName} (${repair.technicianId})` }]
 const onCall = (value: boolean | null) => value === null ? "—" : value ? "Yes" : "No"
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Repair workshop", body: shell(h, { title: "Repair workshop", lede: "Create customers, technicians, and repairs. The board is a joined projection and shows the first 50 matching repairs.", notice: model.notice, session: null, children: [
-  h.section([h.Class("panel stack")], [h.div([h.Class("actions")], [field(h, { id: "board-status", label: "Board status", children: selectInput(h, { id: "board-status", value: model.filterStatus, onChange: (value) => Message.ChangedFilterStatus({ value }), choices: filterChoices }) }), primaryButton(h, { label: Requests.pending(model.requests) ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: Requests.pending(model.requests) })]), dataTable(h, { caption: "Repair board", columns: ["Customer", "Item", "Fault", "Urgent", "Status", "Technician", "On call"], rows: model.board, key: (repair) => repair.id, cells: (repair) => [`${repair.customerName} (${repair.customerId})`, repair.item, repair.fault, repair.urgent ? "Yes" : "No", field(h, { id: `repair-status-${repair.id}`, label: "Status", children: selectInput(h, { id: `repair-status-${repair.id}`, value: repair.status, onChange: (value) => Message.ChangedBoardStatus({ id: repair.id, value }), choices: statusChoices }) }), field(h, { id: `repair-technician-${repair.id}`, label: "Technician", children: selectInput(h, { id: `repair-technician-${repair.id}`, value: repair.technicianId ?? "", onChange: (value) => Message.ChangedBoardTechnician({ id: repair.id, value }), choices: repairTechnicianChoices(model.technicians, repair) }) }), onCall(repair.technicianOnCall)] })]),
-  h.div([h.Class("split")], [h.section([h.Class("panel stack")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedCreateRepair())], [h.h2([], ["Create repair"]), field(h, { id: "repair-customer", label: "Customer", children: selectInput(h, { id: "repair-customer", value: model.repairCustomerId, onChange: (value) => Message.ChangedRepairCustomer({ value }), choices: customerChoices(model.customers) }), error: model.fieldErrors.repairCustomerId }), field(h, { id: "repair-item", label: "Item", children: textInput(h, { id: "repair-item", value: model.repairItem, onInput: (value) => Message.ChangedRepairItem({ value }), type: "text", placeholder: "Espresso machine", autocomplete: "off" }), error: model.fieldErrors.repairItem }), field(h, { id: "repair-fault", label: "Fault", children: textareaInput(h, { id: "repair-fault", value: model.repairFault, onInput: (value) => Message.ChangedRepairFault({ value }), rows: 3 }), error: model.fieldErrors.repairFault }), h.div([h.Class("actions")], [field(h, { id: "repair-urgent", label: "Urgent", children: selectInput(h, { id: "repair-urgent", value: String(model.repairUrgent), onChange: (value) => Message.ChangedRepairUrgent({ value }), choices: booleanChoices }) }), field(h, { id: "repair-new-status", label: "Status", children: selectInput(h, { id: "repair-new-status", value: model.repairStatus, onChange: (value) => Message.ChangedRepairStatus({ value }), choices: statusChoices }) }), field(h, { id: "repair-technician", label: "Technician", children: selectInput(h, { id: "repair-technician", value: model.repairTechnicianId, onChange: (value) => Message.ChangedRepairTechnician({ value }), choices: technicianChoices(model.technicians) }) })]), primaryButton(h, { label: "Create repair", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests, "repair_jobs.save") })])]),
-  h.section([h.Class("panel stack")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSaveCustomer())], [h.h2([], [model.editingCustomerId === null ? "Create customer" : "Edit customer"]), model.editingCustomerId === null ? field(h, { id: "customer-id", label: "Customer ID", children: textInput(h, { id: "customer-id", value: model.customerId, onInput: (value) => Message.ChangedCustomerId({ value }), type: "text", placeholder: "customer-1", autocomplete: "off" }), error: model.fieldErrors.customerId }) : h.p([], [`Customer ID: ${model.editingCustomerId}`]), field(h, { id: "customer-name", label: "Name", children: textInput(h, { id: "customer-name", value: model.customerName, onInput: (value) => Message.ChangedCustomerName({ value }), type: "text", placeholder: "Ada Customer", autocomplete: "off" }), error: model.fieldErrors.customerName }), h.div([h.Class("actions")], [primaryButton(h, { label: model.editingCustomerId === null ? "Create customer" : "Save customer", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests, "customers.save") }), quietButton(h, { label: "Clear", message: Message.ClickedClearCustomer(), disabled: false })])]), dataTable(h, { caption: "Customers loaded for selector", columns: ["ID", "Name", ""], rows: model.customers, key: (customer) => customer.id, cells: (customer) => [customer.id, customer.name, quietButton(h, { label: "Edit", message: Message.ClickedEditCustomer({ id: customer.id }), disabled: false })] }), model.customerCursor === null ? h.p([], ["All customer pages loaded."]) : quietButton(h, { label: "Load next customers", message: Message.ClickedNextCustomers(), disabled: Requests.pending(model.requests, "customers.list") }), h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSaveTechnician())], [h.h2([], [model.editingTechnicianId === null ? "Create technician" : "Edit technician"]), model.editingTechnicianId === null ? field(h, { id: "technician-id", label: "Technician ID", children: textInput(h, { id: "technician-id", value: model.technicianId, onInput: (value) => Message.ChangedTechnicianId({ value }), type: "text", placeholder: "tech-1", autocomplete: "off" }), error: model.fieldErrors.technicianId }) : h.p([], [`Technician ID: ${model.editingTechnicianId}`]), field(h, { id: "technician-name", label: "Name", children: textInput(h, { id: "technician-name", value: model.technicianName, onInput: (value) => Message.ChangedTechnicianName({ value }), type: "text", placeholder: "Sam Technician", autocomplete: "off" }), error: model.fieldErrors.technicianName }), field(h, { id: "technician-on-call", label: "On call", children: selectInput(h, { id: "technician-on-call", value: String(model.technicianOnCall), onChange: (value) => Message.ChangedTechnicianOnCall({ value }), choices: booleanChoices }) }), h.div([h.Class("actions")], [primaryButton(h, { label: model.editingTechnicianId === null ? "Create technician" : "Save technician", message: Option.none(), type: "submit", disabled: Requests.pending(model.requests, "technicians.save") }), quietButton(h, { label: "Clear", message: Message.ClickedClearTechnician(), disabled: false })])]), dataTable(h, { caption: "Technicians loaded for selector", columns: ["ID", "Name", "On call", ""], rows: model.technicians, key: (technician) => technician.id, cells: (technician) => [technician.id, technician.name, onCall(technician.onCall), quietButton(h, { label: "Edit", message: Message.ClickedEditTechnician({ id: technician.id }), disabled: false })] }), model.technicianCursor === null ? h.p([], ["All technician pages loaded."]) : quietButton(h, { label: "Load next technicians", message: Message.ClickedNextTechnicians(), disabled: Requests.pending(model.requests, "technicians.list") })])])
+  h.section([h.Class("panel stack")], [h.div([h.Class("actions")], [field(h, { id: "board-status", label: "Board status", children: selectInput(h, { id: "board-status", value: model.filterStatus, onChange: (value) => Message.ChangedFilterStatus({ value }), choices: filterChoices }) }), primaryButton(h, { label: RpcBrowser.pending(model) ? "Loading…" : "Reload", message: Option.some(Message.ClickedReload()), type: "button", disabled: RpcBrowser.pending(model) })]), dataTable(h, { caption: "Repair board", columns: ["Customer", "Item", "Fault", "Urgent", "Status", "Technician", "On call"], rows: model.board, key: (repair) => repair.id, cells: (repair) => [`${repair.customerName} (${repair.customerId})`, repair.item, repair.fault, repair.urgent ? "Yes" : "No", selectInput(h, { id: `repair-status-${repair.id}`, value: repair.status, onChange: (value) => Message.ChangedBoardStatus({ id: repair.id, value }), choices: statusChoices }), selectInput(h, { id: `repair-technician-${repair.id}`, value: repair.technicianId ?? "", onChange: (value) => Message.ChangedBoardTechnician({ id: repair.id, value }), choices: repairTechnicianChoices(model.technicians, repair) }), onCall(repair.technicianOnCall)] })]),
+  h.div([h.Class("split")], [h.section([h.Class("panel stack")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedCreateRepair())], [h.h2([], ["Create repair"]), field(h, { id: "repair-customer", label: "Customer", children: selectInput(h, { id: "repair-customer", value: model.repairCustomerId, onChange: (value) => Message.ChangedRepairCustomer({ value }), choices: customerChoices(model.customers) }), error: model.fieldErrors.repairCustomerId }), field(h, { id: "repair-item", label: "Item", children: textInput(h, { id: "repair-item", value: model.repairItem, onInput: (value) => Message.ChangedRepairItem({ value }), type: "text", placeholder: "Espresso machine", autocomplete: "off" }), error: model.fieldErrors.repairItem }), field(h, { id: "repair-fault", label: "Fault", children: textareaInput(h, { id: "repair-fault", value: model.repairFault, onInput: (value) => Message.ChangedRepairFault({ value }), rows: 3 }), error: model.fieldErrors.repairFault }), h.div([h.Class("actions")], [field(h, { id: "repair-urgent", label: "Urgent", children: selectInput(h, { id: "repair-urgent", value: String(model.repairUrgent), onChange: (value) => Message.ChangedRepairUrgent({ value }), choices: booleanChoices }) }), field(h, { id: "repair-new-status", label: "Status", children: selectInput(h, { id: "repair-new-status", value: model.repairStatus, onChange: (value) => Message.ChangedRepairStatus({ value }), choices: statusChoices }) }), field(h, { id: "repair-technician", label: "Technician", children: selectInput(h, { id: "repair-technician", value: model.repairTechnicianId, onChange: (value) => Message.ChangedRepairTechnician({ value }), choices: technicianChoices(model.technicians) }) })]), primaryButton(h, { label: "Create repair", message: Option.none(), type: "submit", disabled: RpcBrowser.pending(model, "repair_jobs.save") })])]),
+  h.section([h.Class("panel stack")], [h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSaveCustomer())], [h.h2([], [model.editingCustomerId === null ? "Create customer" : "Edit customer"]), model.editingCustomerId === null ? field(h, { id: "customer-id", label: "Customer ID", children: textInput(h, { id: "customer-id", value: model.customerId, onInput: (value) => Message.ChangedCustomerId({ value }), type: "text", placeholder: "customer-1", autocomplete: "off" }), error: model.fieldErrors.customerId }) : h.p([], [`Customer ID: ${model.editingCustomerId}`]), field(h, { id: "customer-name", label: "Name", children: textInput(h, { id: "customer-name", value: model.customerName, onInput: (value) => Message.ChangedCustomerName({ value }), type: "text", placeholder: "Ada Customer", autocomplete: "off" }), error: model.fieldErrors.customerName }), h.div([h.Class("actions")], [primaryButton(h, { label: model.editingCustomerId === null ? "Create customer" : "Save customer", message: Option.none(), type: "submit", disabled: RpcBrowser.pending(model, "customers.save") }), quietButton(h, { label: "Clear", message: Message.ClickedClearCustomer(), disabled: false })])]), dataTable(h, { caption: "Customers loaded for selector", columns: ["ID", "Name", ""], rows: model.customers, key: (customer) => customer.id, cells: (customer) => [customer.id, customer.name, quietButton(h, { label: "Edit", message: Message.ClickedEditCustomer({ id: customer.id }), disabled: false })] }), model.customerCursor === null ? h.p([], ["All customer pages loaded."]) : quietButton(h, { label: "Load next customers", message: Message.ClickedNextCustomers(), disabled: RpcBrowser.pending(model, "customers.list") }), h.form([h.Class("stack"), h.OnSubmit(Message.ClickedSaveTechnician())], [h.h2([], [model.editingTechnicianId === null ? "Create technician" : "Edit technician"]), model.editingTechnicianId === null ? field(h, { id: "technician-id", label: "Technician ID", children: textInput(h, { id: "technician-id", value: model.technicianId, onInput: (value) => Message.ChangedTechnicianId({ value }), type: "text", placeholder: "tech-1", autocomplete: "off" }), error: model.fieldErrors.technicianId }) : h.p([], [`Technician ID: ${model.editingTechnicianId}`]), field(h, { id: "technician-name", label: "Name", children: textInput(h, { id: "technician-name", value: model.technicianName, onInput: (value) => Message.ChangedTechnicianName({ value }), type: "text", placeholder: "Sam Technician", autocomplete: "off" }), error: model.fieldErrors.technicianName }), field(h, { id: "technician-on-call", label: "On call", children: selectInput(h, { id: "technician-on-call", value: String(model.technicianOnCall), onChange: (value) => Message.ChangedTechnicianOnCall({ value }), choices: booleanChoices }) }), h.div([h.Class("actions")], [primaryButton(h, { label: model.editingTechnicianId === null ? "Create technician" : "Save technician", message: Option.none(), type: "submit", disabled: RpcBrowser.pending(model, "technicians.save") }), quietButton(h, { label: "Clear", message: Message.ClickedClearTechnician(), disabled: false })])]), dataTable(h, { caption: "Technicians loaded for selector", columns: ["ID", "Name", "On call", ""], rows: model.technicians, key: (technician) => technician.id, cells: (technician) => [technician.id, technician.name, onCall(technician.onCall), quietButton(h, { label: "Edit", message: Message.ClickedEditTechnician({ id: technician.id }), disabled: false })] }), model.technicianCursor === null ? h.p([], ["All technician pages loaded."]) : quietButton(h, { label: "Load next technicians", message: Message.ClickedNextTechnicians(), disabled: RpcBrowser.pending(model, "technicians.list") })])])
 ] }) })

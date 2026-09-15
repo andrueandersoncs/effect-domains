@@ -63,6 +63,7 @@ const emptyForm = { date: today, merchant: "", category: "meals", amountMinor: "
 const queryPayload = (from: string, through: string, filterCategory: string) => Schema.decodeUnknownEffect(ExpenseQueryInputSchema)({ from, through, ...(filterCategory === "" ? {} : { category: filterCategory }), limit: 50 })
 
 export const ListExpenses = RpcBrowser.command("ListExpenses", {
+  request: "list",
   args: { from: Schema.String, through: Schema.String, filterCategory: Schema.String },
   success: Message.SucceededList,
   failure: Message.Failed,
@@ -80,6 +81,7 @@ export const ListExpenses = RpcBrowser.command("ListExpenses", {
 })
 
 export const LoadTotals = RpcBrowser.command("LoadTotals", {
+  request: "totals",
   args: { from: Schema.String, through: Schema.String, filterCategory: Schema.String },
   success: Message.SucceededTotals,
   failure: Message.Failed,
@@ -92,6 +94,7 @@ export const LoadTotals = RpcBrowser.command("LoadTotals", {
 })
 
 export const GetExpense = RpcBrowser.command("GetExpense", {
+  request: "get",
   args: { id: Schema.String },
   success: Message.SucceededGet,
   failure: Message.Failed,
@@ -103,6 +106,7 @@ export const GetExpense = RpcBrowser.command("GetExpense", {
 })
 
 export const SaveExpense = RpcBrowser.command("SaveExpense", {
+  request: "save",
   args: {
     selectedId: Schema.NullOr(Schema.String),
     date: Schema.String,
@@ -132,6 +136,7 @@ export const SaveExpense = RpcBrowser.command("SaveExpense", {
 })
 
 export const RemoveExpense = RpcBrowser.command("RemoveExpense", {
+  request: "remove",
   args: { id: Schema.String },
   success: Message.SucceededRemove,
   failure: Message.Failed,
@@ -143,35 +148,50 @@ export const RemoveExpense = RpcBrowser.command("RemoveExpense", {
 })
 
 const reload = (model: Model) => {
-  const listed = Requests.start(model.requests, "list")
-  const totaled = Requests.start(listed.state, "totals")
-  return { state: totaled.state, commands: [ListExpenses({ request: listed.request, from: model.from, through: model.through, filterCategory: model.filterCategory }), LoadTotals({ request: totaled.request, from: model.from, through: model.through, filterCategory: model.filterCategory })] }
+  const args = { from: model.from, through: model.through, filterCategory: model.filterCategory }
+  const listed = ListExpenses.start(model, args, { notice: null })
+  const totaled = LoadTotals.start(listed.model, args)
+  return { model: totaled.model, commands: [...listed.commands, ...totaled.commands] }
 }
-const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
-const clearQuery = (model: Model) => evo(model, {
-  expenses: () => [],
-  totals: () => [],
-  requests: (current) => Requests.invalidate(Requests.invalidate(current, "list"), "totals"),
-  notice: () => null,
-})
+const pending = (model: Model, ...keys: [] | [string]) => RpcBrowser.pending(model, ...keys)
+const clearQuery = (model: Model) => RpcBrowser.invalidate(
+  RpcBrowser.invalidate(model, ListExpenses.requestKey).model,
+  LoadTotals.requestKey,
+  { expenses: [], totals: [], notice: null },
+).model
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   ChangedFrom: ({ value }) => ({ model: evo(clearQuery(model), { from: () => value }) }), ChangedThrough: ({ value }) => ({ model: evo(clearQuery(model), { through: () => value }) }), ChangedFilterCategory: ({ value }) => ({ model: evo(clearQuery(model), { filterCategory: () => value }) }),
   ChangedDate: ({ value }) => ({ model: evo(model, { date: () => value }) }), ChangedMerchant: ({ value }) => ({ model: evo(model, { merchant: () => value }) }), ChangedCategory: ({ value }) => ({ model: evo(model, { category: () => value }) }), ChangedAmountMinor: ({ value }) => ({ model: evo(model, { amountMinor: () => value }) }), ChangedCurrency: ({ value }) => ({ model: evo(model, { currency: () => value }) }),
-  ClickedReload: () => { const next = reload(model); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: next.commands } },
-  ClickedSave: () => { const started = Requests.start(model.requests, "save"); return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [SaveExpense({ request: started.request, selectedId: model.selectedId, date: model.date, merchant: model.merchant, category: model.category, amountMinor: model.amountMinor, currency: model.currency })] } },
+  ClickedReload: () => reload(model),
+  ClickedSave: () => SaveExpense.start(model, {
+    selectedId: model.selectedId,
+    date: model.date,
+    merchant: model.merchant,
+    category: model.category,
+    amountMinor: model.amountMinor,
+    currency: model.currency,
+  }, { notice: null }),
   ClickedNew: () => ({ model: evo(model, { date: () => emptyForm.date, merchant: () => emptyForm.merchant, category: () => emptyForm.category, amountMinor: () => emptyForm.amountMinor, currency: () => emptyForm.currency, selectedId: () => null, notice: () => null }) }),
-  ClickedSelect: ({ id }) => { const started = Requests.start(model.requests, "get"); return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [GetExpense({ request: started.request, id })] } },
-  ClickedRemove: ({ id }) => { const started = Requests.start(model.requests, "remove"); return { model: evo(model, { requests: () => started.state, notice: () => null }), commands: [RemoveExpense({ request: started.request, id })] } },
-  SucceededList: ({ request, expenses }) => Requests.accepts(model.requests, request) ? { model: evo(model, { expenses: () => expenses, requests: (current) => Requests.succeed(current, request) }) } : { model },
-  SucceededTotals: ({ request, totals }) => Requests.accepts(model.requests, request) ? { model: evo(model, { totals: () => totals, requests: (current) => Requests.succeed(current, request) }) } : { model },
-  SucceededGet: ({ request, expense }) => Requests.accepts(model.requests, request) ? { model: evo(model, { selectedId: () => expense.id, date: () => expense.date, merchant: () => expense.merchant, category: () => expense.category, amountMinor: () => String(expense.amountMinor), currency: () => expense.currency, requests: (current) => Requests.succeed(current, request) }) } : { model },
-  SucceededSave: ({ request, expense, created }) => { if (!Requests.accepts(model.requests, request)) return { model }; const settled = evo(model, { selectedId: () => expense.id, date: () => expense.date, merchant: () => expense.merchant, category: () => expense.category, amountMinor: () => String(expense.amountMinor), currency: () => expense.currency, requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: created ? "Expense recorded." : "Expense updated." }) }); const next = reload(settled); return { model: evo(settled, { requests: () => next.state }), commands: next.commands } },
-  SucceededRemove: ({ request, id }) => { if (!Requests.accepts(model.requests, request)) return { model }; const settled = evo(model, { selectedId: () => model.selectedId === id ? null : model.selectedId, requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: "Expense removed." }) }); const next = reload(settled); return { model: evo(settled, { requests: () => next.state }), commands: next.commands } },
-  Failed: ({ request, error }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.fail(current, request, error), notice: () => ({ kind: "error" as const, text: error }) }) } : { model },
+  ClickedSelect: ({ id }) => GetExpense.start(model, { id }, { notice: null }),
+  ClickedRemove: ({ id }) => RemoveExpense.start(model, { id }, { notice: null }),
+  SucceededList: ({ request, expenses }) => RpcBrowser.succeed(model, request, { expenses }),
+  SucceededTotals: ({ request, totals }) => RpcBrowser.succeed(model, request, { totals }),
+  SucceededGet: ({ request, expense }) => RpcBrowser.succeed(model, request, { selectedId: expense.id, date: expense.date, merchant: expense.merchant, category: expense.category, amountMinor: String(expense.amountMinor), currency: expense.currency }),
+  SucceededSave: ({ request, expense, created }) => {
+    const settled = RpcBrowser.succeed(model, request, { selectedId: expense.id, date: expense.date, merchant: expense.merchant, category: expense.category, amountMinor: String(expense.amountMinor), currency: expense.currency, notice: { kind: "success" as const, text: created ? "Expense recorded." : "Expense updated." } })
+    return settled.accepted ? reload(settled.model) : { model }
+  },
+  SucceededRemove: ({ request, id }) => {
+    const settled = RpcBrowser.succeed(model, request, { selectedId: model.selectedId === id ? null : model.selectedId, notice: { kind: "success" as const, text: "Expense removed." } })
+    return settled.accepted ? reload(settled.model) : { model }
+  },
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 
-export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => { const model: Model = { expenses: [], totals: [], from: "2026-01-01", through: "2026-12-31", filterCategory: "", ...emptyForm, requests: Requests.empty(), notice: null }; const next = reload(model); return { model: evo(model, { requests: () => next.state }), commands: next.commands } }
+export const init: Runtime.ApplicationInit<Model, Message, void, WebClient> = () => reload({ expenses: [], totals: [], from: "2026-01-01", through: "2026-12-31", filterCategory: "", ...emptyForm, requests: Requests.empty(), notice: null })
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({ title: "Expense ledger", body: shell(h, { title: "Expense ledger", lede: "Record business expenses and review category totals for a date range.", notice: model.notice, session: null, children: [h.div([h.Class("split")], [
   h.section([h.Class("panel stack")], [h.div([h.Class("actions")], [

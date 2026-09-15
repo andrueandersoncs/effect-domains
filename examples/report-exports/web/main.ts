@@ -47,6 +47,7 @@ type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
 const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
 export const GenerateDiscard = RpcBrowser.command("GenerateDiscard", {
+  request: "generate",
   args: {
     token: Schema.NullOr(Schema.String),
     reportId: Schema.String,
@@ -101,6 +102,7 @@ export const GenerateDiscard = RpcBrowser.command("GenerateDiscard", {
 })
 
 export const Poll = RpcBrowser.command("Poll", {
+  request: "poll",
   args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
   success: Message.SucceededPoll,
   failure: Message.Failed,
@@ -113,6 +115,7 @@ export const Poll = RpcBrowser.command("Poll", {
 })
 
 export const Release = RpcBrowser.command("Release", {
+  request: "release",
   args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
   success: Message.SucceededAction,
   failure: Message.Failed,
@@ -125,6 +128,7 @@ export const Release = RpcBrowser.command("Release", {
 })
 
 export const Resume = RpcBrowser.command("Resume", {
+  request: "resume",
   args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
   success: Message.SucceededAction,
   failure: Message.Failed,
@@ -137,6 +141,7 @@ export const Resume = RpcBrowser.command("Resume", {
 })
 
 export const Cancel = RpcBrowser.command("Cancel", {
+  request: "cancel",
   args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
   success: Message.SucceededAction,
   failure: Message.Failed,
@@ -149,6 +154,7 @@ export const Cancel = RpcBrowser.command("Cancel", {
 })
 
 export const Reconcile = RpcBrowser.command("Reconcile", {
+  request: "reconcile",
   args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
   success: Message.SucceededPoll,
   failure: Message.Failed,
@@ -163,6 +169,7 @@ export const Reconcile = RpcBrowser.command("Reconcile", {
 })
 
 export const Status = RpcBrowser.command("Status", {
+  request: "status",
   args: { token: Schema.NullOr(Schema.String) },
   success: Message.SucceededStatus,
   failure: Message.Failed,
@@ -174,8 +181,7 @@ export const Status = RpcBrowser.command("Status", {
   ),
 })
 
-const start = (model: Model, key: string) => Requests.start(model.requests, key)
-const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)
+const pending = (model: Model, ...keys: [] | [string]) => RpcBrowser.pending(model, ...keys)
 const emptyForm = {
   reportId: "monthly-pnl-2026-01",
   startsAt: "2026-01-01T00:00:00.000Z",
@@ -189,7 +195,8 @@ const emptyForm = {
   creditDescription: "Consulting revenue",
   creditAmountMinor: "125000",
 }
-const clearedForSession = (model: Model, session: typeof Session.ModelSchema.Type): Model => ({ ...model, ...emptyForm, session, requests: Requests.reset(model.requests), executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, notice: null })
+const clearedForSession = (model: Model, session: typeof Session.ModelSchema.Type): Model =>
+  RpcBrowser.reset(model, { ...emptyForm, session, executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, notice: null }).model
 
 export const update = (model: Model, message: Message) => Message.match<UpdateReturn>(message, {
   SessionChanged: ({ message }) => {
@@ -197,19 +204,81 @@ export const update = (model: Model, message: Message) => Message.match<UpdateRe
     const changed = Session.generationChanged(model.session, child.model)
     return { model: changed ? clearedForSession(model, child.model) : evo(model, { session: () => child.model }), commands: child.commands }
   },
-  ChangedReportId: ({ value }) => ({ model: evo(model, { reportId: () => value }) }), ChangedStartsAt: ({ value }) => ({ model: evo(model, { startsAt: () => value }) }), ChangedEndsAt: ({ value }) => ({ model: evo(model, { endsAt: () => value }) }), ChangedCurrency: ({ value }) => ({ model: evo(model, { currency: () => value }) }), ChangedReleasePolicy: ({ value }) => ({ model: evo(model, { releasePolicy: () => value }) }), ChangedDebitAccountCode: ({ value }) => ({ model: evo(model, { debitAccountCode: () => value }) }), ChangedDebitDescription: ({ value }) => ({ model: evo(model, { debitDescription: () => value }) }), ChangedDebitAmountMinor: ({ value }) => ({ model: evo(model, { debitAmountMinor: () => value }) }), ChangedCreditAccountCode: ({ value }) => ({ model: evo(model, { creditAccountCode: () => value }) }), ChangedCreditDescription: ({ value }) => ({ model: evo(model, { creditDescription: () => value }) }), ChangedCreditAmountMinor: ({ value }) => ({ model: evo(model, { creditAmountMinor: () => value }) }), ChangedExecutionId: ({ value }) => ({ model: evo(model, { executionId: () => value, artifactPath: () => null, releasedBy: () => null, requests: (current) => Requests.invalidate(Requests.invalidate(Requests.invalidate(current, "poll"), "release"), "generate"), notice: () => null }) }),
-  ClickedGenerate: () => { const next = Requests.start(Requests.invalidate(Requests.invalidate(model.requests, "poll"), "release"), "generate"); return { model: evo(model, { requests: () => next.state, notice: () => null, executionId: () => "", artifactPath: () => null, releasedBy: () => null }), commands: [GenerateDiscard({ request: next.request, token: currentToken(model.session), reportId: model.reportId, startsAt: model.startsAt, endsAt: model.endsAt, currency: model.currency, releasePolicy: model.releasePolicy, debitAccountCode: model.debitAccountCode, debitDescription: model.debitDescription, debitAmountMinor: model.debitAmountMinor, creditAccountCode: model.creditAccountCode, creditDescription: model.creditDescription, creditAmountMinor: model.creditAmountMinor })] } },
-  ClickedPoll: () => { const next = start(model, "poll"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Poll({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },
-  ClickedRelease: () => { const next = start(model, "release"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Release({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },
-  ClickedResume: () => { const next = start(model, "resume"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Resume({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },
-  ClickedCancel: () => { const next = start(model, "cancel"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Cancel({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },
-  ClickedReconcile: () => { const next = start(model, "reconcile"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Reconcile({ request: next.request, token: currentToken(model.session), executionId: model.executionId.trim() })] } },
-  ClickedStatus: () => { const next = start(model, "status"); return { model: evo(model, { requests: () => next.state, notice: () => null }), commands: [Status({ request: next.request, token: currentToken(model.session) })] } },
-  SucceededGenerate: ({ request, executionId }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.succeed(current, request), executionId: () => executionId, notice: () => ({ kind: "success" as const, text: "Export accepted durably. Poll it as an operator." }) }) } : { model },
-  SucceededPoll: ({ request, result }) => { if (!Requests.accepts(model.requests, request)) return { model }; if (result._tag === "Succeeded") return { model: evo(model, { requests: (current) => Requests.succeed(current, request), artifactPath: () => result.artifactPath, releasedBy: () => result.releasedBy, notice: () => ({ kind: "success" as const, text: "Export artifact is reconciled." }) }) }; const text = result._tag === "Failed" || result._tag === "Recoverable" ? result.reason : result._tag === "Cancelled" ? "Export was cancelled." : result._tag === "Unknown" ? "No durable export has that execution ID." : `Export is ${result.stage}.`; const kind = result._tag === "Failed" ? "error" as const : "info" as const; return { model: evo(model, { requests: (current) => Requests.succeed(current, request), notice: () => ({ kind, text }) }) } },
-  SucceededAction: ({ request, action }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.succeed(current, request), notice: () => ({ kind: "success" as const, text: `Export ${action}. Poll for its current durable state.` }) }) } : { model },
-  SucceededStatus: ({ request, status }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.succeed(current, request), clusterStatus: () => `${status.activeEntities} active export${status.activeEntities === 1 ? "" : "s"}; ${status.runners.length} runner${status.runners.length === 1 ? "" : "s"}; ${status.shuttingDown ? "shutting down" : "accepting work"}.` }) } : { model },
-  Failed: ({ request, error }) => Requests.accepts(model.requests, request) ? { model: evo(model, { requests: (current) => Requests.fail(current, request, error), notice: () => ({ kind: "error" as const, text: error }) }) } : { model },
+  ChangedReportId: ({ value }) => ({ model: evo(model, { reportId: () => value }) }),
+  ChangedStartsAt: ({ value }) => ({ model: evo(model, { startsAt: () => value }) }),
+  ChangedEndsAt: ({ value }) => ({ model: evo(model, { endsAt: () => value }) }),
+  ChangedCurrency: ({ value }) => ({ model: evo(model, { currency: () => value }) }),
+  ChangedReleasePolicy: ({ value }) => ({ model: evo(model, { releasePolicy: () => value }) }),
+  ChangedDebitAccountCode: ({ value }) => ({ model: evo(model, { debitAccountCode: () => value }) }),
+  ChangedDebitDescription: ({ value }) => ({ model: evo(model, { debitDescription: () => value }) }),
+  ChangedDebitAmountMinor: ({ value }) => ({ model: evo(model, { debitAmountMinor: () => value }) }),
+  ChangedCreditAccountCode: ({ value }) => ({ model: evo(model, { creditAccountCode: () => value }) }),
+  ChangedCreditDescription: ({ value }) => ({ model: evo(model, { creditDescription: () => value }) }),
+  ChangedCreditAmountMinor: ({ value }) => ({ model: evo(model, { creditAmountMinor: () => value }) }),
+  ChangedExecutionId: ({ value }) => {
+    const withoutPoll = RpcBrowser.invalidate(model, Poll.requestKey).model
+    const withoutRelease = RpcBrowser.invalidate(withoutPoll, Release.requestKey).model
+    return RpcBrowser.invalidate(withoutRelease, GenerateDiscard.requestKey, {
+      executionId: value,
+      artifactPath: null,
+      releasedBy: null,
+      notice: null,
+    })
+  },
+  ClickedGenerate: () => {
+    const withoutPoll = RpcBrowser.invalidate(model, Poll.requestKey).model
+    const withoutRelease = RpcBrowser.invalidate(withoutPoll, Release.requestKey).model
+    return GenerateDiscard.start(withoutRelease, {
+      token: currentToken(model.session),
+      reportId: model.reportId,
+      startsAt: model.startsAt,
+      endsAt: model.endsAt,
+      currency: model.currency,
+      releasePolicy: model.releasePolicy,
+      debitAccountCode: model.debitAccountCode,
+      debitDescription: model.debitDescription,
+      debitAmountMinor: model.debitAmountMinor,
+      creditAccountCode: model.creditAccountCode,
+      creditDescription: model.creditDescription,
+      creditAmountMinor: model.creditAmountMinor,
+    }, { notice: null, executionId: "", artifactPath: null, releasedBy: null })
+  },
+  ClickedPoll: () => Poll.start(model, { token: currentToken(model.session), executionId: model.executionId.trim() }, { notice: null }),
+  ClickedRelease: () => Release.start(model, { token: currentToken(model.session), executionId: model.executionId.trim() }, { notice: null }),
+  ClickedResume: () => Resume.start(model, { token: currentToken(model.session), executionId: model.executionId.trim() }, { notice: null }),
+  ClickedCancel: () => Cancel.start(model, { token: currentToken(model.session), executionId: model.executionId.trim() }, { notice: null }),
+  ClickedReconcile: () => Reconcile.start(model, { token: currentToken(model.session), executionId: model.executionId.trim() }, { notice: null }),
+  ClickedStatus: () => Status.start(model, { token: currentToken(model.session) }, { notice: null }),
+  SucceededGenerate: ({ request, executionId }) => RpcBrowser.succeed(model, request, {
+    executionId,
+    notice: { kind: "success" as const, text: "Export accepted durably. Poll it as an operator." },
+  }),
+  SucceededPoll: ({ request, result }) => {
+    if (result._tag === "Succeeded") return RpcBrowser.succeed(model, request, {
+      artifactPath: result.artifactPath,
+      releasedBy: result.releasedBy,
+      notice: { kind: "success" as const, text: "Export artifact is reconciled." },
+    })
+
+    const text = result._tag === "Failed" || result._tag === "Recoverable"
+      ? result.reason
+      : result._tag === "Cancelled"
+      ? "Export was cancelled."
+      : result._tag === "Unknown"
+      ? "No durable export has that execution ID."
+      : `Export is ${result.stage}.`
+    const kind = result._tag === "Failed" ? "error" as const : "info" as const
+    return RpcBrowser.succeed(model, request, { notice: { kind, text } })
+  },
+  SucceededAction: ({ request, action }) => RpcBrowser.succeed(model, request, {
+    notice: { kind: "success" as const, text: `Export ${action}. Poll for its current durable state.` },
+  }),
+  SucceededStatus: ({ request, status }) => RpcBrowser.succeed(model, request, {
+    clusterStatus: `${status.activeEntities} active export${status.activeEntities === 1 ? "" : "s"}; ${status.runners.length} runner${status.runners.length === 1 ? "" : "s"}; ${status.shuttingDown ? "shutting down" : "accepting work"}.`,
+  }),
+  Failed: ({ request, error }) => RpcBrowser.fail(model, request, error, {
+    notice: { kind: "error" as const, text: error },
+  }),
 })
 export const init: Runtime.ApplicationInit<Model, Message, void, WebClient | SessionClient> = () => ({ model: { session: Session.empty(), ...emptyForm, executionId: "", artifactPath: null, releasedBy: null, clusterStatus: null, requests: Requests.empty(), notice: null } })
 
