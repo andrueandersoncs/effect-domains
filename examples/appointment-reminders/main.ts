@@ -1,6 +1,5 @@
 import { clusterRuntimeLayer, clusterWorkerLayer } from "@effect-domains/example-support/cluster-runtime"
 import { Layer, pipe } from "effect"
-import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -18,8 +17,6 @@ const execution = pipe(
   Layer.provide(privateClient),
 )
 
-const webBase = new URL("./web/", import.meta.url)
-const web = StaticSpa.layerHttp({ title: "Appointment reminders", accent: "#9f1239", base: webBase })
 
 const identity = ExampleIdentity.layer("appointment-reminders")
 const services = Layer.mergeAll(identity, execution)
@@ -29,7 +26,12 @@ const program = ApplicationBun.run(AppointmentRemindersApplication, {
   database: { migrations: AppointmentReminderMigrations },
   services,
   background,
-  routes: web,
+  ui: {
+    presentation: {
+      title: "Appointment reminders",
+      description: "Schedule durable in-app reminders, then inspect delivery through the generated application interface.",
+    },
+  },
 })
 
 pipe(program, ApplicationBun.runMain)

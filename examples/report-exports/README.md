@@ -6,7 +6,7 @@ Generate a durable financial-report JSON file from lines supplied with the reque
 
 ## Before you start
 
-Use Bun 1.4.0 from the repository root. The server serves the Foldkit application at `/`, so build its assets before starting `serve`; rebuild after frontend changes. There is no generated `/admin` application for this example; every `serve` command does expose the protected MCP endpoint at `/mcp` and the RPC endpoint at `/rpc/v1`.
+Use Bun 1.4.0 from the repository root. Build the shared Application UI before starting `serve`. The protected UI is mounted at `/`; MCP remains at `/mcp` and Effect RPC at `/rpc/v1`.
 
 The walkthrough uses disposable application and execution databases so that its account-bound report ID cannot collide with a previous run.
 
@@ -119,9 +119,9 @@ The caller never sends an account ID. Generation derives it from the authenticat
 
 The request is deliberately constrained: report IDs start alphanumeric and may then contain letters, numbers, `.`, `_`, or `-` (up to 128 characters); account codes are 4–10 digits; currencies are `AUD`, `CAD`, `EUR`, `GBP`, `JPY`, or `USD`; every line has a nonempty description, `debit` or `credit` direction, and a positive safe-integer `amountMinor`. The reporting period must end after it starts. Schema failures exit nonzero, while arithmetic that cannot be represented safely fails the workflow. There is no external ledger lookup, provider, webhook, checkout, or credit-consumption simulation.
 
-## Web, MCP, and operations
+## Application UI, MCP, and operations
 
-At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the shared login form. It uses canonical native clients and retains issued bearer tokens only in memory. An editor can submit a generated request; an administrator can enter an execution ID to poll, release, cancel, resume, reconcile, or inspect runner status. Session changes clear drafts and prior execution state, and field errors are shown for invalid form values. The page has no generated admin area. The same published operations are available as protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every tool call and wrap a request as `{ "input": <RPC payload> }`. A successful MCP tool result is `structuredContent.result`; declared errors have `isError: true`.
+At `http://127.0.0.1:3001/`, run `identity.login` and use the generated forms for report generation, polling, release, cancellation, resume, reconciliation, and status. The issued token remains only in memory. The same operations are protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every call and wrap requests as `{ "input": <RPC payload> }`. Generated artifact bytes are downloaded through the explicit native HTTP route returned by the operation.
 
 The default `EFFECT_CLUSTER_MODE=single` keeps the local one-process workflow. `runner` starts a native Bun HTTP runner and all workflow/queue workers. `client` starts application HTTP/RPC plus the outbox relay, but not runner registrations. Colocated runners coordinate through one execution SQLite file:
 

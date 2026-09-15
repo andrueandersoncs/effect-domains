@@ -8,7 +8,7 @@ The final runtime composes a nested `BillingDomain` application—three generate
 
 ## Run it
 
-Run these commands from the repository root. The server and its generated frontend require the prebuilt Foldkit assets, so build before starting it. Use the timestamped database name below as disposable walkthrough state; do not point it at data you intend to keep.
+Run these commands from the repository root. The server loads the prebuilt shared Application UI, so build before starting it. Use the timestamped database name below as disposable walkthrough state; do not point it at data you intend to keep.
 
 **Server terminal**
 
@@ -21,7 +21,7 @@ export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3001 bun run orders-invoices:server
 ```
 
-The identity database must be distinct from `ORDERS_INVOICES_DB`. `EFFECT_DOMAINS_DEMO_PASSWORD` is required on each startup, but account bootstrap inserts only once and does not reset account changes. The server is loopback-only at `http://127.0.0.1:3001`. It exposes Effect JSON RPC at `/rpc/v1`, Streamable HTTP MCP at `/mcp`, the application page at `/`, and generated admin at `/admin`.
+The identity database must be distinct from `ORDERS_INVOICES_DB`. `EFFECT_DOMAINS_DEMO_PASSWORD` is required on each startup, but account bootstrap inserts only once and does not reset account changes. The loopback server exposes the Application UI at `http://127.0.0.1:3001/`, Effect RPC at `/rpc/v1`, and Streamable HTTP MCP at `/mcp`.
 
 **Client terminal**
 
@@ -120,11 +120,11 @@ The mutations use server-derived tenant identity and database transactions. Orde
 
 `quantity`, `lineNumber`, versions, and unit amounts must be positive safe integers. `totalMinor` is non-negative and checked for safe-integer multiplication and addition. An empty draft cannot be issued (`InvoiceRequiresLines`); duplicate numbers report `DuplicateOrderNumber` or `DuplicateInvoiceNumber`; unsafe arithmetic reports `TotalOverflow`. A payment only changes this local invoice state—there is no provider call, tax/currency calculation, credit note, checkout, request-idempotency key, or production identity system.
 
-## Browser, admin, and MCP
+## Application UI and MCP
 
-At `http://127.0.0.1:3001/`, the Foldkit page starts signed out and provides the shared login form. It uses the canonical native RPC client, holds the issued credential only in memory, and clears draft/loaded order state on login, logout, or expiry. An editor can create, add a line, issue, reload, and record payment; field-specific form errors include invalid numeric inputs, while a version conflict prompts a reload. Roles are enforced by the server, not a client-side role switch.
+At `http://127.0.0.1:3001/`, run `identity.login` with a seeded account. The generated UI keeps the issued token only in memory and derives forms for the billing operations, resource reads, and cursor navigation from the compiled application. Roles and optimistic version checks remain enforced by the server. `billing.getOrder` expects the generated UUID shown by the Orders list, not the business order number; its form and input schema identify that UUID requirement.
 
-`http://127.0.0.1:3001/admin` is available because this application enables generated admin. Build assets first, paste a real issued bearer credential, and expect its generated reads to use the same tenant policy and cursor navigation. MCP is available at `http://127.0.0.1:3001/mcp`; each published RPC is a tool with arguments `{ "input": <operation JSON> }`. Protected calls still require a bearer credential for every request. The CLI and MCP are RPC interfaces, not REST endpoints.
+MCP is available at `http://127.0.0.1:3001/mcp`; each published RPC is a tool with arguments `{ "input": <operation JSON> }`. Protected calls require a bearer credential for every request. `/rpc/v1` and `/mcp` are RPC interfaces, not REST endpoints.
 
 ## Storage and source map
 
@@ -144,7 +144,6 @@ Startup decodes and applies the frozen [migration history](migrations.ts); it pr
 - [`contracts.ts`](contracts.ts): the authored nested order-summary success schema.
 - [`sqlite.ts`](sqlite.ts): declarative billing operations, repository writes, transaction boundaries, and the aggregate SQL read model built with `Table.project`.
 - [`application.ts`](application.ts): nested billing-domain composition, identity integration, and final application compilation.
-- [`main.ts`](main.ts): identity service, generated admin, frontend route, migrations, and runner.
-- [`web/main.ts`](web/main.ts): the actual browser workflow and its native client reader controls.
+- [`main.ts`](main.ts): identity service, Application UI presentation, migrations, and runner.
 - [Resource reference](../../docs/reference/resources.md): generated list/page and entitlement-independent resource contracts.
 - [Runtime reference](../../docs/reference/runtime.md): loopback runtime, CLI, RPC, and migration behavior.

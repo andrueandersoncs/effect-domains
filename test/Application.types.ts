@@ -124,7 +124,7 @@ const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
 
 const minimal = ApplicationBun.run(emptyApplication, {
   database: { migrations: [] },
-  admin: true,
+  ui: true,
 })
 
 BunRuntime.runMain(complete)

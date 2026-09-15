@@ -16,7 +16,7 @@ import {
 } from "effect"
 
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import type { AdminPresentation } from "./contract.ts"
+import type { ApplicationUiPresentation } from "./contract.ts"
 
 const JsonSchema = Schema.Record(Schema.String, Schema.Unknown)
 const JsonArraySchema = Schema.Array(Schema.Unknown)
@@ -48,7 +48,7 @@ interface ResourcePresentation extends Schema.Schema.Type<typeof ResourcePresent
 const OperationPresentationSchema = Schema.Struct({ label: Schema.optionalKey(Schema.String), description: Schema.optionalKey(Schema.String) })
 interface OperationPresentation extends Schema.Schema.Type<typeof OperationPresentationSchema> {}
 
-const PresentationSchema = Schema.Struct({ title: Schema.optionalKey(Schema.String), resources: Schema.optionalKey(Schema.Record(Schema.String, ResourcePresentationSchema)), operations: Schema.optionalKey(Schema.Record(Schema.String, OperationPresentationSchema)) })
+const PresentationSchema = Schema.Struct({ title: Schema.optionalKey(Schema.String), description: Schema.optionalKey(Schema.String), resources: Schema.optionalKey(Schema.Record(Schema.String, ResourcePresentationSchema)), operations: Schema.optionalKey(Schema.Record(Schema.String, OperationPresentationSchema)) })
 interface Presentation extends Schema.Schema.Type<typeof PresentationSchema> {}
 
 const MetadataSchema = Schema.Struct({ application: Schema.String, resources: Schema.Array(ResourceSchema), operations: Schema.Array(OperationSchema), presentation: Schema.optionalKey(PresentationSchema) })
@@ -68,7 +68,7 @@ interface CallInput extends Schema.Schema.Type<typeof CallInputSchema> {}
 interface JsonSchema extends Schema.Schema.Type<typeof JsonSchema> {}
 
 const IncludedSchema = Schema.declare<() => boolean>(Predicate.isFunction as Predicate.Refinement<unknown, () => boolean>)
-const FormValueSchema = Schema.declare<() => Effect.Effect<unknown, AdminInputError>>(Predicate.isFunction as Predicate.Refinement<unknown, () => Effect.Effect<unknown, AdminInputError>>)
+const FormValueSchema = Schema.declare<() => Effect.Effect<unknown, ApplicationUiInputError>>(Predicate.isFunction as Predicate.Refinement<unknown, () => Effect.Effect<unknown, ApplicationUiInputError>>)
 
 const FormControlSchema = Schema.Struct({
   node: Schema.instanceOf(HTMLElement),
@@ -83,11 +83,11 @@ class FormEntry extends Schema.Class<FormEntry>("FormEntry")({
   control: FormControlSchema,
 }) {}
 
-class AdminInputError extends Schema.TaggedError<AdminInputError>()("AdminInputError", {
+class ApplicationUiInputError extends Schema.TaggedError<ApplicationUiInputError>()("ApplicationUiInputError", {
   message: Schema.String,
 }) {}
 
-class AdminRequestError extends Schema.TaggedError<AdminRequestError>()("AdminRequestError", {
+class ApplicationUiRequestError extends Schema.TaggedError<ApplicationUiRequestError>()("ApplicationUiRequestError", {
   message: Schema.String,
 }) {}
 
@@ -114,8 +114,8 @@ const absentValue = Option.none<unknown>()
 const noResource = Option.none<Resource>()
 const noCursor = Option.none<string>()
 const noAncestors = HashSet.empty<JsonSchema>()
-const presentationResources = (presentation: AdminPresentation) => Option.fromUndefinedOr(presentation.resources)
-const presentationOperations = (presentation: AdminPresentation) => Option.fromUndefinedOr(presentation.operations)
+const presentationResources = (presentation: ApplicationUiPresentation) => Option.fromUndefinedOr(presentation.resources)
+const presentationOperations = (presentation: ApplicationUiPresentation) => Option.fromUndefinedOr(presentation.operations)
 const valueAtKey = <Value>(record: Readonly<Record<string, Value>>, key: string) => Record.get(record, key)
 
 const documentDefinitions = (document: SchemaDocument) => {
@@ -159,15 +159,15 @@ const isRequired = (schema: JsonSchema, field: string) => {
 
 const fieldValue = (record: Readonly<Record<string, unknown>>, key: string) => Option.fromUndefinedOr(record[key])
 
-const entryValue = Effect.fn("Admin.form.entryValue")(function* ({ name: name, control: control }: FormEntry) { const value = yield* control.value()
+const entryValue = Effect.fn("ApplicationUi.form.entryValue")(function* ({ name: name, control: control }: FormEntry) { const value = yield* control.value()
 return [name, value] as const })
 
 const selectedEntry = ({ control: control }: FormEntry) => control.included()
 const root = document.getElementById("app")
 
-const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
+const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
   const configuredBase = Option.fromUndefinedOr(root.dataset.base)
-  const base = pipe(configuredBase, Option.getOrElse(Function.constant("/admin"))).replace(/\/$/, "")
+  const base = pipe(configuredBase, Option.getOrElse(Function.constant("/"))).replace(/\/$/, "")
 
   const element = <Tag extends keyof HTMLElementTagNameMap>(tag: Tag, className: Option.Option<string>, text: Option.Option<string>) => {
     const node = document.createElement(tag)
@@ -246,12 +246,12 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
   })
 
   const state = yield* Ref.make(initialState)
-  const unavailableError = AdminRequestError.make({ message: "Admin request could not be sent." })
-  const invalidJsonError = AdminRequestError.make({ message: "Admin response was not JSON." })
+  const unavailableError = ApplicationUiRequestError.make({ message: "Application UI request could not be sent." })
+  const invalidJsonError = ApplicationUiRequestError.make({ message: "Application UI response was not JSON." })
   const requestUnavailable = pipe(Effect.fail(unavailableError), Function.constant)
   const responseWasNotJson = pipe(Effect.fail(invalidJsonError), Function.constant)
 
-  const requestJson = Effect.fn("Admin.request")(function* (request: HttpClientRequest.HttpClientRequest) {
+  const requestJson = Effect.fn("ApplicationUi.request")(function* (request: HttpClientRequest.HttpClientRequest) {
     const executed = HttpClient.execute(request)
     const response = yield* Effect.catch(executed, requestUnavailable)
     const body = yield* Effect.catch(response.json, responseWasNotJson)
@@ -264,7 +264,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
       const bodyError = isRecords(body) ? pipe(failure, Option.getOrElse(Function.constant(body))) : body
       const rendered = textFor(bodyError)
       const detail = rendered || `Request failed (${response.status})`
-      return yield* AdminRequestError.make({ message: detail })
+      return yield* ApplicationUiRequestError.make({ message: detail })
     }
 
     return body
@@ -276,7 +276,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     return authorized ? HttpClientRequest.bearerToken(request, credential) : request
   }
 
-  const getJson = Effect.fn("Admin.get")(function* (path: string) {
+  const getJson = Effect.fn("ApplicationUi.get")(function* (path: string) {
     const url = `${base}${path}`
     const get = HttpClientRequest.get(url)
     const request = HttpClientRequest.acceptJson(get)
@@ -284,18 +284,18 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     return yield* requestJson(authorized)
   })
 
-  const postJson = Effect.fn("Admin.post")(function* (path: string, payload: unknown) {
+  const postJson = Effect.fn("ApplicationUi.post")(function* (path: string, payload: unknown) {
     const url = `${base}${path}`
     const post = HttpClientRequest.post(url)
     const accepted = HttpClientRequest.acceptJson(post)
     const body = HttpClientRequest.bodyJson(accepted, payload)
-    const bodyFailure = pipe(AdminRequestError.make({ message: "Admin request body could not be encoded." }), Function.constant)
+    const bodyFailure = pipe(ApplicationUiRequestError.make({ message: "Application UI request body could not be encoded." }), Function.constant)
     const request = yield* Effect.mapError(body, bodyFailure)
     const authorized = withAuthorization(request)
     return yield* requestJson(authorized)
   })
 
-  const call = Effect.fn("Admin.call")(function* (name: string, input: unknown) {
+  const call = Effect.fn("ApplicationUi.call")(function* (name: string, input: unknown) {
     const payload = CallInputSchema.make({ operation: name, input })
     const response = yield* postJson("/api/call", payload)
     const record = isRecords(response) ? response : Record.empty<string, unknown>()
@@ -303,48 +303,48 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     return result
   })
 
-  const lookupOperation = Effect.fn("Admin.lookupOperation")(function* (name: string) {
+  const lookupOperation = Effect.fn("ApplicationUi.lookupOperation")(function* (name: string) {
     const current = yield* Ref.get(state)
     const matching = (entry: Operation) => equals(entry.name, name)
     const found = pipe(current.inspection, Option.flatMap(flow(Struct.get("operations"), Array.findFirst(matching))))
     return found
   })
 
-  const currentPresentation = Effect.fn("Admin.currentPresentation")(function* () {
+  const currentPresentation = Effect.fn("ApplicationUi.currentPresentation")(function* () {
     const current = yield* Ref.get(state)
     return current.presentation
   })
 
-  const resourcePresentation = Effect.fn("Admin.resourcePresentation")(function* (resource: Resource) {
+  const resourcePresentation = Effect.fn("ApplicationUi.resourcePresentation")(function* (resource: Resource) {
     const presentation = yield* currentPresentation()
     const resources = pipe(presentation, Option.flatMap(presentationResources))
     return pipe(resources, Option.flatMap((values) => valueAtKey(values, resource.name)))
   })
 
-  const operationPresentation = Effect.fn("Admin.operationPresentation")(function* (operation: Operation) {
+  const operationPresentation = Effect.fn("ApplicationUi.operationPresentation")(function* (operation: Operation) {
     const presentation = yield* currentPresentation()
     const operations = pipe(presentation, Option.flatMap(presentationOperations))
     return pipe(operations, Option.flatMap((values) => valueAtKey(values, operation.name)))
   })
 
-  const resourceLabel = Effect.fn("Admin.resourceLabel")(function* (resource: Resource) {
+  const resourceLabel = Effect.fn("ApplicationUi.resourceLabel")(function* (resource: Resource) {
     const presentation = yield* resourcePresentation(resource)
     const label = pipe(presentation, Option.flatMap(flow(Struct.get("label"), Option.fromUndefinedOr)))
     const fallback = title(resource.name)
     return pipe(label, Option.getOrElse(Function.constant(fallback)))
   })
 
-  const operationLabel = Effect.fn("Admin.operationLabel")(function* (operation: Operation) {
+  const operationLabel = Effect.fn("ApplicationUi.operationLabel")(function* (operation: Operation) {
     const presentation = yield* operationPresentation(operation)
     const label = pipe(presentation, Option.flatMap(flow(Struct.get("label"), Option.fromUndefinedOr)))
     const fallback = title(operation.name)
     return pipe(label, Option.getOrElse(Function.constant(fallback)))
   })
 
-  const inputError = (message: string) => AdminInputError.make({ message })
+  const inputError = (message: string) => ApplicationUiInputError.make({ message })
   const parseJson = (source: string, message: string) => Effect.try({ try: () => JSON.parse(source), catch: () => inputError(message) })
 
-  const inclusionControl = (node: HTMLElement, mandatory: boolean, value: () => Effect.Effect<unknown, AdminInputError>): FormControl => {
+  const inclusionControl = (node: HTMLElement, mandatory: boolean, value: () => Effect.Effect<unknown, ApplicationUiInputError>): FormControl => {
     if (mandatory) return { node, included: Function.constant(true), value }
     const include = emptyElement("input") as HTMLInputElement
     include.type = "checkbox"
@@ -528,6 +528,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     const object = pipe(schemaType(schema), Option.contains("object"))
     const properties = pipe(Option.fromNullishOr(schema.properties), Option.filter(isRecords))
     const objectInput = object && Option.isSome(properties)
+    const noInput = pipe(schemaType(schema), Option.contains("null"))
 
     const controls = pipe(Match.value(objectInput),
       Match.when(true, () => {
@@ -546,6 +547,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
         return pipe(entries, Array.map(controlFor), Array.getSomes)
       }),
       Match.when(false, () => {
+        if (noInput) return []
         const control = formControl("Input", schema, entry.input, true, initial, noAncestors)
         return Option.match(control, { onNone: Function.constant([]), onSome: (value) => [FormEntry.make({name: "$value", control: value})] })
       }),
@@ -573,10 +575,12 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
       const source = whole.value.trim()
       if (source) return parseJson(source, "Complete JSON payload must be valid JSON")
 
+      if (noInput) return Effect.succeed(null)
+
       if (!objectInput) {
         const first = Array.head(controls)
-        const noInput = Effect.succeed(null)
-        return Option.match(first, { onNone: Function.constant(noInput), onSome: ({control: control}) => control.value() })
+        const emptyInput = Effect.succeed(null)
+        return Option.match(first, { onNone: Function.constant(emptyInput), onSome: ({control: control}) => control.value() })
       }
 
       const selected = Array.filter(controls, selectedEntry)
@@ -594,15 +598,18 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     return result
   }
 
-  const showError = (error: AdminInputError | AdminRequestError) => Effect.sync(() => {
-    const failure = notice("error", error.message)
-    content.replaceChildren(failure)
-  })
+  const showErrorAt = (target: HTMLElement) =>
+    (error: ApplicationUiInputError | ApplicationUiRequestError) => Effect.sync(() => {
+      const failure = notice("error", error.message)
+      target.replaceChildren(failure)
+    })
 
-  const run = (effect: Effect.Effect<void, AdminInputError | AdminRequestError, HttpClient.HttpClient>) =>
-    pipe(effect, Effect.catch(showError), Effect.provide(FetchHttpClient.layer), Effect.runPromise)
+  const run = (
+    effect: Effect.Effect<void, ApplicationUiInputError | ApplicationUiRequestError, HttpClient.HttpClient>,
+    errorTarget: HTMLElement = content,
+  ) => pipe(effect, Effect.catch(showErrorAt(errorTarget)), Effect.provide(FetchHttpClient.layer), Effect.runPromise)
 
-  const renderList = Effect.fn("Admin.renderList")(function* (resource: Resource) {
+  const renderList = Effect.fn("ApplicationUi.renderList")(function* (resource: Resource) {
     const entry = yield* lookupOperation(`${resource.name}.list`)
     if (Option.isNone(entry)) return
     clear(content)
@@ -651,7 +658,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     const result = namedElement("div", "admin-list-result", "")
     content.append(filterForm, result)
 
-    const loadPage = Effect.fn("Admin.loadPage")(function* (cursor: Option.Option<string>, history: ReadonlyArray<Option.Option<string>>) {
+    const loadPage = Effect.fn("ApplicationUi.loadPage")(function* (cursor: Option.Option<string>, history: ReadonlyArray<Option.Option<string>>) {
       apply.disabled = true
       const loading = notice("loading", "Loading rows…")
       result.replaceChildren(loading)
@@ -763,7 +770,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     yield* loadPage(noCursor, [])
   })
 
-  const renderOperation = Effect.fn("Admin.renderOperation")(function* (entry: Operation, resource: Option.Option<Resource>) {
+  const renderOperation = Effect.fn("ApplicationUi.renderOperation")(function* (entry: Operation, resource: Option.Option<Resource>) {
     clear(content)
     const label = yield* operationLabel(entry)
     const heading = namedElement("h2", "", label)
@@ -790,10 +797,14 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
         const loading = notice("loading", "Calling operation…")
         result.replaceChildren(loading)
         const value = yield* call(entry.name, input)
+        const loginResult = equals(entry.name, "identity.login")
+        const resultRecord = pipe(Option.some(value), Option.filter(isRecords))
+        const issuedToken = loginResult ? pipe(resultRecord, Option.flatMap((record) => fieldValue(record, "token")), Option.filter(isString)) : Option.none<string>()
+        if (Option.isSome(issuedToken)) token.value = issuedToken.value
+        if (equals(entry.name, "identity.logout")) token.value = ""
         const completed = notice("success", "Operation completed.")
         const display = showResult(value)
         result.replaceChildren(completed, display)
-        generated.submit.disabled = false
         const action = pipe(entry.name.split("."), Array.last)
         const refreshable = pipe(resource, Option.filter(flow(Struct.get("operations"), Array.contains("list"))))
         const mutation = pipe(action, Option.filter((value) => Array.contains(["create", "update", "patch", "remove"], value)))
@@ -801,14 +812,19 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
         yield* Option.match(refresh, { onNone: Function.constant(Effect.void), onSome: renderList })
       })
 
-      run(workflow)
+      const restoreSubmit = Effect.sync(() => {
+        generated.submit.disabled = false
+      })
+
+      const guarded = Effect.ensuring(workflow, restoreSubmit)
+      run(guarded, result)
     }
 
     generated.form.addEventListener("submit", onSubmit)
     content.append(generated.form, result)
   })
 
-  const renderNavigation = Effect.fn("Admin.renderNavigation")(function* () {
+  const renderNavigation = Effect.fn("ApplicationUi.renderNavigation")(function* () {
     clear(navigation)
     const current = yield* Ref.get(state)
     if (Option.isNone(current.inspection)) return
@@ -816,7 +832,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     const resourceHeading = namedElement("h2", "admin-nav-title", "Resources")
     resources.append(resourceHeading)
 
-    const appendResource = Effect.fn("Admin.appendResource")(function* (resource: Resource) {
+    const appendResource = Effect.fn("ApplicationUi.appendResource")(function* (resource: Resource) {
         const selectedResource = Option.some(resource)
         const label = yield* resourceLabel(resource)
         const resourceButton = namedElement("button", "admin-nav-resource", label) as HTMLButtonElement
@@ -841,7 +857,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
         resources.append(resourceButton)
         const operations = namedElement("div", "admin-nav-operations", "")
 
-        const appendOperation = Effect.fn("Admin.appendOperation")(function* (name: string) {
+        const appendOperation = Effect.fn("ApplicationUi.appendOperation")(function* (name: string) {
             const entry = yield* lookupOperation(`${resource.name}.${name}`)
             const noEntry = Effect.succeed(name)
             const buttonLabel = yield* Option.match(entry, { onNone: Function.constant(noEntry), onSome: operationLabel })
@@ -901,19 +917,19 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
     }
   })
 
-  const load = Effect.fn("Admin.load")(function* () {
+  const load = Effect.fn("ApplicationUi.load")(function* () {
     const loading = notice("loading", "Loading application metadata…")
     content.replaceChildren(loading)
     const body = yield* getJson("/api")
     const decoder = Schema.decodeUnknownEffect(MetadataSchema)
     const decoded = decoder(body)
-    const invalidMetadata = pipe(AdminRequestError.make({ message: "Admin metadata was invalid." }), Function.constant)
+    const invalidMetadata = pipe(ApplicationUiRequestError.make({ message: "Application UI metadata was invalid." }), Function.constant)
     const metadata = yield* Effect.mapError(decoded, invalidMetadata)
-    const presentation: Option.Option<AdminPresentation> = Option.fromUndefinedOr(metadata.presentation)
+    const presentation: Option.Option<ApplicationUiPresentation> = Option.fromUndefinedOr(metadata.presentation)
     const next = ClientStateSchema.make({ inspection: Option.some(metadata), presentation })
     yield* Ref.set(state, next)
     applicationTitle.textContent = pipe(presentation, Option.flatMap(flow(Struct.get("title"), Option.fromUndefinedOr)), Option.getOrElse(Function.constant(metadata.application)))
-    subtitle.textContent = "Generated application admin"
+    subtitle.textContent = pipe(presentation, Option.flatMap(flow(Struct.get("description"), Option.fromUndefinedOr)), Option.getOrElse(Function.constant("Generated application")))
     yield* renderNavigation()
     const first = Array.findFirst(metadata.resources, flow(Struct.get("operations"), Array.contains("list")))
     const firstOperation = Array.head(metadata.operations)
@@ -929,7 +945,7 @@ const mount = Effect.fn("Admin.mount")(function* (root: HTMLElement) {
 
   const onReload: EventListener = () => pipe(load(), run)
   reload.addEventListener("click", onReload)
-  yield* pipe(load(), Effect.catch(showError))
+  yield* pipe(load(), Effect.catch(showErrorAt(content)))
 })
 
 const program = pipe(Option.fromNullishOr(root), Option.match({ onNone: noEffect, onSome: mount }))

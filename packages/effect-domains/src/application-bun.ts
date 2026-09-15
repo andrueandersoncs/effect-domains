@@ -1,11 +1,11 @@
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun"
-import { AdminAssetFiles } from "@effect-domains/admin/assets"
+import { ApplicationUiAssetFiles } from "@effect-domains/application-ui/assets"
 import { Array, Config, Context, Effect, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Application, type ApplicationIR } from "./application.ts"
-import { ApplicationAdmin, type AdminOptions } from "./application-admin.ts"
+import { ApplicationUi, type ApplicationUiOptions } from "./application-ui.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
@@ -30,7 +30,7 @@ type RunOptions<
   initialize: Initialize
   background: Background
   routes: Routes
-  admin: true | AdminOptions
+  ui: true | ApplicationUiOptions
   telemetry: false | TelemetryOptions
 }>>
 
@@ -61,8 +61,8 @@ type RunRequirements<
   | Exclude<Rpc.Middleware<RpcGroup.Rpcs<App["group"]>>, RouteRuntime<App, Services, Background> | AuthorizationRpc>
   | Exclude<Rpc.ServicesClient<RpcGroup.Rpcs<App["group"]>> | Rpc.ServicesServer<RpcGroup.Rpcs<App["group"]>> | Rpc.MiddlewareClient<RpcGroup.Rpcs<App["group"]>>, BunServices.BunServices | Scope.Scope>
 
-class AdminAssetsError extends Schema.TaggedError<AdminAssetsError>()(
-  "ApplicationBunAdminAssetsError",
+class ApplicationUiAssetsError extends Schema.TaggedError<ApplicationUiAssetsError>()(
+  "ApplicationBunUiAssetsError",
   { reason: Schema.String },
 ) {
   override get message() {
@@ -77,10 +77,10 @@ type RunErrors<
   Background extends RuntimeLayer,
   Routes extends RuntimeLayer,
 > =
-  | AdminAssetsError
+  | ApplicationUiAssetsError
   | Config.ConfigError | MigrationError | PlatformError.PlatformError | Schema.SchemaError | CliError.CliError
   | Layer.Error<ReturnType<typeof BunHttpServer.layer>> | Layer.Error<ReturnType<typeof SqliteBunRuntime.sqlClient>>
-  | Layer.Error<ReturnType<typeof RpcMcp.layerHttp>> | Layer.Error<ReturnType<typeof ApplicationAdmin.layerHttp>>
+  | Layer.Error<ReturnType<typeof RpcMcp.layerHttp>> | Layer.Error<ReturnType<typeof ApplicationUi.layerHttp>>
   | Layer.Error<App["handlers"]>
   | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background> | Layer.Error<Routes>
 
@@ -94,16 +94,16 @@ const databaseFilename = (name: string, configured: Option.Option<string>) => {
   })
 }
 
-const readAdminAsset = (file: URL) => Effect.tryPromise({
+const readApplicationUiAsset = (file: URL) => Effect.tryPromise({
   try: () => Bun.file(file).text(),
-  catch: (cause) => AdminAssetsError.make({
-    reason: `Could not read prebuilt admin asset ${file.pathname}. Run \`bun run build\` before serving with admin enabled. ${String(cause)}`,
+  catch: (cause) => ApplicationUiAssetsError.make({
+    reason: `Could not read prebuilt application UI asset ${file.pathname}. Run \`bun run build\` before serving with the application UI enabled. ${String(cause)}`,
   }),
 })
 
-const readAdminAssets = Effect.fn("ApplicationBun.readAdminAssets")(function* () {
-  const javascript = readAdminAsset(AdminAssetFiles.javascript)
-  const stylesheet = readAdminAsset(AdminAssetFiles.stylesheet)
+const readApplicationUiAssets = Effect.fn("ApplicationBun.readApplicationUiAssets")(function* () {
+  const javascript = readApplicationUiAsset(ApplicationUiAssetFiles.javascript)
+  const stylesheet = readApplicationUiAsset(ApplicationUiAssetFiles.stylesheet)
   return yield* Effect.all({ javascript, stylesheet }, { concurrency: "unbounded" })
 })
 
@@ -152,20 +152,20 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   const rpc = RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" })
   const mcp = RpcMcp.layerHttp({ application, path: "/mcp" })
 
-  const admin = yield* pipe(
-    Option.fromNullishOr(options.admin),
+  const ui = yield* pipe(
+    Option.fromNullishOr(options.ui),
     Option.match({
       onNone: () => Effect.succeed(Layer.empty),
-      onSome: Effect.fn("ApplicationBun.admin")(function* (configuration) {
-        const assets = yield* readAdminAssets()
+      onSome: Effect.fn("ApplicationBun.ui")(function* (configuration) {
+        const assets = yield* readApplicationUiAssets()
         const presentation = Predicate.isBoolean(configuration) ? {} : configuration
-        return ApplicationAdmin.layerHttp({ application, ...assets, ...presentation })
+        return ApplicationUi.layerHttp({ application, ...assets, ...presentation })
       }),
     }),
   )
 
   const routes = pipe(
-    Layer.mergeAll(rpc, mcp, admin, options.routes ?? Layer.empty),
+    Layer.mergeAll(rpc, mcp, ui, options.routes ?? Layer.empty),
     Layer.provideMerge(application.handlers),
     Layer.provide(AuthorizationRpc.layer),
     Layer.provide(RpcSerialization.layerJson),

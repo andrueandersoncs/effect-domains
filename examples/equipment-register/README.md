@@ -13,7 +13,7 @@ bun install
 bun run build
 ```
 
-Although this application does **not** enable the generated `/admin` interface, `bun run build` is still required before `serve`. Its public Foldkit register at `/` reads prebuilt `web/dist` assets. The application is public loopback-only, so its CLI and MCP client need no bearer token.
+`bun run build` prepares the shared Application UI mounted at `/`. The application is public and loopback-only, so its UI, CLI, and MCP client need no bearer token.
 
 Use a new SQLite filename for this walkthrough. The SDK walkthrough creates the fixed tag `EQ-CAM2048`; an interrupted run can leave that row behind, and a second create with the same tag is rejected.
 
@@ -22,7 +22,7 @@ export EQUIPMENT_REGISTER_DB="$(mktemp -d)/equipment-register.sqlite"
 bun run equipment-register:server
 ```
 
-Keep this first terminal running. The server listens on `http://127.0.0.1:3000`, exposes the RPC endpoint at `/rpc/v1`, the Streamable HTTP MCP endpoint at `/mcp`, and the Foldkit application at `/`. There is no `/admin` route for this example.
+Keep this first terminal running. The server listens on `http://127.0.0.1:3000`, exposes the generated Application UI at `/`, Effect RPC at `/rpc/v1`, and Streamable HTTP MCP at `/mcp`.
 
 Use another terminal for clients. Alternatively, to run beside another server, use the following **instead of** the server command above (stop an already-running instance first), then configure both client URLs:
 
@@ -83,7 +83,7 @@ bun run equipment-register assets.get --input-json "{\"id\":\"$ASSET_ID\"}"
 
 Create, get, and update return complete asset rows. Generated `remove` succeeds with `null`; the final get exits nonzero with `ResourceNotFound`.
 
-The generated `assets.list` accepts equality filters only for `assetTag`, `location`, and `condition`. Its configured limit is both the default and maximum: 100 rows. The Foldkit page uses the canonical native client and **Load more** appends a returned cursor page; changing a filter clears the prior page and invalidates its request.
+The generated `assets.list` accepts equality filters only for `assetTag`, `location`, and `condition`. Its configured limit is both the default and maximum: 100 rows. The Application UI derives those filters and cursor paging from inspection.
 
 ## Input rules and expected failures
 
@@ -95,12 +95,12 @@ The generated `assets.list` accepts equality filters only for `assetTag`, `locat
 | Missing UUID | `assets.get`, `assets.update`, and `assets.remove` report `ResourceNotFound` for a well-formed ID with no row. |
 | Lists | An undeclared filter, invalid limit, or invalid cursor is rejected as `RepositoryError`. Limits run from 1 through 100; preserve a non-null cursor exactly with the same encoded filter. |
 
-At `http://127.0.0.1:3000/`, the Foldkit UI offers filters by tag, location, and condition; a pageable table; and controls to register, edit, or remove a record. Empty serial input is sent as `null`, and field-specific validation errors are displayed. It is an equipment register, not a checkout, maintenance-ticket, depreciation, staffing, or production identity system.
+At `http://127.0.0.1:3000/`, the generated UI offers resource lists, declared filters, and forms to register, edit, or remove equipment. Complete JSON remains available for values that are not representable as scalar controls. It is an equipment register, not a checkout, maintenance-ticket, depreciation, staffing, or production identity system.
 
 ## Read next
 
 - [Asset schema](domain.ts), [resource and derived unique/index declarations](resources.ts), and [frozen migration history](migrations.ts)
-- [Application/runtime entry point](main.ts) and [Foldkit register UI](web/main.ts)
+- [Application/runtime entry point](main.ts) and [shared Application UI adapter](../../packages/effect-domains/src/application-ui.ts)
 - [Official SDK MCP walkthrough](client.ts)
 - [Resource CRUD, list, cursor, and implicit UUID contract](../../docs/reference/resources.md)
 - [Bun server, CLI endpoint, and MCP adapter setup](../../packages/effect-domains/src/application-bun.ts)

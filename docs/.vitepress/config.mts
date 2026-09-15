@@ -7,7 +7,7 @@ const sourceRef = encodeURIComponent(process.env.DOCS_SOURCE_REF ?? "main")
 
 export default defineConfig({
   title: "Effect Domains",
-  description: "Build SQLite-backed Effect applications with generated resource operations, CLI, MCP tools, and a browser admin.",
+  description: "Build SQLite-backed Effect applications with generated resource operations, CLI, MCP tools, and an Application UI.",
   lang: "en-US",
   base,
   cleanUrls: false,

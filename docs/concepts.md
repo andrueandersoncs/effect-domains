@@ -71,14 +71,14 @@ CommandSpec + implementation ───┼─Application.compile─► Applicatio
 ReadModel syntax ──fold──────────┘                         ├── HTTP RPC / CLI
                                                          ├── MCP tools
                                                          ├── inspection
-                                                         └── optional admin
+                                                         └── Application UI
 ```
 
 `ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint. See [runtime and clients](/reference/runtime).
 
 ## One contract, several clients
 
-The CLI, MCP tools, generated admin, and example Foldkit pages use the published operation schemas and handlers. An admin form is not a privileged route, an MCP session is not an identity, and browser pages do not invent a second RPC envelope. HTTP is Effect JSON RPC, not REST.
+The CLI, MCP tools, and generated Application UI interpret the same published operation schemas and handlers. A generated form is not a privileged route, an MCP session is not an identity, and the browser does not invent a second RPC envelope. HTTP is Effect JSON RPC, not REST.
 
 ## Current scope
 

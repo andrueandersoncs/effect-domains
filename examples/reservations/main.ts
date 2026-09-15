@@ -1,5 +1,4 @@
 import { pipe } from "effect"
-import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
@@ -11,16 +10,18 @@ const InitialStock = StockSchema.make({
   available: 5,
 })
 
-const webBase = new URL("./web/", import.meta.url)
-const web = StaticSpa.layerHttp({ title: "Reservations", accent: "#b45309", base: webBase })
 
 const seed = seedStock(InitialStock)
 
 const program = ApplicationBun.run(ReservationApplication, {
   database: { migrations: InventoryMigrations },
   initialize: seed,
-  admin: true,
-  routes: web,
+  ui: {
+    presentation: {
+      title: "Reservations",
+      description: "Reserve stock, then confirm or release the guarded hold.",
+    },
+  },
 })
 
 pipe(program, ApplicationBun.runMain)

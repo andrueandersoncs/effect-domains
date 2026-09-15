@@ -6,7 +6,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 
 | Application | Useful scenario | Principal boundary |
 | --- | --- | --- |
-| [reading-list](reading-list/README.md) | Maintain a reading backlog and ratings | Filtered contract-derived editor, nullable form codecs, and cursor lists |
+| [reading-list](reading-list/README.md) | Maintain a reading backlog and ratings | Generated filtered CRUD forms, nullable fields, and cursor lists |
 | [expense-ledger](expense-ledger/README.md) | Record expenses and review totals by currency | Domain value schemas and authored range queries |
 | [team-tasks](team-tasks/README.md) | Track project work and completion | Tenant/owner scope and reusable subject policies |
 | [field-notes](field-notes/README.md) | Share encrypted site observations | Role policy independent of storage encryption |
@@ -30,7 +30,7 @@ bun run build
 bun run reading-list:server
 ```
 
-Servers default to `http://127.0.0.1:3000`; the generated CLI defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and `<APP>_URL` on the client when using another port. Application names become uppercase underscore prefixes: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Application databases default to `data/<application>.sqlite`.
+Servers default to `http://127.0.0.1:3000`; the generated Application UI is mounted at `/`, and the generated CLI defaults to `http://127.0.0.1:3000/rpc/v1`. Set `PORT` on the server and `<APP>_URL` on the client when using another port. Application names become uppercase underscore prefixes: `READING_LIST_DB`, `TEAM_TASKS_TOKEN`, and so on. Application databases default to `data/<application>.sqlite`.
 
 ### Demonstration identity
 
@@ -66,8 +66,7 @@ Report exports and appointment reminders have separate native execution stores. 
 - `sqlite.ts` where needed: `Command` specifications, implementations, and authored SQL for cross-record rules, aggregates, and projections.
 - `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax, followed by `Application.compile`.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
-- `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary without requiring an example-level platform import. `StaticSpa.layerHttp` validates and mounts the authored static-site declaration.
-- `web/`: a Foldkit SPA started by effectful `BrowserRuntime.run` at the explicit `Effect.runSync` browser boundary. `RpcBrowser.command` and `mutation` compile declared argument/result schemas into operations whose `start` method owns request tokens, pending/error state, concurrency, and command emission. Reducers use `succeed`, `fail`, `invalidate`, and `reset`; `ResourcePager` uses the low-level `command` escape hatch because it already owns continuation tokens. Authored Effects still select RPCs and return domain-specific success payloads. `RpcBrowser.query` and `mutation` add local reactivity. Shared HTML/session rendering remains in example-web; transport, paging, identity command mapping, startup, and asset routes are framework modules.
+- `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary. Its declarative `ui.presentation` supplies display-only title, description, labels, columns, and operation copy where needed. The shared Application UI interprets the compiled `ApplicationIR`; examples do not author browser state machines, RPC clients, startup code, or static asset routes.
 
 `Command.define` owns inspectable JSON contracts, policy, transaction mode, and ReadModel dependencies; `Command.implement` deliberately remains the authored Effect boundary for business semantics, transitions across records, and application-owned SQL. Routine codecs, middleware, transactions, and publication derive around that explicit handler. A generic workflow language would hide those semantics rather than derive them mechanically. `Command.bundle(...)` produces a command part. Derived joined pages publish through `ReadModel.publish`.
 

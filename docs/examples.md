@@ -6,16 +6,16 @@ description: Choose a runnable application for CRUD, authorization, migrations, 
 
 Each of the thirteen applications has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
 
-Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: every application needs its prebuilt Foldkit frontend, and some also enable generated admin. Keep demonstration servers on loopback. Example pages begin signed out; protected examples issue credentials through the example identity store, which is not a production authentication service.
+Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: the shared Application UI is prebuilt once and interpreted from each application's compiled contracts. Keep demonstration servers on loopback. Protected applications accept issued credentials through `identity.login`; the example identity store is not a production authentication service.
 
 ## Start with records
 
 | Application guide | What to look for | Related framework guide |
 | --- | --- | --- |
-| [Reading list](../examples/reading-list/README.md) | Filtered contract-derived CRUD editor, nullable form codecs, and cursor lists | [First-run tutorial](/getting-started) |
+| [Reading list](../examples/reading-list/README.md) | Generated filtered CRUD forms, nullable fields, and cursor lists | [First-run tutorial](/getting-started) |
 | [Team tasks](../examples/team-tasks/README.md) | Tenant scope, reusable subject policies, and trusted identity fields | [Authorization guide](/guides/authorization) |
-| [Editorial calendar](../examples/editorial-calendar/README.md) | Contract-derived CRUD editor, automatic reactive refetch, and historical migration | [Migration guide](/guides/migrations) |
-| [Field notes](../examples/field-notes/README.md) | Authenticated reactive RPC queries/mutations, encrypted report text, and SQL EventLog replica synchronization | [Authorization guide](/guides/authorization) |
+| [Editorial calendar](../examples/editorial-calendar/README.md) | Generated CRUD forms and historical migration | [Migration guide](/guides/migrations) |
+| [Field notes](../examples/field-notes/README.md) | Protected operations, encrypted report text, and SQL EventLog replica synchronization | [Authorization guide](/guides/authorization) |
 
 For any example, `bun run <application> --help` lists its commands and `bun run <application> inspect` describes its contracts without starting the server.
 
@@ -57,7 +57,7 @@ Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) fo
 
 This public example exposes equipment records as generated MCP tools. Its [equipment-register guide](../examples/equipment-register/README.md) runs the official SDK client through discovery, creation, relocation, retirement, and removal, then repeats the lifecycle through the CLI.
 
-It has no generated admin, but still needs `bun run build` for its Foldkit page. The guide distinguishes `EQUIPMENT_REGISTER_MCP_URL` (`/mcp`) from the CLI's `EQUIPMENT_REGISTER_URL` (`/rpc/v1`) and covers unique editable tags, stable UUIDs, and list bounds. Read the [SDK client](../examples/equipment-register/client.ts) or [MCP contract](/reference/runtime#mcp-tools) to integrate your own client.
+The generated Application UI at `/` exposes the same resource operations; `bun run build` prepares its shared assets. The guide distinguishes `EQUIPMENT_REGISTER_MCP_URL` (`/mcp`) from the CLI's `EQUIPMENT_REGISTER_URL` (`/rpc/v1`) and covers unique editable tags, stable UUIDs, and list bounds. Read the [SDK client](../examples/equipment-register/client.ts) or [MCP contract](/reference/runtime#mcp-tools) to integrate your own client.
 
 ## Check current entitlements
 

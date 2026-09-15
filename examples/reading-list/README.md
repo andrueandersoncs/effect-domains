@@ -23,28 +23,11 @@ export const ReadingListResource = Resource.define({
 
 The specification is author intent only. `Resource.compile` derives the five `books.*` RPCs, table, UUIDv7 identifier, schemas, repository, and handlers; the application compiler contributes those products to one `ApplicationIR`.
 
-The authored Foldkit page derives its CRUD state machine from that compiled Resource. `ResourceEditor` owns request identity, cursor pages, mutation invalidation, and stale-result rejection; the page supplies reversible codecs for both edit fields and list filters:
-
-```ts
-const Editor = ResourceEditor.make({
-  name: "reading-list/Books",
-  resource: Resource.compile(ReadingListResource),
-  form: BookFormSchema,
-  empty: { title: "", author: "", status: "planned", format: "paperback", rating: "", notes: "" },
-  query: {
-    form: BookQuerySchema,
-    empty: { status: "", format: "" },
-  },
-  notices,
-  formatError: RpcBrowser.messageFromUnknown,
-})
-```
-
-`BookQuerySchema` decodes blank selectors to an empty canonical filter and nonblank selectors to the generated `status`/`format` equality filter with limit 25. `Form.nullableInteger` separately maps a blank rating to `null`. These are explicit, lossless browser-to-contract mappings; no UI metadata is added to the Book schema or Resource declaration.
+The generated Application UI consumes that `ApplicationIR` directly. Inspection supplies the five operations, nullable input shapes, `status` and `format` filters, and cursor-page contract. The example supplies only display title and description in `main.ts`; it has no resource-specific browser state machine or form codec.
 
 ## Run it
 
-Run these commands from the repository root with Bun installed. The build supplies both browser surfaces:
+Run these commands from the repository root with Bun installed. The build prepares the shared Application UI:
 
 ```bash
 bun install
@@ -53,7 +36,7 @@ export READING_LIST_DB="$(mktemp -d)/reading-list.sqlite"
 bun run reading-list:server
 ```
 
-Leave this terminal running. The runner serves a Foldkit reading list at [http://127.0.0.1:3000/](http://127.0.0.1:3000/) and the generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin). Both use the same published RPC surface as the CLI. No token is required.
+Leave this terminal running. The runner serves the generated Application UI at [http://127.0.0.1:3000/](http://127.0.0.1:3000/). It uses the same published operations as CLI and MCP. No token is required.
 
 ## Add books and record progress
 
@@ -132,11 +115,11 @@ bun run reading-list books.get --input-json "{\"id\":\"$BOOK_ID\"}"
 
 Remove has a void result, not a deleted book. The following get exits nonzero with `ResourceNotFound`; repeating remove also fails. Repository/storage errors are reported as `RepositoryError`. “The Dispossessed” remains in the database.
 
-## Use the browser or MCP
+## Use the Application UI or MCP
 
-At `/`, the authored view renders the `ResourceEditor` model. Use **Add a book**, then **Edit**, **Save changes**, or **Remove** on a row. Status and format selectors update the editor's declared query form, invalidate its prior page, and immediately fetch the matching canonical list. **Reload** fetches current data after CLI changes, and **Load more books** appends a returned cursor page using the current filters. Form validation, including invalid rating or notes, appears beside the relevant field; successful saves and removals invalidate the exact Resource key and refetch the list.
+At `/`, select the Books resource to list rows with declared status/format filters and cursor navigation. Select an operation to run generated create, get, update, patch, or remove forms; complete JSON input remains available for the full canonical payload.
 
-The generated admin exposes the same five operations and their schemas. The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
+The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
 
 ## Runtime and persistence
 
@@ -180,8 +163,7 @@ Set the endpoint on both processes so CLI and server share a trace. In Jaeger, s
 - [`domain.ts`](domain.ts): local reading-list canonical schema.
 - [`resources.ts`](resources.ts): generated CRUD and list policy.
 - [`application.ts`](application.ts): resource registration.
-- [`main.ts`](main.ts): Bun runner and generated admin.
+- [`main.ts`](main.ts): Bun runner and Application UI presentation.
 - [`migrations.ts`](migrations.ts) and [artifacts](migrations/): frozen persistence history.
-- [`web/main.ts`](web/main.ts): authored Foldkit view plus contract-derived edit and query-form codecs.
 
 For the underlying derivation boundary, read [how the pieces fit](../../docs/concepts.md). For shared command, transport, and telemetry options, use the [runtime reference](../../docs/reference/runtime.md).

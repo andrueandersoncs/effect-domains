@@ -1,12 +1,12 @@
 # Team tasks: tenant-owned operational work
 
-This guide runs a small task board through the same authenticated RPC operations used by its browser pages. We will create two Acme tasks as Alice, page the filtered list, show that Bob cannot see Alice's work, complete a task, and use an administrator only for the actions an owner cannot take.
+This guide runs a small task board through the same authenticated RPC operations used by its generated Application UI. We will create two Acme tasks as Alice, page the filtered list, show that Bob cannot see Alice's work, complete a task, and use an administrator only for the actions an owner cannot take.
 
 The application has one generated resource, historically named `todos`, so its commands are `todos.*` even though the application is Team tasks. Its [canonical task fields](domain.ts) are project, title, optional detail and due date, priority, completion state, and server-returned tenant and owner fields.
 
 ## Before you start
 
-Run every command below from the repository root with Bun installed. Install workspace dependencies and build the prebuilt Foldkit assets before starting a server:
+Run every command below from the repository root with Bun installed. Install workspace dependencies and build the shared Application UI assets before starting a server:
 
 ```bash
 bun install
@@ -118,13 +118,11 @@ bun run team-tasks todos.create --input-json '{"project":"North Yard pump inspec
 
 The example intentionally does not add scheduling, reminders, dependencies, reassignment, cross-project reporting, or a production identity flow.
 
-## Browser, admin, and MCP
+## Application UI and MCP
 
-With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/) for the hand-authored Foldkit task page. It starts signed out; use the login form with a seeded account password. The page uses the same native RPC client as the CLI and keeps the resulting bearer token only in memory. Create tasks, filter by exact project/priority/status, select **Edit**, and save the form; the browser sends `todos.create` for a new task and a full `todos.update` for an edited task. The task table shows project, title, priority, due date, and completion—not tenant or owner—although successful RPC rows contain both server-owned fields.
+With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/). Run `identity.login` with a seeded account; the generated UI keeps the returned bearer token only in memory. It derives task operation forms, exact project/priority/status filters, and cursor paging from the compiled application. Tenant and owner fields remain server-owned, and authorization failures remain visible.
 
-**Load more** appends a returned cursor page. Changing a filter or signing in/out clears prior rows and invalidates in-flight work. Form and server failures, including an attempted completion edit or forbidden removal, appear in the notice or the relevant field; typed username never supplies a role.
-
-The same server also provides the generated browser admin at [http://127.0.0.1:3001/admin](http://127.0.0.1:3001/admin) and Streamable HTTP MCP at `http://127.0.0.1:3001/mcp`. Admin uses the same operations and per-call issued bearer authentication, including declared filters and cursor navigation. MCP tool arguments wrap the RPC payload as `{ "input": <payload> }`; it does not bypass the task policy.
+Streamable HTTP MCP is available at `http://127.0.0.1:3001/mcp`. Tool arguments wrap the RPC payload as `{ "input": <payload> }`; MCP does not bypass task policy.
 
 ## Settings, persistence, and inspection
 
@@ -145,6 +143,6 @@ Inspection is local and does not need a server or token:
 bun run team-tasks inspect todos.patch
 ```
 
-For the common wire, pagination, error, and endpoint contracts, see the [runtime reference](../../docs/reference/runtime.md) and [resource reference](../../docs/reference/resources.md). The task-specific policy and create binding are in [`resources.ts`](resources.ts); browser behavior is in [`web/main.ts`](web/main.ts); the server enables the Foldkit route and admin in [`main.ts`](main.ts).
+For the common wire, pagination, error, and endpoint contracts, see the [runtime reference](../../docs/reference/runtime.md) and [resource reference](../../docs/reference/resources.md). The task-specific policy and create binding are in [`resources.ts`](resources.ts); [`main.ts`](main.ts) configures identity, migrations, and Application UI presentation.
 
 [All examples](../README.md) · [Field notes: global reports with encrypted bodies](../field-notes/README.md)

@@ -6,7 +6,7 @@ Read the guide that a demo account has already unlocked, then observe why a visi
 
 ## Run it
 
-Run the commands from the repository root. The server serves a Foldkit frontend, so `bun run build` is required even though this application has no generated admin. The timestamped database below is disposable walkthrough state; use a different fresh path when repeating the seed behavior.
+Run the commands from the repository root. `bun run build` prepares the shared Application UI. The timestamped database below is disposable walkthrough state; use a different fresh path when repeating the seed behavior.
 
 **Server terminal**
 
@@ -19,7 +19,7 @@ export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 PORT=3003 bun run purchased-guides:server
 ```
 
-The loopback server is now at `http://127.0.0.1:3003`: its RPC endpoint is `/rpc/v1`, its Streamable HTTP MCP endpoint is `/mcp`, and the frontend is at `/`. There is no `/admin` route for this application. `PURCHASED_GUIDES_IDENTITY_DB` must be distinct from `PURCHASED_GUIDES_DB`; the required bootstrap password does not reset the accounts when the server restarts.
+The loopback server is now at `http://127.0.0.1:3003`: the Application UI is at `/`, Effect RPC at `/rpc/v1`, and Streamable HTTP MCP at `/mcp`. `PURCHASED_GUIDES_IDENTITY_DB` must be distinct from `PURCHASED_GUIDES_DB`; the required bootstrap password does not reset accounts when the server restarts.
 
 **Client terminal**
 
@@ -85,11 +85,11 @@ The seed contains the following initial facts:
 
 Alice and Admin have valid issued Acme credentials but no seeded purchase; neither can open a guide solely by role. The issued `outsider` session is Alice in tenant `other`; it can pass role/tenant policy for the other-tenant guide but has no seeded grant, so its read fails with `EntitlementRequired`.
 
-## Browser and MCP
+## Application UI and MCP
 
-Open `http://127.0.0.1:3003/` to use the frontend. It starts signed out; use the login UI with a seeded account password. The page uses the canonical native client and retains the issued bearer token only in memory. After sign-in, select an unlocked, locked, or hidden guide ID and load it; list errors remain visible rather than treating a locked row as absent. **Load more** appends a returned cursor page. Changing identity clears the prior guide, list, and stale request state.
+Open `http://127.0.0.1:3003/`, run `identity.login` with a seeded account, and use the generated `guides.get` and `guides.list` forms. The returned token remains in memory; list entitlement failures remain visible rather than being treated as absent rows.
 
-There is no generated admin, but MCP is available at `http://127.0.0.1:3003/mcp`. The generated resource tools are the read-only `guides.get` and `guides.list`; the composed identity group also exposes `identity.login`, `identity.current`, and `identity.logout`. Pass tool arguments as `{ "input": <operation JSON> }`, using `{ "input": null }` for current/logout. A protected MCP call needs the same issued bearer credential on every request. `/rpc/v1` and `/mcp` are RPC endpoints, not REST APIs.
+MCP exposes the same guide and identity operations at `http://127.0.0.1:3003/mcp`. Pass arguments as `{ "input": <operation JSON> }`, using `{ "input": null }` for current/logout. Protected calls require the issued bearer credential on every request.
 
 ## Storage and source map
 
@@ -108,7 +108,6 @@ Startup decodes and applies the frozen [migration history](migrations.ts), then 
 - [`resources.ts`](resources.ts): role/tenant policy, `guides.read` requirement, read-only guide operations, and the private purchase resource.
 - [`entitlements.ts`](entitlements.ts): current-status lookup and restart-safe seed facts.
 - [`application.ts`](application.ts): the two registered resources.
-- [`main.ts`](main.ts): identity, entitlement service, initialization, frontend route, migrations, and runner.
-- [`web/main.ts`](web/main.ts): native frontend requests, signed-in guide choices, and cursor navigation.
+- [`main.ts`](main.ts): identity, entitlement service, initialization, Application UI presentation, migrations, and runner.
 - [Resource reference](../../docs/reference/resources.md): protected generated reads, all-or-nothing entitlement pages, and cursor/list rules.
 - [Runtime reference](../../docs/reference/runtime.md): loopback runtime, CLI, RPC, and migration behavior.

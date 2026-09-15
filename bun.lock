@@ -5,7 +5,7 @@
     "": {
       "name": "effect-domains",
       "devDependencies": {
-        "@better-typescript/better-typescript": "0.4.19",
+        "@better-typescript/better-typescript": "0.4.20",
         "@effect-domains/example-support": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
@@ -19,8 +19,8 @@
         "vue": "3.5.42",
       },
     },
-    "apps/admin": {
-      "name": "@effect-domains/admin",
+    "apps/application-ui": {
+      "name": "@effect-domains/application-ui",
       "version": "0.1.0",
       "dependencies": {
         "effect": "catalog:",
@@ -30,137 +30,110 @@
       "name": "@effect-domains/example-appointment-reminders",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/editorial-calendar": {
       "name": "@effect-domains/example-editorial-calendar",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/equipment-register": {
       "name": "@effect-domains/example-equipment-register",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/expense-ledger": {
       "name": "@effect-domains/example-expense-ledger",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/field-notes": {
       "name": "@effect-domains/example-field-notes",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/orders-invoices": {
       "name": "@effect-domains/example-orders-invoices",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/purchased-guides": {
       "name": "@effect-domains/example-purchased-guides",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/reading-list": {
       "name": "@effect-domains/example-reading-list",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/repair-workshop": {
       "name": "@effect-domains/example-repair-workshop",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/report-exports": {
       "name": "@effect-domains/example-report-exports",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/reservations": {
       "name": "@effect-domains/example-reservations",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/support-cases": {
       "name": "@effect-domains/example-support-cases",
       "dependencies": {
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "examples/team-tasks": {
       "name": "@effect-domains/example-team-tasks",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
-        "@effect-domains/example-web": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
     "packages/effect-domains": {
       "name": "effect-domains",
       "version": "0.1.0",
       "dependencies": {
-        "@effect-domains/admin": "workspace:*",
+        "@effect-domains/application-ui": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
-        "foldkit": "0.158.2",
       },
       "peerDependencies": {
         "typescript": "^7",
@@ -173,14 +146,6 @@
         "@effect/sql-sqlite-bun": "catalog:",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-      },
-    },
-    "packages/example-web": {
-      "name": "@effect-domains/example-web",
-      "dependencies": {
-        "effect": "catalog:",
-        "effect-domains": "workspace:*",
-        "foldkit": "0.158.2",
       },
     },
   },
@@ -235,7 +200,7 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.19", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.19", "@better-typescript/better-typescript-darwin-arm64": "0.4.19", "@better-typescript/better-typescript-linux-amd64": "0.4.19", "@better-typescript/better-typescript-linux-arm64": "0.4.19" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-i3XiRyfYuUJS7VB3ubPDwH670h7tSgvOfHWnHsxEHy6Qzn8u4T9u9PceLOgf3aH0FSyQysjDIP/zuwQo5+D66w=="],
+    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.20", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.20", "@better-typescript/better-typescript-darwin-arm64": "0.4.20", "@better-typescript/better-typescript-linux-amd64": "0.4.20", "@better-typescript/better-typescript-linux-arm64": "0.4.20" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-lf/HYv2nCtySx4xjXzADUG6JzFGhotJ2AuGj3JfB3fH0hazxIYPtqTKyO5BD6Wm3AkPq1T0EwddA8HsKTE6Eaw=="],
 
     "@docsearch/css": ["@docsearch/css@3.8.2", "", {}, "sha512-y05ayQFyUmCXze79+56v/4HpycYF3uFqB78pLPrSV5ZKAlDuIAAJNhaRi8tTdRNXh05yxX/TyNnzD6LwSM89vQ=="],
 
@@ -243,7 +208,7 @@
 
     "@docsearch/react": ["@docsearch/react@3.8.2", "", { "dependencies": { "@algolia/autocomplete-core": "1.17.7", "@algolia/autocomplete-preset-algolia": "1.17.7", "@docsearch/css": "3.8.2", "algoliasearch": "^5.14.2" }, "peerDependencies": { "@types/react": ">= 16.8.0 < 19.0.0", "react": ">= 16.8.0 < 19.0.0", "react-dom": ">= 16.8.0 < 19.0.0", "search-insights": ">= 1 < 3" }, "optionalPeers": ["@types/react", "react", "react-dom", "search-insights"] }, "sha512-xCRrJQlTt8N9GU0DG4ptwHRkfnSnD/YpdeaXe02iKfqs97TkZJv60yE+1eq/tjPcVnTW8dP5qLP7itifFVV5eg=="],
 
-    "@effect-domains/admin": ["@effect-domains/admin@workspace:apps/admin"],
+    "@effect-domains/application-ui": ["@effect-domains/application-ui@workspace:apps/application-ui"],
 
     "@effect-domains/example-appointment-reminders": ["@effect-domains/example-appointment-reminders@workspace:examples/appointment-reminders"],
 
@@ -272,8 +237,6 @@
     "@effect-domains/example-support-cases": ["@effect-domains/example-support-cases@workspace:examples/support-cases"],
 
     "@effect-domains/example-team-tasks": ["@effect-domains/example-team-tasks@workspace:examples/team-tasks"],
-
-    "@effect-domains/example-web": ["@effect-domains/example-web@workspace:packages/example-web"],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.112", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.112" }, "peerDependencies": { "effect": "^4.0.0-rc.112" } }, "sha512-Y5n2HhV/vsbrJls9ukX42RL7zqXQxISHegWFsP9njsCyDmGTnq7QYSO82rglwrLPwtTrv5dkSRTuGw4+oXxgMg=="],
 
@@ -643,7 +606,7 @@
 
     "encodeurl": ["encodeurl@2.0.0", "", {}, "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="],
 
-    "entities": ["entities@8.1.0", "", {}, "sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA=="],
+    "entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
 
     "es-define-property": ["es-define-property@1.0.1", "", {}, "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g=="],
 
@@ -682,8 +645,6 @@
     "finalhandler": ["finalhandler@2.1.1", "", { "dependencies": { "debug": "^4.4.0", "encodeurl": "^2.0.0", "escape-html": "^1.0.3", "on-finished": "^2.4.1", "parseurl": "^1.3.3", "statuses": "^2.0.1" } }, "sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA=="],
 
     "focus-trap": ["focus-trap@7.8.0", "", { "dependencies": { "tabbable": "^6.4.0" } }, "sha512-/yNdlIkpWbM0ptxno3ONTuf+2g318kh2ez3KSeZN5dZ8YC6AAmgeWz+GasYYiBJPFaYcSAPeu4GfhUaChzIJXA=="],
-
-    "foldkit": ["foldkit@0.158.2", "", { "dependencies": { "parse5": "^8.0.1" }, "peerDependencies": { "effect": "4.0.0-rc.112" } }, "sha512-zA2Bj0W6DHPhPYXGtWduMJjuKnAo+uDyVNLSp5SO3panujtW5Tbh3oLqXhaOcvomqMx6DO2SUtTy+R5s0ut3wQ=="],
 
     "forwarded": ["forwarded@0.2.0", "", {}, "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow=="],
 
@@ -810,8 +771,6 @@
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
 
     "oniguruma-to-es": ["oniguruma-to-es@3.1.1", "", { "dependencies": { "emoji-regex-xs": "^1.0.0", "regex": "^6.0.1", "regex-recursion": "^6.0.2" } }, "sha512-bUH8SDvPkH3ho3dvwJwfonjlQ4R80vjyvrU8YpxuROddv55vAEJrTuCuCVUhhsHbtlD9tGGbaNApGQckXhS8iQ=="],
-
-    "parse5": ["parse5@8.0.1", "", { "dependencies": { "entities": "^8.0.0" } }, "sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw=="],
 
     "parseurl": ["parseurl@1.3.3", "", {}, "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=="],
 
@@ -964,8 +923,6 @@
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
 
     "@vitest/mocker/vite": ["vite@8.2.2", "", { "dependencies": { "lightningcss": "^1.33.0", "picomatch": "^4.0.5", "postcss": "^8.5.26", "rolldown": "~1.2.4", "tinyglobby": "^0.2.17" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.4.0 || ^0.5.0", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-cFKLV/PRgAUlIRm5WjMjJ86jrftzpqcgH+Us+DS8mI3CDNiH30Whrz8uHL3+MOLPAgqbMBAqWdAHAphOAM+z/Q=="],
-
-    "@vue/compiler-core/entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
 
     "@vue/compiler-core/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

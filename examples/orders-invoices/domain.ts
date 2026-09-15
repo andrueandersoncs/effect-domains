@@ -1,5 +1,5 @@
 import { identity, Schema, pipe } from "effect"
-import { NonNegativeSafeIntSchema, PositiveSafeIntSchema } from "effect-domains/domain"
+import { NonNegativeSafeIntSchema, PositiveSafeIntSchema, UuidV7Schema } from "effect-domains/domain"
 
 export const MinorUnitsSchema = identity(NonNegativeSafeIntSchema)
 export const PositiveMinorUnitsSchema = identity(PositiveSafeIntSchema)
@@ -79,7 +79,7 @@ export const PayInvoiceInputSchema = Schema.Struct({
 })
 
 interface PayInvoiceInput extends Schema.Schema.Type<typeof PayInvoiceInputSchema> {}
-export const GetOrderInputSchema = Schema.Struct({ orderId: Schema.String })
+export const GetOrderInputSchema = Schema.Struct({ orderId: UuidV7Schema })
 interface GetOrderInput extends Schema.Schema.Type<typeof GetOrderInputSchema> {}
 
 export class OrderNotFound extends Schema.TaggedError<OrderNotFound>()(

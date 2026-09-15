@@ -6,7 +6,7 @@ Schedule a future reminder and watch it become a durable in-application inbox no
 
 ## Before you start
 
-Use Bun 1.4.0 from the repository root. This application serves a Foldkit page at `/`, so build the shared Foldkit assets before starting `serve`. It has no generated `/admin` application. Every `serve` command also publishes protected RPC at `/rpc/v1` and MCP at `/mcp`.
+Use Bun 1.4.0 from the repository root. Build the shared Application UI before starting `serve`. The generated interface is at `/`; protected RPC remains at `/rpc/v1` and MCP at `/mcp`.
 
 Use separate disposable paths for the application database, private execution store, and projection. They make the walkthrough repeatable and avoid an existing reminder ID selecting earlier state.
 
@@ -109,11 +109,11 @@ bun run appointment-reminders AppointmentRecipient.ScheduleReminder --input-json
 
 Both calls exit nonzero without inserting a notification. The first returns `AppointmentRecipientMismatch` with `entityId` and `recipient`; the second returns `ReminderMustPrecedeAppointment` with `appointmentId`, `appointmentAt`, and `reminderAt`. A database persistence problem is represented as `AppointmentReminderDeliveryFailed` with `recipient` and `reminderId`. A discard call does not return these eventual handler failures. Empty location/purpose, non-UUIDv7 IDs, and invalid UTC timestamps instead fail RPC input validation before delivery.
 
-## Access, web, and MCP
+## Access, Application UI, and MCP
 
 Both scheduling and the inbox resource use the admin-role expression. The issued administrator credential may schedule and read any recipient's inbox. With `APPOINTMENT_REMINDERS_TOKEN="$ALICE_TOKEN"`, the non-admin Alice session is valid but scheduling fails with `Forbidden`; inbox lists return an empty page, and direct gets return `ResourceNotFound` because those rows are outside its visibility scope. Missing, expired, revoked, or unknown credentials fail authentication. The recipient is data, not the authenticated subject, so an admin can schedule and query Alice's inbox.
 
-At `http://127.0.0.1:3002/`, the Foldkit page starts signed out and offers the shared login UI. It uses the canonical native client, generates UUIDv7 IDs, and retains an issued bearer token only in memory. An administrator can reload an inbox or schedule a reminder; field errors and authorization failures are shown rather than hidden by client role controls. **Load more** appends cursor pages. Changing recipient or session clears the prior inbox, form values, and stale requests.
+At `http://127.0.0.1:3002/`, run `identity.login` with a seeded administrator account; the returned token is retained only in memory and applied to later calls. The generated forms expose scheduling and inbox operations, including declared filters and cursor paging. Authorization and field validation remain server-side.
 
 `appointment_notifications.get` takes `{ "id": <the notification's full id string> }`. Lists support equality filters on `recipient`, `appointmentId`, and `reminderId`; use `cursor` with an unchanged filter to traverse further pages from the CLI or MCP.
 

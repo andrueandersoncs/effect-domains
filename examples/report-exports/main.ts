@@ -1,5 +1,4 @@
 import { Layer, pipe } from "effect"
-import { StaticSpa } from "effect-domains/static-spa"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -29,18 +28,21 @@ const services = Layer.mergeAll(
   execution,
 )
 
-const webBase = new URL("./web/", import.meta.url)
-const web = StaticSpa.layerHttp({ title: "Report exports", accent: "#365314", base: webBase })
 
 const initialize = seedReportExportSubscriptions()
-const routes = Layer.mergeAll(ReportExportRoutes, web)
 
 const program = ApplicationBun.run(ReportExportsApplication, {
   database: { migrations: ReportExportMigrations },
   services,
   initialize,
   background: ReportExportBackground,
-  routes,
+  routes: ReportExportRoutes,
+  ui: {
+    presentation: {
+      title: "Report exports",
+      description: "Generate, inspect, approve, and reconcile durable financial report exports.",
+    },
+  },
   telemetry: {
     protocol: "http/json",
     resource: {

@@ -1,16 +1,13 @@
 import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
-import { StaticSpa } from "effect-domains/static-spa"
 import { SupportCasesApplication } from "./application.ts"
 import { SupportCasesMigrations } from "./migrations.ts"
 
-const webBase = new URL("./web/", import.meta.url)
-const web = StaticSpa.layerHttp({ title: "Support cases", accent: "#0f766e", base: webBase })
 
-const admin = {
-  path: "/support-admin",
+const ui = {
   presentation: {
-    title: "Support operations",
+    title: "Support cases",
+    description: "Open, triage, assign, resolve, and reopen customer cases through declared operations.",
     resources: {
       support_customers: { label: "Customers", columns: ["id", "name"] },
       support_agents: { label: "Agents", columns: ["id", "name", "onDuty"] },
@@ -55,8 +52,7 @@ const admin = {
 
 const program = ApplicationBun.run(SupportCasesApplication, {
   database: { migrations: SupportCasesMigrations },
-  admin,
-  routes: web,
+  ui,
   telemetry: {
     protocol: "http/protobuf",
     resource: {

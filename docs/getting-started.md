@@ -1,10 +1,10 @@
 ---
-description: Run a reading-list application, use the Foldkit page at /, and compare it with the CLI and generated admin.
+description: Run a reading-list application and use its generated Application UI beside the CLI.
 ---
 
 # Run your first application
 
-Run a reading list with SQLite persistence, a command-line client, a Foldkit app at `/`, and a generated admin at `/admin`. You’ll add a book, mark it finished, and see the same record through those interfaces.
+Run a reading list with SQLite persistence, a command-line client, and a generated Application UI at `/`. You’ll add a book, mark it finished, and see the same record through both interfaces.
 
 ## Before you start
 
@@ -26,7 +26,7 @@ bun run build
 bun run reading-list:server
 ```
 
-`build` compiles the Foldkit application and browser admin assets. Leave the server running, then open [http://127.0.0.1:3000/](http://127.0.0.1:3000/) for the reading list and [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) for generated operation forms.
+`build` compiles the shared Application UI assets. Leave the server running, then open [http://127.0.0.1:3000/](http://127.0.0.1:3000/) for generated resource lists and operation forms.
 
 The server creates `data/reading-list.sqlite` and applies the example’s checked-in migrations. Restarting preserves your books.
 
@@ -89,9 +89,9 @@ Both commands return the book with `status: "finished"` and `rating: 5`.
 
 ## 5. See the same record in the browser
 
-Return to `/admin` and select `books`. Reload the list if it was already open. Your finished book should be visible. The operation forms let you create, retrieve, update, and remove books using the same contracts as the CLI.
+Return to `/` and select the Books resource. Your finished book should be visible. Operation forms let you create, retrieve, update, and remove books through the same contracts as the CLI.
 
-There is no second admin database or permission bypass. Both clients call the same operations.
+There is no second UI database or permission bypass. Both clients call the same compiled operations.
 
 ## 6. Try an invalid rating
 
@@ -121,8 +121,7 @@ The application has no hand-written CRUD handlers. These files provide the decla
 | `resources.ts` | Public access, published operations, nullable create defaults, and list filters |
 | `application.ts` | Registers the resource in an application |
 | `migrations.ts` and `migrations/` | Imports the frozen SQLite history |
-| `main.ts` | Runs the server, CLI, Foldkit page, and optional admin |
-| `web/` | Foldkit Model/Message/update/view over the published RPCs |
+| `main.ts` | Runs the server and CLI, and supplies Application UI presentation |
 
 The [reading-list source](../examples/reading-list/) is small enough to read end to end.
 

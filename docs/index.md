@@ -17,7 +17,7 @@ features:
   - title: Stop rewriting the same record
     details: A resource derives its table, repository, and selected CRUD contracts from your schema. Nullable create fields default to null; declare lists, versions, and transitions beside the record.
   - title: Use the same operations everywhere
-    details: The CLI, MCP tools, and browser admin share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
+    details: The CLI, MCP tools, and generated Application UI share published RPC contracts and handlers. Validation and authorization do not depend on which client you choose.
   - title: Keep business rules in your code
     details: Define inspectable Command specs, then attach explicit Effect implementations. Families share names, policies, and transaction boundaries without hiding business behavior.
 ---

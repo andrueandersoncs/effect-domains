@@ -183,7 +183,7 @@ bun run reading-list books.create --input-json '{"title":"A Wizard of Earthsea",
 | --- | --- | --- |
 | `/rpc/v1` | Effect HTTP RPC with JSON serialization | Every `serve` command |
 | `/mcp` | Streamable HTTP MCP | Every `serve` command |
-| `/admin` | Browser administration | Only when enabled; path is configurable |
+| `/` | Generated Application UI | When `ui` is enabled; its path is configurable |
 
 `/rpc/v1` is not a REST resource API. Use the generated CLI or native Effect `RpcClient`.
 
@@ -206,44 +206,19 @@ No-payload identity tools still require the MCP wrapper: call `identity.current`
 
 Protected tools require bearer credentials on every call. Tool discovery exposes contracts, not authorization to read protected rows. The [equipment example](/examples#equipment-register) includes an SDK client.
 
-### Example Foldkit clients
+### Generated Application UI
 
-Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, request-token message construction, and keyed request lifecycle.
+`ApplicationBun.run(application, { ui: true })` mounts the shared UI at `/`. The object form accepts `{ path?, presentation?, allowedOrigins? }`; `path` defaults to `/`. The runtime loads prebuilt `@effect-domains/application-ui` JavaScript and CSS and passes the compiled `ApplicationIR` inspection to the browser. It does not compile assets at startup.
 
-`RpcBrowser.command` and `RpcBrowser.mutation` compile a browser operation from argument fields, success/failure message schemas, and an authored `execute` Effect. The Effect returns only the success payload, excluding `_tag` and the framework-injected `request`. Standard failures derive `{ request, error }` with `messageFromUnknown` or `formatError`; failure schemas with extra fields require `failurePayload`.
+The UI mechanically derives operation forms, resource navigation, resource lists, declared equality filters, cursor paging, and complete-JSON input from inspection. It invokes the same in-process RPC handlers as MCP, preserving middleware, service-dependent codecs, declared failures, and request-local authorization. Resource-specific browser reducers and transport clients are not part of an application.
 
-The compiled operation exposes:
+`presentation` may provide an application title and description, resource labels and columns, and operation labels and descriptions. This display-only configuration does not alter canonical schemas, inspection, authorization, or handler behavior.
 
-- `start(model, args, patch?)`, which allocates the request token, updates `model.requests`, applies the optional model patch, and emits the command.
-- `pending(model)`, `pendingFor(model, args)`, `requestKey`, and `key(args)` for declared request ownership. The required `request` declaration accepts a static key, which uses `"latest"` concurrency, or `{ key, concurrency }`; `key` can be a string or a `{ prefix, fields }` descriptor derived mechanically from arguments, and concurrency is `"latest"` or `"exhaust"`.
-- `command(argsWithRequest)` as the low-level escape hatch used by `ResourcePager`, which already owns continuation tokens.
+Protected operations use the bearer field. Tokens remain in memory and are never written to local or session storage. A successful `identity.login` operation places its returned token in that field; `identity.logout` clears it. The UI does not bypass authentication or infer permissions.
 
-Reducers settle messages through `RpcBrowser.succeed`, `fail`, `invalidate`, and `reset`; stale replies return the original model and report `accepted: false`. `RpcBrowser.pending` handles application-wide or keyed display state. Applications no longer allocate, accept, or settle request tokens directly.
+`allowedOrigins` lists exact origins accepted by the UI's call endpoint when using a non-loopback host. It is an origin check, not CORS configuration, authentication policy, or a permission grant. Loopback hosts are trusted by default.
 
-The remaining client modules stay narrow:
-
-- `Requests` is the private state algebra beneath browser operations and paging: keyed monotonic tokens, pending/error state, session epochs, invalidation, and guarded settlement.
-- `Page` owns the shared `{ items, nextCursor }` value plus explicit replace/append and cursor input helpers.
-- `ResourcePager.make(key)` composes request state with explicit continuation starts, replace/append behavior, and stale-page rejection.
-- `Form` decodes strict integers, nullable integers, finite numbers, and nullable trimmed text into existing schemas and maps schema issues to field paths.
-- `IdentitySession` owns in-memory login/logout/expiry operations and generation changes. Credentials are never rendered or stored; the example-web package supplies only the styled session view.
-- `ResourceEditor.make` derives a public CRUD editor only when `list`, `create`, `update`, and `remove` are all published. Its required reversible query-form codec maps authored browser filter values to the Resource's generated list input; query changes replace the current page, while cursor continuation reuses the same decoded query. The base list is a reactive subscription keyed by the exact Resource descriptor, and successful save/remove mutations invalidate that descriptor so the list refetches without reducer reload commands. Edit/query codecs, copy, error display, and complete presentation remain authored.
-
-`RpcBrowser.query` maps model dependencies to a reactive subscription; `mutation` invalidates declared reactivity keys only after success. Field Notes exercises authenticated/filter-dependent subscription composition, while Editorial Calendar and Reading List exercise the derived editor. Applications still author presentation, RPC choice, input decoding, domain-specific success payloads, query-form mappings, continuation policy, reactivity keys, and business state transitions.
-
-This is browser-local invalidation and refetch over ordinary unary `/rpc/v1` requests. It does not provide server push, cross-tab notification, WebSocket/SSE transport, or offline synchronization; changes made by another client become visible on an explicit refresh unless an application supplies an external invalidation source. [`packages/example-web`](../../packages/example-web/) contains build and HTML presentation support, not RPC, paging, identity, runtime, or static-serving mechanics.
-
-### Browser admin
-
-Run `bun run build` before starting an admin-enabled server. Runtime loads prebuilt JavaScript and CSS; it does not compile the browser application on startup.
-
-The interface provides operation forms, resource lists, declared filters, cursor paging, and a full-JSON input fallback. It uses the same handlers and authorization as other clients. Tokens entered in the UI remain in browser memory.
-
-The generated admin is a generic bearer-entry surface: it accepts a real issued credential and does not bypass authentication. It uses the same per-call identity verification as RPC, CLI, MCP, and operator metrics; an MCP transport session is not an identity.
-
-`allowedOrigins` names exact origins permitted by the admin’s origin check when using a non-loopback host. It is not a CORS configuration, authentication policy, or permission grant.
-
-Support Cases demonstrates the object form at `/support-admin`: `presentation` supplies an application title, resource labels and columns, plus operation labels and descriptions. Presentation does not alter inspection, schemas, authorization, or handler behavior. It omits `allowedOrigins` deliberately because the walkthrough remains loopback-only and supports alternate ports.
+Applications may still add native HTTP `routes` for behavior that is not a mechanical representation of an operation contract, such as downloading a generated artifact. They do not need authored browser startup, RPC, paging, form, session, or static-serving modules.
 
 ## Durable execution
 
@@ -303,7 +278,7 @@ Do not rerun it with altered expectations, start version 2 code before it succee
 
 Report acceptance is an application-database transaction that writes an execution/outbox row. A scoped relay dispatches it at least once to native workflow storage using a deterministic ID. Recoverable infrastructure defects suspend, and an authorized resume continues the same execution. Cancellation is explicit and cannot race past the artifact-writing transition. The artifact sink is immutable and idempotent; reconciliation recreates missing bytes and rejects different bytes. These bounded guarantees do not create a cross-database transaction or general exactly-once delivery.
 
-The Field Notes synchronization slice uses a native SQL `EventJournal`, typed `EventLog` events, remote replay, and a SQL projection. Concurrent edits converge by the authored `(revision, replicaId)` maximum; journal timestamps only identify native conflicts. Projection rebuild replays the persisted journal. EventLog remains an application-level policy seam. Browser refetch is instead a framework client mechanic keyed by explicit Resource descriptors; neither concern becomes canonical Resource metadata.
+The Field Notes synchronization slice uses a native SQL `EventJournal`, typed `EventLog` events, remote replay, and a SQL projection. Concurrent edits converge by the authored `(revision, replicaId)` maximum; journal timestamps only identify native conflicts. Projection rebuild replays the persisted journal. EventLog remains an application-level policy seam and does not become canonical Resource or UI metadata.
 
 ## Sources
 
@@ -312,17 +287,11 @@ The Field Notes synchronization slice uses a native SQL `EventJournal`, typed `E
 - [Telemetry configuration](../../packages/effect-domains/src/application-telemetry.ts)
 - [CLI adapter](../../packages/effect-domains/src/rpc-cli.ts)
 - [MCP adapter](../../packages/effect-domains/src/rpc-mcp.ts)
-- [Admin adapter](../../packages/effect-domains/src/application-admin.ts)
+- [Application UI adapter](../../packages/effect-domains/src/application-ui.ts)
 - [Portable identity interface](../../packages/effect-domains/src/identity.ts)
 - [Native identity RPC adapter](../../packages/effect-domains/src/identity-rpc.ts)
 - [SQLite identity implementation](../../packages/effect-domains/src/sqlite-identity.ts)
 - [SQLite Bun runtime](../../packages/effect-domains/src/sqlite-bun.ts)
-- [Browser RPC boundary](../../packages/effect-domains/src/rpc-browser.ts)
-- [Browser runtime](../../packages/effect-domains/src/browser-runtime.ts)
-- [Identity session controller](../../packages/effect-domains/src/identity-session.ts)
-- [Static SPA routes](../../packages/effect-domains/src/static-spa.ts)
-- [Example HTML presentation](../../packages/example-web/src/)
 - [Native Cluster runtime boundary](../../packages/example-support/src/cluster-runtime.ts)
 - [Report execution outbox](../../examples/report-exports/executions.ts)
 - [Field Notes EventLog synchronization](../../examples/field-notes/sync.ts)
-- [Browser reactivity regression](../../test/RpcBrowserReactivity.test.ts)

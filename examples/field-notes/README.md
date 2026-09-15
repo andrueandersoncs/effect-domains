@@ -6,7 +6,7 @@ The one resource is `reports`. Its [canonical record](domain.ts) has an applicat
 
 ## Before you start
 
-Run all commands from the repository root with Bun installed. Install dependencies and build the prebuilt Foldkit assets before serving:
+Run all commands from the repository root with Bun installed. Install dependencies and build the shared Application UI assets before serving:
 
 ```bash
 bun install
@@ -106,19 +106,17 @@ bun run field-notes reports.list --input-json "{\"filter\":{\"site\":\"North Yar
 
 An undeclared filter (including `title`), a malformed cursor, a cursor made for different filters, or a limit greater than 50 is rejected. There is no owner/tenant filter, text search, custom ordering, unbounded list, attachment, geospatial validation, offline synchronization, or report workflow state.
 
-## Browser, admin, and MCP
+## Application UI and MCP
 
-Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the hand-authored Foldkit report page. It starts signed out; use its login form with a seeded account password. The page uses the canonical native RPC client and retains the issued bearer token only in memory. It lists title, site, and identifier; **Open** fetches the full report and fills the edit form, while **File report** calls `reports.create` and **Save changes** calls full `reports.update`. Its form trims the identifier, title, site, and body, and shows field-specific validation failures.
+Open [http://127.0.0.1:3002/](http://127.0.0.1:3002/) for the generated Application UI. Run `identity.login` with a seeded account; its returned credential is held only in memory and applied to subsequent operations. The UI derives report forms, the declared site filter, resource paging, and complete-JSON input from the compiled application. Server authorization remains authoritative.
 
-The base report list is declared once with `RpcBrowser.query`. Login, logout, site-filter, and manual-refresh changes restart that Foldkit subscription. Save and remove use `RpcBrowser.mutation` with `FieldReportsResource` as their invalidation key, so a successful mutation automatically refetches the mounted list without a reducer-authored reload command. **Load more** remains an explicit cursor request; replacing the base page invalidates any older continuation. Server authorization remains authoritative.
-
-The same server exposes generated admin at [http://127.0.0.1:3002/admin](http://127.0.0.1:3002/admin) and Streamable HTTP MCP at `http://127.0.0.1:3002/mcp`. Paste a real issued credential into admin; MCP tools likewise use the same policy and arguments `{ "input": <RPC payload> }`.
+MCP is available at `http://127.0.0.1:3002/mcp`. Its tools use the same policies and arguments shaped as `{ "input": <RPC payload> }`.
 
 ## Native synchronization slice
 
 [`sync.ts`](sync.ts) defines a separate typed `NoteEdited` EventLog slice backed by native SQL `EventJournal` storage and a SQL projection. Two replicas exchange journal entries through native remote replay. Concurrent values converge by the explicit maximum `(revision, replicaId)`: higher revision wins, and a lexicographically higher replica ID breaks equal-revision ties. The policy is order-independent and separate from native journal timestamps. Replaying the retained journal rebuilds the projection after restart; repeating the same remote snapshot is deduplicated.
 
-The EventLog policy remains separate from `FieldReportsResource`: replica conflict semantics are not lossless facts derivable from the canonical report schema. Browser reactivity uses the Resource descriptor only as a local cache key; it does not turn the Resource into an event-sourced aggregate or provide server push/offline replication. Focused regressions are [`EventLogSync.test.ts`](../../test/EventLogSync.test.ts) and [`RpcBrowserReactivity.test.ts`](../../test/RpcBrowserReactivity.test.ts).
+The EventLog policy remains separate from `FieldReportsResource`: replica conflict semantics are not lossless facts derivable from the canonical report schema, and do not become Application UI metadata. Focused synchronization coverage is [`EventLogSync.test.ts`](../../test/EventLogSync.test.ts).
 
 ## Encryption, persistence, and settings
 
@@ -152,6 +150,6 @@ Inspection is local and needs no server, token, or encryption key:
 bun run field-notes inspect reports.create
 ```
 
-For common RPC, page, endpoint, and failure contracts, see the [runtime reference](../../docs/reference/runtime.md) and [resource reference](../../docs/reference/resources.md). The global role policy and exported operation set are in [`resources.ts`](resources.ts); encryption is in [`storage.ts`](storage.ts); the server provisions the encryption service, Foldkit route, and admin in [`main.ts`](main.ts); and browser behavior is in [`web/main.ts`](web/main.ts).
+For common RPC, page, endpoint, and failure contracts, see the [runtime reference](../../docs/reference/runtime.md) and [resource reference](../../docs/reference/resources.md). The global role policy and exported operation set are in [`resources.ts`](resources.ts); encryption is in [`storage.ts`](storage.ts); and [`main.ts`](main.ts) provisions encryption, identity, migrations, and Application UI presentation.
 
 [All examples](../README.md) · [Team tasks: tenant-owned work](../team-tasks/README.md)

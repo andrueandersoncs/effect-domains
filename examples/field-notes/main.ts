@@ -1,5 +1,4 @@
 import { Config, Effect, Layer, pipe } from "effect"
-import { StaticSpa } from "effect-domains/static-spa"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { FieldNotesApplication } from "./application.ts"
@@ -14,14 +13,16 @@ const encryption = pipe(Effect.gen(function* () {
 const identity = ExampleIdentity.layer("field-notes")
 const services = Layer.mergeAll(encryption, identity)
 
-const webBase = new URL("./web/", import.meta.url)
-const web = StaticSpa.layerHttp({ title: "Field notes", accent: "#854d0e", base: webBase })
 
 const program = ApplicationBun.run(FieldNotesApplication, {
   database: { migrations: FieldNotesMigrations },
   services,
-  admin: true,
-  routes: web,
+  ui: {
+    presentation: {
+      title: "Field notes",
+      description: "Record and share encrypted field reports under the application authorization policy.",
+    },
+  },
 })
 
 pipe(program, ApplicationBun.runMain)

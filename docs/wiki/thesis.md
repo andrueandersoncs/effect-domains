@@ -34,13 +34,13 @@ Explicit authorization can nevertheless be declarative: resource-level scope and
 
 ## Architectural Shape
 
-The canonical domain model stays clean. Separate interpreters consume schemas for persistence, transport, testing, documentation, and an opt-in administrative interface. The repository is a private Bun workspace: [`packages/effect-domains`](../../packages/effect-domains/) is the framework, [`packages/example-support`](../../packages/example-support/) holds shared fixtures, and [`examples`](../../examples/) contains independently runnable examples; [`apps/admin`](../../apps/admin/) is the browser application. Inspection’s physical metadata is JSON-encoded native `Table.snapshot`, rather than a duplicate DTO; it does not invent opaque runtime placeholders for handler services or transactions. The admin's inspection-derived operation and resource data is descriptive; its presentation labels, columns, and descriptions are application configuration, not a canonical domain model. Its browser app is prebuilt from [client](../../apps/admin/src/client.ts) and [stylesheet](../../apps/admin/src/style.css) sources, while the native adapter serves only those artifacts. ([Inspection](../../packages/effect-domains/src/application-inspect.ts); [Admin adapter](../../packages/effect-domains/src/application-admin.ts))
+The canonical domain model stays clean. Separate interpreters consume schemas for persistence, transport, testing, documentation, and the generated Application UI. The repository is a private Bun workspace: [`packages/effect-domains`](../../packages/effect-domains/) is the framework, [`packages/example-support`](../../packages/example-support/) holds shared fixtures, and [`examples`](../../examples/) contains independently runnable examples; [`apps/application-ui`](../../apps/application-ui/) is the shared browser interpreter. Inspection's physical metadata is JSON-encoded native `Table.snapshot`, rather than a duplicate DTO; presentation remains external to canonical schemas.
 
 ```text
 ResourceSpec ── Resource compiler ──┐
 CommandSpec + implementation ──────┼── Application compiler ──► ApplicationIR
 ReadModel syntax ── shared folds ──┘                               ├── runtime
-FieldIR ── storage/auth/table interpreters                         ├── CLI / MCP / admin
+FieldIR ── storage/auth/table interpreters                         ├── CLI / MCP / Application UI
                                                                  └── inspection
 ```
 

@@ -1,10 +1,10 @@
 import { Effect, Schema } from "effect"
 
-class AdminBuildError extends Schema.TaggedError<AdminBuildError>()("AdminBuildError", {
+class ApplicationUiBuildError extends Schema.TaggedError<ApplicationUiBuildError>()("ApplicationUiBuildError", {
   message: Schema.String,
 }) {}
 
-const build = Effect.fn("Admin.build")(function* () {
+const build = Effect.fn("ApplicationUi.build")(function* () {
   const clientUrl = new URL("./src/client.ts", import.meta.url)
   const stylesheetUrl = new URL("./src/style.css", import.meta.url)
   const outputUrl = new URL("./dist", import.meta.url)
@@ -21,11 +21,11 @@ const build = Effect.fn("Admin.build")(function* () {
       naming: "[name].[ext]",
     }),
 
-    catch: () => AdminBuildError.make({ message: "Could not build admin assets." }),
+    catch: () => ApplicationUiBuildError.make({ message: "Could not build application UI assets." }),
   })
 
   if (!result.success) {
-    const error = AdminBuildError.make({ message: "Could not build admin assets." })
+    const error = ApplicationUiBuildError.make({ message: "Could not build application UI assets." })
     return yield* Effect.fail(error)
   }
 })

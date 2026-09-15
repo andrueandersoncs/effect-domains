@@ -158,7 +158,7 @@ For this resource, create input requires nonempty `title` and `author` plus one 
 
 ## Continue building
 
-To add a browser admin, set `admin: true` beside `database` in the runner options, run `bun run build` from the workspace root, and restart the server. Open `http://127.0.0.1:3001/admin`.
+The runner can expose a generated Application UI by setting `ui: true` beside `database`. Build the shared assets with `bun run build`, restart the server, and open `http://127.0.0.1:3001/`. The UI interprets the compiled application's operations and resource inspection; no resource-specific browser client is required.
 
 Before using this pattern for private data, [restrict access](/guides/authorization). When a stored schema changes, [append a migration](/guides/migrations) instead of regenerating the initial artifact. See [runtime and clients](/reference/runtime) for environment variables and endpoints.
 

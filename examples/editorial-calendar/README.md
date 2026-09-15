@@ -6,7 +6,7 @@ Plan an article for the website, newsletter, or print edition, then see how the 
 
 ## Run the historical upgrade
 
-Run these commands from the repository root. First install dependencies and build the Foldkit and admin assets; the server loads those prebuilt files rather than compiling them.
+Run these commands from the repository root. First install dependencies and build the shared Application UI assets; the server loads those prebuilt files rather than compiling them.
 
 ```bash
 bun install
@@ -45,7 +45,7 @@ The result is a page with `items` and `nextCursor`. Its historical item retains 
 }
 ```
 
-The generated list orders identifiers ascending. Its `limit` maximum is 50 (and is also the default); a non-null `nextCursor` can be supplied unchanged with the same filters to fetch another page. The Foldkit page appends later pages with **Load more**.
+The generated list orders identifiers ascending. Its `limit` maximum is 50 (and is also the default); a non-null `nextCursor` can be supplied unchanged with the same filters to fetch another page. The Application UI exposes the cursor continuation.
 
 ### What the upgrade changed
 
@@ -102,15 +102,14 @@ bun run editorial-calendar inspect documents.create
 
 [`resources.ts`](resources.ts) selects the generated `documents.get`, `documents.list`, `documents.create`, `documents.update`, and `documents.remove` operations. There is no domain-specific publication transition behind them.
 
-## Browser, admin, and MCP
+## Application UI and MCP
 
 With the server above:
 
-- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the Foldkit planning page. `ResourceEditor` derives its native CRUD client, reactive base-list subscription, mutations, and cursor state from the published Resource contract. Successful save/remove commands invalidate the exact Resource descriptor and automatically refetch the list; **Load more** remains an explicit cursor continuation. Add, edit, and remove one article; blank summary/publication inputs become `null`, and field-specific validation errors are displayed.
-- [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin) is the generated admin for the same operations. It needs the earlier `bun run build`.
+- [http://127.0.0.1:3000/](http://127.0.0.1:3000/) is the generated Application UI. It derives article CRUD forms, declared filters, and cursor navigation from the compiled resource contract.
 - `http://127.0.0.1:3000/mcp` is Streamable HTTP MCP. Its generated tools wrap the same canonical payload as `{ "input": <payload> }`; `/rpc/v1` is Effect JSON RPC, not REST.
 
-All three surfaces are public for this example and bind only to `127.0.0.1`; no token, login, or production deployment configuration is supplied. For common endpoint, CLI, and MCP behavior, see the [runtime reference](../../docs/reference/runtime.md).
+Both interfaces are public for this example and bind only to `127.0.0.1`; no token, login, or production deployment configuration is supplied. For common endpoint, CLI, and MCP behavior, see the [runtime reference](../../docs/reference/runtime.md).
 
 ## Settings and source map
 
@@ -130,5 +129,4 @@ EDITORIAL_CALENDAR_URL="http://127.0.0.1:3001/rpc/v1" bun run editorial-calendar
 - [`domain.ts`](domain.ts) defines current planning values.
 - [`resources.ts`](resources.ts) publishes the CRUD surface.
 - [`seed-v1.ts`](seed-v1.ts), [`legacy.ts`](legacy.ts), and [`migrations/`](migrations/) contain the historical demonstration and immutable artifacts.
-- [`main.ts`](main.ts) enables the server, generated admin, and Foldkit routes.
-- [`web/main.ts`](web/main.ts) is the application-specific browser workflow.
+- [`main.ts`](main.ts) configures SQLite, the generated Application UI presentation, and the runner.

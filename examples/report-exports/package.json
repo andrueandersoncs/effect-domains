@@ -11,9 +11,7 @@
   },
   "dependencies": {
     "@effect-domains/example-support": "workspace:*",
-    "@effect-domains/example-web": "workspace:*",
     "effect": "catalog:",
-    "effect-domains": "workspace:*",
-    "foldkit": "0.158.2"
+    "effect-domains": "workspace:*"
   }
 }

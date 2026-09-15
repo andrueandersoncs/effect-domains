@@ -17,11 +17,10 @@ bun run repair-workshop:server
 
 Leave this terminal running. The server provides:
 
-- A hand-authored Foldkit board at [http://127.0.0.1:3000/](http://127.0.0.1:3000/).
-- The generated admin at [http://127.0.0.1:3000/admin](http://127.0.0.1:3000/admin).
+- The generated Application UI at [http://127.0.0.1:3000/](http://127.0.0.1:3000/).
 - Effect JSON RPC at `http://127.0.0.1:3000/rpc/v1` and Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`.
 
-No bearer token is required. Keep the server on loopback. The build is required for the frontend and admin assets.
+No bearer token is required. Keep the server on loopback. The build prepares the shared Application UI assets.
 
 ## Register customers and technicians
 
@@ -108,13 +107,11 @@ bun run repair-workshop workshop.board --input-json '{"limit":51}'
 
 This fails the board input schema before execution. Unknown statuses and empty names also fail validation. A malformed cursor or one reused with a different filter fails as `ReadModelInputError`. Missing generated-resource rows produce `ResourceNotFound`; generated storage failures produce `RepositoryError`. The published read model translates SQL/result-codec failures to `RepairWorkshopUnavailable`.
 
-## Use the browser or MCP
+## Use the Application UI or MCP
 
-At `/`, the **Customers** and **Technicians** forms create records or edit their names and on-call state. **Create repair** uses those records in its selectors. Change a repair's status or technician directly on the board. The canonical native client reloads after mutations; changing the board query clears and invalidates old rows until **Reload** fetches the new result. Field-specific validation failures are shown.
+At `/`, the generated UI exposes customer, technician, and repair resource forms plus the authored `workshop.board` operation. Resource lists and the board derive their declared filters and cursor paging from inspection.
 
-The browser requests the first page of up to 50 matching repairs. Customer and technician selectors load 50-row resource pages; **Load more customers** and **Load more technicians** append choices when a cursor exists.
-
-The generated admin exposes resource operations plus `workshop.board`. MCP uses those same contracts: call `workshop.board` with `{"input":{"filter":{"status":"queued"},"limit":25}}` and read the page from `structuredContent.result`. The MCP endpoint is not the CLI's `/rpc/v1` URL. See [shared MCP conventions](../README.md#mcp-server).
+MCP uses those same contracts: call `workshop.board` with `{"input":{"filter":{"status":"queued"},"limit":25}}` and read the page from `structuredContent.result`. The MCP endpoint is not the CLI's `/rpc/v1` URL. See [shared MCP conventions](../README.md#mcp-server).
 
 ## Runtime and persistence
 
@@ -141,7 +138,6 @@ bun run repair-workshop inspect workshop.board
 - [`resources.ts`](resources.ts): public policies, generated CRUD/patch, creation defaults, foreign keys, indexes, and urgent-first repair list.
 - [`board.ts`](board.ts): `ReadModel` selects repair fields, inner-joins the required customer, and left-joins the optional technician; selected storage codecs and output aliases are derived.
 - [`sqlite.ts`](sqlite.ts): `ReadModel.publish` turns the declared page into a command without restating its contract.
-- [`application.ts`](application.ts), [`main.ts`](main.ts): resource/native composition, SQLite history, and browser routes.
-- [`web/main.ts`](web/main.ts): authored forms, board, and selector pagination.
+- [`application.ts`](application.ts), [`main.ts`](main.ts): resource/native composition, SQLite history, and Application UI presentation.
 
 A `ReadModel` does not grant access or apply resource authorization to privileged native SQL. This example has no tenant isolation, production identity, staffing calendar, parts inventory, invoices, or business-transition guards. Compare [reservations](../reservations/README.md) for authored transactional transitions and the [joined projection reference](../../docs/reference/resources.md#relations-and-projections) for the derivation API.

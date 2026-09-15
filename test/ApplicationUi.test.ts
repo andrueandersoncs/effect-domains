@@ -5,7 +5,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Application, Part } from "effect-domains/application"
-import { ApplicationAdmin } from "effect-domains/application-admin"
+import { ApplicationUi } from "effect-domains/application-ui"
 import { AuthorizationSubject } from "effect-domains/authorization"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { ApplicationInspect } from "effect-domains/application-inspect"
@@ -19,7 +19,7 @@ const stylesheet = ""
 
 const HeaderValuesSchema = Schema.Record(Schema.String, Schema.String)
 
-const call = Effect.fn("Admin.testCall")(function* (
+const call = Effect.fn("ApplicationUi.testCall")(function* (
   handler: ReturnType<
     typeof HttpRouter.toWebHandler<never, never, HttpRouter.HttpRouter, never>
   >["handler"],
@@ -29,7 +29,7 @@ const call = Effect.fn("Admin.testCall")(function* (
 ) {
   const body = JSON.stringify({ operation, input })
 
-  const request = new Request("http://localhost/admin/api/call", {
+  const request = new Request("http://localhost/api/call", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body,
@@ -40,7 +40,7 @@ const call = Effect.fn("Admin.testCall")(function* (
   return { status: response.status, body: decoded }
 })
 
-const serverFor = Effect.fn("Admin.testServer")(function* (
+const serverFor = Effect.fn("ApplicationUi.testServer")(function* (
   routes: Layer.Layer<never, unknown, HttpRouter.HttpRouter>,
 ) {
   const server = HttpRouter.toWebHandler(routes, { disableLogger: true })
@@ -48,7 +48,7 @@ const serverFor = Effect.fn("Admin.testServer")(function* (
   return server.handler
 })
 
-it.effect("admin authenticates each invocation and rejects cross-origin writes before handlers", () => pipe(
+it.effect("application UI authenticates each invocation and rejects cross-origin writes before handlers", () => pipe(
   Effect.gen(function* () {
     const writes = yield* Ref.make(0)
 
@@ -65,7 +65,12 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
     const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
 
     const routes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      ApplicationUi.layerHttp({
+        application,
+        javascript,
+        stylesheet,
+        presentation: { title: "Identity application", description: "Generated from application contracts." },
+      }),
       Layer.provide(application.handlers),
       Layer.provide(AuthorizationRpc.layer),
       Layer.provide(capturedSubject),
@@ -73,6 +78,25 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
     )
 
     const handler = yield* serverFor(routes)
+    const documentRequest = new Request("http://localhost/")
+    const documentResponse = yield* Effect.promise(() => handler(documentRequest))
+    expect(documentResponse.status).toBe(200)
+    const document = yield* Effect.promise(() => documentResponse.text())
+    expect(document).toContain('src="/client.js"')
+
+    const metadataRequest = new Request("http://localhost/api")
+    const metadataResponse = yield* Effect.promise(() => handler(metadataRequest))
+    expect(metadataResponse.status).toBe(200)
+    const metadata = yield* Effect.promise(() => metadataResponse.json())
+
+    expect(metadata).toMatchObject({
+      application: "identity",
+      presentation: {
+        title: "Identity application",
+        description: "Generated from application contracts.",
+      },
+    })
+
     const denied = yield* call(handler, "mutate", null)
     expect(denied.status).toBe(422)
     expect(denied.body).toEqual({ error: { _tag: "Unauthenticated" } })
@@ -102,7 +126,7 @@ it.effect("admin authenticates each invocation and rejects cross-origin writes b
 
     const reboundBody = JSON.stringify({ operation: "mutate", input: null })
 
-    const reboundRequest = new Request("http://rebound.example/admin/api/call", {
+    const reboundRequest = new Request("http://rebound.example/api/call", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -141,7 +165,7 @@ const broken = Rpc.make("broken", { success: Schema.String })
 const clock = RpcGroup.make(time, clear, broken)
 const cutoff = new Date("2026-01-01T00:00:00.000Z")
 
-it.effect("admin preserves wire codecs and void while distinguishing validation, declared errors and defects", () => pipe(
+it.effect("application UI preserves wire codecs and void while distinguishing validation, declared errors and defects", () => pipe(
   Effect.gen(function* () {
     const handlers = clock.toLayer({
       time: (date) => date < cutoff ? TooEarly.make({ at: date }) : Effect.succeed(date),
@@ -154,7 +178,7 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
     const application = Application.compile(definition)
 
     const routes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      ApplicationUi.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
     )
 
@@ -185,7 +209,7 @@ it.effect("admin preserves wire codecs and void while distinguishing validation,
   Effect.scoped,
 ))
 
-it.effect("admin isolates a slow call from an unrelated handler defect", () => pipe(
+it.effect("application UI isolates a slow call from an unrelated handler defect", () => pipe(
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>()
     const release = yield* Deferred.make<void>()
@@ -193,7 +217,7 @@ it.effect("admin isolates a slow call from an unrelated handler defect", () => p
     const defect = Rpc.make("defect", { success: Schema.String })
     const group = RpcGroup.make(slow, defect)
 
-    const slowHandler = Effect.fn("ApplicationAdmin.testSlowHandler")(function* () {
+    const slowHandler = Effect.fn("ApplicationUi.testSlowHandler")(function* () {
       yield* Deferred.succeed(started, undefined)
       yield* Deferred.await(release)
       return "healthy"
@@ -209,7 +233,7 @@ it.effect("admin isolates a slow call from an unrelated handler defect", () => p
     const application = Application.compile(definition)
 
     const routes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      ApplicationUi.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
     )
 
@@ -233,7 +257,7 @@ it.effect("admin isolates a slow call from an unrelated handler defect", () => p
   Effect.scoped,
 ))
 
-it.effect("admin uses handler-only codec context instead of its ambient context", () => pipe(
+it.effect("application UI uses handler-only codec context instead of its ambient context", () => pipe(
   Effect.gen(function* () {
     const echo = Rpc.make("echo", {
       payload: StoredTextSchema,
@@ -255,7 +279,7 @@ it.effect("admin uses handler-only codec context instead of its ambient context"
     const application = Application.compile(definition)
 
     const handlerOnlyRoutes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      ApplicationUi.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
     )
 
@@ -267,7 +291,7 @@ it.effect("admin uses handler-only codec context instead of its ambient context"
     expect(handlerOnlyFailure).toEqual({ status: 422, body: { error: "inner:failure" } })
 
     const routes = pipe(
-      ApplicationAdmin.layerHttp({ application, javascript, stylesheet }),
+      ApplicationUi.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
       Layer.provide(outerPrefix),
     )

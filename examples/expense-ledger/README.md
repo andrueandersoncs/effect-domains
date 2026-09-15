@@ -6,16 +6,16 @@ Record a small multi-currency expense period, then retrieve, correct, and delete
 
 ## Before you start
 
-Use Bun from the repository root. The expense database is local SQLite and the application is public on loopback: no token is needed. The server, CLI, browser UI, generated admin, and MCP endpoint are separate surfaces over the same application.
+Use Bun from the repository root. The expense database is local SQLite and the application is public on loopback: no token is needed. The generated Application UI, CLI, RPC, and MCP surfaces use the same compiled application.
 
-Install dependencies and build the precompiled browser assets once:
+Install dependencies and build the shared Application UI assets once:
 
 ```bash
 bun install
 bun run build
 ```
 
-`bun run build` is required before `serve`: the Foldkit page at `/` needs its prebuilt `web/dist` JavaScript and CSS, and this application also enables the generated admin at `/admin`.
+`bun run build` is required before `serve` because the runtime loads the prebuilt Application UI mounted at `/`.
 
 For a disposable tutorial database, choose a new path before starting the server. Do not reuse this path if you want the fixed examples below to begin empty.
 
@@ -24,7 +24,7 @@ export EXPENSE_LEDGER_DB="$(mktemp -d)/expense-ledger.sqlite"
 bun run expense-ledger:server
 ```
 
-Leave that terminal running. It listens on `http://127.0.0.1:3000`, serves RPC at `http://127.0.0.1:3000/rpc/v1`, MCP at `http://127.0.0.1:3000/mcp`, the Foldkit ledger at `/`, and the generated admin at `/admin`.
+Leave that terminal running. It listens on `http://127.0.0.1:3000`, serves the Application UI at `/`, RPC at `/rpc/v1`, and MCP at `/mcp`.
 
 Open a second terminal at the repository root for the CLI. Alternatively, if another example uses port 3000, use the following **instead of** the server command above (stop an already-running instance first), then set the client URL separately:
 
@@ -100,7 +100,7 @@ The first three calls return the selected row (the remove call returns the delet
 - `expenses.totals` with `from` later than `through` fails with `InvalidExpenseDateRange` and echoes the two dates.
 - Storage and result-codec failures are translated to `ExpenseLedgerUnavailable`. That includes a database failure and a total that cannot satisfy the declared safe-integer result schema; no silently rounded or unrepresentable total is returned.
 - A missing row from `get`, `update`, or `remove` is `ExpenseNotFound`. Invalid dates, categories, currencies, UUIDs, and generated-list limits are rejected by their request schemas before the handler can perform the operation.
-- The Foldkit page at `/` uses the canonical native client with date/category controls, a cursor-backed expense list, a totals-by-category-and-currency table, and record/edit/remove controls. Changing the query invalidates prior rows and totals; saves/removals refresh both. Invalid amount or date inputs produce field-specific errors. `/admin` is the separate generated RPC admin. Neither surface is an accounting workflow.
+- The Application UI at `/` derives expense CRUD, list filters, cursor paging, and the authored `expenses.totals` operation form from inspection. Neither the UI nor the application is an accounting workflow.
 
 This is a local expense register. It does not implement double-entry accounting, exchange rates, reimbursement review, taxes, production identity, or a payment-provider workflow.
 
@@ -109,7 +109,7 @@ This is a local expense register. It does not implement double-entry accounting,
 - [Expense schemas and declared failures](domain.ts)
 - [Resource list declaration](resources.ts) and [`Command` contracts, implementations, and SQLite totals](sqlite.ts)
 - [Migration history](migrations.ts) and [runtime entry point](main.ts)
-- [Foldkit ledger UI](web/main.ts)
+- [Generated Application UI adapter](../../packages/effect-domains/src/application-ui.ts)
 - [Resource/list and implicit identifier contract](../../docs/reference/resources.md)
 - [Bun runtime, RPC, MCP, and environment settings](../../packages/effect-domains/src/application-bun.ts)
 - [Runtime reference](../../docs/reference/runtime.md)

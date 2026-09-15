@@ -19,8 +19,7 @@ bun run support-cases:server
 
 The server provides:
 
-- A hand-authored Foldkit case board at [http://127.0.0.1:3000/](http://127.0.0.1:3000/).
-- Generated administration with authored presentation at [http://127.0.0.1:3000/support-admin](http://127.0.0.1:3000/support-admin).
+- The generated Application UI with authored presentation at [http://127.0.0.1:3000/](http://127.0.0.1:3000/).
 - Effect JSON RPC at `http://127.0.0.1:3000/rpc/v1`.
 - Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`.
 
@@ -89,11 +88,9 @@ open --triage--> triaged --assign--> assigned --resolve--> resolved
                          +-----------reopen----------+
 ```
 
-## Use the browser, admin, or MCP
+## Use the Application UI or MCP
 
-The Foldkit page can register customers and agents, open cases, filter and inspect the board, review event history, and advance the selected case. The page uses the same native RPC contracts as the CLI and suppresses repeated local mutations while one is pending.
-
-The generated admin at `/support-admin` exposes the published resource reads, customer and agent CRUD, board, and authored support operations. Its runtime configuration supplies the **Support operations** title, resource and operation labels, operation descriptions, and deliberate table columns. These values affect presentation only; inspected schemas and server-side authorization remain authoritative. The loopback default origin policy remains in force, so the example does not hardcode `allowedOrigins` or prevent using another `PORT`. Case/event creation and case transitions are not published as generated resource mutations; callers must use `support.openCase` and `support.advanceCase` so the event history shares the transaction.
+The generated UI at `/` exposes published resource reads, customer and agent CRUD, the joined board, and authored support operations. Its `ui.presentation` supplies the **Support operations** title, resource and operation labels, descriptions, and deliberate table columns. These values affect presentation only; inspected schemas and server-side authorization remain authoritative. Case/event creation and transitions still use `support.openCase` and `support.advanceCase` so event history shares the transaction.
 
 For MCP, call the same operations with arguments shaped as `{ "input": <RPC payload> }`. A successful tool result is `{ "result": <RPC result> }`.
 
@@ -119,7 +116,7 @@ bun run support-cases:server
 bun run support-cases support.board --input-json '{"filter":{"status":"open"}}'
 ```
 
-The configuration wraps the nested application, generated resources, authored transactions, joined read model, admin/MCP dispatch, and CLI command lifetime without adding telemetry metadata to domain schemas. With no endpoint, no collector request is made. See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry-tracing) for headers, endpoint precedence, batching, shutdown, and opt-out behavior.
+The configuration wraps the nested application, generated resources, authored transactions, joined read model, Application UI/MCP dispatch, and CLI command lifetime without adding telemetry metadata to domain schemas. With no endpoint, no collector request is made. See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry-tracing).
 
 ## Follow the implementation
 
@@ -129,7 +126,6 @@ The configuration wraps the nested application, generated resources, authored tr
 - [`contracts.ts`](contracts.ts): the nested case-detail result.
 - [`sqlite.ts`](sqlite.ts): transactional open/advance handlers and the authored nested history query.
 - [`application.ts`](application.ts): sibling directory/case-management applications and final composition.
-- [`main.ts`](main.ts): frozen migration history, custom generated-admin presentation and path, OTLP resource metadata, and static browser routes.
-- [`web/main.ts`](web/main.ts): the authored case-management workflow.
+- [`main.ts`](main.ts): frozen migration history, Application UI presentation, OTLP resource metadata, and runner.
 
-This slice adds no framework API. It exercises the existing version, transition, list range/order, operation transaction, joined projection, authored-query, sibling-application composition, runtime-owned admin presentation, and telemetry configuration seams together in another domain.
+This slice exercises version, transition, list range/order, operation transaction, joined projection, authored-query, sibling-application composition, runtime-owned UI presentation, and telemetry configuration seams together in another domain.
