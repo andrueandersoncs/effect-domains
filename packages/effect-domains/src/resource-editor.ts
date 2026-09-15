@@ -1,11 +1,11 @@
-import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
-import { Command, type Update } from "foldkit"
+import type { Update } from "foldkit"
 import { defineMessageUnion } from "foldkit/message"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Authorization } from "./authorization.ts"
 import { BrowserModel } from "./browser-model.ts"
-import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "./requests.ts"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "./requests.ts"
 import { RpcBrowser } from "./rpc-browser.ts"
 import { RpcService, type Type } from "./rpc-service.ts"
 import { Page, type Page as PageValue } from "./page.ts"
@@ -183,43 +183,31 @@ const make = <
       sameForm(model.form, form) && sameOptionalIdentifier(model.selectedId, selectedId)),
   )
 
-  const failure = (request: RequestToken, error: unknown) => {
-    const details = BrowserModel.failure(error, options.formatError)
-
-    return MessageSchema.Failed({ request, ...details })
-  }
-
-  const recover = (request: RequestToken) => {
-    const toFailure = (error: unknown) => failure(request, error)
-    return Effect.catch(flow(toFailure, Effect.succeed))
-  }
+  const failurePayload = (error: unknown) =>
+    BrowserModel.failure(error, options.formatError)
 
   class ListArgs extends Schema.Class<ListArgs>(`${options.name}/ListArgs`)({
     query: QueryFormSchema,
     cursor: CursorSchema,
     append: Schema.Boolean,
-    request: RequestTokenSchema,
   }) {}
 
-  const loadPage = ({ query, cursor, append, request }: ListArgs) => pipe(
-    Effect.gen(function* () {
-      const client = yield* Client
-      const decoded = yield* decodeQuery(query)
-      const input = listInput(decoded, cursor)
-      const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
+  const loadPage = Effect.fn("ResourceEditor.loadPage")(function* ({ query, cursor, append }: ListArgs) {
+    const client = yield* Client
+    const decoded = yield* decodeQuery(query)
+    const input = listInput(decoded, cursor)
+    const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
 
-      return MessageSchema.SucceededList({ page, append, request })
-    }),
-    recover(request),
-  )
-
-  const ListConfig = Object.freeze({
-    args: ListArgs.fields,
-    messages: [MessageSchema.SucceededList, MessageSchema.Failed],
-    execute: loadPage,
+    return { page, append }
   })
 
-  const List = Command.define(`${options.name}.List`, ListConfig)
+  const List = RpcBrowser.command(`${options.name}.List`, {
+    args: ListArgs.fields,
+    success: MessageSchema.SucceededList,
+    failure: MessageSchema.Failed,
+    execute: loadPage,
+    failurePayload,
+  })
 
   class SyncDependencies extends Schema.Class<SyncDependencies>(`${options.name}/SyncDependencies`)({
     query: QueryFormSchema,
@@ -234,93 +222,78 @@ const make = <
       const client = yield* Client
       const decoded = yield* decodeQuery(query)
       const input = listInput(decoded, null)
+      const page = yield* invoke<PageValue<Row>>(client, listMethod, input)
 
-      return yield* invoke<PageValue<Row>>(client, listMethod, input)
+      return { page }
     },
   )
-
-  const synchronizePage = (page: PageValue<Row>) =>
-    MessageSchema.SynchronizedList({ page })
-
-  const failSynchronization = (error: unknown) => {
-    const formatted = options.formatError(error)
-
-    return MessageSchema.FailedList({ error: formatted })
-  }
 
   const subscriptions = RpcBrowser.query<Model, Message>()(`${options.name}.Sync`, {
     dependencies: SyncDependencies.fields,
     modelToDependencies: selectSyncDependencies,
     reactivityKeys: [options.resource],
     execute: selectSynchronizedPage,
-    onSuccess: synchronizePage,
-    onFailure: failSynchronization,
+    success: MessageSchema.SynchronizedList,
+    failure: MessageSchema.FailedList,
+    formatError: options.formatError,
   })
 
   class SaveArgs extends Schema.Class<SaveArgs>(`${options.name}/SaveArgs`)({
     selectedId: OptionalIdentifierSchema,
     form: FormValueSchema,
-    request: RequestTokenSchema,
   }) {}
 
-  const executeSave = ({ selectedId, form, request }: SaveArgs) => pipe(
-    Effect.gen(function* () {
-      const draft = yield* pipe(
-        Schema.decodeUnknownEffect(options.form)(form),
-        Effect.mapError(BrowserModel.formFailure),
-      )
+  const executeSave = Effect.fn("ResourceEditor.executeSave")(function* ({ selectedId, form }: SaveArgs) {
+    const draft = yield* pipe(
+      Schema.decodeUnknownEffect(options.form)(form),
+      Effect.mapError(BrowserModel.formFailure),
+    )
 
-      const client = yield* Client
-      const created = Predicate.isNull(selectedId)
+    const client = yield* Client
+    const created = Predicate.isNull(selectedId)
 
-      const row = yield* created
-        ? invoke<Row>(client, createMethod, draft)
-        : Effect.gen(function* () {
-          const candidate = Record.set(draft, options.resource.table.identifier, selectedId)
-          const input = yield* Schema.decodeUnknownEffect(options.resource.table.rowSchema)(candidate)
-          return yield* invoke<Row>(client, updateMethod, input)
-        })
+    const row = yield* created
+      ? invoke<Row>(client, createMethod, draft)
+      : Effect.gen(function* () {
+        const candidate = Record.set(draft, options.resource.table.identifier, selectedId)
+        const input = yield* Schema.decodeUnknownEffect(options.resource.table.rowSchema)(candidate)
+        return yield* invoke<Row>(client, updateMethod, input)
+      })
 
-      return MessageSchema.SucceededSave({ row, created, request })
-    }),
-    Reactivity.mutation([options.resource]),
-    recover(request),
-  )
-
-  const SaveConfig = Object.freeze({
-    args: SaveArgs.fields,
-    messages: [MessageSchema.SucceededSave, MessageSchema.Failed],
-    execute: executeSave,
+    return { row, created }
   })
 
-  const Save = Command.define(`${options.name}.Save`, SaveConfig)
+  const Save = RpcBrowser.mutation(`${options.name}.Save`, {
+    args: SaveArgs.fields,
+    success: MessageSchema.SucceededSave,
+    failure: MessageSchema.Failed,
+    execute: executeSave,
+    failurePayload,
+    invalidates: [options.resource],
+  })
 
   class RemoveArgs extends Schema.Class<RemoveArgs>(`${options.name}/RemoveArgs`)({
     id: options.resource.table.identifierSchema,
-    request: RequestTokenSchema,
   }) {}
 
   const RemoveInputSchema = Schema.Record(Schema.String, options.resource.table.identifierSchema)
 
-  const makeRemove = ({ id, request }: RemoveArgs) => pipe(
-    Effect.gen(function* () {
-      const client = yield* Client
-      const input = RemoveInputSchema.make({ [options.resource.table.identifier]: id })
-      yield* invoke<void>(client, removeMethod, input)
+  const makeRemove = Effect.fn("ResourceEditor.makeRemove")(function* ({ id }: RemoveArgs) {
+    const client = yield* Client
+    const input = RemoveInputSchema.make({ [options.resource.table.identifier]: id })
+    yield* invoke<void>(client, removeMethod, input)
 
-      return MessageSchema.SucceededRemove({ id, request })
-    }),
-    Reactivity.mutation([options.resource]),
-    recover(request),
-  )
-
-  const RemoveConfig = Object.freeze({
-    args: RemoveArgs.fields,
-    messages: [MessageSchema.SucceededRemove, MessageSchema.Failed],
-    execute: makeRemove,
+    return { id }
   })
 
-  const Remove = Command.define(`${options.name}.Remove`, RemoveConfig)
+  const Remove = RpcBrowser.mutation(`${options.name}.Remove`, {
+    args: RemoveArgs.fields,
+    success: MessageSchema.SucceededRemove,
+    failure: MessageSchema.Failed,
+    execute: makeRemove,
+    failurePayload,
+    invalidates: [options.resource],
+  })
 
   const beginList = (model: Model, append: boolean): UpdateReturn => {
     const page = options.resource.contracts.list.successSchema.make({

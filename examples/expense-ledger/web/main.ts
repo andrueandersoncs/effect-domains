@@ -1,5 +1,5 @@
 import { Array, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -61,14 +61,12 @@ type UpdateReturn = Update.Return<Model, Message, WebClient>
 
 const emptyForm = { date: today, merchant: "", category: "meals", amountMinor: "", currency: "USD", selectedId: null as string | null }
 const queryPayload = (from: string, through: string, filterCategory: string) => Schema.decodeUnknownEffect(ExpenseQueryInputSchema)({ from, through, ...(filterCategory === "" ? {} : { category: filterCategory }), limit: 50 })
-const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
-  effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
-)
 
-export const ListExpenses = Command.define("ListExpenses", {
-  args: { request: RequestTokenSchema, from: Schema.String, through: Schema.String, filterCategory: Schema.String }, messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, from, through, filterCategory }) => requestEffect(request, Effect.gen(function*() {
+export const ListExpenses = RpcBrowser.command("ListExpenses", {
+  args: { from: Schema.String, through: Schema.String, filterCategory: Schema.String },
+  success: Message.SucceededList,
+  failure: Message.Failed,
+  execute: ({ from, through, filterCategory }) => Effect.gen(function*() {
     const client = yield* WebClient
     const query = yield* queryPayload(from, through, filterCategory)
     const page = yield* client["expenses.list"]({
@@ -76,30 +74,72 @@ export const ListExpenses = Command.define("ListExpenses", {
       ...(query.category === undefined ? {} : { filter: { category: query.category } }),
       limit: 50,
     })
-    return page.items
-  }), (expenses) => Message.SucceededList({ request, expenses })),
+
+    return { expenses: page.items }
+  }),
 })
-export const LoadTotals = Command.define("LoadTotals", {
-  args: { request: RequestTokenSchema, from: Schema.String, through: Schema.String, filterCategory: Schema.String }, messages: [Message.SucceededTotals, Message.Failed],
-  execute: ({ request, from, through, filterCategory }) => requestEffect(request, Effect.gen(function*() { const client = yield* WebClient; return yield* client["expenses.totals"](yield* queryPayload(from, through, filterCategory)) }), (totals) => Message.SucceededTotals({ request, totals })),
+
+export const LoadTotals = RpcBrowser.command("LoadTotals", {
+  args: { from: Schema.String, through: Schema.String, filterCategory: Schema.String },
+  success: Message.SucceededTotals,
+  failure: Message.Failed,
+  execute: ({ from, through, filterCategory }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const totals = yield* client["expenses.totals"](yield* queryPayload(from, through, filterCategory))
+
+    return { totals }
+  }),
 })
-export const GetExpense = Command.define("GetExpense", {
-  args: { request: RequestTokenSchema, id: Schema.String }, messages: [Message.SucceededGet, Message.Failed],
-  execute: ({ request, id }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["expenses.get"]({ id }))), (expense) => Message.SucceededGet({ request, expense })),
+
+export const GetExpense = RpcBrowser.command("GetExpense", {
+  args: { id: Schema.String },
+  success: Message.SucceededGet,
+  failure: Message.Failed,
+  execute: ({ id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["expenses.get"]({ id })),
+    Effect.map((expense) => ({ expense })),
+  ),
 })
-export const SaveExpense = Command.define("SaveExpense", {
-  args: { request: RequestTokenSchema, selectedId: Schema.NullOr(Schema.String), date: Schema.String, merchant: Schema.String, category: Schema.String, amountMinor: Schema.String, currency: Schema.String }, messages: [Message.SucceededSave, Message.Failed],
-  execute: (args) => requestEffect(args.request, Effect.gen(function*() {
-    const expense = yield* Schema.decodeUnknownEffect(ExpenseSchema)({ date: args.date, merchant: args.merchant.trim(), category: args.category, amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(ExpenseSchema.fields.amountMinor))(args.amountMinor), currency: args.currency.trim().toUpperCase() })
+
+export const SaveExpense = RpcBrowser.command("SaveExpense", {
+  args: {
+    selectedId: Schema.NullOr(Schema.String),
+    date: Schema.String,
+    merchant: Schema.String,
+    category: Schema.String,
+    amountMinor: Schema.String,
+    currency: Schema.String,
+  },
+  success: Message.SucceededSave,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const expense = yield* Schema.decodeUnknownEffect(ExpenseSchema)({
+      date: args.date,
+      merchant: args.merchant.trim(),
+      category: args.category,
+      amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(ExpenseSchema.fields.amountMinor))(args.amountMinor),
+      currency: args.currency.trim().toUpperCase(),
+    })
     const client = yield* WebClient
     const created = args.selectedId === null
-    const saved = yield* (created ? client["expenses.record"](expense) : client["expenses.update"]({ id: args.selectedId, ...expense }))
-    return { saved, created }
-  }), ({ saved, created }) => Message.SucceededSave({ request: args.request, expense: saved, created })),
+    const saved = yield* (created
+      ? client["expenses.record"](expense)
+      : client["expenses.update"]({ id: args.selectedId, ...expense }))
+
+    return { expense: saved, created }
+  }),
 })
-export const RemoveExpense = Command.define("RemoveExpense", {
-  args: { request: RequestTokenSchema, id: Schema.String }, messages: [Message.SucceededRemove, Message.Failed],
-  execute: ({ request, id }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["expenses.remove"]({ id }))), () => Message.SucceededRemove({ request, id })),
+
+export const RemoveExpense = RpcBrowser.command("RemoveExpense", {
+  args: { id: Schema.String },
+  success: Message.SucceededRemove,
+  failure: Message.Failed,
+  execute: ({ id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["expenses.remove"]({ id })),
+    Effect.as({ id }),
+  ),
 })
 
 const reload = (model: Model) => {

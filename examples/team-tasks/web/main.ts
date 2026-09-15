@@ -1,5 +1,5 @@
 import { Array, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -110,9 +110,8 @@ const taskInput = (model: Model) => ({
   dueDate: model.dueDate.trim() === "" ? null : model.dueDate.trim(),
 })
 
-export const ListTasks = Command.define("ListTasks", {
+export const ListTasks = RpcBrowser.command("ListTasks", {
   args: {
-    request: RequestTokenSchema,
     token: Schema.String,
     filterProject: Schema.String,
     filterPriority: Schema.String,
@@ -120,66 +119,56 @@ export const ListTasks = Command.define("ListTasks", {
     cursor: Schema.NullOr(Schema.String),
     append: Schema.Boolean,
   },
-  messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, token, filterProject, filterPriority, filterCompleted, cursor, append }) =>
-    pipe(
-      Effect.gen(function*() {
-        const client = yield* WebClient
-        return yield* client["todos.list"]({
-          filter: {
-            ...(filterProject === "" ? {} : { project: filterProject }),
-            ...(filterPriority === "" ? {} : { priority: filterPriority }),
-            ...(filterCompleted === "" ? {} : { completed: filterCompleted === "true" }),
-          },
-          limit: 25,
-          ...Page.input(cursor),
-        }, RpcBrowser.requestOptions(token))
-      }),
-      Effect.match({
-        onSuccess: (page) => Message.SucceededList({ request, append, page }),
-        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-      }),
-    ),
+  success: Message.SucceededList,
+  failure: Message.Failed,
+  execute: ({ token, filterProject, filterPriority, filterCompleted, cursor, append }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["todos.list"]({
+      filter: {
+        ...(filterProject === "" ? {} : { project: filterProject }),
+        ...(filterPriority === "" ? {} : { priority: filterPriority }),
+        ...(filterCompleted === "" ? {} : { completed: filterCompleted === "true" }),
+      },
+      limit: 25,
+      ...Page.input(cursor),
+    }, RpcBrowser.requestOptions(token))),
+    Effect.map((page) => ({ page, append })),
+  ),
 })
 
-export const SaveTask = Command.define("SaveTask", {
-  args: { request: RequestTokenSchema, token: Schema.String, selectedId: Schema.NullOr(Schema.String), task: TaskSchema },
-  messages: [Message.SucceededSave, Message.Failed],
-  execute: ({ request, token, selectedId, task }) =>
-    pipe(
-      Effect.gen(function*() {
-        const client = yield* WebClient
-        return selectedId === null
-          ? yield* client["todos.create"]({
-            project: task.project,
-            title: task.title,
-            detail: task.detail,
-            priority: task.priority,
-            dueDate: task.dueDate,
-          }, RpcBrowser.requestOptions(token))
-          : yield* client["todos.update"]({ id: selectedId, ...task }, RpcBrowser.requestOptions(token))
-      }),
-      Effect.match({
-        onSuccess: (task) => Message.SucceededSave({ request, task, created: selectedId === null }),
-        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-      }),
-    ),
+export const SaveTask = RpcBrowser.command("SaveTask", {
+  args: {
+    token: Schema.String,
+    selectedId: Schema.NullOr(Schema.String),
+    task: TaskSchema,
+  },
+  success: Message.SucceededSave,
+  failure: Message.Failed,
+  execute: ({ token, selectedId, task }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const saved = selectedId === null
+      ? yield* client["todos.create"]({
+        project: task.project,
+        title: task.title,
+        detail: task.detail,
+        priority: task.priority,
+        dueDate: task.dueDate,
+      }, RpcBrowser.requestOptions(token))
+      : yield* client["todos.update"]({ id: selectedId, ...task }, RpcBrowser.requestOptions(token))
+
+    return { task: saved, created: selectedId === null }
+  }),
 })
 
-export const RemoveTask = Command.define("RemoveTask", {
-  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
-  messages: [Message.SucceededRemove, Message.Failed],
-  execute: ({ request, token, id }) =>
-    pipe(
-      Effect.gen(function*() {
-        const client = yield* WebClient
-        yield* client["todos.remove"]({ id }, RpcBrowser.requestOptions(token))
-      }),
-      Effect.match({
-        onSuccess: () => Message.SucceededRemove({ request, id }),
-        onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-      }),
-    ),
+export const RemoveTask = RpcBrowser.command("RemoveTask", {
+  args: { token: Schema.String, id: Schema.String },
+  success: Message.SucceededRemove,
+  failure: Message.Failed,
+  execute: ({ token, id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["todos.remove"]({ id }, RpcBrowser.requestOptions(token))),
+    Effect.as({ id }),
+  ),
 })
 
 const TasksPager = ResourcePager.make("tasks.list")

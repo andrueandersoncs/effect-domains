@@ -3,18 +3,33 @@ import { SqlClient } from "effect/unstable/sql"
 import type { StructSchema } from "./domain.ts"
 import type { Table } from "./table.ts"
 
+type StringField<Value> = Extract<keyof Value, string>
+
+type CompatibleSubjectField<Subject, Value> = {
+  [Field in StringField<Subject>]-?:
+    Readonly<Record<never, never>> extends Pick<Subject, Field>
+      ? never
+      : Subject[Field] extends Value ? Field : never
+}[StringField<Subject>]
+
+type SubjectScope<
+  Subject extends StructSchema,
+  Source extends Table,
+> = Readonly<Partial<{
+  [Field in StringField<Source["storageSchema"]["Type"]>]:
+    CompatibleSubjectField<Subject["Type"], Source["storageSchema"]["Type"][Field]>
+}>>
+
 class EntitlementSource<
   Subject extends StructSchema = StructSchema,
   Source extends Table = Table,
-  const Key extends Extract<keyof Source["storageSchema"]["Type"], string> = Extract<keyof Source["storageSchema"]["Type"], string>,
+  const Key extends StringField<Source["storageSchema"]["Type"]> = StringField<Source["storageSchema"]["Type"]>,
 > extends Data.Class<{
   readonly name: string
   readonly table: Source
   readonly subject: Subject
   readonly key: Key
-  readonly where: {
-    bivarianceHack(input: Subject["Type"]): Readonly<Record<string, unknown>>
-  }["bivarianceHack"]
+  readonly scope: SubjectScope<Subject, Source>
   readonly grant: {
     bivarianceHack(row: Source["storageSchema"]["Type"], now: DateTime.Utc): boolean
   }["bivarianceHack"]
@@ -35,7 +50,7 @@ interface AnyEntitlementSource {
   readonly table: Table
   readonly subject: StructSchema
   readonly key: string
-  readonly where: { bivarianceHack(input: unknown): Readonly<Record<string, unknown>> }["bivarianceHack"]
+  readonly scope: Readonly<Partial<Record<string, string>>>
   readonly grant: { bivarianceHack(row: unknown, now: DateTime.Utc): boolean }["bivarianceHack"]
 }
 
@@ -73,7 +88,10 @@ const validation = (definitions: ReadonlyArray<AnyEntitlementSource>) => {
 const equality = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
   Predicate.isNull(value) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
-const resolverEntry = (definition: AnyEntitlementSource) => [definition.name, definition] as const
+const resolverEntry = (definition: AnyEntitlementSource) => [
+  definition.name,
+  { ...definition, scope: Object.freeze({ ...definition.scope }) },
+] as const
 
 const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource>>(
   definitions: Definitions,
@@ -98,8 +116,17 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
             Effect.mapError(unavailable),
           )
 
-          const filters = definition.where(subject)
-          const filterEntries = Record.toEntries(filters)
+          const scopeEntries = Record.toEntries(definition.scope) as
+            ReadonlyArray<readonly [string, string]>
+
+          const filterEntries = Array.map(
+            scopeEntries,
+            ([field, subjectField]) => [
+              field,
+              (subject as Readonly<Record<string, unknown>>)[subjectField],
+            ] as const,
+          )
+
           const filterPredicates = Array.map(filterEntries, equality(sql))
           const keyPredicate = equality(sql)([definition.key, request.key])
           const predicates = [keyPredicate, ...filterPredicates]

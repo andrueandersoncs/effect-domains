@@ -4,18 +4,64 @@ import { Command, Subscription } from "foldkit"
 import { FetchHttpClient } from "effect/unstable/http"
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc"
 
-import { RequestTokenSchema } from "./requests.ts"
+import { RequestTokenSchema, type RequestToken } from "./requests.ts"
 
 const TaggedErrorSchema = Schema.Struct({ _tag: Schema.String })
 const BrowserGlobalSchema = Schema.Struct({ location: Schema.Struct({ href: Schema.String }) })
 const HeadersSchema = Schema.Record(Schema.String, Schema.String)
 const RequestOptionsSchema = Schema.Struct({ headers: HeadersSchema })
+const StandardFailureFieldsSchema = Schema.Struct({ error: Schema.String })
 const sameString = Equivalence.strictEqual<string>()
 
 type RequestCommandFieldSchema = globalThis.Record<"request", typeof RequestTokenSchema>
 
 type RequestCommandArgs<Fields extends Schema.Struct.Fields> =
-  Schema.Schema.Type<Schema.Struct<Fields & RequestCommandFieldSchema>>
+  Schema.Schema.Type<Schema.Struct<Fields>> & Readonly<{ request: RequestToken }>
+
+type MessageConstructor<Output = unknown> = Schema.Top & Readonly<{
+  make: (value: never) => Output
+}>
+
+type MessageInput<Constructor extends MessageConstructor> =
+  Parameters<Constructor["make"]>[0]
+
+type MessageOutput<Constructor extends MessageConstructor> =
+  Schema.Schema.Type<Constructor>
+
+type MessagePayload<Constructor extends MessageConstructor> =
+  Omit<MessageInput<Constructor>, "_tag" | "request">
+
+type QueryMessagePayload<Constructor extends MessageConstructor> =
+  Omit<MessageInput<Constructor>, "_tag">
+
+type CustomFailurePayload<
+  Constructor extends MessageConstructor,
+  Error,
+  Args,
+> = Readonly<{
+  failurePayload: (error: Error, args: Args) => MessagePayload<Constructor>
+}>
+
+type CustomErrorFormat<Error> = Readonly<{
+  formatError: (error: Error) => string
+}>
+
+type StandardFailureHandling<
+  Constructor extends MessageConstructor,
+  Error,
+  Args,
+> =
+  | Readonly<Record<never, never>>
+  | CustomErrorFormat<Error>
+  | CustomFailurePayload<Constructor, Error, Args>
+
+type FailureHandling<
+  Constructor extends MessageConstructor,
+  Error,
+  Args,
+> = Readonly<{ error: string }> extends MessagePayload<Constructor>
+  ? StandardFailureHandling<Constructor, Error, Args>
+  : CustomFailurePayload<Constructor, Error, Args>
 
 const isNonEmptyString = (value: unknown): value is string =>
   Predicate.isString(value) && value.length > 0
@@ -40,6 +86,30 @@ const messageFromUnknown = (unknownValue: unknown) => {
 
   return Schema.is(TaggedErrorSchema)(unknownValue) ? unknownValue._tag : String(unknownValue)
 }
+
+const resolveFailureFields = <
+  Constructor extends MessageConstructor,
+  Error,
+  Args,
+>(
+  definition: FailureHandling<Constructor, Error, Args>,
+  error: Error,
+  args: Args,
+): Readonly<Record<string, unknown>> => {
+  const hasCustomPayload = "failurePayload" in definition
+    && Predicate.isFunction(definition.failurePayload)
+
+  if (hasCustomPayload) {
+    return definition.failurePayload(error, args) as Readonly<Record<string, unknown>>
+  }
+
+  const errorMessage = "formatError" in definition
+    ? definition.formatError(error)
+    : messageFromUnknown(error)
+
+  return StandardFailureFieldsSchema.make({ error: errorMessage })
+}
+
 
 const makeProtocol = Effect.fn("RpcBrowser.makeProtocol")(function* () {
   const decoded = Schema.decodeUnknownEffect(BrowserGlobalSchema)(globalThis)
@@ -76,21 +146,20 @@ const requestOptions = (token: string | null) => {
   })
 }
 
-interface BrowserCommandDefinition<
+type BrowserCommandDefinition<
   Fields extends Schema.Struct.Fields,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
-> {
-  readonly args: Fields
-  readonly success: Success
-  readonly failure: Failure
-  readonly execute: (args: RequestCommandArgs<Fields>) => Effect.Effect<Output, Error, Requirements>
-  readonly onSuccess: (output: Output, args: RequestCommandArgs<Fields>) => Schema.Schema.Type<Success>
-  readonly onFailure: (error: Error, args: RequestCommandArgs<Fields>) => Schema.Schema.Type<Failure>
-}
+> = Readonly<{
+  args: Fields
+  success: Success
+  failure: Failure
+  execute: (
+    args: RequestCommandArgs<Fields>,
+  ) => Effect.Effect<MessagePayload<Success>, Error, Requirements>
+}> & FailureHandling<Failure, Error, RequestCommandArgs<Fields>>
 
 type ReactivityKeys =
   | ReadonlyArray<unknown>
@@ -101,52 +170,46 @@ const resolveReactivityKeys = <Args>(
   args: Args,
 ) => Predicate.isFunction(keys) ? keys(args) : keys
 
-interface BrowserMutationDefinition<
+type BrowserMutationDefinition<
   Fields extends Schema.Struct.Fields,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
-> extends BrowserCommandDefinition<Fields, Success, Failure, Output, Error, Requirements> {
-  readonly invalidates: ReactivityKeys | ((args: RequestCommandArgs<Fields>) => ReactivityKeys)
-}
+> = BrowserCommandDefinition<Fields, Success, Failure, Error, Requirements> & Readonly<{
+  invalidates: ReactivityKeys | ((args: RequestCommandArgs<Fields>) => ReactivityKeys)
+}>
 
-interface BrowserQueryDefinition<
+type BrowserQueryDefinition<
   Model,
-  Message,
   Fields extends Schema.Struct.Fields,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
-> {
-  readonly dependencies: Fields
-  readonly modelToDependencies: (model: Model) => Schema.Schema.Type<Schema.Struct<Fields>>
-  readonly reactivityKeys:
+> = Readonly<{
+  dependencies: Fields
+  modelToDependencies: (model: Model) => Schema.Schema.Type<Schema.Struct<Fields>>
+  reactivityKeys:
     | ReactivityKeys
     | ((dependencies: Schema.Schema.Type<Schema.Struct<Fields>>) => ReactivityKeys)
-  readonly execute: (
+  execute: (
     dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
-  ) => Effect.Effect<Output, Error, Requirements>
-  readonly onSuccess: (
-    output: Output,
-    dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
-  ) => Message
-  readonly onFailure: (
-    error: Error,
-    dependencies: Schema.Schema.Type<Schema.Struct<Fields>>,
-  ) => Message
-}
+  ) => Effect.Effect<QueryMessagePayload<Success>, Error, Requirements>
+  success: Success
+  failure: Failure
+}> & FailureHandling<Failure, Error, Schema.Schema.Type<Schema.Struct<Fields>>>
 
 const query = <Model, Message>() => <
   const Name extends string,
   Fields extends Schema.Struct.Fields,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
 >(
   name: Name,
-  definition: BrowserQueryDefinition<Model, Message, Fields, Output, Error, Requirements>,
+  definition: BrowserQueryDefinition<Model, Fields, Success, Failure, Error, Requirements>,
 ) => {
   type Dependencies = Schema.Schema.Type<Schema.Struct<Fields>>
   type Services = Requirements | Reactivity.Reactivity
@@ -154,15 +217,23 @@ const query = <Model, Message>() => <
   const dependenciesToStream = (dependencies: Dependencies) => {
     const keys = resolveReactivityKeys(definition.reactivityKeys, dependencies)
 
-    const message = pipe(
+    const result = pipe(
       definition.execute(dependencies),
       Effect.match({
-        onSuccess: (output) => definition.onSuccess(output, dependencies),
-        onFailure: (error) => definition.onFailure(error, dependencies),
+        onSuccess: definition.success.make.bind(definition.success) as
+          (payload: QueryMessagePayload<Success>) => MessageOutput<Success>,
+        onFailure: (error) => pipe(
+          resolveFailureFields(definition, error, dependencies),
+          definition.failure.make.bind(definition.failure) as
+            (fields: Readonly<Record<string, unknown>>) => MessageOutput<Failure>,
+        ),
       }),
     )
 
-    return Reactivity.stream(message, keys)
+    return Reactivity.stream(
+      result as Effect.Effect<Message, never, Requirements>,
+      keys,
+    )
   }
 
   type SubscriptionFactory = ReturnType<typeof Subscription.make<Model, Message, Services>>
@@ -189,75 +260,99 @@ const query = <Model, Message>() => <
 const command = <
   const Name extends string,
   Fields extends Schema.Struct.Fields,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
 >(
   name: Name,
-  definition: BrowserCommandDefinition<Fields, Success, Failure, Output, Error, Requirements>,
+  definition: BrowserCommandDefinition<Fields, Success, Failure, Error, Requirements>,
 ) => {
   const args = Record.set(definition.args, "request", RequestTokenSchema) as
     Fields & globalThis.Record<"request", typeof RequestTokenSchema>
 
-  const execute = (commandArgs: RequestCommandArgs<Fields>) => pipe(
-    definition.execute(commandArgs),
+  type RuntimeArgs = Schema.Schema.Type<Schema.Struct<typeof args>>
+
+  const constructResult = (runtimeArgs: RuntimeArgs) => pipe(
+    definition.execute(runtimeArgs as RequestCommandArgs<Fields>),
     Effect.match({
-      onSuccess: (output) => definition.onSuccess(output, commandArgs),
-      onFailure: (error) => definition.onFailure(error, commandArgs),
+      onSuccess: (payload) => definition.success.make({
+        ...payload,
+        request: (runtimeArgs as RequestCommandArgs<Fields>).request,
+      } as never) as MessageOutput<Success>,
+      onFailure: (error) => {
+        const fields = resolveFailureFields(
+          definition,
+          error,
+          runtimeArgs as RequestCommandArgs<Fields>,
+        )
+
+        return definition.failure.make({
+          ...fields,
+          request: (runtimeArgs as RequestCommandArgs<Fields>).request,
+        } as never) as MessageOutput<Failure>
+      },
     }),
   )
 
   const messages = [definition.success, definition.failure] as const
-  const config = Object.freeze({ args, messages, execute })
+  const config = Object.freeze({ args, messages, execute: constructResult })
 
-  return Command.define<
-    Name,
-    Fields & RequestCommandFieldSchema,
-    typeof messages,
-    ReturnType<typeof execute>
-  >(name, config)
+  return Command.define(name, config)
 }
 
 const mutation = <
   const Name extends string,
   Fields extends Schema.Struct.Fields,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
-  Output,
+  Success extends MessageConstructor,
+  Failure extends MessageConstructor,
   Error,
   Requirements,
 >(
   name: Name,
-  definition: BrowserMutationDefinition<Fields, Success, Failure, Output, Error, Requirements>,
+  definition: BrowserMutationDefinition<Fields, Success, Failure, Error, Requirements>,
 ) => {
   const args = Record.set(definition.args, "request", RequestTokenSchema) as
     Fields & globalThis.Record<"request", typeof RequestTokenSchema>
 
-  const selectMutation = (commandArgs: RequestCommandArgs<Fields>) => {
-    const keys = resolveReactivityKeys(definition.invalidates, commandArgs)
-    const effect = definition.execute(commandArgs)
-    const mutated = Reactivity.mutation(effect, keys)
+  type RuntimeArgs = Schema.Schema.Type<Schema.Struct<typeof args>>
+
+  const constructMutationResult = (runtimeArgs: RuntimeArgs) => {
+    const keys = resolveReactivityKeys(
+      definition.invalidates,
+      runtimeArgs as RequestCommandArgs<Fields>,
+    )
+
+    const operation = definition.execute(runtimeArgs as RequestCommandArgs<Fields>)
+    const mutated = Reactivity.mutation(operation, keys)
 
     return pipe(
       mutated,
       Effect.match({
-        onSuccess: (output) => definition.onSuccess(output, commandArgs),
-        onFailure: (error) => definition.onFailure(error, commandArgs),
+        onSuccess: (payload) => definition.success.make({
+          ...payload,
+          request: (runtimeArgs as RequestCommandArgs<Fields>).request,
+        } as never) as MessageOutput<Success>,
+        onFailure: (error) => {
+          const fields = resolveFailureFields(
+            definition,
+            error,
+            runtimeArgs as RequestCommandArgs<Fields>,
+          )
+
+          return definition.failure.make({
+            ...fields,
+            request: (runtimeArgs as RequestCommandArgs<Fields>).request,
+          } as never) as MessageOutput<Failure>
+        },
       }),
     )
   }
 
   const messages = [definition.success, definition.failure] as const
-  const config = Object.freeze({ args, messages, execute: selectMutation })
+  const config = Object.freeze({ args, messages, execute: constructMutationResult })
 
-  return Command.define<
-    Name,
-    Fields & RequestCommandFieldSchema,
-    typeof messages,
-    ReturnType<typeof selectMutation>
-  >(name, config)
+  return Command.define(name, config)
 }
 
 export const RpcBrowser = { messageFromUnknown, layer, protocol, requestOptions, command, mutation, query }

@@ -15,8 +15,6 @@ const equals = Equivalence.strictEqual<unknown>()
 const stringEquals = Equivalence.strictEqual<string>()
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String })
 const ReportSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, title: Schema.String })
-const EntitlementWhereSchema = Schema.Struct({ tenantId: Schema.String })
-const whereReportTenantMatches = (subject: Schema.Schema.Type<typeof SubjectSchema>) => EntitlementWhereSchema.make({ tenantId: subject.tenantId })
 const reportTitle = Struct.get<Schema.Schema.Type<typeof ReportSchema>, "title">("title")
 const isActive = (title: string) => stringEquals(title, "active")
 const activeReport = Function.flow(reportTitle, isActive)
@@ -91,7 +89,7 @@ const reportSubscriptionSource = new Entitlements.Source({
   table: accountReportsTable,
   subject: SubjectSchema,
   key: "id",
-  where: whereReportTenantMatches,
+  scope: { tenantId: "tenantId" },
   grant: activeReport,
 })
 

@@ -1,5 +1,5 @@
 import { DateTime, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -45,22 +45,58 @@ export const Message = defineMessageUnion({
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
-const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
-  effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
-)
 
-export const ListNotifications = Command.define("ListNotifications", {
-  args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), recipient: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean }, messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, token, recipient, cursor, append }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["appointment_notifications.list"]({ filter: { recipient }, ...Page.input(cursor) }, RpcBrowser.requestOptions(token)))), (page) => Message.SucceededList({ request, page, append })),
+export const ListNotifications = RpcBrowser.command("ListNotifications", {
+  args: {
+    token: Schema.NullOr(Schema.String),
+    recipient: Schema.String,
+    cursor: Schema.NullOr(Schema.String),
+    append: Schema.Boolean,
+  },
+  success: Message.SucceededList,
+  failure: Message.Failed,
+  execute: ({ token, recipient, cursor, append }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["appointment_notifications.list"](
+        { filter: { recipient }, ...Page.input(cursor) },
+        RpcBrowser.requestOptions(token),
+      )),
+    Effect.map((page) => ({ page, append })),
+  ),
 })
-export const ScheduleReminder = Command.define("ScheduleReminder", {
-  args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), recipient: Schema.String, reminderId: Schema.String, appointmentId: Schema.String, appointmentAt: Schema.String, reminderAt: Schema.String, location: Schema.String, purpose: Schema.String }, messages: [Message.SucceededSchedule, Message.Failed],
-  execute: (args) => requestEffect(args.request, Effect.gen(function*() {
-    const payload = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(AppointmentReminderDelivery))({ recipient: args.recipient.trim(), reminderId: args.reminderId.trim(), appointmentId: args.appointmentId.trim(), appointmentAt: args.appointmentAt.trim(), reminderAt: args.reminderAt.trim(), location: args.location.trim(), purpose: args.purpose.trim() })
+
+export const ScheduleReminder = RpcBrowser.command("ScheduleReminder", {
+  args: {
+    token: Schema.NullOr(Schema.String),
+    recipient: Schema.String,
+    reminderId: Schema.String,
+    appointmentId: Schema.String,
+    appointmentAt: Schema.String,
+    reminderAt: Schema.String,
+    location: Schema.String,
+    purpose: Schema.String,
+  },
+  success: Message.SucceededSchedule,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const payload = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(AppointmentReminderDelivery))({
+      recipient: args.recipient.trim(),
+      reminderId: args.reminderId.trim(),
+      appointmentId: args.appointmentId.trim(),
+      appointmentAt: args.appointmentAt.trim(),
+      reminderAt: args.reminderAt.trim(),
+      location: args.location.trim(),
+      purpose: args.purpose.trim(),
+    })
     const client = yield* WebClient
-    yield* client["AppointmentRecipient.ScheduleReminderDiscard"]({ entityId: payload.recipient, payload }, RpcBrowser.requestOptions(args.token))
-  }), () => Message.SucceededSchedule({ request: args.request })),
+    yield* client["AppointmentRecipient.ScheduleReminderDiscard"](
+      { entityId: payload.recipient, payload },
+      RpcBrowser.requestOptions(args.token),
+    )
+
+    return {}
+  }),
 })
 
 const InboxPager = ResourcePager.make("inbox")

@@ -1,6 +1,6 @@
 import { Effect, Option, Schema, pipe } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -71,23 +71,23 @@ type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient | Re
 const newReportId = () => `report_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`
 const emptyForm = () => ({ id: newReportId(), title: "", site: "", body: "", selectedId: null as string | null })
 
-export const ListReports = Command.define("ListReports", {
-  args: { request: RequestTokenSchema, token: Schema.String, filterSite: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
-  messages: [Message.SucceededList, Message.Failed],
-  execute: ({ request, token, filterSite, cursor, append }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["reports.list"]({
-        filter: filterSite.trim() === "" ? {} : { site: filterSite.trim() },
-        limit: 50,
-        ...Page.input(cursor),
-      }, RpcBrowser.requestOptions(token))
-    }),
-
-    Effect.match({
-      onSuccess: (page) => Message.SucceededList({ request, append, page }),
-      onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-    }),
+export const ListReports = RpcBrowser.command("ListReports", {
+  args: {
+    token: Schema.String,
+    filterSite: Schema.String,
+    cursor: Schema.NullOr(Schema.String),
+    append: Schema.Boolean,
+  },
+  success: Message.SucceededList,
+  failure: Message.Failed,
+  execute: ({ token, filterSite, cursor, append }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["reports.list"]({
+      filter: filterSite.trim() === "" ? {} : { site: filterSite.trim() },
+      limit: 50,
+      ...Page.input(cursor),
+    }, RpcBrowser.requestOptions(token))),
+    Effect.map((page) => ({ page, append })),
   ),
 })
 
@@ -104,29 +104,27 @@ export const subscriptions = RpcBrowser.query<Model, Message>()("reports", {
   }),
   reactivityKeys: [FieldReportsResource],
   execute: ({ token, filterSite }) => token === null
-    ? Effect.succeed(Page.empty<Report>())
-    : WebClient.pipe(
+    ? Effect.succeed({ page: Page.empty<Report>() })
+    : pipe(
+      WebClient,
       Effect.flatMap((client) => client["reports.list"]({
         filter: filterSite.trim() === "" ? {} : { site: filterSite.trim() },
         limit: 50,
       }, RpcBrowser.requestOptions(token))),
+      Effect.map((page) => ({ page })),
     ),
-  onSuccess: (page) => Message.SynchronizedList({ page }),
-  onFailure: (error) => Message.FailedList({ error: RpcBrowser.messageFromUnknown(error) }),
+  success: Message.SynchronizedList,
+  failure: Message.FailedList,
 })
 
-export const GetReport = Command.define("GetReport", {
-  args: { request: RequestTokenSchema, token: Schema.String, id: Schema.String },
-  messages: [Message.SucceededGet, Message.Failed],
-  execute: ({ request, token, id }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["reports.get"]({ id }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: (report) => Message.SucceededGet({ request, report }),
-      onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
-    }),
+export const GetReport = RpcBrowser.command("GetReport", {
+  args: { token: Schema.String, id: Schema.String },
+  success: Message.SucceededGet,
+  failure: Message.Failed,
+  execute: ({ token, id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["reports.get"]({ id }, RpcBrowser.requestOptions(token))),
+    Effect.map((report) => ({ report })),
   ),
 })
 
@@ -142,14 +140,12 @@ export const SaveReport = RpcBrowser.mutation("SaveReport", {
   execute: ({ token, selectedId, report }) => Effect.gen(function*() {
     const client = yield* WebClient
     const decoded = yield* Schema.decodeUnknownEffect(FieldReportSchema)(report)
-    return selectedId === null
+    const saved = selectedId === null
       ? yield* client["reports.create"](decoded, RpcBrowser.requestOptions(token))
       : yield* client["reports.update"](decoded, RpcBrowser.requestOptions(token))
+
+    return { report: saved, created: selectedId === null }
   }),
-  onSuccess: (report, { request, selectedId }) =>
-    Message.SucceededSave({ request, report, created: selectedId === null }),
-  onFailure: (error, { request }) =>
-    Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 export const RemoveReport = RpcBrowser.mutation("RemoveReport", {
@@ -157,12 +153,11 @@ export const RemoveReport = RpcBrowser.mutation("RemoveReport", {
   success: Message.SucceededRemove,
   failure: Message.Failed,
   invalidates: [FieldReportsResource],
-  execute: ({ token, id }) => WebClient.pipe(
+  execute: ({ token, id }) => pipe(
+    WebClient,
     Effect.flatMap((client) => client["reports.remove"]({ id }, RpcBrowser.requestOptions(token))),
+    Effect.as({ id }),
   ),
-  onSuccess: (_, { request, id }) => Message.SucceededRemove({ request, id }),
-  onFailure: (error, { request }) =>
-    Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 const ReportsPager = ResourcePager.make("reports.list")

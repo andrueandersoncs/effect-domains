@@ -1,5 +1,5 @@
 import { Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -78,100 +78,121 @@ export const Message = defineMessageUnion({
   SucceededCreate: { request: RequestTokenSchema, order: OrderSchema },
   SucceededSummary: { request: RequestTokenSchema, summary: OrderSummary },
   SucceededAction: { request: RequestTokenSchema, text: Schema.String },
-  InvalidLine: { request: RequestTokenSchema, errors: BrowserModel.FieldErrorsSchema },
-  Failed: { request: RequestTokenSchema, error: Schema.String },
+  Failed: {
+    request: RequestTokenSchema,
+    error: Schema.String,
+    fieldErrors: BrowserModel.FieldErrorsSchema,
+  },
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
-export const LoadOrder = Command.define("LoadOrder", {
-  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String },
-  messages: [Message.SucceededSummary, Message.Failed],
-  execute: ({ request, token, orderId }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["billing.getOrder"]({ orderId }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: (summary) => Message.SucceededSummary({ request, summary }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
-    }),
+const failurePayload = (error: unknown) => BrowserModel.failure(error, errorText)
+
+export const LoadOrder = RpcBrowser.command("LoadOrder", {
+  args: { token: Schema.String, orderId: Schema.String },
+  success: Message.SucceededSummary,
+  failure: Message.Failed,
+  execute: ({ token, orderId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["billing.getOrder"]({ orderId }, RpcBrowser.requestOptions(token))),
+    Effect.map((summary) => ({ summary })),
   ),
+  failurePayload,
 })
-export const CreateOrder = Command.define("CreateOrder", {
-  args: { request: RequestTokenSchema, token: Schema.String, number: Schema.String, customer: Schema.String },
-  messages: [Message.SucceededCreate, Message.Failed],
-  execute: ({ request, token, number, customer }) => pipe(
-    Schema.decodeUnknownEffect(CreateOrderInputSchema)({ number: number.trim(), customer: customer.trim() }),
-    Effect.flatMap((input) => Effect.gen(function*() {
-      const client = yield* WebClient
-      return yield* client["billing.createOrder"](input, RpcBrowser.requestOptions(token))
-    })),
-    Effect.match({
-      onSuccess: (order) => Message.SucceededCreate({ request, order }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
+
+export const CreateOrder = RpcBrowser.command("CreateOrder", {
+  args: { token: Schema.String, number: Schema.String, customer: Schema.String },
+  success: Message.SucceededCreate,
+  failure: Message.Failed,
+  execute: ({ token, number, customer }) => pipe(
+    Schema.decodeUnknownEffect(CreateOrderInputSchema)({
+      number: number.trim(),
+      customer: customer.trim(),
     }),
+    Effect.mapError(BrowserModel.formFailure),
+    Effect.flatMap((input) => WebClient.pipe(
+      Effect.flatMap((client) =>
+        client["billing.createOrder"](input, RpcBrowser.requestOptions(token))),
+    )),
+    Effect.map((order) => ({ order })),
   ),
+  failurePayload,
 })
-export const AddLine = Command.define("AddLine", {
-  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String, expectedVersion: Schema.Int, lineNumber: Schema.String, description: Schema.String, quantity: Schema.String, unitAmountMinor: Schema.String },
-  messages: [Message.SucceededSummary, Message.InvalidLine, Message.Failed],
+
+export const AddLine = RpcBrowser.command("AddLine", {
+  args: {
+    token: Schema.String,
+    orderId: Schema.String,
+    expectedVersion: Schema.Int,
+    lineNumber: Schema.String,
+    description: Schema.String,
+    quantity: Schema.String,
+    unitAmountMinor: Schema.String,
+  },
+  success: Message.SucceededSummary,
+  failure: Message.Failed,
   execute: (args) => pipe(
     Schema.decodeUnknownEffect(integerFields)({
       lineNumber: args.lineNumber,
       quantity: args.quantity,
       unitAmountMinor: args.unitAmountMinor,
     }),
-    Effect.matchEffect({
-      onFailure: (error) => Effect.succeed(Message.InvalidLine({ request: args.request, errors: Form.errors(error) })),
-      onSuccess: (numbers) => pipe(
-        Effect.gen(function*() {
-          const client = yield* WebClient
-          return yield* client["billing.addLine"]({
-            orderId: args.orderId,
-            expectedVersion: args.expectedVersion,
-            lineNumber: numbers.lineNumber,
-            description: args.description.trim(),
-            quantity: numbers.quantity,
-            unitAmountMinor: numbers.unitAmountMinor,
-          }, RpcBrowser.requestOptions(args.token))
-        }),
-        Effect.match({
-          onSuccess: (summary) => Message.SucceededSummary({ request: args.request, summary }),
-          onFailure: (error) => Message.Failed({ request: args.request, error: errorText(error) }),
-        }),
-      ),
-    }),
+    Effect.mapError(BrowserModel.formFailure),
+    Effect.flatMap((numbers) => WebClient.pipe(
+      Effect.flatMap((client) => client["billing.addLine"]({
+        orderId: args.orderId,
+        expectedVersion: args.expectedVersion,
+        lineNumber: numbers.lineNumber,
+        description: args.description.trim(),
+        quantity: numbers.quantity,
+        unitAmountMinor: numbers.unitAmountMinor,
+      }, RpcBrowser.requestOptions(args.token))),
+    )),
+    Effect.map((summary) => ({ summary })),
   ),
+  failurePayload,
 })
-export const IssueInvoice = Command.define("IssueInvoice", {
-  args: { request: RequestTokenSchema, token: Schema.String, orderId: Schema.String, expectedVersion: Schema.Int, number: Schema.String },
-  messages: [Message.SucceededAction, Message.Failed],
-  execute: ({ request, token, orderId, expectedVersion, number }) => pipe(
+
+export const IssueInvoice = RpcBrowser.command("IssueInvoice", {
+  args: {
+    token: Schema.String,
+    orderId: Schema.String,
+    expectedVersion: Schema.Int,
+    number: Schema.String,
+  },
+  success: Message.SucceededAction,
+  failure: Message.Failed,
+  execute: ({ token, orderId, expectedVersion, number }) => pipe(
     Schema.decodeUnknownEffect(InvoiceNumberSchema)(number.trim()),
-    Effect.flatMap((number) => Effect.gen(function*() {
-      const client = yield* WebClient
-      yield* client["billing.issueInvoice"]({ orderId, expectedVersion, number }, RpcBrowser.requestOptions(token))
-    })),
-    Effect.match({
-      onSuccess: () => Message.SucceededAction({ request, text: "Invoice issued." }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
-    }),
+    Effect.mapError(BrowserModel.fieldFailure("invoiceNumber")),
+    Effect.flatMap((number) => WebClient.pipe(
+      Effect.flatMap((client) =>
+        client["billing.issueInvoice"](
+          { orderId, expectedVersion, number },
+          RpcBrowser.requestOptions(token),
+        )),
+    )),
+    Effect.as({ text: "Invoice issued." }),
   ),
+  failurePayload,
 })
-export const PayInvoice = Command.define("PayInvoice", {
-  args: { request: RequestTokenSchema, token: Schema.String, invoiceId: Schema.String, expectedVersion: Schema.Int },
-  messages: [Message.SucceededAction, Message.Failed],
-  execute: ({ request, token, invoiceId, expectedVersion }) => pipe(
-    Effect.gen(function*() {
-      const client = yield* WebClient
-      yield* client["billing.payInvoice"]({ invoiceId, expectedVersion }, RpcBrowser.requestOptions(token))
-    }),
-    Effect.match({
-      onSuccess: () => Message.SucceededAction({ request, text: "Invoice paid." }),
-      onFailure: (error) => Message.Failed({ request, error: errorText(error) }),
-    }),
+
+export const PayInvoice = RpcBrowser.command("PayInvoice", {
+  args: { token: Schema.String, invoiceId: Schema.String, expectedVersion: Schema.Int },
+  success: Message.SucceededAction,
+  failure: Message.Failed,
+  execute: ({ token, invoiceId, expectedVersion }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["billing.payInvoice"](
+        { invoiceId, expectedVersion },
+        RpcBrowser.requestOptions(token),
+      )),
+    Effect.as({ text: "Invoice paid." }),
   ),
+  failurePayload,
 })
 
 const start = (model: Model, key: string) => Requests.start(model.requests, key)
@@ -267,11 +288,12 @@ export const update = (model: Model, message: Message): UpdateReturn => Message.
     if (!Requests.accepts(model.requests, request)) return { model }
     return loadCurrent(evo(model, { requests: () => Requests.succeed(model.requests, request) }), { kind: "success", text })
   },
-  InvalidLine: ({ request, errors }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.succeed(model.requests, request), fieldErrors: () => errors, notice: () => ({ kind: "error" as const, text: "Correct the highlighted line fields." }) }),
-  },
-  Failed: ({ request, error }) => !Requests.accepts(model.requests, request) ? { model } : {
-    model: evo(model, { requests: () => Requests.fail(model.requests, request, error), notice: () => ({ kind: "error" as const, text: error }) }),
+  Failed: ({ request, error, fieldErrors }) => !Requests.accepts(model.requests, request) ? { model } : {
+    model: evo(model, {
+      requests: () => Requests.fail(model.requests, request, error),
+      fieldErrors: () => fieldErrors,
+      notice: () => ({ kind: "error" as const, text: error }),
+    }),
   },
 })
 

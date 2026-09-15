@@ -65,20 +65,25 @@ export const GetGuide = RpcBrowser.command("GetGuide", {
   args: { token: Schema.String, id: Schema.String },
   success: Message.SucceededGuide,
   failure: Message.Failed,
-  execute: ({ token, id }) => pipe(WebClient, Effect.flatMap((client) =>
-    client["guides.get"]({ id }, RpcBrowser.requestOptions(token)))),
-  onSuccess: (guide, { request }) => Message.SucceededGuide({ request, guide }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: errorText(error) }),
+  execute: ({ token, id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["guides.get"]({ id }, RpcBrowser.requestOptions(token))),
+    Effect.map((guide) => ({ guide })),
+  ),
+  formatError: errorText,
 })
 
 export const ListGuides = RpcBrowser.command("ListGuides", {
   args: { token: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
   success: Message.SucceededList,
   failure: Message.Failed,
-  execute: ({ token, cursor }) => pipe(WebClient, Effect.flatMap((client) =>
-    client["guides.list"]({ limit: 25, ...Page.input(cursor) }, RpcBrowser.requestOptions(token)))),
-  onSuccess: (page, { request, append }) => Message.SucceededList({ request, append, page }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: errorText(error) }),
+  execute: ({ token, cursor, append }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["guides.list"]({ limit: 25, ...Page.input(cursor) }, RpcBrowser.requestOptions(token))),
+    Effect.map((page) => ({ page, append })),
+  ),
+  formatError: errorText,
 })
 
 const GuidesPager = ResourcePager.make("guides.list")

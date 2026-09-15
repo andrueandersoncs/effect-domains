@@ -1,5 +1,5 @@
 import { Array, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -45,28 +45,134 @@ export const Message = defineMessageUnion({
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient | SessionClient>
 
-const requestEffect = <A, E, Success extends Message>(request: typeof RequestTokenSchema.Type, effect: Effect.Effect<A, E, WebClient>, success: (value: A) => Success) => pipe(
-  effect,
-  Effect.match({ onSuccess: success, onFailure: (error) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }) }),
-)
 const currentToken = (session: typeof Session.ModelSchema.Type) => Session.token(session)
-export const GenerateDiscard = Command.define("GenerateDiscard", {
-  args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), reportId: Schema.String, startsAt: Schema.String, endsAt: Schema.String, currency: Schema.String, releasePolicy: Schema.String, debitAccountCode: Schema.String, debitDescription: Schema.String, debitAmountMinor: Schema.String, creditAccountCode: Schema.String, creditDescription: Schema.String, creditAmountMinor: Schema.String }, messages: [Message.SucceededGenerate, Message.Failed],
-  execute: (args) => requestEffect(args.request, Effect.gen(function*() {
-    const request = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(ReportExportRequestSchema))({ report: { reportId: args.reportId.trim(), reportingPeriod: { startsAt: args.startsAt.trim(), endsAt: args.endsAt.trim() }, currency: args.currency, releasePolicy: args.releasePolicy }, lines: [
-      { accountCode: args.debitAccountCode.trim(), description: args.debitDescription.trim(), direction: "debit", amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(FinancialReportLineSchema.fields.amountMinor))(args.debitAmountMinor) },
-      { accountCode: args.creditAccountCode.trim(), description: args.creditDescription.trim(), direction: "credit", amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(FinancialReportLineSchema.fields.amountMinor))(args.creditAmountMinor) },
-    ] })
+export const GenerateDiscard = RpcBrowser.command("GenerateDiscard", {
+  args: {
+    token: Schema.NullOr(Schema.String),
+    reportId: Schema.String,
+    startsAt: Schema.String,
+    endsAt: Schema.String,
+    currency: Schema.String,
+    releasePolicy: Schema.String,
+    debitAccountCode: Schema.String,
+    debitDescription: Schema.String,
+    debitAmountMinor: Schema.String,
+    creditAccountCode: Schema.String,
+    creditDescription: Schema.String,
+    creditAmountMinor: Schema.String,
+  },
+  success: Message.SucceededGenerate,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const request = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(ReportExportRequestSchema))({
+      report: {
+        reportId: args.reportId.trim(),
+        reportingPeriod: { startsAt: args.startsAt.trim(), endsAt: args.endsAt.trim() },
+        currency: args.currency,
+        releasePolicy: args.releasePolicy,
+      },
+      lines: [
+        {
+          accountCode: args.debitAccountCode.trim(),
+          description: args.debitDescription.trim(),
+          direction: "debit",
+          amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(FinancialReportLineSchema.fields.amountMinor))(
+            args.debitAmountMinor,
+          ),
+        },
+        {
+          accountCode: args.creditAccountCode.trim(),
+          description: args.creditDescription.trim(),
+          direction: "credit",
+          amountMinor: yield* Schema.decodeUnknownEffect(Form.integer(FinancialReportLineSchema.fields.amountMinor))(
+            args.creditAmountMinor,
+          ),
+        },
+      ],
+    })
     const client = yield* WebClient
-    return yield* client["ReportExport.GenerateDiscard"](request, RpcBrowser.requestOptions(args.token))
-  }), (executionId) => Message.SucceededGenerate({ request: args.request, executionId })),
+    const executionId = yield* client["ReportExport.GenerateDiscard"](
+      request,
+      RpcBrowser.requestOptions(args.token),
+    )
+
+    return { executionId }
+  }),
 })
-export const Poll = Command.define("Poll", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededPoll, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Poll"]({ executionId }, RpcBrowser.requestOptions(token)))), (result) => Message.SucceededPoll({ request, result })) })
-export const Release = Command.define("Release", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededAction, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Release"]({ executionId }, RpcBrowser.requestOptions(token)))), () => Message.SucceededAction({ request, action: "released" })) })
-export const Resume = Command.define("Resume", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededAction, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.GenerateResume"]({ executionId }, RpcBrowser.requestOptions(token)))), () => Message.SucceededAction({ request, action: "resumed" })) })
-export const Cancel = Command.define("Cancel", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededAction, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Cancel"]({ executionId }, RpcBrowser.requestOptions(token)))), () => Message.SucceededAction({ request, action: "cancelled" })) })
-export const Reconcile = Command.define("Reconcile", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String), executionId: Schema.String }, messages: [Message.SucceededPoll, Message.Failed], execute: ({ request, token, executionId }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Reconcile"]({ executionId }, RpcBrowser.requestOptions(token)))), (artifact) => Message.SucceededPoll({ request, result: ReportExportPollResultSchema.make({ _tag: "Succeeded", ...artifact }) })) })
-export const Status = Command.define("Status", { args: { request: RequestTokenSchema, token: Schema.NullOr(Schema.String) }, messages: [Message.SucceededStatus, Message.Failed], execute: ({ request, token }) => requestEffect(request, pipe(WebClient, Effect.flatMap((client) => client["ReportExport.Status"](undefined, RpcBrowser.requestOptions(token)))), (status) => Message.SucceededStatus({ request, status })) })
+
+export const Poll = RpcBrowser.command("Poll", {
+  args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
+  success: Message.SucceededPoll,
+  failure: Message.Failed,
+  execute: ({ token, executionId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.Poll"]({ executionId }, RpcBrowser.requestOptions(token))),
+    Effect.map((result) => ({ result })),
+  ),
+})
+
+export const Release = RpcBrowser.command("Release", {
+  args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
+  success: Message.SucceededAction,
+  failure: Message.Failed,
+  execute: ({ token, executionId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.Release"]({ executionId }, RpcBrowser.requestOptions(token))),
+    Effect.as({ action: "released" as const }),
+  ),
+})
+
+export const Resume = RpcBrowser.command("Resume", {
+  args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
+  success: Message.SucceededAction,
+  failure: Message.Failed,
+  execute: ({ token, executionId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.GenerateResume"]({ executionId }, RpcBrowser.requestOptions(token))),
+    Effect.as({ action: "resumed" as const }),
+  ),
+})
+
+export const Cancel = RpcBrowser.command("Cancel", {
+  args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
+  success: Message.SucceededAction,
+  failure: Message.Failed,
+  execute: ({ token, executionId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.Cancel"]({ executionId }, RpcBrowser.requestOptions(token))),
+    Effect.as({ action: "cancelled" as const }),
+  ),
+})
+
+export const Reconcile = RpcBrowser.command("Reconcile", {
+  args: { token: Schema.NullOr(Schema.String), executionId: Schema.String },
+  success: Message.SucceededPoll,
+  failure: Message.Failed,
+  execute: ({ token, executionId }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.Reconcile"]({ executionId }, RpcBrowser.requestOptions(token))),
+    Effect.map((artifact) => ({
+      result: ReportExportPollResultSchema.make({ _tag: "Succeeded", ...artifact }),
+    })),
+  ),
+})
+
+export const Status = RpcBrowser.command("Status", {
+  args: { token: Schema.NullOr(Schema.String) },
+  success: Message.SucceededStatus,
+  failure: Message.Failed,
+  execute: ({ token }) => pipe(
+    WebClient,
+    Effect.flatMap((client) =>
+      client["ReportExport.Status"](undefined, RpcBrowser.requestOptions(token))),
+    Effect.map((status) => ({ status })),
+  ),
+})
 
 const start = (model: Model, key: string) => Requests.start(model.requests, key)
 const pending = (model: Model, ...keys: [] | [string]) => Requests.pending(model.requests, ...keys)

@@ -1,5 +1,5 @@
 import { Array, Effect, Option, Schema, pipe } from "effect"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -35,34 +35,83 @@ export const Message = defineMessageUnion({
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>
-const failed = (request: RequestToken, error: unknown) =>
-  Message.Failed({ request, ...BrowserModel.failure(error, RpcBrowser.messageFromUnknown) })
 const emptyForm = { assetTag: "", name: "", model: "", serial: "", location: "", condition: "in-service" as const, selectedId: null as string | null }
 
-export const ListAssets = Command.define("ListAssets", {
-  args: { filterAssetTag: Schema.String, filterLocation: Schema.String, filterCondition: Schema.String, cursor: Schema.NullOr(Schema.String), append: Schema.Boolean, request: RequestTokenSchema }, messages: [Message.SucceededList, Message.Failed],
+export const ListAssets = RpcBrowser.command("ListAssets", {
+  args: {
+    filterAssetTag: Schema.String,
+    filterLocation: Schema.String,
+    filterCondition: Schema.String,
+    cursor: Schema.NullOr(Schema.String),
+    append: Schema.Boolean,
+  },
+  success: Message.SucceededList,
+  failure: Message.Failed,
   execute: (args) => Effect.gen(function*() {
     const client = yield* WebClient
-    const page = yield* client["assets.list"]({ filter: { ...(args.filterAssetTag.trim() === "" ? {} : { assetTag: args.filterAssetTag.trim() }), ...(args.filterLocation.trim() === "" ? {} : { location: args.filterLocation.trim() }), ...(args.filterCondition === "" ? {} : { condition: args.filterCondition as typeof AssetConditionSchema.Type }) }, limit: 100, ...Page.input(args.cursor) })
-    return Message.SucceededList({ page, append: args.append, request: args.request })
-  }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))),
+    const page = yield* client["assets.list"]({
+      filter: {
+        ...(args.filterAssetTag.trim() === "" ? {} : { assetTag: args.filterAssetTag.trim() }),
+        ...(args.filterLocation.trim() === "" ? {} : { location: args.filterLocation.trim() }),
+        ...(args.filterCondition === "" ? {} : {
+          condition: args.filterCondition as typeof AssetConditionSchema.Type,
+        }),
+      },
+      limit: 100,
+      ...Page.input(args.cursor),
+    })
+
+    return { page, append: args.append }
+  }),
+  failurePayload: (error) => BrowserModel.failure(error, RpcBrowser.messageFromUnknown),
 })
-export const SaveAsset = Command.define("SaveAsset", {
-  args: { selectedId: Schema.NullOr(Schema.String), assetTag: Schema.String, name: Schema.String, model: Schema.String, serial: Schema.String, location: Schema.String, condition: AssetConditionSchema, request: RequestTokenSchema }, messages: [Message.SucceededSave, Message.Failed],
+
+export const SaveAsset = RpcBrowser.command("SaveAsset", {
+  args: {
+    selectedId: Schema.NullOr(Schema.String),
+    assetTag: Schema.String,
+    name: Schema.String,
+    model: Schema.String,
+    serial: Schema.String,
+    location: Schema.String,
+    condition: AssetConditionSchema,
+  },
+  success: Message.SucceededSave,
+  failure: Message.Failed,
   execute: (args) => Effect.gen(function*() {
-    const assetTag = yield* Schema.decodeUnknownEffect(AssetSchema.fields.assetTag)(args.assetTag.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("assetTag")))
-    const name = yield* Schema.decodeUnknownEffect(AssetSchema.fields.name)(args.name.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("name")))
-    const model = yield* Schema.decodeUnknownEffect(AssetSchema.fields.model)(args.model.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("model")))
-    const serial = yield* Schema.decodeUnknownEffect(Form.nullableText(Schema.NonEmptyString))(args.serial).pipe(Effect.mapError(BrowserModel.fieldFailure("serial")))
-    const location = yield* Schema.decodeUnknownEffect(AssetSchema.fields.location)(args.location.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("location")))
+    const assetTag = yield* Schema.decodeUnknownEffect(AssetSchema.fields.assetTag)(args.assetTag.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("assetTag")))
+    const name = yield* Schema.decodeUnknownEffect(AssetSchema.fields.name)(args.name.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("name")))
+    const model = yield* Schema.decodeUnknownEffect(AssetSchema.fields.model)(args.model.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("model")))
+    const serial = yield* Schema.decodeUnknownEffect(Form.nullableText(Schema.NonEmptyString))(args.serial)
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("serial")))
+    const location = yield* Schema.decodeUnknownEffect(AssetSchema.fields.location)(args.location.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("location")))
     const client = yield* WebClient
     const asset = { assetTag, name, model, serial, location, condition: args.condition }
     const created = args.selectedId === null
-    const saved = yield* (created ? client["assets.create"](asset) : client["assets.update"]({ id: args.selectedId, ...asset }))
-    return Message.SucceededSave({ asset: saved, created, request: args.request })
-  }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))),
+    const saved = yield* (created
+      ? client["assets.create"](asset)
+      : client["assets.update"]({ id: args.selectedId, ...asset }))
+
+    return { asset: saved, created }
+  }),
+  failurePayload: (error) => BrowserModel.failure(error, RpcBrowser.messageFromUnknown),
 })
-export const RemoveAsset = Command.define("RemoveAsset", { args: { id: Schema.String, request: RequestTokenSchema }, messages: [Message.SucceededRemove, Message.Failed], execute: ({ id, request }) => Effect.gen(function*() { const client = yield* WebClient; yield* client["assets.remove"]({ id }); return Message.SucceededRemove({ id, request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))) })
+
+export const RemoveAsset = RpcBrowser.command("RemoveAsset", {
+  args: { id: Schema.String },
+  success: Message.SucceededRemove,
+  failure: Message.Failed,
+  execute: ({ id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client["assets.remove"]({ id })),
+    Effect.as({ id }),
+  ),
+  failurePayload: (error) => BrowserModel.failure(error, RpcBrowser.messageFromUnknown),
+})
 const AssetsPager = ResourcePager.make("assets.list")
 const assetsState = (model: Model) => ({ page: { items: model.assets, nextCursor: model.nextCursor }, requests: model.requests })
 const list = (model: Model, request: RequestToken, cursor: string | null, append: boolean) =>

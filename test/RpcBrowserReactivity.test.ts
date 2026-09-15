@@ -10,6 +10,12 @@ const NoteSchema = Schema.Struct({
 })
 
 const NotesSchema = Schema.Array(NoteSchema)
+const FieldErrorsSchema = Schema.Record(Schema.String, Schema.String)
+
+const ValidationFailurePayloadSchema = Schema.Struct({
+  error: Schema.String,
+  fieldErrors: FieldErrorsSchema,
+})
 
 class NotesStore extends Context.Service<NotesStore, {
   readonly read: Effect.Effect<ReadonlyArray<typeof NoteSchema.Type>>
@@ -41,6 +47,12 @@ class MutationFailed extends Schema.TaggedClass<MutationFailed>()("MutationFaile
   request: RequestTokenSchema,
 }) {}
 
+class ValidationFailed extends Schema.TaggedClass<ValidationFailed>()("ValidationFailed", {
+  error: Schema.String,
+  fieldErrors: FieldErrorsSchema,
+  request: RequestTokenSchema,
+}) {}
+
 class SaveArguments extends Schema.Class<SaveArguments>("SaveArguments")({
   note: NoteSchema,
   request: RequestTokenSchema,
@@ -53,41 +65,34 @@ const selectQueryDependencies = (model: Model) =>
 
 const selectNotes = Effect.fn("NotesStore.selectNotes")(function* (_dependencies: QueryDependencies) {
   const store = yield* NotesStore
+  const notes = yield* store.read
 
-  return yield* store.read
+  return { notes }
 })
-
-const receiveNotes = (notes: ReadonlyArray<typeof NoteSchema.Type>) =>
-  Received.make({ notes })
-
-const failQuery = (error: unknown) => {
-  const message = String(error)
-
-  return QueryFailed.make({ error: message })
-}
 
 const persistNote = Effect.fn("NotesStore.persistNote")(function* ({ note }: SaveArguments) {
   const store = yield* NotesStore
+  const saved = yield* store.save(note)
 
-  return yield* store.save(note)
+  return { note: saved }
 })
 
-const succeedMutation = (note: typeof NoteSchema.Type, { request }: SaveArguments) =>
-  Saved.make({ note, request })
+const rejectNote = Effect.fn("NotesStore.rejectNote")(function* () {
+  return yield* Effect.fail("rejected")
+})
 
-const failMutation = (error: unknown, { request }: SaveArguments) => {
-  const message = String(error)
-
-  return MutationFailed.make({ error: message, request })
-}
+const validationFailurePayload = () => ValidationFailurePayloadSchema.make({
+  error: "Invalid note.",
+  fieldErrors: { value: "Choose another value." },
+})
 
 const subscriptions = RpcBrowser.query<Model, typeof MessageSchema.Type>()("notes", {
   dependencies: QueryDependencies.fields,
   modelToDependencies: selectQueryDependencies,
   reactivityKeys: ["notes"],
   execute: selectNotes,
-  onSuccess: receiveNotes,
-  onFailure: failQuery,
+  success: Received,
+  failure: QueryFailed,
 })
 
 const Save = RpcBrowser.mutation("SaveNote", {
@@ -96,8 +101,14 @@ const Save = RpcBrowser.mutation("SaveNote", {
   failure: MutationFailed,
   invalidates: ["notes"],
   execute: persistNote,
-  onSuccess: succeedMutation,
-  onFailure: failMutation,
+})
+
+const Reject = RpcBrowser.command("RejectNote", {
+  args: { value: Schema.String },
+  success: Saved,
+  failure: ValidationFailed,
+  execute: rejectNote,
+  failurePayload: validationFailurePayload,
 })
 
 it.effect("a reactive RPC mutation automatically refetches its mounted Foldkit query", Effect.fn("RpcBrowser.reactivity")(function* () {
@@ -157,3 +168,20 @@ it.effect("a reactive RPC mutation automatically refetches its mounted Foldkit q
   expect(messages).toEqual(expectedMessages)
   expect(readCount).toBe(2)
 }))
+
+it.effect(
+  "browser commands derive failure messages and inject request tokens",
+  Effect.fn("RpcBrowser.failurePayload")(function* () {
+    const request = RequestTokenSchema.make({ epoch: 1, id: 2, key: "notes.reject" })
+    const command = Reject({ value: "bad", request })
+    const rejected = yield* command.effect
+
+    const expected = ValidationFailed.make({
+      request,
+      error: "Invalid note.",
+      fieldErrors: { value: "Choose another value." },
+    })
+
+    expect(rejected).toEqual(expected)
+  }),
+)

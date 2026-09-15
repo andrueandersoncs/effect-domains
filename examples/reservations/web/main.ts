@@ -63,10 +63,10 @@ export const GetStock = RpcBrowser.command("GetStock", {
   execute: ({ sku }) => Effect.gen(function* () {
     const client = yield* WebClient
     const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
-    return yield* client["stock.get"]({ sku: key })
+    const stock = yield* client["stock.get"]({ sku: key })
+
+    return { stock }
   }),
-  onSuccess: (stock, { request }) => Message.SucceededStock({ request, stock }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 export const GetReservation = RpcBrowser.command("GetReservation", {
@@ -76,10 +76,10 @@ export const GetReservation = RpcBrowser.command("GetReservation", {
   execute: ({ id }) => Effect.gen(function* () {
     const client = yield* WebClient
     const key = yield* Schema.decodeUnknownEffect(ReservationSchema.fields.id)(id)
-    return yield* client["reservations.get"]({ id: key })
+    const reservation = yield* client["reservations.get"]({ id: key })
+
+    return { reservation }
   }),
-  onSuccess: (reservation, { request }) => Message.SucceededLoadedReservation({ request, reservation }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 export const Reserve = RpcBrowser.command("Reserve", {
@@ -90,19 +90,21 @@ export const Reserve = RpcBrowser.command("Reserve", {
     const decodedQuantity = yield* Schema.decodeUnknownEffect(Form.integer(QuantitySchema))(quantity)
     const client = yield* WebClient
     const key = yield* Schema.decodeUnknownEffect(StockSchema.fields.sku)(sku)
-    return yield* client.reserve({ sku: key, quantity: decodedQuantity })
+    const reservation = yield* client.reserve({ sku: key, quantity: decodedQuantity })
+
+    return { reservation, action: "Reservation held." }
   }),
-  onSuccess: (reservation, { request }) => Message.SucceededReservation({ request, reservation, action: "Reservation held." }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
 })
 
 const transition = (name: "confirm" | "release", action: string) => RpcBrowser.command(name, {
   args: { id: ReservationSchema.fields.id },
   success: Message.SucceededReservation,
   failure: Message.Failed,
-  execute: ({ id }) => pipe(WebClient, Effect.flatMap((client) => client[name]({ id }))),
-  onSuccess: (reservation, { request }) => Message.SucceededReservation({ request, reservation, action }),
-  onFailure: (error, { request }) => Message.Failed({ request, error: RpcBrowser.messageFromUnknown(error) }),
+  execute: ({ id }) => pipe(
+    WebClient,
+    Effect.flatMap((client) => client[name]({ id })),
+    Effect.map((reservation) => ({ reservation, action })),
+  ),
 })
 
 export const Confirm = transition("confirm", "Reservation confirmed.")

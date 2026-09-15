@@ -1,4 +1,4 @@
-import { DateTime, Effect, Equivalence, Option, Record, Schema, pipe } from "effect"
+import { DateTime, Effect, Equivalence, Option, Schema, pipe } from "effect"
 
 import { Authorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
@@ -43,8 +43,6 @@ const subscriptionAccess = (
   return paidTerm || cancellationGrace
 }
 
-const entitlementKey = (subject: typeof ExampleSubjectSchema.Type) =>
-  Record.singleton("tenantId", subject.tenantId)
 
 const reportSubscriptionsTable = Resource.table(ReportSubscriptionsResource)
 
@@ -53,7 +51,7 @@ const entitlementDefinition = new Entitlements.Source({
   table: reportSubscriptionsTable,
   subject: ExampleSubjectSchema,
   key: "tenantId",
-  where: entitlementKey,
+  scope: { tenantId: "tenantId" },
   grant: subscriptionAccess,
 })
 

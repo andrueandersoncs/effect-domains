@@ -7,10 +7,63 @@ import { SupportCasesMigrations } from "./migrations.ts"
 const webBase = new URL("./web/", import.meta.url)
 const web = StaticSpa.layerHttp({ title: "Support cases", accent: "#0f766e", base: webBase })
 
+const admin = {
+  path: "/support-admin",
+  presentation: {
+    title: "Support operations",
+    resources: {
+      support_customers: { label: "Customers", columns: ["id", "name"] },
+      support_agents: { label: "Agents", columns: ["id", "name", "onDuty"] },
+      support_cases: {
+        label: "Cases",
+        columns: [
+          "id",
+          "customerId",
+          "subject",
+          "priority",
+          "status",
+          "assignedAgentId",
+          "openedAt",
+          "version",
+        ],
+      },
+      support_case_events: {
+        label: "Case history",
+        columns: ["id", "caseId", "kind", "agentId", "note", "occurredAt"],
+      },
+    },
+    operations: {
+      "support.openCase": {
+        label: "Open case",
+        description: "Create a case and its opening history entry in one transaction.",
+      },
+      "support.advanceCase": {
+        label: "Advance case",
+        description: "Apply a guarded lifecycle transition and append its history entry.",
+      },
+      "support.caseDetail": {
+        label: "Case detail",
+        description: "Read the case with its customer, assigned agent, and ordered history.",
+      },
+      "support.board": {
+        label: "Case board",
+        description: "List the joined board with filters, range bounds, and keyset pagination.",
+      },
+    },
+  },
+}
+
 const program = ApplicationBun.run(SupportCasesApplication, {
   database: { migrations: SupportCasesMigrations },
-  admin: true,
+  admin,
   routes: web,
+  telemetry: {
+    protocol: "http/protobuf",
+    resource: {
+      serviceName: "support-cases",
+      attributes: { "service.namespace": "effect-domains.examples" },
+    },
+  },
 })
 
 pipe(program, ApplicationBun.runMain)

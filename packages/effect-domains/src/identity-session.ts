@@ -62,7 +62,6 @@ const loginFailureMessage = (error: unknown) => {
 }
 
 class LoginArgs extends Schema.Class<LoginArgs>("IdentitySessionLoginArgs")({
-  request: RequestTokenSchema,
   username: Schema.String,
   password: RedactedStringSchema,
 }) {}
@@ -72,7 +71,7 @@ const loginWithCredentials = (credentials: typeof CredentialsSchema.Type) => pip
   Effect.flatMap((client) => client["identity.login"](credentials)),
 )
 
-const executeLogin = Effect.fn("IdentitySession.executeLogin")(function* ({ request, username, password }: LoginArgs) {
+const executeLogin = Effect.fn("IdentitySession.executeLogin")(function* ({ username, password }: LoginArgs) {
   const normalizedUsername = username.trim()
   const normalizedPassword = Redacted.value(password)
 
@@ -81,59 +80,45 @@ const executeLogin = Effect.fn("IdentitySession.executeLogin")(function* ({ requ
     password: normalizedPassword,
   })
 
-  const attempt = pipe(
+  const session = yield* pipe(
     Schema.decodeUnknownEffect(CredentialsJsonSchema)(input),
     Effect.flatMap(loginWithCredentials),
   )
 
-  return yield* pipe(attempt, Effect.match({
-    onSuccess: (session) => IdentitySessionMessageSchema.SucceededLogin({ request, session }),
-    onFailure: (error) => {
-      const message = loginFailureMessage(error)
-      return IdentitySessionMessageSchema.Failed({ request, error: message })
-    },
-  }))
+  return { session }
 })
 
-const LoginConfig = Object.freeze({
+const Login = RpcBrowser.command("IdentitySession.login", {
   args: LoginArgs.fields,
-  messages: [IdentitySessionMessageSchema.SucceededLogin, IdentitySessionMessageSchema.Failed],
+  success: IdentitySessionMessageSchema.SucceededLogin,
+  failure: IdentitySessionMessageSchema.Failed,
   execute: executeLogin,
+  formatError: loginFailureMessage,
 })
-
-const Login = Command.define("IdentitySession.login", LoginConfig)
 
 class LogoutArgs extends Schema.Class<LogoutArgs>("IdentitySessionLogoutArgs")({
-  request: RequestTokenSchema,
   token: RedactedStringSchema,
 }) {}
 
-const executeLogout = Effect.fn("IdentitySession.executeLogout")(function* ({ request, token }: LogoutArgs) {
+const executeLogout = Effect.fn("IdentitySession.executeLogout")(function* ({ token }: LogoutArgs) {
   const tokenValue = Redacted.value(token)
   const options = RpcBrowser.requestOptions(tokenValue)
 
-  const attempt = pipe(
+  yield* pipe(
     Client,
     Effect.flatMap((client) => client["identity.logout"](undefined, options)),
     Effect.catchTag("Unauthenticated", () => Effect.void),
   )
 
-  return yield* pipe(attempt, Effect.match({
-    onSuccess: () => IdentitySessionMessageSchema.SucceededLogout({ request }),
-    onFailure: (error) => {
-      const message = RpcBrowser.messageFromUnknown(error)
-      return IdentitySessionMessageSchema.Failed({ request, error: message })
-    },
-  }))
+  return {}
 })
 
-const LogoutConfig = Object.freeze({
+const Logout = RpcBrowser.command("IdentitySession.logout", {
   args: LogoutArgs.fields,
-  messages: [IdentitySessionMessageSchema.SucceededLogout, IdentitySessionMessageSchema.Failed],
+  success: IdentitySessionMessageSchema.SucceededLogout,
+  failure: IdentitySessionMessageSchema.Failed,
   execute: executeLogout,
 })
-
-const Logout = Command.define("IdentitySession.logout", LogoutConfig)
 
 class ExpireArgs extends Schema.Class<ExpireArgs>("IdentitySessionExpireArgs")({
   generation: Schema.Int,

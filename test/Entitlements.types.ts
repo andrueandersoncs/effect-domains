@@ -8,8 +8,6 @@ const ReportSchema = Schema.Struct({ id: Schema.String, tenantId: Schema.String,
 const SubjectSchema = Schema.Struct({ tenantId: Schema.String, nullableTenantId: Schema.NullOr(Schema.String), numberId: Schema.Int })
 const EntitlementRowSchema = Schema.Struct({ tenantId: Schema.String, active: Schema.Boolean })
 interface EntitlementRow extends Schema.Schema.Type<typeof EntitlementRowSchema> {}
-const EntitlementWhereSchema = Schema.Struct({ tenantId: Schema.String })
-const whereEntitlementTenantMatches = (subject: Schema.Schema.Type<typeof SubjectSchema>) => EntitlementWhereSchema.make({ tenantId: subject.tenantId })
 const activeGrant = Struct.get<EntitlementRow, "active">("active")
 
 const EntitlementRows = Table.make({
@@ -22,7 +20,7 @@ const reportSubscriptionSource = new Entitlements.Source({
   table: EntitlementRows,
   subject: SubjectSchema,
   key: "tenantId",
-  where: whereEntitlementTenantMatches,
+  scope: { tenantId: "tenantId" },
   grant: activeGrant,
 })
 
@@ -34,7 +32,19 @@ const invalidReportSource = new Entitlements.Source({
   subject: SubjectSchema,
   // @ts-expect-error because the lookup key must name a storage column.
   key: "unknown",
-  where: whereEntitlementTenantMatches,
+  scope: { tenantId: "tenantId" },
+  grant: activeGrant,
+})
+
+new Entitlements.Source({
+  name: "reports.invalid-scope",
+  table: EntitlementRows,
+  subject: SubjectSchema,
+  key: "tenantId",
+  scope: {
+    // @ts-expect-error because scope fields must reference compatible subject fields.
+    tenantId: "numberId",
+  },
   grant: activeGrant,
 })
 

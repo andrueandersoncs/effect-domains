@@ -1,6 +1,6 @@
 import { Effect, Option, Schema, pipe } from "effect"
 import { RpcGroup } from "effect/unstable/rpc"
-import { Command, Runtime, type Update } from "foldkit"
+import { Runtime, type Update } from "foldkit"
 import { type Document, type HtmlBuilder } from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { evo } from "foldkit/struct"
@@ -9,7 +9,7 @@ import { BrowserModel } from "effect-domains/browser-model"
 import { Page } from "effect-domains/page"
 import { ResourcePager } from "effect-domains/resource-pager"
 import { Resource } from "effect-domains/resource"
-import { Requests, RequestStateSchema, RequestTokenSchema, type RequestToken } from "effect-domains/requests"
+import { Requests, RequestStateSchema, RequestTokenSchema } from "effect-domains/requests"
 import { RpcBrowser } from "effect-domains/rpc-browser"
 import { RpcService, type Type } from "effect-domains/rpc-service"
 import { RepairBoardList, RepairBoardPage, RepairBoardRowSchema } from "../board.ts"
@@ -44,20 +44,169 @@ export const Message = defineMessageUnion({
 })
 export type Message = typeof Message.Type
 type UpdateReturn = Update.Return<Model, Message, WebClient>
-const failed = (request: RequestToken, error: unknown) =>
-  Message.Failed({ request, ...BrowserModel.failure(error, RpcBrowser.messageFromUnknown) })
+const failurePayload = (error: unknown) =>
+  BrowserModel.failure(error, RpcBrowser.messageFromUnknown)
 const emptyCustomer = { customerId: "", customerName: "", editingCustomerId: null as string | null }
 const emptyTechnician = { technicianId: "", technicianName: "", technicianOnCall: false, editingTechnicianId: null as string | null }
 const emptyRepair = { repairCustomerId: "", repairItem: "", repairFault: "", repairUrgent: false, repairStatus: "queued" as const, repairTechnicianId: "" }
 
-export const LoadCustomers = Command.define("LoadCustomers", { args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean, request: RequestTokenSchema }, messages: [Message.SucceededCustomers, Message.Failed], execute: (args) => Effect.gen(function*() { const client = yield* WebClient; const page = yield* client["customers.list"]({ limit: 50, ...Page.input(args.cursor) }); return Message.SucceededCustomers({ page, append: args.append, request: args.request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))) })
-export const LoadTechnicians = Command.define("LoadTechnicians", { args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean, request: RequestTokenSchema }, messages: [Message.SucceededTechnicians, Message.Failed], execute: (args) => Effect.gen(function*() { const client = yield* WebClient; const page = yield* client["technicians.list"]({ limit: 50, ...Page.input(args.cursor) }); return Message.SucceededTechnicians({ page, append: args.append, request: args.request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))) })
-export const LoadBoard = Command.define("LoadBoard", { args: { status: Schema.String, request: RequestTokenSchema }, messages: [Message.SucceededBoard, Message.Failed], execute: ({ status, request }) => Effect.gen(function*() { const client = yield* WebClient; const page = yield* client["workshop.board"]({ limit: 50, ...(status === "" ? {} : { filter: { status: status as typeof RepairStatusSchema.Type } }) }); return Message.SucceededBoard({ page, request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))) })
-export const SaveCustomer = Command.define("SaveCustomer", { args: { id: Schema.String, name: Schema.String, editingId: Schema.NullOr(Schema.String), request: RequestTokenSchema }, messages: [Message.SucceededCustomer, Message.Failed], execute: (args) => Effect.gen(function*() { const id = yield* Schema.decodeUnknownEffect(CustomerSchema.fields.id)(args.id.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("customerId"))); const name = yield* Schema.decodeUnknownEffect(CustomerSchema.fields.name)(args.name.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("customerName"))); const client = yield* WebClient; const created = args.editingId === null; const customer = yield* (created ? client["customers.create"]({ id, name }) : client["customers.patch"]({ key: args.editingId, changes: { name } })); return Message.SucceededCustomer({ customer, created, request: args.request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))) })
-export const SaveTechnician = Command.define("SaveTechnician", { args: { id: Schema.String, name: Schema.String, onCall: Schema.Boolean, editingId: Schema.NullOr(Schema.String), request: RequestTokenSchema }, messages: [Message.SucceededTechnician, Message.Failed], execute: (args) => Effect.gen(function*() { const id = yield* Schema.decodeUnknownEffect(TechnicianSchema.fields.id)(args.id.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("technicianId"))); const name = yield* Schema.decodeUnknownEffect(TechnicianSchema.fields.name)(args.name.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("technicianName"))); const client = yield* WebClient; const created = args.editingId === null; const technician = yield* (created ? client["technicians.create"]({ id, name, onCall: args.onCall }) : client["technicians.patch"]({ key: args.editingId, changes: { name, onCall: args.onCall } })); return Message.SucceededTechnician({ technician, created, request: args.request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))) })
-export const SaveRepair = Command.define("SaveRepair", { args: { customerId: Schema.String, item: Schema.String, fault: Schema.String, urgent: Schema.Boolean, status: RepairStatusSchema, technicianId: Schema.String, request: RequestTokenSchema }, messages: [Message.SucceededRepair, Message.Failed], execute: (args) => Effect.gen(function*() { const customerId = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.customerId)(args.customerId.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("repairCustomerId"))); const item = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.item)(args.item.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("repairItem"))); const fault = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.fault)(args.fault.trim()).pipe(Effect.mapError(BrowserModel.fieldFailure("repairFault"))); const technicianId = args.technicianId === "" ? null : yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(args.technicianId).pipe(Effect.mapError(BrowserModel.fieldFailure("repairTechnicianId"))); const client = yield* WebClient; const repair = yield* client["repair_jobs.create"]({ customerId, item, fault, urgent: args.urgent, status: args.status, technicianId }); return Message.SucceededRepair({ repair, created: true, request: args.request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(args.request, error)))) })
-export const PatchRepairStatus = Command.define("PatchRepairStatus", { args: { id: Schema.String, status: RepairStatusSchema, request: RequestTokenSchema }, messages: [Message.SucceededRepair, Message.Failed], execute: ({ id, status, request }) => Effect.gen(function*() { const client = yield* WebClient; const repair = yield* client["repair_jobs.patch"]({ key: id, changes: { status } }); return Message.SucceededRepair({ repair, created: false, request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))) })
-export const PatchRepairTechnician = Command.define("PatchRepairTechnician", { args: { id: Schema.String, technicianId: Schema.NullOr(Schema.String), request: RequestTokenSchema }, messages: [Message.SucceededRepair, Message.Failed], execute: ({ id, technicianId, request }) => Effect.gen(function*() { const client = yield* WebClient; const repair = yield* client["repair_jobs.patch"]({ key: id, changes: { technicianId } }); return Message.SucceededRepair({ repair, created: false, request }) }).pipe(Effect.catch((error) => Effect.succeed(failed(request, error)))) })
+export const LoadCustomers = RpcBrowser.command("LoadCustomers", {
+  args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
+  success: Message.SucceededCustomers,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const page = yield* client["customers.list"]({ limit: 50, ...Page.input(args.cursor) })
+
+    return { page, append: args.append }
+  }),
+  failurePayload,
+})
+
+export const LoadTechnicians = RpcBrowser.command("LoadTechnicians", {
+  args: { cursor: Schema.NullOr(Schema.String), append: Schema.Boolean },
+  success: Message.SucceededTechnicians,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const page = yield* client["technicians.list"]({ limit: 50, ...Page.input(args.cursor) })
+
+    return { page, append: args.append }
+  }),
+  failurePayload,
+})
+
+export const LoadBoard = RpcBrowser.command("LoadBoard", {
+  args: { status: Schema.String },
+  success: Message.SucceededBoard,
+  failure: Message.Failed,
+  execute: ({ status }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const page = yield* client["workshop.board"]({
+      limit: 50,
+      ...(status === "" ? {} : { filter: { status: status as typeof RepairStatusSchema.Type } }),
+    })
+
+    return { page }
+  }),
+  failurePayload,
+})
+
+export const SaveCustomer = RpcBrowser.command("SaveCustomer", {
+  args: {
+    id: Schema.String,
+    name: Schema.String,
+    editingId: Schema.NullOr(Schema.String),
+  },
+  success: Message.SucceededCustomer,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const id = yield* Schema.decodeUnknownEffect(CustomerSchema.fields.id)(args.id.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("customerId")))
+    const name = yield* Schema.decodeUnknownEffect(CustomerSchema.fields.name)(args.name.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("customerName")))
+    const client = yield* WebClient
+    const created = args.editingId === null
+    const customer = yield* (created
+      ? client["customers.create"]({ id, name })
+      : client["customers.patch"]({ key: args.editingId, changes: { name } }))
+
+    return { customer, created }
+  }),
+  failurePayload,
+})
+
+export const SaveTechnician = RpcBrowser.command("SaveTechnician", {
+  args: {
+    id: Schema.String,
+    name: Schema.String,
+    onCall: Schema.Boolean,
+    editingId: Schema.NullOr(Schema.String),
+  },
+  success: Message.SucceededTechnician,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const id = yield* Schema.decodeUnknownEffect(TechnicianSchema.fields.id)(args.id.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("technicianId")))
+    const name = yield* Schema.decodeUnknownEffect(TechnicianSchema.fields.name)(args.name.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("technicianName")))
+    const client = yield* WebClient
+    const created = args.editingId === null
+    const technician = yield* (created
+      ? client["technicians.create"]({ id, name, onCall: args.onCall })
+      : client["technicians.patch"]({
+        key: args.editingId,
+        changes: { name, onCall: args.onCall },
+      }))
+
+    return { technician, created }
+  }),
+  failurePayload,
+})
+
+export const SaveRepair = RpcBrowser.command("SaveRepair", {
+  args: {
+    customerId: Schema.String,
+    item: Schema.String,
+    fault: Schema.String,
+    urgent: Schema.Boolean,
+    status: RepairStatusSchema,
+    technicianId: Schema.String,
+  },
+  success: Message.SucceededRepair,
+  failure: Message.Failed,
+  execute: (args) => Effect.gen(function*() {
+    const customerId = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.customerId)(
+      args.customerId.trim(),
+    ).pipe(Effect.mapError(BrowserModel.fieldFailure("repairCustomerId")))
+    const item = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.item)(args.item.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("repairItem")))
+    const fault = yield* Schema.decodeUnknownEffect(RepairJobSchema.fields.fault)(args.fault.trim())
+      .pipe(Effect.mapError(BrowserModel.fieldFailure("repairFault")))
+    const technicianId = args.technicianId === ""
+      ? null
+      : yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(args.technicianId)
+        .pipe(Effect.mapError(BrowserModel.fieldFailure("repairTechnicianId")))
+    const client = yield* WebClient
+    const repair = yield* client["repair_jobs.create"]({
+      customerId,
+      item,
+      fault,
+      urgent: args.urgent,
+      status: args.status,
+      technicianId,
+    })
+
+    return { repair, created: true }
+  }),
+  failurePayload,
+})
+
+export const PatchRepairStatus = RpcBrowser.command("PatchRepairStatus", {
+  args: { id: Schema.String, status: RepairStatusSchema },
+  success: Message.SucceededRepair,
+  failure: Message.Failed,
+  execute: ({ id, status }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const repair = yield* client["repair_jobs.patch"]({ key: id, changes: { status } })
+
+    return { repair, created: false }
+  }),
+  failurePayload,
+})
+
+export const PatchRepairTechnician = RpcBrowser.command("PatchRepairTechnician", {
+  args: { id: Schema.String, technicianId: Schema.NullOr(Schema.String) },
+  success: Message.SucceededRepair,
+  failure: Message.Failed,
+  execute: ({ id, technicianId }) => Effect.gen(function*() {
+    const client = yield* WebClient
+    const repair = yield* client["repair_jobs.patch"]({ key: id, changes: { technicianId } })
+
+    return { repair, created: false }
+  }),
+  failurePayload,
+})
 
 const CustomersPager = ResourcePager.make("customers.list")
 const TechniciansPager = ResourcePager.make("technicians.list")

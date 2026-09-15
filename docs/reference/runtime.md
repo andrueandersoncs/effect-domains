@@ -208,7 +208,7 @@ Protected tools require bearer credentials on every call. Tool discovery exposes
 
 ### Example Foldkit clients
 
-Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, and display error formatting. `RpcBrowser.query` turns a model dependency record and Effect into a Foldkit subscription that runs initially and whenever its declared reactivity keys are invalidated. `RpcBrowser.mutation` runs an authored command and invalidates its declared keys only after success. `BrowserRuntime.run` injects the required root container and one shared native `Reactivity` service while constructing and starting Foldkit. `StaticSpa.layerHttp({ title, accent, base })` validates the site declaration and serves its explicitly prebuilt JavaScript and CSS.
+Each example page is a contract-bound native `RpcClient` for the application's existing resource and native groups. `RpcBrowser` owns the lazy same-origin `/rpc/v1` protocol, native `FetchHttpClient` and JSON serialization layers, bearer request options, and request-token message construction. `RpcBrowser.command` and `RpcBrowser.mutation` declare argument fields plus success/failure message schemas; their authored `execute` Effect returns only the success payload, excluding `_tag` and the framework-injected `request`. Standard failures derive `{ request, error }` with `messageFromUnknown` or an optional `formatError`; failure schemas with extra fields require an explicit `failurePayload`. `RpcBrowser.query` applies the same payload construction without a request token and turns model dependencies into a Foldkit subscription that runs initially and whenever its declared reactivity keys are invalidated. `RpcBrowser.mutation` invalidates declared keys only after the underlying Effect succeeds. `BrowserRuntime.run` injects the required root container and one shared native `Reactivity` service while constructing and starting Foldkit. `StaticSpa.layerHttp({ title, accent, base })` validates the site declaration and mounts the prebuilt asset routes.
 
 The client modules stay narrow:
 
@@ -232,6 +232,8 @@ The interface provides operation forms, resource lists, declared filters, cursor
 The generated admin is a generic bearer-entry surface: it accepts a real issued credential and does not bypass authentication. It uses the same per-call identity verification as RPC, CLI, MCP, and operator metrics; an MCP transport session is not an identity.
 
 `allowedOrigins` names exact origins permitted by the admin’s origin check when using a non-loopback host. It is not a CORS configuration, authentication policy, or permission grant.
+
+Support Cases demonstrates the object form at `/support-admin`: `presentation` supplies an application title, resource labels and columns, plus operation labels and descriptions. Presentation does not alter inspection, schemas, authorization, or handler behavior. It omits `allowedOrigins` deliberately because the walkthrough remains loopback-only and supports alternate ports.
 
 ## Durable execution
 

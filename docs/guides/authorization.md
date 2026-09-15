@@ -104,13 +104,13 @@ const purchasedGuideEntitlement = new Entitlements.Source({
   table: GuidePurchasesResource.table,
   subject: ExampleSubjectSchema,
   key: "guideId",
-  where: (subject) => ({ tenantId: subject.tenantId, userId: subject.userId }),
+  scope: { tenantId: "tenantId", userId: "userId" },
   grant: (purchase) => purchase.status === "granted",
 })
 
 export const PurchasedGuideEntitlements = Entitlements.fromTable(purchasedGuideEntitlement)
 ```
 
-Use `Entitlements.fromTables([...])` for multiple names. Each definition finds the named key under its subject-derived `where` fields and calls `grant(row, now)`. A missing grant yields `EntitlementRequired`; database or decoding failure yields `EntitlementUnavailable`. Neither one replaces resource scope or authentication.
+Use `Entitlements.fromTables([...])` for multiple names. Each source declares `scope` as storage-field-to-subject-field bindings; the type system rejects missing, optional, or scalar-incompatible subject fields. The resolver finds the requested `key` under those bindings, then calls the authored `grant(row, now)` business predicate. A missing grant yields `EntitlementRequired`; database or decoding failure yields `EntitlementUnavailable`. Neither one replaces resource scope or authentication.
 
 See the [team-task resource](../../examples/team-tasks/resources.ts), [purchased-guide entitlement](../../examples/purchased-guides/entitlements.ts), and [`Authorization`](../../packages/effect-domains/src/authorization.ts).
