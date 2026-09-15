@@ -1,0 +1,23 @@
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'rpc_server_call_duration_seconds_count{error_type="Failure",service_name="reading-list"}'
+        values: '0+10x20'
+      - series: 'rpc_server_call_duration_seconds_count{service_name="reading-list"}'
+        values: '0+20x20'
+      - series: 'rpc_server_call_duration_seconds_bucket{le="+Inf",service_name="reading-list"}'
+        values: '0+20x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: EffectDomainsServerErrorRatioHigh
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: Sustained Effect RPC server error ratio above 5%
+              runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#server-errors

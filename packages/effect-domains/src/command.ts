@@ -324,7 +324,14 @@ const compileCommand = <
   const translate = (cause: Cause.Cause<unknown>) => pipe(
     declaredFailure(isDeclared, cause),
     Option.match({
-      onNone: () => pipe(Effect.logError(cause), Effect.andThen(fallback)),
+      onNone: () => pipe(
+        Effect.logError("Command failed with an undeclared error"),
+        Effect.annotateLogs({
+          "error.type": "undeclared",
+          "operation.name": definition.name,
+        }),
+        Effect.andThen(fallback),
+      ),
       onSome: Effect.fail,
     }),
   )

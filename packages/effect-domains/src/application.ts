@@ -1,6 +1,7 @@
 import { Array, Data, Effect, Equivalence, HashSet, Layer, Match, Schema, Struct, pipe } from "effect"
 import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import { Command, type AnyCommandBundle, type CommandLive } from "./command.ts"
+import { FeatureFlags, type FeatureFlag } from "./feature-flags.ts"
 import { SchemaStore } from "./migrations.ts"
 import { Resource, type ResourceSpec, type Resource as CompiledResource, type ResourceRuntime } from "./resource.ts"
 import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
@@ -9,6 +10,7 @@ import { Table } from "./table.ts"
 
 type ApplicationPart = Data.TaggedEnum<{
   ResourcePart: { readonly resource: ResourceSpec }
+  FeatureFlagPart: { readonly flag: FeatureFlag }
   CommandPart: { readonly bundle: AnyCommandBundle }
   NativePart: { readonly bundle: RpcBundle }
   ApplicationPart: { readonly application: ApplicationSpec }
@@ -38,6 +40,11 @@ const nativePart = <const Bundle extends RpcBundle>(bundle: Bundle) => {
   return Struct.assign(part, { bundle })
 }
 
+const featureFlagPart = <const Flag extends FeatureFlag>(flag: Flag) => {
+  const part = ApplicationParts.FeatureFlagPart({ flag })
+  return Struct.assign(part, { flag })
+}
+
 const applicationPart = <const Spec extends ApplicationSpec>(application: Spec) => {
   const part = ApplicationParts.ApplicationPart({ application })
   return Struct.assign(part, { application })
@@ -60,13 +67,16 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
 }
 
 class CompiledPart extends Data.Class<{
-  readonly bundle: RpcBundle
+  readonly bundles: ReadonlyArray<RpcBundle>
   readonly resources: ReadonlyArray<CompiledResource>
   readonly commands: ReadonlyArray<CommandLive>
+  readonly featureFlags: ReadonlyArray<FeatureFlag>
 }> {}
 
+const noBundles: ReadonlyArray<RpcBundle> = Object.freeze([])
 const noResources: ReadonlyArray<CompiledResource> = Object.freeze([])
 const noCommands: ReadonlyArray<CommandLive> = Object.freeze([])
+const noFeatureFlags: ReadonlyArray<FeatureFlag> = Object.freeze([])
 
 type ApplicationDepth = 0 | 1 | 2 | 3 | 4 | 5
 
@@ -84,9 +94,11 @@ type PartBundle<Part, Depth extends ApplicationDepth = 5> =
       ? Bundle
       : Part extends { readonly _tag: "NativePart"; readonly bundle: infer Bundle extends RpcBundle }
         ? Bundle
-        : Part extends { readonly _tag: "ApplicationPart"; readonly application: infer Spec extends ApplicationSpec }
-          ? Depth extends 0 ? RpcBundle : ApplicationIRFor<Spec, PreviousDepth<Depth>>
-          : never
+        : Part extends { readonly _tag: "FeatureFlagPart" }
+          ? never
+          : Part extends { readonly _tag: "ApplicationPart"; readonly application: infer Spec extends ApplicationSpec }
+            ? Depth extends 0 ? RpcBundle : ApplicationIRFor<Spec, PreviousDepth<Depth>>
+            : never
 
 type BundleRpcs<Bundle> =
   Bundle extends { readonly group: RpcGroup.RpcGroup<infer Rpcs extends RpcProcedure> } ? Rpcs : never
@@ -118,6 +130,7 @@ export interface ApplicationIR extends RpcBundle {
   readonly name: string
   readonly resources: ReadonlyArray<CompiledResource>
   readonly commands: ReadonlyArray<CommandLive>
+  readonly featureFlags: ReadonlyArray<FeatureFlag>
   readonly tables: ReadonlyArray<Table>
 }
 
@@ -193,13 +206,37 @@ const compileParts = (
     Match.tagsExhaustive({
       ResourcePart: ({ resource }) => {
         const compiled = Resource.compile(resource)
-        return [new CompiledPart({ bundle: compiled, resources: [compiled], commands: noCommands })]
+
+        return [new CompiledPart({
+          bundles: [compiled],
+          resources: [compiled],
+          commands: noCommands,
+          featureFlags: noFeatureFlags,
+        })]
       },
       CommandPart: ({ bundle }) => [
-        new CompiledPart({ bundle, resources: noResources, commands: bundle.commands }),
+        new CompiledPart({
+          bundles: [bundle],
+          resources: noResources,
+          commands: bundle.commands,
+          featureFlags: noFeatureFlags,
+        }),
       ],
       NativePart: ({ bundle }) => [
-        new CompiledPart({ bundle, resources: noResources, commands: noCommands }),
+        new CompiledPart({
+          bundles: [bundle],
+          resources: noResources,
+          commands: noCommands,
+          featureFlags: noFeatureFlags,
+        }),
+      ],
+      FeatureFlagPart: ({ flag }) => [
+        new CompiledPart({
+          bundles: noBundles,
+          resources: noResources,
+          commands: noCommands,
+          featureFlags: [flag],
+        }),
       ],
       ApplicationPart: ({ application }) => compileParts(application.parts),
     }),
@@ -217,9 +254,11 @@ function compileApplication(definition: ApplicationSpec): ApplicationIR
 
 function compileApplication(definition: ApplicationSpec): ApplicationIR {
   const parts = compileParts(definition.parts)
-  const bundles = Array.map(parts, Struct.get("bundle"))
+  const bundles = Array.flatMap(parts, Struct.get("bundles"))
   const resources = Array.flatMap(parts, Struct.get("resources"))
   const commands = Array.flatMap(parts, Struct.get("commands"))
+  const featureFlagDeclarations = Array.flatMap(parts, Struct.get("featureFlags"))
+  const featureFlags = FeatureFlags.compile(featureFlagDeclarations)
   const groups = Array.map(bundles, Struct.get("group"))
   const validationEffect = validateApplication(resources, groups, commands)
   const validation = Effect.runSync(validationEffect)
@@ -232,6 +271,7 @@ function compileApplication(definition: ApplicationSpec): ApplicationIR {
     name: definition.name,
     resources,
     commands,
+    featureFlags,
     tables: validation.tables,
   })
 
@@ -248,6 +288,7 @@ const prepareApplication = function* (
 export const Part = {
   resource: resourcePart,
   command: commandPart,
+  featureFlag: featureFlagPart,
   native: nativePart,
   application: applicationPart,
 }

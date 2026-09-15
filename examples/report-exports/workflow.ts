@@ -1,7 +1,14 @@
-import { Array, Cause, DateTime, Effect, Equivalence, Exit, Function, Match, Option, Schema, Struct, pipe } from "effect"
+import { Array, Cause, DateTime, Effect, Equivalence, Exit, Function, Match, Metric, Option, Schema, Struct, pipe } from "effect"
 import { RunnerStorage, Sharding } from "effect/unstable/cluster"
 import { Activity, DurableClock, DurableDeferred, DurableQueue, Workflow } from "effect/unstable/workflow"
 import { Command } from "effect-domains/command"
+
+
+import {
+  appendReportExportAudit,
+  ReportExportAuditOperation,
+  ReportExportAuditsResource,
+} from "./audit.ts"
 
 import {
   ReportArtifactConflict,
@@ -21,6 +28,7 @@ import {
   type ReportExportRequest,
 } from "./contracts.ts"
 
+
 import { ReportExportGenerationAuthorization } from "./authorization.ts"
 import { type ReportExportExecution, ReportExportExecutionStore } from "./executions.ts"
 import { writeReportArtifact } from "./writer.ts"
@@ -29,6 +37,21 @@ import {
   ExampleRoles,
   ExampleSubjectSchema,
 } from "@effect-domains/example-support/subject"
+
+const completedExports = Metric.counter("report_exports.completed", {
+  description: "Completed financial report exports",
+  incremental: true,
+})
+
+const exportedAmountMinor = Metric.counter("report_exports.amount_minor", {
+  description: "Total minor currency units included in completed exports",
+  incremental: true,
+})
+
+const ReportMetricAttributesSchema = Schema.Struct({
+  currency: Schema.String,
+  release_policy: Schema.String,
+})
 
 export const ReportArtifactQueue = DurableQueue.make({
   name: "ReportExports.WriteArtifact",
@@ -122,6 +145,16 @@ export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.ex
 
     const artifact = yield* DurableQueue.process(ReportArtifactQueue, job)
     yield* executions.succeed(executionId, artifact)
+
+    const metricAttributes = ReportMetricAttributesSchema.make({
+      currency: request.report.currency,
+      release_policy: request.report.releasePolicy,
+    })
+
+    const completedMetric = Metric.withAttributes(completedExports, metricAttributes)
+    yield* Metric.update(completedMetric, 1)
+    const amountMetric = Metric.withAttributes(exportedAmountMinor, metricAttributes)
+    yield* Metric.update(amountMetric, job.totalCreditMinor + job.totalDebitMinor)
     return artifact
   },
 )
@@ -166,6 +199,7 @@ const selectGenerateDiscard = Effect.fn("ReportExports.selectGenerateDiscard")(f
 })
 
 // Call execute as a method because the native workflow reads its payload schema from `this`.
+
 const selectGenerate = Effect.fn("ReportExports.selectGenerate")(function* (
   request: ReportExportRequest,
   subject: typeof ExampleSubjectSchema.Type,
@@ -182,6 +216,8 @@ const ReportGenerationCommand = Command
 const ReportOperatorCommand = Command
   .family("ReportExport.", ReportExportUnavailable)
   .authorized(ExampleRoles.admin)
+
+const ReportOperatorTransaction = ReportOperatorCommand.transactional()
 
 const generateSpec = ReportGenerationCommand.define({
   name: "Generate",
@@ -201,16 +237,17 @@ const generateDiscardSpec = ReportGenerationCommand.define({
 
 const generateDiscard = Command.implement(generateDiscardSpec, selectGenerateDiscard)
 
-const resumeSpec = ReportOperatorCommand.define({
+const resumeSpec = ReportOperatorTransaction.define({
   name: "GenerateResume",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
+  dependencies: [ReportExportAuditsResource],
 })
 
 const resume = Command.implement(
   resumeSpec,
-  Effect.fn("ReportExports.Resume")(function* ({ executionId }) {
+  Effect.fn("ReportExports.Resume")(function* ({ executionId }, subject) {
     const executions = yield* ReportExportExecutionStore
     const execution = yield* executions.require(executionId)
     const terminalStatuses = ["cancelled", "failed", "succeeded"] as const
@@ -226,14 +263,22 @@ const resume = Command.implement(
 
     const recovery = FinancialReportExport.resume(executionId)
     yield* native(recovery)
+
+    yield* appendReportExportAudit({
+      action: "resume",
+      actorId: subject.userId,
+      targetId: executionId,
+    })
+
   }),
 )
 
-const releaseSpec = ReportOperatorCommand.define({
+const releaseSpec = ReportOperatorTransaction.define({
   name: "Release",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
+  dependencies: [ReportExportAuditsResource],
 })
 
 const release = Command.implement(
@@ -248,23 +293,38 @@ const release = Command.implement(
 
     const releasedBy = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(subject.userId)
     yield* releaseFinancialReportExport(executionId, releasedBy)
+
+    yield* appendReportExportAudit({
+      action: "release",
+      actorId: subject.userId,
+      targetId: executionId,
+    })
+
   }),
 )
 
-const cancelSpec = ReportOperatorCommand.define({
+const cancelSpec = ReportOperatorTransaction.define({
   name: "Cancel",
   payload: ReportExportExecutionInputSchema,
   success: Schema.Void,
   errors: ReportExportOperatorErrorsSchema,
+  dependencies: [ReportExportAuditsResource],
 })
 
 const cancel = Command.implement(
   cancelSpec,
-  Effect.fn("ReportExports.Cancel")(function* ({ executionId }) {
+  Effect.fn("ReportExports.Cancel")(function* ({ executionId }, subject) {
     const executions = yield* ReportExportExecutionStore
     yield* executions.cancel(executionId)
     const interruption = FinancialReportExport.interrupt(executionId)
     yield* native(interruption)
+
+    yield* appendReportExportAudit({
+      action: "cancel",
+      actorId: subject.userId,
+      targetId: executionId,
+    })
+
   }),
 )
 
@@ -369,16 +429,17 @@ const poll = Command.implement(
   }),
 )
 
-const reconcileSpec = ReportOperatorCommand.define({
+const reconcileSpec = ReportOperatorTransaction.define({
   name: "Reconcile",
   payload: ReportExportExecutionInputSchema,
   success: ReportArtifactSchema,
   errors: ReportExportOperatorErrorsSchema,
+  dependencies: [ReportExportAuditsResource],
 })
 
 const reconcile = Command.implement(
   reconcileSpec,
-  Effect.fn("ReportExports.Reconcile")(function* ({ executionId }) {
+  Effect.fn("ReportExports.Reconcile")(function* ({ executionId }, subject) {
     const executions = yield* ReportExportExecutionStore
     const execution = yield* executions.require(executionId)
     const succeeded = sameStatus(execution.status, "succeeded")
@@ -392,7 +453,15 @@ const reconcile = Command.implement(
 
     const retained = Option.getOrThrow(artifact)
     const job = makeReportExportJob(execution.request, executionId, retained.releasedBy)
-    return yield* writeReportArtifact(job)
+    const reconciled = yield* writeReportArtifact(job)
+
+    yield* appendReportExportAudit({
+      action: "reconcile",
+      actorId: subject.userId,
+      targetId: executionId,
+    })
+
+    return reconciled
   }),
 )
 
@@ -437,6 +506,7 @@ export const ReportExportCommands = Command.bundle(
   poll,
   reconcile,
   status,
+  ReportExportAuditOperation,
 )
 
 export const ReportExportRpcs = pipe(

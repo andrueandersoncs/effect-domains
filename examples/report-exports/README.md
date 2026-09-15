@@ -113,7 +113,7 @@ For an export that does not need operator approval, use a **new** report ID and 
 The caller never sends an account ID. Generation derives it from the authenticated subject's tenant, and the durable execution key is the pair of that account and `report.reportId`. Consequently:
 
 - Repeating the same report ID for the same account addresses the same execution. It is not an update or a replacement for changed lines. Use a fresh report ID for different source data.
-- Alice's issued Acme editor credential can generate in the newly seeded database. An issued Bob credential is a reader and fails the editor policy. An issued `outsider` credential is an editor in the `other` account but has no seeded paid subscription, so generation fails its `reports.generate` entitlement. The issued Admin credential is the global operator for polling, release, cancellation, recovery, reconciliation, status, and `GET /operator/metrics`; operator access does not require a subscription.
+- Alice's issued Acme editor credential can generate in the newly seeded database. An issued Bob credential is a reader and fails the editor policy. An issued `outsider` credential is an editor in the `other` account but has no seeded paid subscription, so generation fails its `reports.generate` entitlement. The issued Admin credential is the global operator for polling, release, cancellation, recovery, reconciliation, status, and authorized audit reads; operator access does not require a subscription.
 - The subscription resolver checks the stored row and clock on each generation request. Cancellation retains access until `validUntil`; a canceled row can use a non-null `graceUntil` until that exclusive timestamp. Restarting never renews, restores, or seeds over an existing subscription.
 - Once a workflow has been accepted, its durable steps do not re-check the generation entitlement. That lets already accepted work continue after the subscription changes; it does not authorize a new generation.
 
@@ -122,6 +122,8 @@ The request is deliberately constrained: report IDs start alphanumeric and may t
 ## Application UI, MCP, and operations
 
 At `http://127.0.0.1:3001/`, run `identity.login` and use the generated forms for report generation, polling, release, cancellation, resume, reconciliation, and status. The issued token remains only in memory. The same operations are protected MCP tools at `http://127.0.0.1:3001/mcp`; provide the bearer token on every call and wrap requests as `{ "input": <RPC payload> }`. Generated artifact bytes are downloaded through the explicit native HTTP route returned by the operation.
+
+`ReportExport.AuditTrail` is admin-only and reads application-owned records for successful release, resume, cancellation, and reconciliation actions. These records are stored in application SQLite independently of OTLP and survive restarts. Stable action/execution IDs make repeated writes idempotent; a failed application transaction leaves no audit row. Durable workflow effects and the application database remain separate transaction boundaries.
 
 The default `EFFECT_CLUSTER_MODE=single` keeps the local one-process workflow. `runner` starts a native Bun HTTP runner and all workflow/queue workers. `client` starts application HTTP/RPC plus the outbox relay, but not runner registrations. Colocated runners coordinate through one execution SQLite file:
 
@@ -146,16 +148,18 @@ The application database defaults to `data/report-exports.sqlite`; execution sto
 
 `EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `REPORT_EXPORTS_IDENTITY_DB` defaults to `data/report-exports-identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
 
-## OpenTelemetry traces
+## Full-stack OpenTelemetry and business metrics
 
-The runner declares OTLP HTTP/JSON telemetry with service name `report-exports` and `service.namespace=effect-domains.examples`. Supply a collector endpoint at deployment time; the same configuration wraps short-lived inspection/CLI commands, the HTTP server, initialization, the outbox relay, and the durable worker lifetime:
+The runner exports OTLP traces, metrics, and correlated logs as `report-exports`. The same configuration covers CLI inspection, HTTP, initialization, outbox relay, and the long-lived worker. Start the local stack and point every process at its OTLP/HTTP receiver:
 
 ```bash
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
-bun run report-exports inspect
+bun run observability:up
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318
 bun run report-exports:worker
 ```
 
-Use the same endpoint for every server, client, and worker whose spans should reach that collector. The worker uses the storage and credential variables established above. Graceful interruption flushes its final `ApplicationBun.worker` and `ApplicationBun.run` spans; SQL polling and queue work appear under the same resource. The collector must accept OTLP HTTP/JSON. With no endpoint, this application makes no collector request. See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry-tracing) for headers, batching, shutdown, precedence, and opt-out behavior.
+Completed workflows emit `report_exports.completed` and `report_exports.amount_minor` with bounded `currency` and `release_policy` attributes through the ordinary Effect metric API. The shared Collector exports those metrics to Prometheus; the redundant authenticated pull endpoint was deleted. Graceful interruption flushes all three signals; `SIGKILL` can lose buffered telemetry. With no endpoint, the runtime makes no collector request and durable audit writes are unchanged.
 
-For source details, see the [workflow and RPCs](workflow.ts), [contracts](contracts.ts), [authorization](authorization.ts), [subscription resolver](subscriptions.ts), [runtime layer](runtime.ts), [artifact writer](writer.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).
+See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry) for precedence, batching, gateway security, and loss boundaries.
+
+For source details, see the [workflow and RPCs](workflow.ts), [contracts](contracts.ts), [authorization](authorization.ts), [audit evidence](audit.ts), [subscription resolver](subscriptions.ts), [runtime layer](runtime.ts), [artifact writer](writer.ts), and the shared [runtime reference](../../docs/reference/runtime.md#durable-execution).

@@ -8,6 +8,8 @@ Each of the thirteen applications has its own detailed guide beside its source. 
 
 Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: the shared Application UI is prebuilt once and interpreted from each application's compiled contracts. Keep demonstration servers on loopback. Protected applications accept issued credentials through `identity.login`; the example identity store is not a production authentication service.
 
+Reading List is the smallest full-stack observability walkthrough. Report Exports adds worker spans, logs, runtime/custom metrics, and durable operator audit records; Support Cases adds nested-application HTTP/RPC telemetry and durable case-lifecycle audit history. See the [runtime observability contract](reference/runtime.md#opentelemetry).
+
 ## Start with records
 
 | Application guide | What to look for | Related framework guide |
@@ -75,7 +77,7 @@ These examples use native Effect durable execution, composed through application
 
 Use this for work that waits for approval and then publishes a file. The workflow takes supplied financial lines, enforces account subscription access on generation, waits for an operator when requested, and writes a JSON report artifact.
 
-The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation, cancellation, release, recovery, reconciliation, polling, multi-runner instructions, and OTLP tracing for the worker lifetime. Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path. The immutable file sink is idempotent, but the application does not query a separate accounting system or provide a payment integration.
+The [report-exports guide](../examples/report-exports/README.md) supplies isolated storage paths, demo credentials, generation, cancellation, release, recovery, reconciliation, durable audit inspection, polling, multi-runner instructions, and full OTLP observability for the worker lifetime. Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path. The immutable file sink is idempotent, but the application does not query a separate accounting system or provide a payment integration.
 
 ### Appointment reminders
 

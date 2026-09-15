@@ -20,11 +20,50 @@ const application = Application.compile(Application.define({
 
 This example belongs beside the reading list's `resources.ts`. In your application, import the resource you want to register.
 
-Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` produces the authoritative `ApplicationIR`; adapters do not rediscover resources or inspect arbitrary object properties. Compilation rejects duplicate table and command names.
+Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` values. `Application.compile` produces the authoritative `ApplicationIR`; adapters do not rediscover resources or inspect arbitrary object properties. Compilation rejects duplicate table, command, and feature-flag names.
 
 Use `Part.application(child)` when a domain module owns a coherent set of resources and commands but the runnable application adds integrations such as identity. Compilation recursively flattens the child into the same `ApplicationIR`, so adapters and dependency validation see one operation, resource, command, and table set. [Orders and invoices](../../examples/orders-invoices/application.ts) exercises this boundary with a nested billing domain and an outer native identity bundle.
 
 Sibling child applications may reference one another's exact Resource descriptors. Compilation gathers the full tree before validating foreign keys and command dependencies. [Support cases](../../examples/support-cases/application.ts) uses separate directory and case-management children: case relations and commands depend on resources registered by the directory sibling.
+
+## Feature flags
+
+Feature flags are application-level operational declarations, not fields on canonical domain schemas. Define each flag once, register its exact descriptor as an application part, and supply the runtime implementation through `services`:
+
+```ts
+import { Effect } from "effect"
+import { Application, Part } from "effect-domains/application"
+import { FeatureFlags } from "effect-domains/feature-flags"
+
+const NewCheckout = FeatureFlags.define({
+  name: "new-checkout",
+  default: false,
+  description: "Use the replacement checkout flow",
+})
+
+const application = Application.compile(Application.define({
+  name: "storefront",
+  parts: [Part.featureFlag(NewCheckout)],
+}))
+
+const services = FeatureFlags.layerMemory(
+  application.featureFlags,
+  [[NewCheckout, true]],
+)
+
+const program = Effect.gen(function* () {
+  const enabled = yield* FeatureFlags.isEnabled(NewCheckout)
+  yield* FeatureFlags.disable(NewCheckout)
+  yield* FeatureFlags.enable(NewCheckout)
+  const toggled = yield* FeatureFlags.toggle(NewCheckout)
+  return { enabled, toggled }
+})
+```
+
+`FeatureFlags.isEnabled`, `setEnabled`, `enable`, `disable`, and atomic `toggle` require the `FeatureFlags` service and fail with `FeatureFlagUnavailable` when the runtime does not manage the exact declared descriptor. `FeatureFlags.layerMemory(application.featureFlags, overrides?)` is the process-local implementation; its optional override entries pair an exact declaration with its initial Boolean state. It validates declarations and overrides synchronously.
+
+The memory layer resets on process restart. Persistent, remote, targeted, scheduled, or percentage rollout semantics require an application-provided `FeatureFlags` service implementation. The framework does not publish flag mutation RPCs or infer administrative authorization.
+
 
 ## Bun runner
 
@@ -39,7 +78,7 @@ Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.r
 | `background` | Background layer, built after initialization. Also enables the `worker` command. |
 | `routes` | Additional native HTTP route layer for `serve`. |
 | `admin` | Omitted by default. `true` enables the prebuilt admin; an object accepts `path`, `presentation`, and `allowedOrigins`. |
-| `telemetry` | Automatic OTLP tracing when an endpoint is configured. An object configures export; `false` opts out of the runtime exporter. |
+| `telemetry` | Project-owned OTLP traces, metrics, logs, safe HTTP/RPC measurements, and optional browser ingestion. An object configures it; `false` opts out of every automatic telemetry layer. |
 
 For `serve` and `worker`, startup prepares the database, builds `services`, runs `initialize`, and then starts `background`. `serve` additionally starts HTTP. Initialization therefore also runs in worker mode; it must be appropriate for each process you launch.
 
@@ -79,56 +118,107 @@ READING_LIST_URL=http://127.0.0.1:3001/rpc/v1 bun run reading-list books.list
 
 The Bun runner binds to `127.0.0.1`. It does not provide a configurable public bind address or a production deployment setup.
 
-## OpenTelemetry tracing
+## OpenTelemetry
 
-RPC tracing requires no handler wrappers or domain annotations. The runner installs Effect's native OTLP tracer around the entire command lifetime: HTTP RPC, generated CLI calls, in-process admin/MCP RPCs, initialization, and workers. Existing Effect and SQL spans participate in the same traces. Finished spans are batched and flushed on graceful shutdown, including short-lived CLI commands.
+`ApplicationBun.run` can install one scoped OTLP runtime for traces, metrics, and logs. It covers `serve`, remote CLI, inspection, initialization, background layers, and `worker`. The generated UI uses one persistent browser runtime and forwards selected signals through a same-origin gateway. Canonical schemas and operation contracts contain no telemetry annotations.
 
-Export starts automatically when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set:
+No endpoint means no runtime-owned exporter or browser gateway traffic. Independently supplied tracer, metric, and logger services remain usable. `telemetry: false` disables the exporter, automatic safe HTTP/RPC observation, browser gateway, and runtime metrics.
+
+### Start the local stack
 
 ```bash
-bun run reading-list:server:otel
+bun run observability:up
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 bun run reading-list:server
 ```
 
-That sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Use `bun run reading-list:otel …` for the matching CLI process so both sides of a trace export. With no endpoint, no collector is contacted and an externally supplied tracer is left intact.
+The pinned stack exposes Grafana at [http://127.0.0.1:3001](http://127.0.0.1:3001/), Prometheus at `:9090`, Tempo at `:3200`, Loki at `:3100`, and Collector OTLP/HTTP at `:14318`. The dashboard links traces, logs, and metrics. Stop it with `bun run observability:down`; validate alert rules with `bun run observability:alerts:test`.
 
-The [reading-list walkthrough](../../examples/reading-list/README.md#opentelemetry-traces) searches Jaeger service `reading-list` at [http://127.0.0.1:16686](http://127.0.0.1:16686/). The [report-exports walkthrough](../../examples/report-exports/README.md#opentelemetry-traces) configures OTLP HTTP/JSON resource metadata on a durable application and runs the same exporter around its worker lifetime.
-
-For declarative configuration, add this option to `ApplicationBun.run`:
+### Declarative options
 
 ```ts
 telemetry: {
-  endpoint: "https://collector.example.com/v1/traces",
+  endpoint: "https://collector.example.com",
   protocol: "http/protobuf",
   resource: {
     serviceName: "reading-list",
     serviceVersion: "1.2.0",
     attributes: { "deployment.environment.name": "production" },
   },
-  exportInterval: "5 seconds",
-  maxBatchSize: 1000,
-  shutdownTimeout: "3 seconds",
+  headers: { authorization: "Bearer deployment-secret" },
+  traces: {
+    sampleRate: 0.25,
+    exportInterval: "5 seconds",
+    maxBatchSize: 1000,
+    shutdownTimeout: "3 seconds",
+  },
+  metrics: {
+    temporality: "cumulative",
+    exportInterval: "5 seconds",
+    shutdownTimeout: "3 seconds",
+  },
+  logs: {
+    exportInterval: "5 seconds",
+    maxBatchSize: 1000,
+    shutdownTimeout: "3 seconds",
+    mergeWithExisting: true,
+  },
+  browser: {
+    ingestPath: "/otel",
+    signals: { traces: true, metrics: true, logs: true },
+    maxRequestBytes: 262144,
+    requestsPerMinute: 120,
+  },
 },
 ```
 
-| Option | Contract |
+The top-level `endpoint` is an OTLP base URL; the runtime appends `/v1/traces`, `/v1/metrics`, and `/v1/logs`. A signal-level `endpoint` is its full URL and is used unchanged. A signal-level `protocol` or `headers` overrides the top-level value. Set `traces`, `metrics`, `logs`, or `browser` to `false` to disable that part.
+
+`protocol` is `http/protobuf` by default and also accepts `http/json`; gRPC is not an application exporter transport. Trace and browser sample rates are finite values from 0 through 1. Root decisions are random and parent decisions remain authoritative. Durations, batch sizes, gateway body limits, and rate limits must be positive. Invalid explicit configuration fails startup.
+
+Metrics enable Effect fiber-runtime instruments only while metric export is active. Logs preserve the existing logger by default; `minimumLevel`, `excludeLogSpans`, and `mergeWithExisting` pass through the native logger contract. Resource identity is shared by all backend signals. The browser service defaults to `<service-name>-browser`.
+
+### Environment precedence
+
+Explicit options override environment configuration. Without explicit values, each signal uses its `OTEL_EXPORTER_OTLP_<SIGNAL>_*` value before the generic `OTEL_EXPORTER_OTLP_*` value. A generic endpoint enables all three signals and appends their standard paths; a lone signal-specific endpoint enables only that signal.
+
+Supported standard controls include:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, and `OTEL_EXPORTER_OTLP_HEADERS`
+- signal-specific `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_{ENDPOINT,PROTOCOL,HEADERS,TIMEOUT}`
+- `OTEL_{TRACES,METRICS,LOGS}_EXPORTER`; a value without `otlp`, including `none`, disables that signal
+- `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION`, and `OTEL_RESOURCE_ATTRIBUTES`
+- native batching controls `OTEL_BSP_*`, `OTEL_METRIC_EXPORT_*`, and `OTEL_BLRP_*`
+- `OTEL_SDK_DISABLED=true`, which disables native OTLP construction
+
+Environment durations use the native OpenTelemetry millisecond representation. Signal-specific headers are merged with explicit headers, with explicit values winning.
+
+### Automatic measurements
+
+The runtime emits these histograms in seconds with boundaries `0.005`, `0.01`, `0.025`, `0.05`, `0.075`, `0.1`, `0.25`, `0.5`, `0.75`, `1`, `2.5`, `5`, `7.5`, and `10`:
+
+| Instrument | Attributes |
 | --- | --- |
-| `endpoint` | Full OTLP traces URL, used unchanged. The generic environment endpoint instead appends `/v1/traces`. |
-| `protocol` | `http/protobuf` (default) or `http/json`. No gRPC transport. |
-| `resource.serviceName` | Explicit service identity; otherwise `OTEL_SERVICE_NAME`, then `service.name` in `OTEL_RESOURCE_ATTRIBUTES`, then `application.name`. |
-| `resource.serviceVersion` | Optional service version. |
-| `resource.attributes` | Static resource metadata. Explicit resource fields override matching attributes; explicit attributes override environment metadata. |
-| `headers` | Native Effect HTTP headers for collector authentication. These are exporter headers, not RPC credentials. Prefer deployment-provided secrets. |
-| `exportInterval` | Effect duration input; defaults to 5 seconds. |
-| `maxBatchSize` | Number of buffered spans triggering an export; defaults to 1000. Not a bounded queue or total-memory limit. |
-| `shutdownTimeout` | Effect duration input limiting graceful exporter shutdown; defaults to 3 seconds. |
+| `rpc.server.call.duration` | `rpc.system.name="effect"`, logical `rpc.method`, bounded `error.type` on failure |
+| `http.server.request.duration` | request method, response status, scheme, bounded HTTP error class |
+| `rpc.client.call.duration` | browser logical RPC method, `rpc.system.name="effect"`, bounded request error |
 
-Explicit options override environment configuration. Otherwise the native exporter honors `OTEL_EXPORTER_OTLP_TRACES_*` ahead of corresponding generic `OTEL_EXPORTER_OTLP_*` settings for endpoint, headers, protocol, and timeout. Resource metadata also accepts `OTEL_SERVICE_VERSION` and `OTEL_RESOURCE_ATTRIBUTES`. Batching accepts `OTEL_BSP_SCHEDULE_DELAY`, `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`, and `OTEL_BSP_EXPORT_TIMEOUT`; environment durations are milliseconds. Shutdown timeout precedence is traces timeout, generic timeout, then BSP export timeout.
+Histogram count is the request rate; no duplicate request counter is emitted. Unknown route templates are omitted rather than replaced with raw paths. Runtime-owned HTTP client/server spans suppress native URL, query, and header capture, while W3C context still connects browser and server spans. Exporter requests disable tracing and propagation so export cannot observe itself. Custom business metrics remain ordinary authored Effect `Metric` values.
 
-`telemetry: false`, `OTEL_SDK_DISABLED=true`, or `OTEL_TRACES_EXPORTER=none` disables this exporter. Otherwise `OTEL_TRACES_EXPORTER` defaults to `otlp`. Opt-out does not disable native span creation or an independently installed tracer.
+Framework-owned telemetry never records RPC payloads/results, form values, authorization or cookie headers, session tokens, SQL bind values, URL queries, or arbitrary actor/resource identifiers. Undeclared command failures log a bounded type and operation name rather than a serialized cause. User-authored logs, custom span annotations, and authored native routes remain the application's privacy responsibility. The production Collector example adds defense-in-depth redaction; it cannot make arbitrary free text safe.
 
-Native RPC trace propagation and parent sampling decisions remain authoritative; this integration does not add a second RPC span, sampler, metrics exporter, or log exporter. It does not add payload/result attributes. Native HTTP/SQL instrumentation and exception events can still contain sensitive data: treat the collector as trusted and apply application/collector redaction policy.
+### Browser gateway
 
-For a custom runtime or independently composed RPC adapter, import `ApplicationTelemetry` from `effect-domains/application-telemetry` and provide `ApplicationTelemetry.layer({ name }, options)` around the runtime. Supply its native `HttpClient` requirement with your platform's HTTP client layer. For a custom tracer implementation, opt out of the automatic exporter and provide the native tracing layer yourself.
+When UI and browser telemetry are enabled, the document receives only the same-origin ingestion path, derived public service name, sample rate, and enabled-signal booleans. Collector URLs and headers remain server-side. The default endpoints are `/otel/v1/traces`, `/otel/v1/metrics`, and `/otel/v1/logs`; CSP remains `connect-src 'self'`.
+
+The gateway accepts same-origin `POST` requests with OTLP protobuf or JSON, enforces a 256 KiB body limit and 120 requests per remote address per minute by default, and rejects unknown paths, disabled signals, cross-origin requests, unsupported content types, and compressed bodies. It forwards only server-held collector headers; browser cookies and authorization never become collector credentials. Browser page-load, RPC, validation/request failure, uncaught-error, and unhandled-rejection events exclude raw form, response, DOM, and exception content. `pagehide` starts a bounded best-effort flush and cannot guarantee delivery.
+
+### Reliability and custom runtimes
+
+Native exporters retry transient responses, honor `Retry-After`, and temporarily disable a signal for 60 seconds after retries are exhausted. Application effects do not fail when a collector is slow, refuses a connection, returns 429, or returns 503. Buffered data dropped after exhausted retries is not recovered. Graceful scope or process interruption flushes all enabled signals up to each shutdown timeout; `SIGKILL` can lose application-buffered data.
+
+The reference Collector adds memory limiting, batching, redaction, retry, internal telemetry, and a disk-backed sending queue. Delivery becomes restart-durable only after the Collector accepts it. `ops/observability/collector.production.example.yaml` is a hardened baseline with TLS and upstream-auth placeholders, not a production deployment.
+
+For a custom runtime, import `ApplicationTelemetry` and provide `ApplicationTelemetry.layer(application, options)` around the complete runtime, supplying the native `HttpClient`. Apply `ApplicationTelemetry.httpMiddleware` once around the complete HTTP router and call `ApplicationTelemetry.browserGateway` while constructing UI routes. Opt out with `false` when another runtime owns the complete policy; do not install two exporters.
 
 ## Local commands
 

@@ -1,0 +1,51 @@
+groups:
+  - name: effect-domains
+    rules:
+      - alert: EffectDomainsServerErrorRatioHigh
+        expr: sum(rate(rpc_server_call_duration_seconds_count{error_type=~".+"}[5m])) / clamp_min(sum(rate(rpc_server_call_duration_seconds_count[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Sustained Effect RPC server error ratio above 5%
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#server-errors
+      - alert: EffectDomainsServerLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(rpc_server_call_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Effect RPC p95 latency above one second
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#server-latency
+      - alert: EffectDomainsBrowserFailureRateHigh
+        expr: sum(rate(rpc_client_call_duration_seconds_count{service_name=~".*-browser",error_type=~".+"}[5m])) / clamp_min(sum(rate(rpc_client_call_duration_seconds_count{service_name=~".*-browser"}[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Generated browser RPC failure ratio above 5%
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#browser-failures
+      - alert: EffectDomainsWorkerTelemetryMissing
+        expr: absent_over_time(child_fibers_started_total{service_name="report-exports"}[10m]) == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Report Exports worker telemetry is missing
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#missing-worker
+      - alert: OpenTelemetryCollectorExportFailure
+        expr: sum(rate(otelcol_exporter_send_failed_spans_total[5m])) + sum(rate(otelcol_exporter_send_failed_metric_points_total[5m])) + sum(rate(otelcol_exporter_send_failed_log_records_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: OpenTelemetry Collector cannot export accepted telemetry
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#collector-export-failures
+      - alert: OpenTelemetryCollectorQueueDroppedData
+        expr: sum(rate(otelcol_exporter_enqueue_failed_spans_total[5m])) + sum(rate(otelcol_exporter_enqueue_failed_metric_points_total[5m])) + sum(rate(otelcol_exporter_enqueue_failed_log_records_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: OpenTelemetry Collector persistent queue dropped data
+          runbook_url: https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md#collector-dropped-data

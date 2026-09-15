@@ -30,6 +30,14 @@ const PolicyRulesSchema = Schema.Record(Schema.String, Schema.String)
 const PolicyInspectionSchema = Schema.TaggedStruct("Policy", { subject: Schema.Unknown, scope: Schema.String, allow: PolicyRulesSchema, require: Schema.optionalKey(EntitlementRequirementsSchema) })
 const AuthorizationInspectionSchema = Schema.Union([Schema.TaggedStruct("Public", {}), Schema.TaggedStruct("Deny", {}), PolicyInspectionSchema])
 
+const FeatureFlagInspectionSchema = Schema.Struct({
+  name: Schema.String,
+  default: Schema.Boolean,
+  description: Schema.optionalKey(Schema.String),
+})
+
+const FeatureFlagsInspectionSchema = Schema.Array(FeatureFlagInspectionSchema)
+
 const ResourceInspectionSchema = Schema.Struct({
   name: Schema.String,
   operations: OperationNamesSchema,
@@ -63,6 +71,7 @@ interface Commands extends Schema.Schema.Type<typeof CommandsSchema> {}
 const ApplicationInspectionSchema = Schema.Struct({
   application: Schema.String,
   commands: CommandsSchema,
+  featureFlags: FeatureFlagsInspectionSchema,
   operations: OperationsSchema,
   resources: ResourcesSchema,
 })
@@ -198,10 +207,12 @@ const describe = (
 
   const remote = Array.map(operations, Struct.get("name"))
   const commands = CommandsSchema.make({ local: localCommands, remote })
+  const featureFlags = Array.map(application.featureFlags, (flag) => FeatureFlagInspectionSchema.make(flag))
   const resources = Array.map(application.resources, resource)
 
   return ApplicationInspectionSchema.make({
     application: application.name,
+    featureFlags,
     commands,
     operations: matchingOperations,
     resources,

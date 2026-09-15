@@ -102,21 +102,22 @@ For MCP, call the same operations with arguments shaped as `{ "input": <RPC payl
 | `PORT` | `3000` | Loopback server port |
 | `SUPPORT_CASES_URL` | `http://127.0.0.1:3000/rpc/v1` | Remote CLI endpoint |
 
-The imported `001_initial.json` artifact creates four tables, foreign keys, indexes, and the migration ledger. Restarting with the same database preserves cases and history. Startup checks the artifact ledger and exact managed schema rather than adopting untracked objects.
+The imported `001_initial.json` and `002_audit.json` artifacts create the domain and audit tables, foreign keys, indexes, and migration ledger. Restarting with the same database preserves cases, history, and audit evidence. Startup checks the artifact ledger and exact managed schema rather than adopting untracked objects.
 
-## OpenTelemetry traces
+## Full-stack OpenTelemetry and durable audit
 
-The runtime declares OTLP HTTP/protobuf telemetry with service name `support-cases` and `service.namespace=effect-domains.examples`. Export remains deployment-controlled: set a collector endpoint for each process whose spans should be correlated.
+The runtime exports OTLP traces, metrics, and correlated logs as `support-cases`, while the generated browser exports through the same-origin gateway as `support-cases-browser`. This nested application demonstrates one correlated runtime boundary across generated resources, authored transactions, the joined board, Application UI, MCP, and CLI:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+bun run observability:up
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318
 bun run support-cases:server
 
 # In another terminal with the same endpoint:
 bun run support-cases support.board --input-json '{"filter":{"status":"open"}}'
 ```
 
-The configuration wraps the nested application, generated resources, authored transactions, joined read model, Application UI/MCP dispatch, and CLI command lifetime without adding telemetry metadata to domain schemas. With no endpoint, no collector request is made. See the [runtime telemetry reference](../../docs/reference/runtime.md#opentelemetry-tracing).
+`support.auditTrail` is admin-only. Every successful lifecycle transition appends one typed record in the same SQLite transaction as case state and history. Failed and rolled-back transitions append none; stable case/version IDs make retries idempotent. Audit persistence does not depend on OTLP. No telemetry endpoint means no runtime-owned exporter or browser gateway traffic.
 
 ## Follow the implementation
 
@@ -124,6 +125,7 @@ The configuration wraps the nested application, generated resources, authored tr
 - [`resources.ts`](resources.ts): public authorization, generated reads, private creation policies, versions, foreign keys, and list declarations.
 - [`board.ts`](board.ts): the flat customer/agent `ReadModel` and bounded keyset page.
 - [`contracts.ts`](contracts.ts): the nested case-detail result.
+- [`audit.ts`](audit.ts): private typed lifecycle records, deterministic identifiers, and authorized history reads.
 - [`sqlite.ts`](sqlite.ts): transactional open/advance handlers and the authored nested history query.
 - [`application.ts`](application.ts): sibling directory/case-management applications and final composition.
 - [`main.ts`](main.ts): frozen migration history, Application UI presentation, OTLP resource metadata, and runner.

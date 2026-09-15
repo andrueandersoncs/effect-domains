@@ -64,7 +64,7 @@ Report exports and appointment reminders have separate native execution stores. 
 - `domain.ts`: canonical values, brands, and domain errors; use framework schemas such as `UuidV7Schema`, `SafeIntSchema`, and `PageLimitSchema`, and use `Schema.DateTimeUtc` for canonical timestamps.
 - `resources.ts`: resource schemas, policies, relation declarations, generated operations, versions, and transitions.
 - `sqlite.ts` where needed: `Command` specifications, implementations, and authored SQL for cross-record rules, aggregates, and projections.
-- `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` syntax, followed by `Application.compile`.
+- `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` syntax, followed by `Application.compile`.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
 - `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary. Its declarative `ui.presentation` supplies display-only title, description, labels, columns, and operation copy where needed. The shared Application UI interprets the compiled `ApplicationIR`; examples do not author browser state machines, RPC clients, startup code, or static asset routes.
 

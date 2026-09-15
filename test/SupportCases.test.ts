@@ -1,11 +1,15 @@
+import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, FileSystem, HashSet, Path, Struct, pipe } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
 import { Application } from "effect-domains/application"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
+import { ApplicationInspect } from "effect-domains/application-inspect"
 import { SupportCasesApplication } from "../examples/support-cases/application.ts"
 import { SupportCasesMigrations } from "../examples/support-cases/migrations.ts"
+import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", {
   migrations: SupportCasesMigrations,
@@ -15,6 +19,8 @@ const supportCasesTest = Effect.gen(function* () {
   yield* Application.prepare(SupportCasesApplication)
   const client = yield* RpcTest.makeClient(SupportCasesApplication.group)
   const database = yield* SqlClient.SqlClient
+  const readerSession = yield* sessionFor("bob")
+  const adminSession = yield* sessionFor("admin")
 
   yield* client["support_customers.create"]({ id: "acme", name: "Acme Industries" })
   yield* client["support_agents.create"]({ id: "sam", name: "Sam", onDuty: false })
@@ -127,10 +133,105 @@ const supportCasesTest = Effect.gen(function* () {
   const lastEvent = Array.last(detail.events)
   expect(eventKinds).toEqual(["opened", "triaged", "assigned", "resolved"])
   expect(lastEvent).toMatchObject({ _tag: "Some", value: { note: "Export permission repaired." } })
+
+  yield* database`CREATE TRIGGER reject_case_audit BEFORE INSERT ON support_case_audits
+    BEGIN SELECT RAISE(ABORT, 'audit storage unavailable'); END`
+
+
+  const auditInterrupted = yield* pipe(client["support.advanceCase"]({
+    caseId: opened.id,
+    expectedVersion: 4,
+    action: "reopen",
+  }), Effect.result)
+
+  expect(auditInterrupted).toMatchObject({ _tag: "Failure", failure: { _tag: "SupportCasesUnavailable" } })
+  const afterAuditRollback = yield* client["support_cases.get"]({ id: opened.id })
+  expect(afterAuditRollback).toMatchObject({ status: "resolved", version: 4 })
+  yield* database`DROP TRIGGER reject_case_audit`
+
+
+  const anonymousAudit = yield* pipe(
+    client["support.auditTrail"]({ caseId: opened.id }),
+    Effect.result,
+  )
+
+  expect(anonymousAudit).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+
+  const deniedAudit = yield* pipe(
+    client["support.auditTrail"]({ caseId: opened.id }, { headers: readerSession }),
+    Effect.result,
+  )
+
+  expect(deniedAudit).toMatchObject({ _tag: "Failure", failure: { _tag: "Forbidden" } })
+  const audit = yield* client["support.auditTrail"]({ caseId: opened.id }, { headers: adminSession })
+  expect(audit).toHaveLength(4)
+  const actions = Array.map(audit, Struct.get("action"))
+  expect(actions).toEqual(["open", "triage", "assign", "resolve"])
+  const sameString = Equivalence.strictEqual<string>()
+
+  const validAuditEvent = (event: typeof audit[number]) => {
+    const publicActor = sameString(event.actorId, "public-api")
+    const succeeded = sameString(event.outcome, "succeeded")
+    return publicActor && succeeded
+  }
+
+  const validAudit = Array.every(audit, validAuditEvent)
+  expect(validAudit).toBe(true)
+  const auditIds = Array.map(audit, Struct.get("id"))
+  const distinctIds = HashSet.fromIterable(auditIds)
+  const distinctAuditCount = HashSet.size(distinctIds)
+  expect(distinctAuditCount).toBe(4)
+  const inspection = ApplicationInspect.describe(SupportCasesApplication)
+
+  const auditOperation = (operation: typeof inspection.operations[number]) =>
+    operation.name.startsWith("support_case_audits.")
+
+  const exposesAuditResource = Array.some(inspection.operations, auditOperation)
+  expect(exposesAuditResource).toBe(false)
 })
 
 it.effect("keeps the support-case lifecycle, joined board, history, versions, and rollback explicit", () => pipe(
   supportCasesTest,
   Effect.provide(SupportCasesApplication.handlers),
+  Effect.provide(AuthorizationRpc.layer),
+  Effect.provide(TestIdentity),
   Effect.provide(sqlite),
 ))
+
+it.effect("persists application-owned audit evidence across a database restart", Effect.fn(
+  "SupportCases.auditPersistence",
+)(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const directory = yield* fileSystem.makeTempDirectoryScoped()
+  const databasePath = path.join(directory, "support-cases.sqlite")
+
+  const databaseLayer = SqliteBunRuntime.sqlClient(databasePath, {
+    migrations: SupportCasesMigrations,
+  })
+
+  yield* pipe(
+    Effect.gen(function* () {
+      yield* Application.prepare(SupportCasesApplication)
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`INSERT INTO support_case_audits
+        (id, occurredAt, action, outcome, actorId, targetId, traceId)
+        VALUES ('restart-audit', '2026-01-01T00:00:00.000Z', 'open', 'succeeded', 'restart-probe', 'case-1', NULL)`
+
+    }),
+    Effect.provide(databaseLayer),
+  )
+
+
+  const persisted = yield* pipe(
+    Effect.gen(function* () {
+      yield* Application.prepare(SupportCasesApplication)
+      const sql = yield* SqlClient.SqlClient
+      return yield* sql<{ readonly id: string }>`SELECT id FROM support_case_audits WHERE id = 'restart-audit'`
+    }),
+    Effect.provide(databaseLayer),
+  )
+
+  expect(persisted).toEqual([{ id: "restart-audit" }])
+}, Effect.scoped, Effect.provide(BunServices.layer)))

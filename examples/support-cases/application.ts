@@ -1,4 +1,6 @@
 import { Application, Part } from "effect-domains/application"
+import { IdentityBundle } from "effect-domains/identity-rpc"
+import { SupportCaseAuditsResource } from "./audit.ts"
 
 import {
   SupportAgentsResource,
@@ -22,6 +24,7 @@ const SupportDirectory = Application.define({
 const caseManagementParts = [
   Part.resource(SupportCasesResource),
   Part.resource(SupportCaseEventsResource),
+  Part.resource(SupportCaseAuditsResource),
   Part.command(SupportCaseOperations),
 ]
 
@@ -33,6 +36,7 @@ const CaseManagement = Application.define({
 const applicationParts = [
   Part.application(SupportDirectory),
   Part.application(CaseManagement),
+  Part.native(IdentityBundle),
 ]
 
 const application = Application.define({

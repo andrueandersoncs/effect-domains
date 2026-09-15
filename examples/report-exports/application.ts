@@ -1,5 +1,6 @@
 import { Application, Part } from "effect-domains/application"
 import { IdentityBundle } from "effect-domains/identity-rpc"
+import { ReportExportAuditsResource } from "./audit.ts"
 import { ReportExportExecutionsResource } from "./executions.ts"
 import { ReportExportCommands } from "./workflow.ts"
 import { ReportSubscriptionsResource } from "./subscriptions.ts"
@@ -7,6 +8,7 @@ import { ReportSubscriptionsResource } from "./subscriptions.ts"
 const parts = [
   Part.resource(ReportSubscriptionsResource),
   Part.resource(ReportExportExecutionsResource),
+  Part.resource(ReportExportAuditsResource),
   Part.command(ReportExportCommands),
   Part.native(IdentityBundle),
 ]

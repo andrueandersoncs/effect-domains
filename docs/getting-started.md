@@ -111,6 +111,17 @@ Inspection prints JSON containing the operation’s input, success, and error sc
 
 Inspection runs locally; you can stop the server with **Ctrl+C** and run it again. Creating and retrieving books require the server.
 
+## 8. Observe the full stack
+
+Optionally stop the server and restart it with the pinned local observability stack:
+
+```bash
+bun run observability:up
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 bun run reading-list:server
+```
+
+Reload the generated UI and list or create a book. Grafana at [http://127.0.0.1:3001](http://127.0.0.1:3001/) receives linked server/browser traces, request metrics, and correlated logs. The browser sends OTLP only to the same-origin `/otel` gateway; collector credentials are never embedded in the page. Stop the stack with `bun run observability:down`.
+
 ## What you just ran
 
 The application has no hand-written CRUD handlers. These files provide the declarations:

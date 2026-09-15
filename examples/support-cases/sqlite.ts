@@ -9,6 +9,12 @@ import { SupportCaseBoardList } from "./board.ts"
 import { SupportCaseDetail } from "./contracts.ts"
 
 import {
+  appendSupportCaseAudit,
+  SupportCaseAuditOperation,
+  SupportCaseAuditsResource,
+} from "./audit.ts"
+
+import {
   AdvanceSupportCaseInputSchema,
   AgentOffDuty,
   GetSupportCaseInputSchema,
@@ -167,7 +173,7 @@ const openCaseSpec = SupportTransaction.define({
   payload: OpenSupportCaseInputSchema,
   success: supportCasesTable.rowSchema,
   errors: SupportCustomerNotFound,
-  dependencies: [SupportCustomersResource, SupportCasesResource, SupportCaseEventsResource],
+  dependencies: [SupportCustomersResource, SupportCasesResource, SupportCaseEventsResource, SupportCaseAuditsResource],
 })
 
 const openCase = Command.implement(openCaseSpec, Effect.fn("SupportCases.openCase")(function* (
@@ -195,6 +201,14 @@ const openCase = Command.implement(openCaseSpec, Effect.fn("SupportCases.openCas
     kind: "opened",
   })
 
+
+  yield* appendSupportCaseAudit({
+    id: `support-case:${supportCase.id}:${supportCase.version}`,
+    action: "open",
+    actorId: "public-api",
+    targetId: supportCase.id,
+  })
+
   return supportCase
 }))
 
@@ -213,7 +227,7 @@ const advanceCaseSpec = SupportTransaction.define({
   payload: AdvanceSupportCaseInputSchema,
   success: supportCasesTable.rowSchema,
   errors: advanceCaseErrorsSchema,
-  dependencies: [SupportCasesResource, SupportAgentsResource, SupportCaseEventsResource],
+  dependencies: [SupportCasesResource, SupportAgentsResource, SupportCaseEventsResource, SupportCaseAuditsResource],
 })
 
 const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.advanceCase")(function* (
@@ -263,6 +277,13 @@ const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.a
     }),
   )
 
+  yield* appendSupportCaseAudit({
+    id: `support-case:${supportCase.id}:${supportCase.version}`,
+    action: input.action,
+    actorId: "public-api",
+    targetId: supportCase.id,
+  })
+
   return supportCase
 }))
 
@@ -301,6 +322,7 @@ export const SupportCaseOperations = Command.bundle(
   advanceCase,
   caseDetail,
   caseBoard,
+  SupportCaseAuditOperation,
 )
 
 

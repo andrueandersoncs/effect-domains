@@ -1,21 +1,28 @@
 import {
   Array,
+  Clock,
   Effect,
   Equivalence,
+  Exit,
   Function,
   HashSet,
+  Layer,
+  ManagedRuntime,
   Match,
+  Metric,
   Option,
   Predicate,
   Record,
   Ref,
   Schema,
   Struct,
+  Tracer,
   flow,
   pipe,
 } from "effect"
 
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse, HttpTraceContext } from "effect/unstable/http"
+import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
 import type { ApplicationUiPresentation } from "./contract.ts"
 
 const JsonSchema = Schema.Record(Schema.String, Schema.Unknown)
@@ -63,6 +70,19 @@ const ClientStateSchema = Schema.Struct({ inspection: Schema.Option(InspectionSc
 interface ClientState extends Schema.Schema.Type<typeof ClientStateSchema> {}
 
 const CallInputSchema = Schema.Struct({ operation: Schema.String, input: Schema.Unknown })
+
+
+const BrowserTelemetryConfigurationSchema = Schema.Struct({
+  endpoint: Schema.TemplateLiteral(["/", Schema.String]),
+  serviceName: Schema.String,
+  sampleRate: Schema.optionalKey(Schema.Number),
+  signals: Schema.Struct({
+    traces: Schema.Boolean,
+    metrics: Schema.Boolean,
+    logs: Schema.Boolean,
+  }),
+})
+
 interface CallInput extends Schema.Schema.Type<typeof CallInputSchema> {}
 
 interface JsonSchema extends Schema.Schema.Type<typeof JsonSchema> {}
@@ -92,6 +112,7 @@ class ApplicationUiRequestError extends Schema.TaggedError<ApplicationUiRequestE
 }) {}
 
 const equals = Equivalence.strictEqual<unknown>()
+const equalsString = Equivalence.strictEqual<string>()
 const emptyUnknownArray = Function.constant<ReadonlyArray<unknown>>([])
 const emptyOperation = Option.none<Operation>()
 const absentOperation = Effect.succeed(emptyOperation)
@@ -159,11 +180,136 @@ const isRequired = (schema: JsonSchema, field: string) => {
 
 const fieldValue = (record: Readonly<Record<string, unknown>>, key: string) => Option.fromUndefinedOr(record[key])
 
-const entryValue = Effect.fn("ApplicationUi.form.entryValue")(function* ({ name: name, control: control }: FormEntry) { const value = yield* control.value()
-return [name, value] as const })
+const entryValue = Effect.fn("ApplicationUi.form.entryValue")(function* ({ name: name, control: control }: FormEntry) {
+  const value = yield* control.value()
+  return [name, value] as const
+})
 
 const selectedEntry = ({ control: control }: FormEntry) => control.included()
+
+const rpcDurationBoundaries = Metric.boundariesFromIterable([
+  0.005,
+  0.01,
+  0.025,
+  0.05,
+  0.075,
+  0.1,
+  0.25,
+  0.5,
+  0.75,
+  1,
+  2.5,
+  5,
+  7.5,
+  10,
+])
+
+const rpcClientDuration = Metric.histogram("rpc.client.call.duration", {
+  boundaries: rpcDurationBoundaries,
+  description: "Duration of Effect RPC calls made by the generated application UI",
+  attributes: { unit: "s" },
+})
+
+const BrowserTelemetryJsonSchema = Schema.fromJsonString(BrowserTelemetryConfigurationSchema)
+const decodeBrowserTelemetry = Schema.decodeUnknownOption(BrowserTelemetryJsonSchema)
+
+const readTelemetryConfiguration = (root: HTMLElement | null) => pipe(
+  Option.fromNullishOr(root),
+  Option.flatMap(flow(Struct.get("dataset"), Struct.get("telemetry"), Option.fromUndefinedOr)),
+  Option.flatMap(decodeBrowserTelemetry),
+)
+
+const randomSample = (rate: number) => {
+  const disabled = rate <= 0
+  if (disabled) return !disabled
+  const complete = rate >= 1
+  if (complete) return complete
+  const value = new Uint32Array(1)
+  globalThis.crypto.getRandomValues(value)
+  return (value[0] ?? 0) / 0x1_0000_0000 < rate
+}
+
+const withSampleRate = <ROut, E, RIn>(
+  tracerLayer: Layer.Layer<ROut, E, RIn>,
+  rate: Option.Option<number>,
+) => Option.match(rate, {
+  onNone: Function.constant(tracerLayer),
+  onSome: (sampleRate) => {
+    const complete = sampleRate >= 1
+    if (complete) return tracerLayer
+
+    const makeSampledTracer = (tracer: Tracer.Tracer): Tracer.Tracer => {
+      const wrapSpan = (delegate: Tracer.Tracer["span"]) => (
+        options: Parameters<Tracer.Tracer["span"]>[0],
+      ) => {
+        const inherited = Option.isSome(options.parent)
+        const rootSampled = options.sampled && randomSample(sampleRate)
+        const sampled = inherited ? options.sampled : rootSampled
+        const configured = Struct.evolve(options, { sampled: Function.constant(sampled) })
+        return delegate.call(tracer, configured)
+      }
+
+      return Struct.evolve(tracer, { span: wrapSpan })
+    }
+
+    const sampledTracer = pipe(Effect.tracer, Effect.map(makeSampledTracer))
+    const sampled = Layer.effect(Tracer.Tracer, sampledTracer)
+
+    return pipe(sampled, Layer.provideMerge(tracerLayer))
+  },
+})
+
+const browserTelemetryLayer = (configuration: ReturnType<typeof readTelemetryConfiguration>) => Option.match(configuration, {
+  onNone: Function.constant(Layer.empty),
+  onSome: (telemetry) => {
+    const baseUrl = `${location.origin}${telemetry.endpoint}`
+    const sampleRate = Option.fromUndefinedOr(telemetry.sampleRate)
+
+    const tracerBase = OtlpTracer.layer({
+      url: `${baseUrl}/v1/traces`,
+      resource: { serviceName: telemetry.serviceName },
+      exportInterval: "5 seconds",
+      shutdownTimeout: "1500 millis",
+    })
+
+    const traces = telemetry.signals.traces
+      ? withSampleRate(tracerBase, sampleRate)
+      : Layer.empty
+
+    const metrics = telemetry.signals.metrics
+      ? OtlpMetrics.layer({
+        url: `${baseUrl}/v1/metrics`,
+        resource: { serviceName: telemetry.serviceName },
+        exportInterval: "5 seconds",
+        shutdownTimeout: "1500 millis",
+
+      })
+      : Layer.empty
+
+    const logs = telemetry.signals.logs
+      ? OtlpLogger.layer({
+        url: `${baseUrl}/v1/logs`,
+        resource: { serviceName: telemetry.serviceName },
+        exportInterval: "5 seconds",
+        shutdownTimeout: "1500 millis",
+
+        mergeWithExisting: true,
+      })
+      : Layer.empty
+
+    return pipe(
+      Layer.mergeAll(traces, metrics, logs),
+      Layer.provide(OtlpSerialization.layerProtobuf),
+      Layer.provide(FetchHttpClient.layer),
+    )
+  },
+})
+
 const root = document.getElementById("app")
+const telemetryConfiguration = readTelemetryConfiguration(root)
+const telemetryLayer = browserTelemetryLayer(telemetryConfiguration)
+const runtimeLayer = Layer.merge(FetchHttpClient.layer, telemetryLayer)
+const runtime = ManagedRuntime.make(runtimeLayer)
 
 const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
   const configuredBase = Option.fromUndefinedOr(root.dataset.base)
@@ -252,8 +398,38 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
   const responseWasNotJson = pipe(Effect.fail(invalidJsonError), Function.constant)
 
   const requestJson = Effect.fn("ApplicationUi.request")(function* (request: HttpClientRequest.HttpClientRequest) {
-    const executed = HttpClient.execute(request)
-    const response = yield* Effect.catch(executed, requestUnavailable)
+    const activeSpan = yield* Effect.option(Effect.currentSpan)
+
+    yield* Option.match(activeSpan, {
+      onNone: noEffect,
+      onSome: (span) => Effect.sync(() => span.attribute("http.request.method", request.method)),
+    })
+
+    const propagated = Option.match(activeSpan, {
+      onNone: Function.constant(request),
+      onSome: (span) => {
+        const noop = equalsString(span.traceId, "noop")
+        if (noop) return request
+        const headers = HttpTraceContext.toHeaders(span)
+        return HttpClientRequest.setHeaders(request, headers)
+      },
+    })
+
+    const annotateStatus = (response: HttpClientResponse.HttpClientResponse) => Option.match(activeSpan, {
+      onNone: noEffect,
+      onSome: (span) => Effect.sync(() => span.attribute("http.response.status_code", response.status)),
+    })
+
+    const disabled = Function.constant(true)
+
+    const response = yield* pipe(
+      HttpClient.execute(propagated),
+
+      Effect.provideService(HttpClient.TracerDisabledWhen, disabled),
+      Effect.tap(annotateStatus),
+      Effect.catch(requestUnavailable),
+    )
+
     const body = yield* Effect.catch(response.json, responseWasNotJson)
     const lower = response.status >= 200
     const upper = response.status < 300
@@ -296,11 +472,48 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
   })
 
   const call = Effect.fn("ApplicationUi.call")(function* (name: string, input: unknown) {
-    const payload = CallInputSchema.make({ operation: name, input })
-    const response = yield* postJson("/api/call", payload)
-    const record = isRecords(response) ? response : Record.empty<string, unknown>()
-    const result = pipe(fieldValue(record, "result"), Option.getOrElse(Function.constant(null)))
-    return result
+    const start = yield* Clock.currentTimeNanos
+
+    const invoke = Effect.fn("ApplicationUi.invokeRpc")(function* () {
+      yield* pipe(
+        Effect.logInfo("Application UI RPC call"),
+        Effect.annotateLogs({
+          "rpc.method": name,
+          "rpc.system.name": "effect",
+        }),
+      )
+
+      const payload = CallInputSchema.make({ operation: name, input })
+      const response = yield* postJson("/api/call", payload)
+      const record = isRecords(response) ? response : Record.empty<string, unknown>()
+      return pipe(fieldValue(record, "result"), Option.getOrElse(Function.constant(null)))
+    })
+
+
+    const invoked = pipe(
+      invoke(),
+      Effect.withSpan(`RpcClient.${name}`, { kind: "client" }),
+    )
+
+    const exit = yield* Effect.exit(invoked)
+    const end = yield* Clock.currentTimeNanos
+
+    const baseAttributes = pipe(
+      Record.empty<string, string>(),
+      (attributes) => Record.set(attributes, "rpc.method", name),
+      (attributes) => Record.set(attributes, "rpc.system.name", "effect"),
+    )
+
+
+    const attributes = Exit.isFailure(exit)
+      ? Record.set(baseAttributes, "error.type", "request_error")
+      : baseAttributes
+
+    const observed = Metric.withAttributes(rpcClientDuration, attributes)
+    const seconds = Number(end - start) / 1_000_000_000
+
+    yield* Metric.update(observed, seconds)
+    return yield* exit
   })
 
   const lookupOperation = Effect.fn("ApplicationUi.lookupOperation")(function* (name: string) {
@@ -598,16 +811,27 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     return result
   }
 
-  const showErrorAt = (target: HTMLElement) =>
-    (error: ApplicationUiInputError | ApplicationUiRequestError) => Effect.sync(() => {
-      const failure = notice("error", error.message)
-      target.replaceChildren(failure)
-    })
+  const showErrorAt = (target: HTMLElement) => Effect.fn("ApplicationUi.showError")(function* (
+    error: ApplicationUiInputError | ApplicationUiRequestError,
+  ) {
+    yield* pipe(
+      Effect.logWarning("Application UI operation failed"),
+      Effect.annotateLogs({ "error.type": error._tag }),
+    )
 
-  const run = (
+    const failure = notice("error", error.message)
+    target.replaceChildren(failure)
+
+  })
+
+  const selectUiEffect = (
     effect: Effect.Effect<void, ApplicationUiInputError | ApplicationUiRequestError, HttpClient.HttpClient>,
     errorTarget: HTMLElement = content,
-  ) => pipe(effect, Effect.catch(showErrorAt(errorTarget)), Effect.provide(FetchHttpClient.layer), Effect.runPromise)
+  ) => pipe(
+    effect,
+    Effect.catch(showErrorAt(errorTarget)),
+    runtime.runPromise,
+  )
 
   const renderList = Effect.fn("ApplicationUi.renderList")(function* (resource: Resource) {
     const entry = yield* lookupOperation(`${resource.name}.list`)
@@ -733,7 +957,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
           const previous = Array.last(history)
           const before = Array.dropRight(history, 1)
           const program = Option.match(previous, { onNone: Function.constant(Effect.void), onSome: (value) => loadPage(value, before) })
-          run(program)
+          selectUiEffect(program)
         }
 
         back.addEventListener("click", onBack)
@@ -749,7 +973,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
             return loadPage(cursor, nextHistory)
           } })
 
-          run(program)
+          selectUiEffect(program)
         }
 
         next.addEventListener("click", onNext)
@@ -763,7 +987,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     const onSubmit: EventListener = (event) => {
       event.preventDefault()
       const program = loadPage(noCursor, [])
-      run(program)
+      selectUiEffect(program)
     }
 
     filterForm.addEventListener("submit", onSubmit)
@@ -817,7 +1041,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
       })
 
       const guarded = Effect.ensuring(workflow, restoreSubmit)
-      run(guarded, result)
+      selectUiEffect(guarded, result)
     }
 
     generated.form.addEventListener("submit", onSubmit)
@@ -850,7 +1074,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
               yield* Option.match(candidate, { onNone: Function.constant(Effect.void), onSome: (entry) => renderOperation(entry, selectedResource) })
             })
 
-          run(program)
+          selectUiEffect(program)
         }
 
         resourceButton.addEventListener("click", onResourceClick)
@@ -874,7 +1098,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
                   yield* Option.match(selected, { onNone: Function.constant(Effect.void), onSome: (value) => renderOperation(value, selectedResource) })
                 })
 
-              run(program)
+              selectUiEffect(program)
             }
 
             button.addEventListener("click", onOperationClick)
@@ -903,12 +1127,12 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
           const label = yield* operationLabel(entry)
           const button = namedElement("button", "admin-nav-resource", label) as HTMLButtonElement
           button.type = "button"
-          const onCommandClick: EventListener = () => pipe(renderOperation(entry, noResource), run)
+          const onCommandClick: EventListener = () => pipe(renderOperation(entry, noResource), selectUiEffect)
           button.addEventListener("click", onCommandClick)
           group.append(button)
         })
 
-        run(program)
+        selectUiEffect(program)
         return entry
       }
 
@@ -943,12 +1167,46 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     })
   })
 
-  const onReload: EventListener = () => pipe(load(), run)
+  const onReload: EventListener = () => pipe(load(), selectUiEffect)
   reload.addEventListener("click", onReload)
   yield* pipe(load(), Effect.catch(showErrorAt(content)))
 })
 
-const program = pipe(Option.fromNullishOr(root), Option.match({ onNone: noEffect, onSome: mount }))
-const provided = Effect.provide(program, FetchHttpClient.layer)
+const program = pipe(
+  Option.fromNullishOr(root),
+  Option.match({ onNone: noEffect, onSome: mount }),
+  Effect.withSpan("browser.document.load", { kind: "internal" }),
+)
 
-await Effect.runPromise(provided)
+const reportBrowserFailure = (type: "uncaught_error" | "unhandled_rejection") => pipe(
+  Effect.logError("Application UI encountered an unhandled browser failure"),
+  Effect.annotateLogs({ "error.type": type }),
+)
+
+const onWindowError: EventListener = () => {
+  const report = reportBrowserFailure("uncaught_error")
+  void runtime.runPromise(report)
+}
+
+const onUnhandledRejection: EventListener = () => {
+  const report = reportBrowserFailure("unhandled_rejection")
+  void runtime.runPromise(report)
+}
+
+
+window.addEventListener("error", onWindowError)
+window.addEventListener("unhandledrejection", onUnhandledRejection)
+
+
+const dispose: EventListener = () => {
+  window.removeEventListener("error", onWindowError)
+  window.removeEventListener("unhandledrejection", onUnhandledRejection)
+  const shutdown = runtime.dispose()
+  const afterTimeout = (resolve: () => void) => window.setTimeout(resolve, 1_500)
+  const timeout = new Promise<void>(afterTimeout)
+  void Promise.race([shutdown, timeout])
+}
+
+window.addEventListener("pagehide", dispose, { once: true })
+
+await runtime.runPromise(program)

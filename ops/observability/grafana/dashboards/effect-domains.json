@@ -1,0 +1,84 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "title": "Runbooks", "type": "link", "url": "https://github.com/andrueandersoncs/effect-domains/blob/main/ops/observability/RUNBOOKS.md", "targetBlank": true }
+  ],
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "HTTP request rate", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (service_name, http_request_method) (rate(http_server_request_duration_seconds_count{service_name=~\"$service\"}[5m]))", "legendFormat": "{{service_name}} {{http_request_method}}" }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "RPC request rate and errors", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (rpc_method) (rate(rpc_server_call_duration_seconds_count{service_name=~\"$service\"}[5m]))", "legendFormat": "{{rpc_method}} calls" },
+        { "refId": "B", "expr": "sum by (rpc_method) (rate(rpc_server_call_duration_seconds_count{service_name=~\"$service\",error_type=~\".+\"}[5m]))", "legendFormat": "{{rpc_method}} errors" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "RPC error ratio", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "sum(rate(rpc_server_call_duration_seconds_count{service_name=~\"$service\",error_type=~\".+\"}[5m])) / clamp_min(sum(rate(rpc_server_call_duration_seconds_count{service_name=~\"$service\"}[5m])), 1)", "legendFormat": "server errors" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "RPC latency p50 / p95 / p99", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(rpc_server_call_duration_seconds_bucket{service_name=~\"$service\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(rpc_server_call_duration_seconds_bucket{service_name=~\"$service\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(rpc_server_call_duration_seconds_bucket{service_name=~\"$service\"}[5m])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Browser RPC failures", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (service_name, rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=~\".*-browser\",error_type=~\".+\"}[5m]))", "legendFormat": "{{service_name}} {{rpc_method}}" }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Worker and runtime fibers", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (service_name) (child_fibers_active{service_name=~\"$service\"})", "legendFormat": "{{service_name}} active" },
+        { "refId": "B", "expr": "sum by (service_name) (rate(child_fiber_failures_total{service_name=~\"$service\"}[5m]))", "legendFormat": "{{service_name}} failures" }
+      ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Collector export failures and drops", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(otelcol_exporter_send_failed_spans_total[5m]) or vector(0))", "legendFormat": "failed spans" },
+        { "refId": "B", "expr": "sum(rate(otelcol_exporter_enqueue_failed_spans_total[5m]) or vector(0))", "legendFormat": "dropped spans" }
+      ]
+    },
+    {
+      "id": 8, "type": "logs", "title": "Logs by severity (trace links enabled)", "gridPos": { "h": 10, "w": 16, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service_name=~\"$service\"}", "queryType": "range" }]
+    },
+    {
+      "id": 9, "type": "table", "title": "Recent traces", "gridPos": { "h": 10, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [{ "refId": "A", "queryType": "traceql", "query": "{ resource.service.name =~ \"$service\" }" }]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": ["effect-domains", "opentelemetry"],
+  "templating": {
+    "list": [{
+      "name": "service", "label": "Service", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "query": { "query": "label_values(service_name)", "refId": "service-variable" }, "includeAll": true, "allValue": ".+", "current": { "text": "All", "value": "$__all" }
+    }]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "Effect Domains Application Observability",
+  "uid": "effect-domains-observability",
+  "version": 1
+}

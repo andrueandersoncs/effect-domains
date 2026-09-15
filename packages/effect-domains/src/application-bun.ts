@@ -1,8 +1,8 @@
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun"
 import { ApplicationUiAssetFiles } from "@effect-domains/application-ui/assets"
-import { Array, Config, Context, Effect, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
+import { Array, Config, Context, Effect, Function, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Application, type ApplicationIR } from "./application.ts"
 import { ApplicationUi, type ApplicationUiOptions } from "./application-ui.ts"
@@ -149,6 +149,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   Routes extends RuntimeLayer,
 >(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
+  const telemetryDisabled = Predicate.isBoolean(options.telemetry)
   const rpc = RpcServer.layerHttp({ group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>, path: "/rpc/v1", protocol: "http" })
   const mcp = RpcMcp.layerHttp({ application, path: "/mcp" })
 
@@ -159,7 +160,13 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
       onSome: Effect.fn("ApplicationBun.ui")(function* (configuration) {
         const assets = yield* readApplicationUiAssets()
         const presentation = Predicate.isBoolean(configuration) ? {} : configuration
-        return ApplicationUi.layerHttp({ application, ...assets, ...presentation })
+
+        return ApplicationUi.layerHttp({
+          application,
+          ...assets,
+          ...presentation,
+          telemetry: telemetryDisabled ? undefined : options.telemetry,
+        })
       }),
     }),
   )
@@ -169,10 +176,25 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
     Layer.provideMerge(application.handlers),
     Layer.provide(AuthorizationRpc.layer),
     Layer.provide(RpcSerialization.layerJson),
+    Layer.provide(FetchHttpClient.layer),
   )
 
   const httpServer = BunHttpServer.layer({ hostname: "127.0.0.1", port })
-  const server = pipe(HttpRouter.serve(routes), Layer.provide(httpServer))
+
+  const servedRoutes = telemetryDisabled
+    ? HttpRouter.serve(routes)
+    : HttpRouter.serve(routes, {
+      disableLogger: true,
+      middleware: ApplicationTelemetry.httpMiddleware,
+    })
+
+  const serverBase = pipe(servedRoutes, Layer.provide(httpServer))
+  const tracerDisabled = Layer.succeed(HttpMiddleware.TracerDisabledWhen, Function.constant(true))
+
+  const server = telemetryDisabled
+    ? serverBase
+    : pipe(serverBase, Layer.provide(tracerDisabled))
+
   const serving = Layer.launch(server)
 
   return yield* pipe(

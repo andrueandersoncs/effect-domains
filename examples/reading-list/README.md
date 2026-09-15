@@ -138,25 +138,23 @@ bun run reading-list --help
 
 This is a public local register, not a private account service: there is no login, per-reader ownership, reading-history ledger, or concurrent-edit version check.
 
-## OpenTelemetry traces
+## Full-stack OpenTelemetry
 
-The runner already installs Effect OTLP tracing. Export starts when a collector endpoint is set. This example names the service `reading-list` and marks `deployment.environment.name=local`.
-
-With a Jaeger all-in-one on loopback `4318` (UI [http://127.0.0.1:16686](http://127.0.0.1:16686/)):
+Start the pinned local Collector, Tempo, Prometheus, Loki, and Grafana stack:
 
 ```bash
-bun run reading-list:server:otel
+bun run observability:up
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 bun run reading-list:server
 ```
 
-In another terminal:
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000/) and create or list a book. The server exports OTLP traces, metrics, and correlated logs as service `reading-list`; the generated browser exports as `reading-list-browser` through the same-origin `/otel` gateway. Collector credentials and URLs never enter the document. CLI operations use the same configuration:
 
 ```bash
-bun run reading-list:otel books.create --input-json '{"title":"The Dispossessed","author":"Ursula K. Le Guin","status":"planned","format":"paperback"}'
-bun run reading-list:otel books.list --input-json '{"filter":{"status":"planned"},"limit":10}'
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 \
+  bun run reading-list books.list --input-json '{"filter":{"status":"planned"},"limit":10}'
 ```
 
-Set the endpoint on both processes so CLI and server share a trace. In Jaeger, search service `reading-list`. No endpoint means no collector traffic; omit the `:otel` scripts for that.
-
+Grafana is at [http://127.0.0.1:3001](http://127.0.0.1:3001/). No endpoint means no runtime-owned exporter or browser gateway traffic. Stop the stack with `bun run observability:down`.
 
 ## Code map
 

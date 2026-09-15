@@ -12,6 +12,7 @@
     "./authorization-rpc": "./src/authorization-rpc.ts",
     "./domain": "./src/domain.ts",
     "./entitlements": "./src/entitlements.ts",
+    "./feature-flags": "./src/feature-flags.ts",
     "./identity": "./src/identity.ts",
     "./identity-rpc": "./src/identity-rpc.ts",
     "./migrations": "./src/migrations.ts",

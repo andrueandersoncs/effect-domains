@@ -5,7 +5,6 @@ import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ReportExportsApplication } from "./application.ts"
 import { ReportExportExecutionStoreLive } from "./executions.ts"
 import { ReportExportMigrations } from "./migrations.ts"
-import { ReportExportRoutes } from "./routes.ts"
 import { ReportExportBackground, ReportExportExecution, ReportExportServices } from "./runtime.ts"
 import { seedReportExportSubscriptions } from "./subscriptions.ts"
 
@@ -36,11 +35,16 @@ const program = ApplicationBun.run(ReportExportsApplication, {
   services,
   initialize,
   background: ReportExportBackground,
-  routes: ReportExportRoutes,
   ui: {
     presentation: {
       title: "Report exports",
       description: "Generate, inspect, approve, and reconcile durable financial report exports.",
+      operations: {
+        "ReportExport.AuditTrail": {
+          label: "Audit trail",
+          description: "Read durable privileged-action evidence as an administrator.",
+        },
+      },
     },
   },
   telemetry: {

@@ -1,0 +1,96 @@
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+  file_storage/queue:
+    directory: ${env:OTEL_QUEUE_DIRECTORY}
+    create_directory: true
+    compaction:
+      directory: ${env:OTEL_QUEUE_COMPACTION_DIRECTORY}
+      on_start: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+        tls:
+          cert_file: ${env:OTEL_TLS_CERT_FILE}
+          key_file: ${env:OTEL_TLS_KEY_FILE}
+      http:
+        endpoint: 127.0.0.1:4318
+        tls:
+          cert_file: ${env:OTEL_TLS_CERT_FILE}
+          key_file: ${env:OTEL_TLS_KEY_FILE}
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: ${env:OTEL_MEMORY_LIMIT_MIB}
+    spike_limit_mib: ${env:OTEL_MEMORY_SPIKE_LIMIT_MIB}
+  redaction:
+    allow_all_keys: false
+    allowed_keys:
+      - service.name
+      - service.version
+      - deployment.environment.name
+      - rpc.system.name
+      - rpc.method
+      - http.request.method
+      - http.response.status_code
+      - url.scheme
+      - error.type
+      - trace_id
+      - span_id
+      - severity_text
+    blocked_values:
+      - '(?i)bearer[[:space:]]+[a-z0-9._~+/-]+=*'
+      - '(?i)(authorization|cookie|set-cookie|token|password|secret)=[^&[:space:]]+'
+  batch:
+    send_batch_size: 1024
+    timeout: 1s
+
+exporters:
+  otlphttp/upstream:
+    endpoint: ${env:OTEL_UPSTREAM_ENDPOINT}
+    headers:
+      Authorization: Bearer ${env:OTEL_UPSTREAM_TOKEN}
+    tls:
+      insecure: false
+      ca_file: ${env:OTEL_UPSTREAM_CA_FILE}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 30m
+    sending_queue:
+      enabled: true
+      num_consumers: 8
+      queue_size: 10000
+      storage: file_storage/queue
+
+service:
+  extensions: [health_check, file_storage/queue]
+  telemetry:
+    logs:
+      encoding: json
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [otlphttp/upstream]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [otlphttp/upstream]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [otlphttp/upstream]

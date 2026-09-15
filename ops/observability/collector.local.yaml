@@ -1,0 +1,98 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
+    create_directory: true
+    compaction:
+      directory: /var/lib/otelcol/queue-compaction
+      on_start: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+connectors:
+  spanmetrics:
+    histogram:
+      explicit:
+        buckets: [5ms, 10ms, 25ms, 50ms, 75ms, 100ms, 250ms, 500ms, 750ms, 1s, 2.5s, 5s, 7.5s, 10s]
+    dimensions:
+      - name: rpc.system.name
+      - name: rpc.method
+      - name: http.request.method
+      - name: http.response.status_code
+      - name: error.type
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - '(?i)bearer[[:space:]]+[a-z0-9._~+/-]+=*'
+      - '(?i)(authorization|cookie|set-cookie|token|password|secret)=[^&[:space:]]+'
+  batch:
+    send_batch_size: 1024
+    timeout: 1s
+
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage/queue
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+      storage: file_storage/queue
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [health_check, file_storage/queue]
+  telemetry:
+    logs:
+      encoding: json
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [otlphttp/tempo, spanmetrics]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [otlphttp/loki]

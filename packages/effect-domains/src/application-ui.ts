@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, HashMap, HashSet, Layer, Option, Result, Schema, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, HashMap, HashSet, Layer, Option, Result, Schema, Struct, pipe } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
@@ -6,6 +6,7 @@ import type { ApplicationIR } from "./application.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
+import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
 
 export type ApplicationUiOptions = Readonly<Partial<{
   path: string
@@ -55,7 +56,7 @@ const register = Effect.fn("ApplicationUi.register")(function* (options: Readonl
   application: ApplicationIR
   javascript: string
   stylesheet: string
-}> & ApplicationUiOptions) {
+}> & Readonly<Partial<{ telemetry: TelemetryOptions }>> & ApplicationUiOptions) {
   const path = (options.path ?? "/") as `/${string}`
 
   if (!/^\/$|^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(path)) {
@@ -104,6 +105,32 @@ const register = Effect.fn("ApplicationUi.register")(function* (options: Readonl
   const invocations = HashMap.fromIterable(entries)
   const inspection = ApplicationInspect.describe(options.application)
   const metadata = Struct.assign(inspection, { presentation: options.presentation ?? {} })
+
+  const browserTelemetry = yield* ApplicationTelemetry.browserGateway({
+    application: options.application,
+    telemetry: options.telemetry,
+    allowedOrigins: options.allowedOrigins,
+  })
+
+
+  const escapeAttribute = (value: string) => value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+
+  const serializeBrowsertelemetry = (browser: Option.Option.Value<typeof browserTelemetry>) => {
+    const encoded = JSON.stringify(browser)
+    return ` data-telemetry="${escapeAttribute(encoded)}"`
+  }
+
+  const noBrowserTelemetryAttribute = Function.constant("")
+
+  const telemetryAttribute = Option.match(browserTelemetry, {
+    onNone: noBrowserTelemetryAttribute,
+    onSome: serializeBrowsertelemetry,
+  })
+
   const assetPath = (name: string) => (sameString(path, "/") ? `/${name}` : `${path}/${name}`) as `/${string}`
   const clientPath = assetPath("client.js")
   const stylesheetPath = assetPath("style.css")
@@ -111,7 +138,7 @@ const register = Effect.fn("ApplicationUi.register")(function* (options: Readonl
   const callPath = assetPath("api/call")
 
   const document = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Effect Domains Application</title><link rel="stylesheet" href="${stylesheetPath}"><script type="module" src="${clientPath}"></script></head><body><div id="app" data-base="${path}"></div><noscript>This application requires JavaScript.</noscript></body></html>`
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Effect Domains Application</title><link rel="stylesheet" href="${stylesheetPath}"><script type="module" src="${clientPath}"></script></head><body><div id="app" data-base="${path}"${telemetryAttribute}></div><noscript>This application requires JavaScript.</noscript></body></html>`
 
   const html = pipe(HttpServerResponse.html(document), HttpServerResponse.setHeaders(responseHeaders))
   const javascript = HttpServerResponse.text(options.javascript, { contentType: "text/javascript", headers: responseHeaders })
@@ -158,7 +185,11 @@ const register = Effect.fn("ApplicationUi.register")(function* (options: Readonl
   yield* router.add("POST", callPath, receive)
 })
 
-const layerHttp = <App extends ApplicationIR>(options: Readonly<{ application: App; javascript: string; stylesheet: string }> & ApplicationUiOptions) => pipe(
+const layerHttp = <App extends ApplicationIR>(options: Readonly<{
+  application: App
+  javascript: string
+  stylesheet: string
+}> & Readonly<Partial<{ telemetry: TelemetryOptions }>> & ApplicationUiOptions) => pipe(
   register(options),
   Layer.effectDiscard,
 ) as Layer.Layer<

@@ -1,9 +1,17 @@
 import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Schema, pipe } from "effect"
+import { Array, Effect, FileSystem, HashSet, Layer, Path, Schema, Struct, pipe } from "effect"
+import { RpcTest } from "effect/unstable/rpc"
+import { SqlClient } from "effect/unstable/sql"
+import { Application } from "effect-domains/application"
+import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { Command } from "effect-domains/command"
 import { Resource } from "effect-domains/resource"
-
+import { ReportExportsApplication } from "../examples/report-exports/application.ts"
+import { appendReportExportAudit, ReportExportAuditOperation } from "../examples/report-exports/audit.ts"
+import { ReportExportMigrations } from "../examples/report-exports/migrations.ts"
+import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
 
 import {
@@ -38,6 +46,7 @@ const requestInput = {
 const RequestJsonSchema = Schema.toCodecJson(ReportExportRequestSchema)
 const requestEffect = Schema.decodeUnknownEffect(RequestJsonSchema)(requestInput)
 const reportExportExecutionsTable = Resource.table(ReportExportExecutionsResource)
+const reportAuditCommands = Command.bundle(ReportExportAuditOperation)
 
 
 const executionStore = (filename: string) => {
@@ -113,4 +122,91 @@ it.effect("writes artifacts idempotently and rejects conflicting content", Effec
     _tag: "Failure",
     failure: { _tag: "ReportArtifactConflict", path: first.artifactPath },
   })
+}, Effect.scoped, Effect.provide(BunServices.layer)))
+
+it.effect("keeps privileged report-export audit evidence durable, idempotent, and authorized", Effect.fn(
+  "ReportExports.audit",
+)(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const directory = yield* fileSystem.makeTempDirectoryScoped()
+  const databasePath = path.join(directory, "report-export-audit.sqlite")
+
+  const databaseLayer = SqliteBunRuntime.sqlClient(databasePath, {
+    migrations: ReportExportMigrations,
+  })
+
+  yield* pipe(
+    Effect.gen(function* () {
+      yield* Application.prepare(ReportExportsApplication)
+      yield* appendReportExportAudit({ action: "release", actorId: "admin", targetId: "export-1" })
+      yield* appendReportExportAudit({ action: "resume", actorId: "admin", targetId: "export-1" })
+      yield* appendReportExportAudit({ action: "cancel", actorId: "admin", targetId: "export-1" })
+      yield* appendReportExportAudit({ action: "reconcile", actorId: "admin", targetId: "export-1" })
+      yield* appendReportExportAudit({ action: "cancel", actorId: "admin", targetId: "export-1" })
+
+      const sql = yield* SqlClient.SqlClient
+
+      const rollback = pipe(
+        appendReportExportAudit({ action: "cancel", actorId: "admin", targetId: "rolled-back-export" }),
+        Effect.flatMap(() => Effect.fail("rollback")),
+      )
+
+      const transaction = sql.withTransaction(rollback)
+      const rolledBack = yield* pipe(transaction, Effect.result)
+      expect(rolledBack._tag).toBe("Failure")
+
+      const client = yield* RpcTest.makeClient(reportAuditCommands.group)
+      const readerSession = yield* sessionFor("bob")
+      const adminSession = yield* sessionFor("admin")
+
+      const anonymous = yield* pipe(
+        client["ReportExport.AuditTrail"]({ executionId: "export-1" }),
+        Effect.result,
+      )
+
+      expect(anonymous).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+
+      const denied = yield* pipe(
+        client["ReportExport.AuditTrail"]({ executionId: "export-1" }, { headers: readerSession }),
+        Effect.result,
+      )
+
+      expect(denied).toMatchObject({ _tag: "Failure", failure: { _tag: "Forbidden" } })
+
+      const audit = yield* client["ReportExport.AuditTrail"](
+        { executionId: "export-1" },
+        { headers: adminSession },
+      )
+
+      const actions = Array.map(audit, Struct.get("action"))
+      const observedActions = HashSet.fromIterable(actions)
+      const expectedActions = HashSet.make("release", "resume", "cancel", "reconcile")
+      expect(observedActions).toEqual(expectedActions)
+
+      const absent = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM report_export_audits WHERE targetId = 'rolled-back-export'`
+
+      expect(absent).toEqual([{ count: 0 }])
+    }),
+    Effect.provide(reportAuditCommands.handlers),
+    Effect.provide(AuthorizationRpc.layer),
+    Effect.provide(TestIdentity),
+    Effect.provide(databaseLayer),
+  )
+
+
+  const persisted = yield* pipe(
+    Effect.gen(function* () {
+      yield* Application.prepare(ReportExportsApplication)
+      const sql = yield* SqlClient.SqlClient
+
+      return yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM report_export_audits WHERE targetId = 'export-1'`
+
+    }),
+    Effect.provide(databaseLayer),
+  )
+
+  expect(persisted).toEqual([{ count: 4 }])
 }, Effect.scoped, Effect.provide(BunServices.layer)))

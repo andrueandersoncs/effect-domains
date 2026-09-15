@@ -1,7 +1,10 @@
 import { pipe } from "effect"
+import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { SupportCasesApplication } from "./application.ts"
 import { SupportCasesMigrations } from "./migrations.ts"
+
+const services = ExampleIdentity.layer("support-cases")
 
 
 const ui = {
@@ -46,12 +49,17 @@ const ui = {
         label: "Case board",
         description: "List the joined board with filters, range bounds, and keyset pagination.",
       },
+      "support.auditTrail": {
+        label: "Audit trail",
+        description: "Read durable application-owned lifecycle evidence as an administrator.",
+      },
     },
   },
 }
 
 const program = ApplicationBun.run(SupportCasesApplication, {
   database: { migrations: SupportCasesMigrations },
+  services,
   ui,
   telemetry: {
     protocol: "http/protobuf",
