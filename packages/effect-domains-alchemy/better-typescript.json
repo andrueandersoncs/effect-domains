@@ -1,0 +1,5 @@
+{
+  "commands": [
+    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] }
+  ]
+}

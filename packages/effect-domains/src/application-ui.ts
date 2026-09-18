@@ -3,6 +3,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
 import type { ApplicationIR } from "./application.ts"
+import { applicationUiPaths } from "./application-ui-paths.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
@@ -131,11 +132,12 @@ const register = Effect.fn("ApplicationUi.register")(function* (options: Readonl
     onSome: serializeBrowsertelemetry,
   })
 
-  const assetPath = (name: string) => (sameString(path, "/") ? `/${name}` : `${path}/${name}`) as `/${string}`
-  const clientPath = assetPath("client.js")
-  const stylesheetPath = assetPath("style.css")
-  const apiPath = assetPath("api")
-  const callPath = assetPath("api/call")
+  const {
+    javascript: clientPath,
+    stylesheet: stylesheetPath,
+    api: apiPath,
+    call: callPath,
+  } = applicationUiPaths(path)
 
   const document = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Effect Domains Application</title><link rel="stylesheet" href="${stylesheetPath}"><script type="module" src="${clientPath}"></script></head><body><div id="app" data-base="${path}"${telemetryAttribute}></div><noscript>This application requires JavaScript.</noscript></body></html>`

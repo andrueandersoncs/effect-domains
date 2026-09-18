@@ -11,7 +11,9 @@
   "catalog": {
     "effect": "4.0.0-rc.112",
     "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@effect/vitest": "4.0.0-rc.112"
   },
   "scripts": {
@@ -21,7 +23,7 @@
     "docs:preview": "vitepress preview docs",
     "check": "bun run --workspaces check && tsc --noEmit",
     "lint": "bun run --workspaces lint && better-typescript",
-    "test": "bun --bun vitest run",
+    "test": "bun run build && NODE_BINARY=\"$(command -v node)\" bun --bun vitest run",
     "observability:up": "docker compose -f ops/observability/compose.yaml up -d --wait",
     "observability:down": "docker compose -f ops/observability/compose.yaml down",
     "observability:alerts:test": "docker run --rm --entrypoint promtool -v \"$PWD/ops/observability:/work:ro\" -w /work prom/prometheus:v3.2.1 test rules alerts.test.yaml",
@@ -58,6 +60,7 @@
   },
   "devDependencies": {
     "@better-typescript/better-typescript": "0.4.20",
+    "@effect-domains/alchemy": "workspace:*",
     "@effect-domains/example-support": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",

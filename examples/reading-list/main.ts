@@ -1,17 +1,8 @@
 import { pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
-import { ReadingListApplication } from "./application.ts"
-import { ReadingListMigrations } from "./migrations.ts"
+import { ReadingListInfrastructureIR } from "./infrastructure.ts"
 
-
-const program = ApplicationBun.run(ReadingListApplication, {
-  database: { migrations: ReadingListMigrations },
-  ui: {
-    presentation: {
-      title: "Reading list",
-      description: "Maintain a reading backlog, record progress, and rate finished books.",
-    },
-  },
+const program = ApplicationBun.runInfrastructure(ReadingListInfrastructureIR, {
   telemetry: {
     resource: {
       serviceName: "reading-list",

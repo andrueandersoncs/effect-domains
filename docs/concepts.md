@@ -77,7 +77,9 @@ FeatureFlag declaration ──────────┘                       
 Feature flags remain application-level operational declarations. The compiled IR retains their names, defaults, and descriptions for inspection; a supplied `FeatureFlags` service owns live state. See [feature flags](/reference/runtime#feature-flags) for the memory implementation and explicit persistence/targeting boundary.
 
 
-`ApplicationBun.run(application, options)` supplies SQLite history, application services, initialization, background layers, and the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint. See [runtime and clients](/reference/runtime).
+`ApplicationBun.run(application, options)` supplies explicitly authored local runtime configuration. When infrastructure is authoritative, `ApplicationBun.runInfrastructure(infrastructure, options)` instead preserves the application's typed Effect contract while deriving migrations, SQLite durability, and RPC/MCP/UI publication settings from the same compiled `InfrastructureIR` consumed by cloud backends. Ephemeral local infrastructure uses in-memory SQLite; persistent infrastructure retains the normal filename configuration. Pass either result to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint. See [runtime and clients](/reference/runtime).
+
+`ApplicationInfrastructure.define` derives the common application database, HTTP runtime, publications, and public endpoint as provider-neutral infrastructure syntax. `InfrastructureCompiler.compile` validates canonical IDs, exact descriptor bindings, the complete UI/RPC/MCP route set, and a stable dependency graph with explicit execution, transaction, durability, writer-topology, and backup-schedule capabilities. Local execution, inspection, and cloud backends consume that `InfrastructureIR`; canonical domain models remain free of deployment concerns. See [infrastructure and deployment](/reference/runtime#infrastructure-and-deployment).
 
 ## One contract, several clients
 
@@ -85,7 +87,7 @@ The CLI, MCP tools, and generated Application UI interpret the same published op
 
 ## Current scope
 
-The repository implements a Bun runtime and SQLite persistence. It is experimental, not a promise of stable APIs, other database adapters, or production authentication.
+The repository implements Bun and Node application runtime seams over SQLite. The Alchemy package maps the provider-neutral Reading List graph to inspectable Railway and Fly process/volume plans, constructs one application runtime per deployed process, rejects unsupported writer and backup semantics, rejects local Alchemy state in the production stage, and explicitly rejects Cloudflare when its request runtime and D1 transaction model cannot preserve the declared capabilities. These declarations and local artifact/runtime smokes are experimental infrastructure evidence, not evidence of a production cloud deployment, broad provider coverage, or production authentication.
 
 ## Continue
 
@@ -93,4 +95,4 @@ The repository implements a Bun runtime and SQLite persistence. It is experiment
 - [Restrict access](/guides/authorization)
 - [Choose an example](/examples)
 
-Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Command`](../packages/effect-domains/src/command.ts), [`ReadModel`](../packages/effect-domains/src/read-model.ts), [`Application`](../packages/effect-domains/src/application.ts), and [Bun runtime](../packages/effect-domains/src/application-bun.ts).
+Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Command`](../packages/effect-domains/src/command.ts), [`ReadModel`](../packages/effect-domains/src/read-model.ts), [`Application`](../packages/effect-domains/src/application.ts), [portable runtime](../packages/effect-domains/src/application-runtime.ts), [infrastructure compiler](../packages/effect-domains/src/infrastructure-compiler.ts), and [Alchemy backends](../packages/effect-domains-alchemy/src/).

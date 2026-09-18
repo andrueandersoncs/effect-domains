@@ -4,7 +4,7 @@ description: Bun runner options, environment variables, generated commands, HTTP
 
 # Runtime and clients
 
-This reference covers `ApplicationBun.run` in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
+This reference covers `ApplicationBun.run` and the provider-neutral `ApplicationBun.runInfrastructure` path in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
 
 ## Application composition
 
@@ -67,7 +67,11 @@ The memory layer resets on process restart. Persistent, remote, targeted, schedu
 
 ## Bun runner
 
-Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.run(application, options)` returns the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
+Import `ApplicationBun` from `effect-domains/application-bun`. Use `ApplicationBun.run(application, options)` when the entrypoint intentionally owns runtime publications and migration configuration. Use `ApplicationBun.runInfrastructure(infrastructure, options)` when an `InfrastructureIR` is authoritative: it derives the application, migration history, RPC path, MCP path, UI path, and UI presentation from that graph. Both return the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
+
+`runInfrastructure` accepts local runtime concerns without restating deployment intent: an optional database filename for a persistent store, services, initialization, background layers, native routes, and telemetry. It derives persistent storage from the normal `<PREFIX>_DB` configuration and uses `:memory:` for an ephemeral store; supplying a filename for an ephemeral declaration fails before command execution. It does not accept RPC, MCP, UI, or UI-asset overrides.
+
+`ApplicationBun.run` accepts:
 
 | Option | Contract |
 | --- | --- |
@@ -77,7 +81,9 @@ Import `ApplicationBun` from `effect-domains/application-bun`. `ApplicationBun.r
 | `initialize` | Startup Effect, run after database preparation and service construction. |
 | `background` | Background layer, built after initialization. Also enables the `worker` command. |
 | `routes` | Additional native HTTP route layer for `serve`. |
-| `admin` | Omitted by default. `true` enables the prebuilt admin; an object accepts `path`, `presentation`, and `allowedOrigins`. |
+| `rpc` | Omit or `true` for HTTP RPC at `/rpc/v1`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
+| `mcp` | Omit or `true` for Streamable HTTP MCP at `/mcp`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
+| `ui` | Omitted or `false` disables the generated UI without loading its bundle; `true` enables it at `/`; an object accepts `path`, `presentation`, and `allowedOrigins`. |
 | `telemetry` | Project-owned OTLP traces, metrics, logs, safe HTTP/RPC measurements, and optional browser ingestion. An object configures it; `false` opts out of every automatic telemetry layer. |
 
 For `serve` and `worker`, startup prepares the database, builds `services`, runs `initialize`, and then starts `background`. `serve` additionally starts HTTP. Initialization therefore also runs in worker mode; it must be appropriate for each process you launch.
@@ -117,6 +123,83 @@ READING_LIST_URL=http://127.0.0.1:3001/rpc/v1 bun run reading-list books.list
 ```
 
 The Bun runner binds to `127.0.0.1`. It does not provide a configurable public bind address or a production deployment setup.
+
+## Infrastructure and deployment
+
+`effect-domains/infrastructure` is a closed provider-neutral deployment language. Resources declare stable IDs, dependencies, bindings, execution model, transaction semantics, writer topology, lifecycle, and publication intent. `InfrastructureCompiler.compile` rejects blank, padded, or duplicate names and IDs; dependency cycles; bindings to copied or unregistered descriptors; duplicate publication kinds; and collisions across RPC, MCP, and every route reserved by the generated UI. `InfrastructureInspect.describe` renders canonical JSON without handlers or credentials.
+
+`ApplicationInfrastructure.define` is the convenience derivation for the common SQLite HTTP shape:
+
+```ts
+import { ApplicationInfrastructure } from "effect-domains/application-infrastructure"
+import { InfrastructureCompiler } from "effect-domains/infrastructure-compiler"
+
+export const ReadingListInfrastructureIR = InfrastructureCompiler.compile(
+  ApplicationInfrastructure.define({
+    application: ReadingListApplication,
+    database: {
+      migrations: ReadingListMigrations,
+      transactions: "interactive",
+      durability: "persistent",
+      writerTopology: "single",
+    },
+    http: {
+      rpc: true,
+      mcp: true,
+      ui: { presentation: { title: "Reading list" } },
+      public: true,
+    },
+  }),
+)
+```
+
+The same compiled value drives local execution without repeating application, migration, or publication settings:
+
+```ts
+import { pipe } from "effect"
+import { ApplicationBun } from "effect-domains/application-bun"
+import { ReadingListInfrastructureIR } from "./infrastructure.ts"
+
+const program = ApplicationBun.runInfrastructure(ReadingListInfrastructureIR, {
+  telemetry: {
+    resource: { serviceName: "reading-list" },
+  },
+})
+
+pipe(program, ApplicationBun.runMain)
+```
+
+`@effect-domains/alchemy` supplies exhaustive backends over that graph. Railway maps it to a Project, one process Service, a mounted Volume, and a generated public domain. Fly maps it to an App, one process Service, a per-machine mounted Volume, and a shared public IPv4 assignment. Both run one process-scoped `ApplicationRuntime` with `SqliteNodeRuntime`, use the declared migration history at process startup, require the declared single-writer topology, and reject multi-writer graphs rather than weakening them to one replica. Railway accepts only `backups: "none"` because its provider resource cannot apply the declared schedule; Fly maps `none`, `daily`, and `weekly` to its volume snapshot settings. Both carry the same `reading-list/api`, `reading-list/application`, and `reading-list/public` logical identities. `RailwayInfrastructure.plan(...)` and `FlyInfrastructure.plan(...)` return the provider resource kinds, logical IDs, mount and database paths, handler, port, region, replicas, publications, and state mode without applying a stack.
+
+An Alchemy entrypoint exports the generated runtime resource by the same name supplied as `handler`, then exports the stack:
+
+```ts
+import { RailwayInfrastructure } from "@effect-domains/alchemy/railway"
+import { Effect } from "effect"
+import { ReadingListInfrastructureIR } from "./infrastructure.ts"
+
+const deployment = RailwayInfrastructure.make({
+  infrastructure: ReadingListInfrastructureIR,
+  options: {
+    main: import.meta.url,
+    handler: "Runtime",
+  },
+})
+
+export const Runtime = Effect.fn("ReadingListRailway.Runtime")(function* () {
+  return yield* deployment.runtime
+})()
+
+export default deployment.stack
+```
+
+Persistent resources default to retain-on-removal in the `production` Alchemy stage. Railway can retain the Volume independently. Fly volumes are embedded in the Service replica set, so the backend conservatively retains the App and Service together when production retention is required.
+
+Both backends use Alchemy's local state store for non-production work unless `options.state` supplies another Alchemy `State` layer. A `production` stack fails before provider resources execute when the resolved state store is local; production therefore requires an explicitly supplied shared state implementation. This protects deployment coordination state, not application SQLite data or backups.
+
+Backends validate capabilities before declaring provider resources. The current Cloudflare capability interpreter rejects the Reading List graph at `transactions:interactive`: D1's batch transaction model cannot preserve the application's interactive transaction contract. It does not silently weaken that contract.
+
+The checked-in examples are [`alchemy.railway.ts`](../../examples/reading-list/alchemy.railway.ts) and [`alchemy.fly.ts`](../../examples/reading-list/alchemy.fly.ts). Current verification compiles their declarations, inspects both provider plans, and runs the declared Reading List HTTP/UI path with the packaged UI artifacts under a real Node 26 process and in-memory SQLite. It does not apply either stack to a cloud account. Credentials, regions, remote state provisioning, production backup restoration, rollout policy, and multi-region database semantics remain deployment-owned concerns.
 
 ## OpenTelemetry
 

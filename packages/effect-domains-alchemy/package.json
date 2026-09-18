@@ -1,0 +1,27 @@
+{
+  "name": "@effect-domains/alchemy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/backend.ts",
+    "./railway": "./src/railway.ts",
+    "./fly": "./src/fly.ts",
+    "./cloudflare": "./src/cloudflare.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript"
+  },
+  "dependencies": {
+    "@effect-domains/application-ui": "workspace:*",
+    "@effect/platform-node": "catalog:",
+    "@effect/sql-sqlite-node": "catalog:",
+    "alchemy": "2.0.0-beta.77",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}
