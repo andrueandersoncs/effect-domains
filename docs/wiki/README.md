@@ -9,7 +9,7 @@ Effect Domains derives routine application machinery from canonical Effect Schem
 - [Thesis](thesis.md) — central claim, derivation boundary, and architectural principles.
 - [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, declared joined projections, imported migrations, and native execution composition.
 - [Validation Strategy](validation-strategy.md) — slice criteria, the current [lint-clean compiler record](validation-strategy.md#2026-09-14-better-typescript-lint-completion), native identity/browser/Cluster evidence, synchronization slices, prior validation, and dated evidence limits.
-- [Research Agenda](research-agenda.md) — current framework contract, identity boundary, join/dependency slice, and remaining evidence.
+- [Research Agenda](research-agenda.md) — current framework contract, identity boundary, join/dependency slice, remaining evidence, and the linked actionable work queue.
 
 ## Wiki Operations and Sources
 

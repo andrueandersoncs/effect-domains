@@ -96,19 +96,19 @@ Human direction on 2026-09-11 sequenced the remaining questions. The subsequent 
 
 ## Remaining Evidence
 
-Still unproven after those choices:
+The actionable queue is [GitHub issue #12](https://github.com/andrueandersoncs/effect-domains/issues/12). Individual issues own scope, dependencies, state, and acceptance criteria; this page remains the synthesis of why the evidence matters and records the conclusion after each issue closes.
 
-- whether further SQLite domains continue to generalize the conventions without framework growth;
-- whether the bounded joined-projection declaration generalizes beyond two flat boards without becoming a general query DSL;
-- whether aggregate or nested read models have a repeatable mechanical subset beyond authored SQL;
-- whether a production IdP or user-management lifecycle is required beyond the bounded example credential store;
-- which encoded shape, if any, a future slice cannot avoid;
-- whether declared `version`/`transitions`/`range`/`order` cover substantially different domains without growing into a query or workflow language;
-- readability of large or database-specific v2 histories, when one hurts;
-- how application-owned reconciliation should handle ambiguous commits for non-idempotent external services beyond the demonstrated immutable file sink;
-- whether production collector/storage topology, capacity planning, SLO thresholds, and retention preserve the local tri-signal contract under real load;
-- whether a future audit domain shares enough actor/action/target, retention, and privacy semantics to justify any framework abstraction beyond the two authored tables;
-- whether Railway or Fly provider APIs, supplied remote state, backup restoration, rollout behavior, and regional failure handling preserve the inspected deployment plans in a live production stack;
+- [Whether further SQLite domains continue to generalize the conventions without framework growth](https://github.com/andrueandersoncs/effect-domains/issues/6).
+- [Whether the bounded joined-projection declaration generalizes beyond two flat boards without becoming a general query DSL](https://github.com/andrueandersoncs/effect-domains/issues/8).
+- [Whether aggregate or nested read models have a repeatable mechanical subset beyond authored SQL](https://github.com/andrueandersoncs/effect-domains/issues/5).
+- [Whether a production IdP or user-management lifecycle is required beyond the bounded example credential store](https://github.com/andrueandersoncs/effect-domains/issues/11).
+- [Which encoded shape, if any, a future slice cannot avoid](https://github.com/andrueandersoncs/effect-domains/issues/7).
+- [Whether declared `version`/`transitions`/`range`/`order` cover substantially different domains without growing into a query or workflow language](https://github.com/andrueandersoncs/effect-domains/issues/9).
+- [Readability of large or database-specific v2 histories, when one hurts](https://github.com/andrueandersoncs/effect-domains/issues/10).
+- [How application-owned reconciliation should handle ambiguous commits for non-idempotent external services beyond the demonstrated immutable file sink](https://github.com/andrueandersoncs/effect-domains/issues/3).
+- [Whether production collector/storage topology, capacity planning, SLO thresholds, and retention preserve the local tri-signal contract under real load](https://github.com/andrueandersoncs/effect-domains/issues/4).
+- [Whether a future audit domain shares enough actor/action/target, retention, and privacy semantics to justify any framework abstraction beyond the two authored tables](https://github.com/andrueandersoncs/effect-domains/issues/2).
+- [Whether Railway or Fly provider APIs, supplied remote state, backup restoration, rollout behavior, and regional failure handling preserve the inspected deployment plans in a live production stack](https://github.com/andrueandersoncs/effect-domains/issues/1).
 
 The table compiler directly interprets supported Effect AST nodes and rejects cyclic suspended scalar fields. Its storage semantics remain separate from canonical JSON RPC codecs; CLI support does not imply arbitrary schemas have lossless table representations. ([Table compiler](../../packages/effect-domains/src/table.ts); [table regressions](../../test/Table.test.ts); [CLI](../../packages/effect-domains/src/rpc-cli.ts))
 
