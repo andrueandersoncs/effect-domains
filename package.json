@@ -23,6 +23,7 @@
     "docs:preview": "vitepress preview docs",
     "check": "bun run --workspaces check && tsc --noEmit",
     "lint": "bun run --workspaces lint && better-typescript",
+    "lint:semantic": "bun --env-file=.env run better-typescript semantic",
     "test": "bun run build && NODE_BINARY=\"$(command -v node)\" bun --bun vitest run",
     "observability:up": "docker compose -f ops/observability/compose.yaml up -d --wait",
     "observability:down": "docker compose -f ops/observability/compose.yaml down",
