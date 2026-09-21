@@ -231,10 +231,9 @@ bun install
 bun run build
 ```
 
-The root commands check the library, workspace applications, and root integration suite:
+`bun run check` runs manifest formatting, workspace and root lint, independent TypeScript checks, the integration suite, and deterministic dependency/boundary checks. Live semantic review uses the API key from `.env`:
 
 ```bash
 bun run check
-bun run lint
-bun run test
+bun run lint:semantic
 ```

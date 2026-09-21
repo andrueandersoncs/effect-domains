@@ -6,9 +6,9 @@ import { Application } from "effect-domains/application"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
-import { BillingApplication } from "../examples/orders-invoices/application.ts"
-import { BillingMigrations } from "../examples/orders-invoices/migrations.ts"
-import { InvoiceNumberSchema, OrderNumberSchema } from "../examples/orders-invoices/domain.ts"
+import { BillingApplication } from "@effect-domains/example-orders-invoices/application"
+import { BillingMigrations } from "@effect-domains/example-orders-invoices/migrations"
+import { InvoiceNumberSchema, OrderNumberSchema } from "@effect-domains/example-orders-invoices/domain"
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: BillingMigrations })
 const orderNumber = OrderNumberSchema.make("SO-1")
 const invoiceNumber = InvoiceNumberSchema.make("INV-1")

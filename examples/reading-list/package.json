@@ -2,6 +2,11 @@
   "name": "@effect-domains/example-reading-list",
   "private": true,
   "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./infrastructure": "./infrastructure.ts",
+    "./migrations": "./migrations.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

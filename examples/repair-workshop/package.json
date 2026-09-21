@@ -2,6 +2,7 @@
   "name": "@effect-domains/example-repair-workshop",
   "private": true,
   "type": "module",
+  "exports": {},
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

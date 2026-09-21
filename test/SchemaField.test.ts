@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Data, Effect, Equivalence, Function, Match, Option, Schema, SchemaAST, Struct, pipe } from "effect"
-import { SchemaField, type ScalarF } from "../packages/effect-domains/src/schema-field.ts"
+import { SchemaField, type ScalarF } from "effect-domains/schema-field"
 import { Authorization } from "effect-domains/authorization"
 import { Table } from "effect-domains/table"
 

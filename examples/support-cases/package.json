@@ -2,6 +2,10 @@
   "name": "@effect-domains/example-support-cases",
   "private": true,
   "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./migrations": "./migrations.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",
@@ -9,6 +13,7 @@
     "serve": "bun run main.ts serve"
   },
   "dependencies": {
+    "@effect-domains/example-support": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
   }

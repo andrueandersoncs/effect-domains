@@ -4,14 +4,12 @@ import { Effect, FileSystem, Layer, Option, Path, Schema, pipe } from "effect"
 import { EventJournal } from "effect/unstable/eventlog"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
-import {
-  editSyncedNote,
-  findSyncedNote,
-  rebuildSyncedNoteProjection,
-  syncedNoteEntries,
-  syncedNoteReplicaLayer,
-  syncSyncedNoteEntries,
-} from "../examples/field-notes/sync.ts"
+import { editSyncedNote,
+findSyncedNote,
+rebuildSyncedNoteProjection,
+syncedNoteEntries,
+syncedNoteReplicaLayer,
+syncSyncedNoteEntries, } from "@effect-domains/example-field-notes/sync"
 
 const readNote = (noteId: string) => pipe(
   findSyncedNote(noteId),

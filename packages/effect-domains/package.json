@@ -33,6 +33,7 @@
     "./sqlite-node": "./src/sqlite-node.ts",
     "./sqlite-identity": "./src/sqlite-identity.ts",
     "./sqlite-migrations": "./src/sqlite-migrations.ts",
+    "./sqlite-ddl": "./src/sqlite-ddl.ts",
     "./read-model": "./src/read-model.ts",
     "./table": "./src/table.ts",
     "./schema-field": "./src/schema-field.ts",

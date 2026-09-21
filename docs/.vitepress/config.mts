@@ -17,6 +17,7 @@ export default defineConfig({
     siteTitle: "Effect Domains",
     nav: [
       { text: "Get started", link: "/getting-started" },
+      { text: "Features", link: "/features" },
       { text: "Guides", link: "/guides/define-a-resource", activeMatch: "/guides/" },
       { text: "Reference", link: "/reference/resources", activeMatch: "/reference/" },
       { text: "Examples", link: "/examples" },
@@ -26,6 +27,7 @@ export default defineConfig({
         text: "Start here",
         items: [
           { text: "Run your first application", link: "/getting-started" },
+          { text: "Implemented features", link: "/features" },
           { text: "How the pieces fit", link: "/concepts" },
           { text: "Choose an example", link: "/examples" },
         ],

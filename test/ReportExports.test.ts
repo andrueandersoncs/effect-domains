@@ -8,21 +8,19 @@ import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Command } from "effect-domains/command"
 import { Resource } from "effect-domains/resource"
-import { ReportExportsApplication } from "../examples/report-exports/application.ts"
-import { appendReportExportAudit, ReportExportAuditOperation } from "../examples/report-exports/audit.ts"
-import { ReportExportMigrations } from "../examples/report-exports/migrations.ts"
+import { ReportExportsApplication } from "@effect-domains/example-report-exports/application"
+import { appendReportExportAudit, ReportExportAuditOperation } from "@effect-domains/example-report-exports/audit"
+import { ReportExportMigrations } from "@effect-domains/example-report-exports/migrations"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
-import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
+import { ReportExportRequestSchema } from "@effect-domains/example-report-exports/contracts"
 
-import {
-  ReportExportExecutionsResource,
-  ReportExportExecutionStore,
-  ReportExportExecutionStoreLive,
-} from "../examples/report-exports/executions.ts"
+import { ReportExportExecutionsResource,
+ReportExportExecutionStore,
+ReportExportExecutionStoreLive, } from "@effect-domains/example-report-exports/executions"
 
-import { ReportArtifactOutput } from "../examples/report-exports/output.ts"
-import { makeReportExportJob } from "../examples/report-exports/workflow.ts"
-import { writeReportArtifact } from "../examples/report-exports/writer.ts"
+import { ReportArtifactOutput } from "@effect-domains/example-report-exports/output"
+import { makeReportExportJob } from "@effect-domains/example-report-exports/workflow"
+import { writeReportArtifact } from "@effect-domains/example-report-exports/writer"
 import { prepareTables } from "./prepare-tables.ts"
 
 const requestInput = {

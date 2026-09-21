@@ -6,7 +6,7 @@ import { Headers } from "effect/unstable/http"
 import { TestClock } from "effect/testing"
 import { Workflow, WorkflowEngine, WorkflowProxy, WorkflowProxyServer } from "effect/unstable/workflow"
 import { Application, Part } from "effect-domains/application"
-import { ReportExportRequestSchema } from "../examples/report-exports/contracts.ts"
+import { ReportExportRequestSchema } from "@effect-domains/example-report-exports/contracts"
 
 class OperatorRequired extends Schema.TaggedError<OperatorRequired>()("OperatorRequired", {}) {}
 

@@ -2,6 +2,11 @@
   "name": "@effect-domains/example-orders-invoices",
   "private": true,
   "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./domain": "./domain.ts",
+    "./migrations": "./migrations.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

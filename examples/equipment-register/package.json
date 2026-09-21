@@ -2,6 +2,7 @@
   "name": "@effect-domains/example-equipment-register",
   "private": true,
   "type": "module",
+  "exports": {},
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

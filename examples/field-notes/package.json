@@ -2,6 +2,12 @@
   "name": "@effect-domains/example-field-notes",
   "private": true,
   "type": "module",
+  "exports": {
+    "./domain": "./domain.ts",
+    "./resources": "./resources.ts",
+    "./storage": "./storage.ts",
+    "./sync": "./sync.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

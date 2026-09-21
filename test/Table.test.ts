@@ -3,7 +3,7 @@ import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct,
 import { identifier } from "effect-domains/domain"
 import { Table, TableField, GreaterThan, GreaterThanOrEqualTo, LessThan, LessThanOrEqualTo, OneOf, MinLength, MaxLength } from "effect-domains/table"
 import { SqlClient } from "effect/unstable/sql"
-import { renderColumn } from "../packages/effect-domains/src/sqlite-ddl.ts"
+import { renderColumn } from "effect-domains/sqlite-ddl"
 import { Resource } from "effect-domains/resource"
 import { Authorization } from "effect-domains/authorization"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"

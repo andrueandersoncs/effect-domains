@@ -1,23 +1,21 @@
 import { expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Function, Option, Result, Schema, pipe } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
-import { ReservationApplication } from "../examples/reservations/application.ts"
+import { ReservationApplication } from "@effect-domains/example-reservations/application"
 
-import {
-  InsufficientStock,
-  InventoryUnavailable,
-  ReservationIdSchema,
-  ReservationInputSchema,
-  ReservationSchema,
-  ReservationStateTransitions,
-  ReserveStockInputSchema,
-  SkuSchema,
-  StockSchema,
-} from "../examples/reservations/domain.ts"
+import { InsufficientStock,
+InventoryUnavailable,
+ReservationIdSchema,
+ReservationInputSchema,
+ReservationSchema,
+ReservationStateTransitions,
+ReserveStockInputSchema,
+SkuSchema,
+StockSchema, } from "@effect-domains/example-reservations/domain"
 
-import { InventoryMigrations } from "../examples/reservations/migrations.ts"
-import { ReservationResource, StockResource } from "../examples/reservations/resources.ts"
-import { seedStock } from "../examples/reservations/sqlite.ts"
+import { InventoryMigrations } from "@effect-domains/example-reservations/migrations"
+import { ReservationResource, StockResource } from "@effect-domains/example-reservations/resources"
+import { seedStock } from "@effect-domains/example-reservations/sqlite"
 import { Application } from "effect-domains/application"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"

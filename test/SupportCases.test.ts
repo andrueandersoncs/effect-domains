@@ -7,8 +7,8 @@ import { Application } from "effect-domains/application"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { ApplicationInspect } from "effect-domains/application-inspect"
-import { SupportCasesApplication } from "../examples/support-cases/application.ts"
-import { SupportCasesMigrations } from "../examples/support-cases/migrations.ts"
+import { SupportCasesApplication } from "@effect-domains/example-support-cases/application"
+import { SupportCasesMigrations } from "@effect-domains/example-support-cases/migrations"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", {

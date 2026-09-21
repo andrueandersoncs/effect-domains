@@ -2,6 +2,16 @@
   "name": "@effect-domains/example-report-exports",
   "private": true,
   "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./audit": "./audit.ts",
+    "./contracts": "./contracts.ts",
+    "./executions": "./executions.ts",
+    "./migrations": "./migrations.ts",
+    "./output": "./output.ts",
+    "./workflow": "./workflow.ts",
+    "./writer": "./writer.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",

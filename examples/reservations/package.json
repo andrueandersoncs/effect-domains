@@ -2,6 +2,13 @@
   "name": "@effect-domains/example-reservations",
   "private": true,
   "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./domain": "./domain.ts",
+    "./migrations": "./migrations.ts",
+    "./resources": "./resources.ts",
+    "./sqlite": "./sqlite.ts"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "better-typescript --files '*.ts'",
