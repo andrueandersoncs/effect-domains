@@ -63,7 +63,7 @@
     "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.24",
+    "@better-typescript/better-typescript": "0.4.25",
     "@effect-domains/alchemy": "workspace:*",
     "@effect-domains/example-field-notes": "workspace:*",
     "@effect-domains/example-orders-invoices": "workspace:*",

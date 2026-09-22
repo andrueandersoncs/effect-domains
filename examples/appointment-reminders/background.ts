@@ -96,13 +96,14 @@ const writeInboxProjection = Effect.gen(function* () {
     Config.withDefault("data/appointment-reminders.notifications.json"),
   )
 
-  const notifications = yield* database<Readonly<Record<string, unknown>>>`
+  const notifications = yield* database<typeof notificationTable.storageSchema.Encoded>`
     SELECT id, recipient, reminderId, appointmentId, appointmentAt, reminderAt, location, purpose, deliveredAt, archivedAt
     FROM ${database(notificationTable.name)}
     ORDER BY ${database("id")} ASC
   `
 
   const snapshot = `${JSON.stringify({ notifications }, null, 2)}\n`
+
   yield* replaceFileAtomically({ path: destination, contents: snapshot })
 })
 

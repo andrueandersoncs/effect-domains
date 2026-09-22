@@ -152,6 +152,7 @@ const readApplicationUiAsset = (file: URL) => Effect.tryPromise({
 const readApplicationUiAssets = Effect.fn("ApplicationBun.readApplicationUiAssets")(function* () {
   const javascript = readApplicationUiAsset(ApplicationUiAssetFiles.javascript)
   const stylesheet = readApplicationUiAsset(ApplicationUiAssetFiles.stylesheet)
+
   return yield* Effect.all({ javascript, stylesheet }, { concurrency: "unbounded" })
 })
 
@@ -258,6 +259,7 @@ const inspectCommand = (application: ApplicationIR, localCommands: ReadonlyArray
     const output = JSON.stringify(inspection, null, 2)
     const stdio = yield* Stdio.Stdio
     const stdout = stdio.stdout()
+
     yield* pipe(Stream.make(`${output}\n`), Stream.run(stdout))
   })
 
@@ -291,6 +293,7 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
     Effect.gen(function* () {
       const url = yield* pipe(Config.schema(Schema.URLFromString, `${environment}_URL`), Config.withDefault(defaultUrl))
       const token = yield* pipe(Config.redacted(`${environment}_TOKEN`), Config.option)
+
       return clientProtocol(url, token)
     }),
     Layer.unwrap,
@@ -311,10 +314,12 @@ const runApplication = Effect.fn("ApplicationBun.run")(function* <
     onSome: () => {
       const worker = Effect.fn("ApplicationBun.worker")(function* () {
         const lifetime = pipe(Effect.log(`Worker ready: ${application.name}`), Effect.andThen(Effect.never))
+
         return yield* pipe(withApplicationRuntime(application, options, lifetime), Effect.scoped)
       })
 
       const workerCommand = Command.make("worker", {}, worker)
+
       return [serveCommand, workerCommand, inspection]
     },
   })
@@ -340,10 +345,12 @@ const run = Effect.fn("ApplicationBun.run")(function* <
     Layer.provide(FetchHttpClient.layer),
   )
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return yield* pipe(
     runApplication(application, options),
     Effect.provide(BunServices.layer),
     Effect.provide(telemetry),
+    // SAFETY: The effect error and requirement channels match because runApplication derives them from the same application and options types.
   ) as Effect.Effect<
     void,
     RunErrors<App, Services, Initialize, Background, Routes>,

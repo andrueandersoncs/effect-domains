@@ -16,4 +16,7 @@ const parts = [
 
 const reportExports = Application.define({ name: "report-exports", parts })
 
-export const ReportExportsApplication = Effect.runSync(Application.compile(reportExports))
+const reportExportsCompiler = Application.compile(reportExports)
+const reportExportsApplication = Effect.runSync(reportExportsCompiler)
+
+export { reportExportsApplication as ReportExportsApplication }

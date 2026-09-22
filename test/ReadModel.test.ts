@@ -65,7 +65,9 @@ const JobListBundle = Command.bundle(JobListCommand)
 it.effect("decodes composite left joins without losing booleans, service codecs, or unmatched rows", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs, Technicians])
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('assigned', 'acme', 'sam', 1), ('waiting', 'acme', NULL, 0)`
     yield* sql`INSERT INTO "people""records" (id, tenant, localId, name, onCall) VALUES ('a', 'acme', 'sam', 'stored:Sam', 1), ('b', 'other', 'sam', 'stored:Not Sam', 0)`
 
@@ -100,6 +102,7 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
     ])
 
     yield* sql`UPDATE "people""records" SET name = 'stored:Samuel', onCall = NULL WHERE id = 'a'`
+
     const updated = yield* query(undefined)
 
     expect(updated).toEqual([
@@ -114,6 +117,7 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
 it.effect("derives bounded filtered keyset pages for compiled views", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
+
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES
@@ -150,10 +154,14 @@ it.effect("derives bounded filtered keyset pages for compiled views", () => pipe
 it.effect("publishes a compiled page as a command without hand-written pass-through fields", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('a', 'acme', NULL, 1)`
+
     const client = yield* RpcTest.makeClient(JobListBundle.group)
     const page = yield* client["jobs.list"]({ filter: { tenant: "acme" } })
+
     expect(page).toEqual({ items: [{ id: "a", tenant: "acme", urgent: true }], nextCursor: null })
   }),
   Effect.provide(JobListBundle.handlers),
@@ -163,8 +171,11 @@ it.effect("publishes a compiled page as a command without hand-written pass-thro
 it.effect("snapshots selections so caller mutation cannot redirect a compiled read", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([Jobs])
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO "jobs.work" (id, tenant, technicianId, "is.urgent") VALUES ('job', 'acme', NULL, 0)`
+
     const select = Record.singleton("value", ["j", "tenant"] as const)
     const sources = ReadModel.sources({ j: Jobs })
 
@@ -176,10 +187,13 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
     })
 
     const view = ReadModel.compile(model)
+
     yield* Effect.sync(() => Reflect.set(select.value, "1", "id"))
+
     const rows = yield* sql<Readonly<Record<string, unknown>>>`${view.select(sql)}`
     const RowsSchema = Schema.Array(view.schema)
     const decoded = yield* Schema.decodeUnknownEffect(RowsSchema)(rows)
+
     expect(decoded).toEqual([{ value: "acme" }])
   }),
   Effect.provide(database),
@@ -196,6 +210,7 @@ it("rejects ambiguous or disconnected joins rather than silently changing result
   const incompatibleJoin = new Data.Class({ ...base, joins: [{ ...join, on: [{ left: ["j", "is.urgent"], right: ["t", "localId"] }] }] })
   const duplicateTable = new Data.Class({ ...base, tables: { ...base.tables, J: Jobs }, joins: [join] })
   const duplicateSelection = new Data.Class({ ...base, joins: [join], select: { label: ["j", "id"], LABEL: ["t", "id"] } })
+
   expect(() => compile(unknownSelection)).toThrow()
   expect(() => compile(emptyJoin)).toThrow()
   expect(() => compile(disconnectedJoin)).toThrow()
@@ -234,6 +249,7 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
   const commands = Command.bundle(command)
   const missingParts = [Part.command(commands)]
   const missing = Application.define({ name: "missing", parts: missingParts })
+
   expect(() => Effect.runSync(Application.compile(missing))).toThrow()
 
   const WrongPersonSchema = Schema.Struct({ name: Schema.Int })
@@ -247,6 +263,7 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
 
   const mismatchParts = [Part.resource(WrongPeople), Part.command(commands)]
   const mismatch = Application.define({ name: "mismatch", parts: mismatchParts })
+
   expect(() => Effect.runSync(Application.compile(mismatch))).toThrow()
 })
 

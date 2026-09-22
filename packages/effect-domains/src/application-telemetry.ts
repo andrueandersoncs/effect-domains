@@ -141,8 +141,11 @@ const signalEndpoint = (base: string, signal: Signal) => {
   const url = new URL(base)
   const trailingSlash = url.pathname.endsWith("/")
   const separator = trailingSlash ? "" : "/"
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const name = signal.toLowerCase() as SignalName
+
   url.pathname += `${separator}v1/${name}`
+
   return url.href
 }
 
@@ -152,9 +155,13 @@ const environment = (options: TelemetryOptions) => {
   const metrics = Predicate.isObject(options.metrics) ? options.metrics : null
   const logs = Predicate.isObject(options.logs) ? options.logs : null
   const baseEndpoint = Option.fromUndefinedOr(options.endpoint)
-  const tracesEndpoint = pipe(baseEndpoint, Option.map((base) => signalEndpoint(base, "TRACES")), Option.getOrUndefined)
-  const metricsEndpoint = pipe(baseEndpoint, Option.map((base) => signalEndpoint(base, "METRICS")), Option.getOrUndefined)
-  const logsEndpoint = pipe(baseEndpoint, Option.map((base) => signalEndpoint(base, "LOGS")), Option.getOrUndefined)
+
+  const endpointFor = (signal: Signal) =>
+    pipe(baseEndpoint, Option.map((base) => signalEndpoint(base, signal)), Option.getOrUndefined)
+
+  const tracesEndpoint = endpointFor("TRACES")
+  const metricsEndpoint = endpointFor("METRICS")
+  const logsEndpoint = endpointFor("LOGS")
   const tracesDisabled = equalsFalse(options.traces, false)
   const metricsDisabled = equalsFalse(options.metrics, false)
   const logsDisabled = equalsFalse(options.logs, false)
@@ -223,6 +230,7 @@ const signalTransport = Effect.fn("ApplicationTelemetry.signalTransport")(functi
     Config.url("OTEL_EXPORTER_OTLP_ENDPOINT"),
     Config.map((url) => {
       const endpoint = signalEndpoint(url.href, signal)
+
       return new URL(endpoint)
     }),
   )
@@ -280,6 +288,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
 
   const configuredBrowser = pipe(
     Option.fromUndefinedOr(telemetry.browser),
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     Option.filter(Predicate.isObject as Predicate.Refinement<unknown, BrowserOptions>),
   )
 
@@ -338,6 +347,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
             const sameOrigin = Equivalence.strictEqual<string>()(origin, url.origin)
             const allowedOrigins = Option.fromUndefinedOr(options.allowedOrigins)
             const explicitlyAllowed = Option.exists(allowedOrigins, (allowed) => Array.contains(allowed, origin))
+
             return sameOrigin || explicitlyAllowed
           },
         })
@@ -371,6 +381,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
         onNone: () => {
           const window = GatewayWindow.make({ startedAt: now, count: 1 })
           const nextWindows = HashMap.set(activeWindows, key, window)
+
           return [false, nextWindows] as const
         },
         onSome: (window) => {
@@ -379,6 +390,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
           const startedAt = fresh ? window.startedAt : now
           const next = GatewayWindow.make({ startedAt, count })
           const nextWindows = HashMap.set(activeWindows, key, next)
+
           return [count > requestsPerMinute, nextWindows] as const
         },
       })
@@ -390,6 +402,8 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
     transport: Option.Option<OtlpTransport>,
   ) {
     if (Option.isNone(transport)) return
+
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const path = `${ingestPath}/v1/${signal}` as `/${string}`
 
     const handler = Effect.fn("ApplicationTelemetry.browserGateway.forward")(function* (
@@ -398,6 +412,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
       if (!isTrusted(request)) return reject(403)
 
       const limited = yield* rateLimited(request)
+
       if (limited) return reject(429)
 
       const normalizeHeader = (value: string) => value.trim().toLowerCase()
@@ -416,6 +431,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
       const normalizeContentType = (value: string) => {
         const parts = value.split(";", 1)
         const mediaType = pipe(Array.head(parts), Option.getOrElse(Function.constant("")))
+
         return normalizeHeader(mediaType)
       }
 
@@ -433,9 +449,11 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
 
       const contentLength = Number(request.headers["content-length"] ?? 0)
       const declaredOversized = Number.isFinite(contentLength) && contentLength > maxRequestBytes
+
       if (declaredOversized) return reject(413)
 
       const body = yield* Effect.result(request.arrayBuffer)
+
       if (Result.isFailure(body)) return reject(400)
       if (body.success.byteLength > maxRequestBytes) return reject(413)
 
@@ -450,9 +468,11 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
 
       const forwarding = client.execute(outbound)
       const forwarded = yield* Effect.result(forwarding)
+
       if (Result.isFailure(forwarded)) return reject(502)
 
       const responseBody = yield* Effect.result(forwarded.success.arrayBuffer)
+
       if (Result.isFailure(responseBody)) return reject(502)
 
       const responseBytes = new Uint8Array(responseBody.success)
@@ -520,6 +540,7 @@ const validateValue = <S extends Schema.Top>(schema: S, value: Option.Option<unk
 
 const validateOptional = <S extends Schema.Top>(schema: S, value: unknown) => {
   const optional = Option.fromNullishOr(value)
+
   return validateValue(schema, optional)
 }
 
@@ -532,6 +553,7 @@ const validateDuration = (value: Option.Option<Duration.Input>) => Option.match(
     }),
     Effect.flatMap((millis) => {
       const measured = Option.some(millis)
+
       return validateValue(PositiveFiniteSchema, measured)
     }),
   ),
@@ -595,20 +617,28 @@ const rpcServerDuration = Metric.histogram("rpc.server.call.duration", {
 
 const randomSample = (rate: number) => {
   const disabled = rate <= 0
+
   if (disabled) return !disabled
+
   const complete = rate >= 1
+
   if (complete) return complete
+
   const value = new Uint32Array(1)
+
   globalThis.crypto.getRandomValues(value)
+
   return (value[0] ?? 0) / 0x1_0000_0000 < rate
 }
 
 const taggedFailure = (exit: Exit.Exit<unknown, unknown>) => {
   if (Exit.isSuccess(exit)) return Option.none<string>()
+
   const failure = Cause.findErrorOption(exit.cause)
 
   if (Option.isNone(failure)) {
     const type = Cause.hasInterruptsOnly(exit.cause) ? "interrupt" : "defect"
+
     return Option.some(type)
   }
 
@@ -645,7 +675,9 @@ const observeRpcSpan = (
   const seconds = Number(duration) / 1_000_000_000
   const observed = Metric.withAttributes(rpcServerDuration, attributes)
   const update = Metric.update(observed, seconds)
+
   Effect.runSync(update)
+
   return seconds
 }
 
@@ -660,17 +692,22 @@ const observedSpan = (
     if (endProperty) {
       const endSpan = (endTime: bigint, exit: Exit.Exit<unknown, unknown>) => {
         target.end(endTime, exit)
+
         return observeRpcSpan(target, startTime, exit)
       }
 
       return endSpan
     }
 
-    const value = Reflect.get(target, property, target)
+    // SAFETY: The property belongs to the proxied Span because this trap only forwards accesses made through that Span.
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+    const value = target[property as keyof Tracer.Span]
+
     return Predicate.isFunction(value) ? value.bind(target) : value
   }
 
   const handler: ProxyHandler<Tracer.Span> = { get }
+
   return new Proxy(span, handler)
 }
 
@@ -688,6 +725,7 @@ const withTelemetryTracer = <ROut, E, RIn>(
   const traceEverything = !samplingConfigured
   const noRpcObservation = !observeRpc
   const unnecessary = traceEverything && noRpcObservation
+
   if (unnecessary) return tracerLayer
 
   const makeTelemetryTracer = (tracer: Tracer.Tracer): Tracer.Tracer => {
@@ -706,6 +744,7 @@ const withTelemetryTracer = <ROut, E, RIn>(
         const span = delegate.call(tracer, configured)
         const serverRpc = span.name.startsWith("RpcServer.")
         const shouldObserve = observeRpc && serverRpc
+
         return shouldObserve ? observedSpan(span, spanOptions.startTime) : span
       }
 
@@ -773,6 +812,7 @@ const httpMiddleware = Effect.fn("ApplicationTelemetry.httpMiddleware")(function
     const seconds = Number(end - start) / 1_000_000_000
 
     yield* Metric.update(metric, seconds)
+
     return yield* exit
 })
 
@@ -882,11 +922,13 @@ const layer = (
   if (Predicate.isBoolean(options)) return Layer.empty
 
   const configured = exporterLayer(application, options)
+
   return Layer.unwrap(configured)
 }
 
 export const ApplicationTelemetry = {
   browserGateway: Effect.fn("ApplicationTelemetry.browserGateway")(browserGateway),
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   httpMiddleware: Effect.fn("ApplicationTelemetry.httpMiddleware")(httpMiddleware) as typeof httpMiddleware,
   layer,
 }

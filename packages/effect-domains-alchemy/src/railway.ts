@@ -136,6 +136,7 @@ const inspectRailwayPlan = (parameters: Readonly<{
 }>) => {
   const resolvedEffect = resolvePlan(parameters)
   const resolved = Effect.runSync(resolvedEffect)
+
   return resolved.deployment
 }
 
@@ -175,6 +176,7 @@ const make = (parameters: Readonly<{
         onNone: Function.constant(memoryDatabase),
         onSome: Effect.fn("RailwayInfrastructure.mountVolume")(function* (databaseVolume) {
           const mounted = yield* MountVolume(databaseVolume, { path: deployment.database.mountPath })
+
           return `${mounted.path}/${deployment.database.filename}`
         }),
       })
@@ -199,6 +201,7 @@ const make = (parameters: Readonly<{
         Effect.orDie,
       )
 
+      // SAFETY: The asserted infrastructure type matches because this branch constructs the corresponding provider declaration.
       return { fetch: fetch as HttpEffect }
     }),
     Effect.provide(MountVolumeLive),

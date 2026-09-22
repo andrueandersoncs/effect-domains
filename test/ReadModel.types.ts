@@ -62,6 +62,7 @@ ReadModel.page({
 
 declare const sql: SqlClient.SqlClient
 // @ts-expect-error because fields must exist in the selected table.
+
 view.column(sql, ["j", "missing"])
 // @ts-expect-error because aliases are declared, not arbitrary SQL strings.
 view.column(sql, ["absent", "name"])

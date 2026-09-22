@@ -3,7 +3,7 @@ import { applicationUiPaths } from "./application-ui-paths.ts"
 import type { ApplicationIR } from "./application.ts"
 
 import {
-  ApplicationInfrastructureSpec,
+  type ApplicationInfrastructureSpec,
   type BackupSchedule,
   type InfrastructureBinding,
   type InfrastructurePublication,
@@ -185,16 +185,19 @@ const resourceCapabilities = (resource: InfrastructureResource): ReadonlyArray<I
     Match.tagsExhaustive({
       HttpRuntime: ({ execution }) => {
         const runtime = Capabilities.RuntimeExecutionCapability({ execution })
+
         return Array.prepend(bound, runtime)
       },
       BackgroundRuntime: ({ execution }) => {
         const runtime = Capabilities.RuntimeExecutionCapability({ execution })
         const background = Capabilities.BackgroundLifetimeCapability()
+
         return Array.appendAll([runtime, background], bound)
       },
       ScheduledRuntime: ({ execution }) => {
         const runtime = Capabilities.RuntimeExecutionCapability({ execution })
         const scheduled = Capabilities.ScheduledExecutionCapability()
+
         return Array.appendAll([runtime, scheduled], bound)
       },
       SqliteStore: ({ durability, transactions, writerTopology, lifecycle }) => {
@@ -202,6 +205,7 @@ const resourceCapabilities = (resource: InfrastructureResource): ReadonlyArray<I
         const durable = sameDurability(durability, "persistent") ? [Capabilities.DurableFilesystemCapability()] : []
         const writer = Capabilities.WriterTopologyCapability({ topology: writerTopology })
         const backups = Capabilities.BackupScheduleCapability({ schedule: lifecycle.backups })
+
         return pipe([transaction], Array.appendAll(durable), Array.append(writer), Array.append(backups))
       },
       DurableFilesystem: Function.constant(DurableFilesystemCapabilities),
@@ -247,10 +251,12 @@ const appendUniqueCapability = (
   value: InfrastructureCapability,
 ): CapabilityAccumulator => {
   const key = capabilityKey(value)
+
   if (HashSet.has(state.keys, key)) return state
 
   const keys = HashSet.add(state.keys, key)
   const values = Array.append(state.values, value)
+
   return new CapabilityAccumulator({ keys, values })
 }
 
@@ -258,6 +264,7 @@ const uniqueCapabilities = (values: ReadonlyArray<InfrastructureCapability>) => 
   const keys = HashSet.empty<string>()
   const initial = new CapabilityAccumulator({ keys, values: [] })
   const accumulated = Array.reduce(values, initial, appendUniqueCapability)
+
   return accumulated.values
 }
 
@@ -303,6 +310,7 @@ const publicationPaths = (publication: InfrastructurePublication): ReadonlyArray
     McpPublication: ({ path }) => [path],
     UiPublication: ({ path }) => {
       const paths = applicationUiPaths(path)
+
       return [paths.document, paths.javascript, paths.stylesheet, paths.api, paths.call]
     },
   }),
@@ -331,6 +339,7 @@ const validatePublication = (
 
   const tags = HashSet.add(state.tags, publication._tag)
   const paths = Array.reduce(occupiedPaths, state.paths, (paths, path) => HashSet.add(paths, path))
+
   return new PublicationAccumulator({ tags, paths })
 })
 
@@ -424,6 +433,7 @@ const validateDefinition = Effect.fn("Infrastructure.validate")(function* (
     HashSet.empty<string>,
     Effect.fn("Infrastructure.validateRootCycle")(function* (visited, resource) {
       const visiting = HashSet.empty<string>()
+
       return yield* validateCycle(resource, visiting, visited)
     }),
   )

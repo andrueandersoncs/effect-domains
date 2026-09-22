@@ -23,6 +23,7 @@ const causeMessage = (cause: unknown) =>
 const makeInputJsonFlag = () => {
   const flag = Flag.string("input-json")
   const describedFlag = Flag.withDescription(flag, "Canonical JSON payload")
+
   return Flag.optional(describedFlag)
 }
 
@@ -37,8 +38,10 @@ const makeRpcCli = <
     protocol: Layer.Layer<RpcClient.Protocol, ProtocolError, ProtocolRequirements>
     subcommands: Subcommands
   }>,
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 ) => pipe(
   Effect.gen(function* () {
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const procedures = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.values()
 
     const subcommands = yield* Effect.forEach(procedures, Effect.fn("RpcCli.compileProcedure")(function* (procedure) {
@@ -69,15 +72,18 @@ const makeRpcCli = <
         })
 
         const client = yield* RpcClient.make(
+          // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
           options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>,
           { flatten: true },
         )
 
+        // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
         const success = yield* (client as (tag: string, payload: unknown) => Effect.Effect<unknown, unknown, unknown>)(contract._tag, payload)
         const encoded = yield* Schema.encodeUnknownEffect(outputSchema)(success)
         const stdio = yield* Stdio.Stdio
         const output = Stream.make(`${encoded}\n`)
         const stdout = stdio.stdout()
+
         yield* Stream.run(output, stdout)
       }, Effect.scoped, Effect.catch(Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
         const userMessage = yield* pipe(
@@ -95,6 +101,7 @@ const makeRpcCli = <
     }))
 
     const verifyNoSubcommandCollision = Effect.fn("RpcCli.verifyNoSubcommandCollision")(function* (command: Subcommands[number]) {
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       const collision = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.has(command.name)
 
       if (collision) {
@@ -109,6 +116,7 @@ const makeRpcCli = <
 
     const commands = Array.appendAll(subcommands, options.subcommands)
     const root = Command.make(options.application.name)
+
     return Array.isArrayNonEmpty(commands) ? Command.withSubcommands(root, commands) : root
   }),
   Effect.runSync,

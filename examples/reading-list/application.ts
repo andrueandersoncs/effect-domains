@@ -4,4 +4,7 @@ import { Effect } from "effect"
 
 const parts = [Part.resource(ReadingListResource)]
 const readingList = Application.define({ name: "reading-list", parts })
-export const ReadingListApplication = Effect.runSync(Application.compile(readingList))
+const readingListCompiler = Application.compile(readingList)
+const readingListApplication = Effect.runSync(readingListCompiler)
+
+export { readingListApplication as ReadingListApplication }

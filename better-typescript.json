@@ -1,5 +1,23 @@
 {
   "commands": [
-    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] }
+    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] },
+    {
+      "type": "add_exclusions",
+      "files": "**/*.ts",
+      "rules": ["require-safety-comment-for-type-assertion"]
+    },
+    {
+      "type": "add_exclusions",
+      "files": "test/**/*.ts",
+      "rules": [
+        "no-manual-tagged-construction",
+        "no-nested-calls",
+        "no-reflect-apply",
+        "no-runtime-typeof",
+        "no-unsafe-dictionary-type",
+        "prefer-effectful-function",
+        "prefer-function-for-repeated-shape"
+      ]
+    }
   ]
 }

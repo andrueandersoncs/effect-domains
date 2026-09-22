@@ -15,4 +15,7 @@ const appointmentReminders = Application.define({
   parts,
 })
 
-export const AppointmentRemindersApplication = Effect.runSync(Application.compile(appointmentReminders))
+const appointmentRemindersCompiler = Application.compile(appointmentReminders)
+const appointmentRemindersApplication = Effect.runSync(appointmentRemindersCompiler)
+
+export { appointmentRemindersApplication as AppointmentRemindersApplication }

@@ -8,8 +8,7 @@ import { CollectedSignal, decodeSignalBody, telemetryCollector } from "./telemet
 const applicationDefinition = Application.define({ name: "telemetry-test", parts: [] })
 const application = Effect.runSync(Application.compile(applicationDefinition))
 const calls = Metric.counter("telemetry.test.calls", { incremental: true })
-const samePath = Equivalence.strictEqual<string>()
-const pathMatches = (path: string) => (signal: CollectedSignal) => samePath(signal.path, path)
+const pathMatches = (path: string) => (signal: CollectedSignal) => Equivalence.strictEqual<string>()(signal.path, path)
 
 it.effect("exports correlated traces, metrics, and logs from one application lifetime", Effect.fn(
   "ApplicationTelemetry.correlatedSignals",
@@ -73,13 +72,17 @@ it.effect("exports correlated traces, metrics, and logs from one application lif
   expect(metrics).toContain("http.server.request.duration")
   expect(traces).toContain("RpcServer.telemetryTest")
   expect(traces).toContain("http.server GET")
+
   const traceAssertion = expect(traces)
+
   traceAssertion.not.toContain("sentinel")
   expect(logs).toContain("correlated-telemetry-test")
   expect(logs).toContain("traceId")
   expect(logs).toContain("spanId")
+
   const signals = [traces, metrics, logs]
   const identifiesService = (body: string) => body.includes("telemetry-test")
   const allSignalsIdentifyService = Array.every(signals, identifiesService)
+
   expect(allSignalsIdentifyService).toBe(true)
 }))

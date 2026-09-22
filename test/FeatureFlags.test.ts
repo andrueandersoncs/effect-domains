@@ -67,37 +67,49 @@ it.effect("enables, disables, overrides, and atomically toggles declared flags",
   Effect.gen(function* () {
     const initialCheckout = yield* FeatureFlags.isEnabled(NewCheckout)
     const initialSuggestions = yield* FeatureFlags.isEnabled(SearchSuggestions)
+
     expect(initialCheckout).toBe(false)
     expect(initialSuggestions).toBe(false)
 
     yield* FeatureFlags.enable(NewCheckout)
+
     const enabledCheckout = yield* FeatureFlags.isEnabled(NewCheckout)
+
     expect(enabledCheckout).toBe(true)
 
     yield* FeatureFlags.disable(NewCheckout)
+
     const disabledCheckout = yield* FeatureFlags.isEnabled(NewCheckout)
+
     expect(disabledCheckout).toBe(false)
 
     const toggle = FeatureFlags.toggle(NewCheckout)
     const toggles = Array.replicate(toggle, 100)
+
     yield* Effect.all(toggles, { concurrency: "unbounded" })
 
     const checkoutAfterToggles = yield* FeatureFlags.isEnabled(NewCheckout)
+
     expect(checkoutAfterToggles).toBe(false)
 
     const replacement = FeatureFlags.define({ name: "new-checkout", default: false })
     const unavailable = yield* pipe(FeatureFlags.isEnabled(replacement), Effect.flip)
+
     expect(unavailable).toMatchObject({ _tag: "FeatureFlagUnavailable", name: "new-checkout" })
   }),
   Effect.provide(featureFlagRuntime),
 ))
 
-it.effect("reports invalid overrides through layer acquisition", () => Effect.gen(function* () {
+it.effect("reports invalid overrides through layer acquisition", Effect.fn(
+  "FeatureFlags.invalidOverrides",
+)(function* () {
   const replacement = FeatureFlags.define({ name: "new-checkout", default: false })
+
   const invalidRuntime = FeatureFlags.layerMemory(
     application.featureFlags,
     [[replacement, true]],
   )
+
   const failure = yield* pipe(Layer.build(invalidRuntime), Effect.scoped, Effect.flip)
 
   expect(failure).toMatchObject({

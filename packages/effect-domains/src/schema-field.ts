@@ -17,10 +17,12 @@ const transformLayer = <A, B>(layer: ScalarF<A>, f: (child: A) => B): ScalarF<B>
   Match.tag("Leaf", "Unsupported", (leaf) => leaf),
   Match.tag("Encoding", "Suspend", "Collection", (node) => {
     const value = f(node.value)
+
     return Struct.assign(node, { value })
   }),
   Match.tag("Union", (node) => {
     const members = Array.map(node.members, f)
+
     return Struct.assign(node, { members })
   }),
   Match.exhaustive,
@@ -31,12 +33,14 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
 
   if (encoded) {
     const value = SchemaAST.toEncoded(ast)
+
     return Nodes.Encoding({ ast, value })
   }
 
   return pipe(Match.value(ast),
     Match.tag("Suspend", (ast) => {
       const value = ast.thunk()
+
       return Nodes.Suspend({ ast, value })
     }),
     Match.tag("Union", (ast) => pipe(ast, Struct.get("types"), (members) => Nodes.Union({ ast, members }))),
@@ -45,8 +49,11 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
       const homogeneous = Array.isReadonlyArrayEmpty(ast.elements) && single
       const canonical = !storage
       const supported = canonical && homogeneous
+
       if (!supported) return Nodes.Unsupported({ ast })
+
       const value = pipe(Array.head(ast.rest), Option.getOrThrow)
+
       return Nodes.Collection({ ast, value })
     }),
     Match.orElse((ast) => Nodes.Leaf({ ast })),
@@ -59,8 +66,10 @@ const fold = <A>(mode: "canonical" | "storage", algebra: (layer: ScalarF<A>) => 
 
   const visit = (seen: HashSet.HashSet<SchemaAST.AST>) => (ast: SchemaAST.AST): A => {
     if (HashSet.has(seen, ast)) return pipe(Nodes.Unsupported({ ast }), algebra)
+
     const next = HashSet.add(seen, ast)
     const layer = project(ast, storage)
+
     return pipe(transformLayer(layer, visit(next)), algebra)
   }
 
@@ -70,6 +79,7 @@ const fold = <A>(mode: "canonical" | "storage", algebra: (layer: ScalarF<A>) => 
 // Read only data properties because check metadata must not invoke authored getters.
 export const ownValue = (value: unknown, key: string): unknown => {
   const descriptor = Predicate.isObject(value) ? Object.getOwnPropertyDescriptor(value, key) : null
+
   return descriptor?.value
 }
 
@@ -130,6 +140,7 @@ const sameCategory = (
 ) => {
   const unrestricted = Option.isNone(left) || Option.isNone(right)
   const same = Option.makeEquivalence(Equivalence.strictEqual<unknown>())(left, right)
+
   return unrestricted || same
 }
 
@@ -143,6 +154,7 @@ const combineDescriptions = (
     const incompatible = !compatible
 
     if (unsupported) return Option.none<FieldIR>()
+
     const category = Option.orElse(left.category, Function.constant(right.category))
 
     const combined = pipe(describe(
@@ -161,6 +173,7 @@ const combineDescriptions = (
   ) => pipe(Option.all([state, next] as const), Option.flatMap(Function.tupled(merge)))
 
   const initial = Option.some(neutralDescription)
+
   return Array.reduce(descriptions, initial, reduce)
 }
 
@@ -219,6 +232,7 @@ const storageNullAlgebra = (layer: ScalarF<boolean>) => pipe(
   Match.tag("Union", ({ members }) => Array.some(members, Function.identity)),
   Match.tag("Encoding", ({ ast, value }) => {
     const EncodedSchema = Schema.make(SchemaAST.toEncoded(ast))
+
     return Schema.is(EncodedSchema)(null) || value
   }),
   Match.exhaustive,
@@ -229,12 +243,14 @@ const transformsStoredNull = fold("storage", storageNullAlgebra)
 
 export const compileField = (schema: Schema.Constraint): Option.Option<FieldIR> => {
   const ast = SchemaAST.toType(schema.ast)
+
   if (SchemaAST.isOptional(ast)) return Option.none()
 
   return pipe(
     canonical(ast),
     Option.map((field) => {
       const storedNull = transformsStoredNull(schema.ast)
+
       return new FieldIR({ ...field, transformsStoredNull: storedNull })
     }),
   )

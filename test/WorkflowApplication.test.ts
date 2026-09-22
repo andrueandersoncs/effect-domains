@@ -17,6 +17,7 @@ class Operator extends RpcMiddleware.Service<Operator>()("test/WorkflowApplicati
 const operator = Layer.succeed(Operator, Operator.of(
   Effect.fn("WorkflowApplication.authorize")(function* (effect, metadata) {
     if (metadata.headers.authorization !== "Bearer operator") return yield* OperatorRequired.make({})
+
     return yield* effect
   }),
 ))
@@ -59,20 +60,29 @@ it.effect("authorizes native workflow submissions and recovery before invoking t
   yield* pipe(Effect.gen(function* () {
     const client = yield* RpcTest.makeClient(application.group)
     const deniedSubmission = yield* pipe(client["workflow.ExportDiscard"]({ requestId: "one" }), Effect.result)
+
     expect(deniedSubmission).toMatchObject({ _tag: "Failure", failure: { _tag: "OperatorRequired" } })
+
     const beforeSubmission = yield* Ref.get(executions)
+
     expect(beforeSubmission).toBe(0)
 
     const headers = Headers.fromInput({ authorization: "Bearer operator" })
     const result = yield* client["workflow.Export"]({ requestId: "one" }, { headers })
+
     expect(result).toBe("exported")
+
     const executionId = yield* client["workflow.ExportDiscard"]({ requestId: "one" }, { headers })
     const repeatedId = yield* client["workflow.ExportDiscard"]({ requestId: "one" }, { headers })
+
     expect(repeatedId).toBe(executionId)
+
     const afterRepeatedSubmission = yield* Ref.get(executions)
+
     expect(afterRepeatedSubmission).toBe(1)
 
     const deniedRecovery = yield* pipe(client["workflow.ExportResume"]({ executionId }), Effect.result)
+
     expect(deniedRecovery).toMatchObject({ _tag: "Failure", failure: { _tag: "OperatorRequired" } })
   }), Effect.provide(handlers), Effect.scoped)
 }))
@@ -100,8 +110,10 @@ it.effect("suspends interrupted workflow failures and resumes the same execution
 
   yield* pipe(Effect.gen(function* () {
     const executionId = yield* recoverableWorkflow.execute({ requestId: "recoverable" }, { discard: true })
+
     yield* Effect.yieldNow
     yield* TestClock.adjust("100 millis")
+
     const suspended = yield* recoverableWorkflow.poll(executionId)
     const hasSuspended = Option.isSome(suspended)
 
@@ -110,6 +122,7 @@ it.effect("suspends interrupted workflow failures and resumes the same execution
     yield* recoverableWorkflow.resume(executionId)
     yield* Effect.yieldNow
     yield* TestClock.adjust("100 millis")
+
     const completed = yield* recoverableWorkflow.poll(executionId)
     const hasCompleted = Option.isSome(completed)
 

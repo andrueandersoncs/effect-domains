@@ -1,7 +1,8 @@
 import { Effect, Equivalence, Match, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlError, SqlSchema } from "effect/unstable/sql"
 import { Command } from "effect-domains/command"
-import { VersionConflict } from "effect-domains/repository-store"
+import type { StructValue } from "effect-domains/domain"
+import { ResourceNotFound, VersionConflict } from "effect-domains/repository-store"
 import { Resource } from "effect-domains/resource"
 import { ReadModel } from "effect-domains/read-model"
 import { Table } from "effect-domains/table"
@@ -34,7 +35,6 @@ import {
   SupportCustomersResource,
 } from "./resources.ts"
 
-type SqliteRow = Readonly<Record<string, unknown>>
 
 const supportCasesTable = Resource.table(SupportCasesResource)
 const supportCustomersTable = Resource.table(SupportCustomersResource)
@@ -74,13 +74,14 @@ const SupportCaseDetailProjectionSchema = pipe(
   Schema.decodeTo(SupportCaseDetail),
 )
 
+// SAFETY: The asserted result type matches because the SQL projection and decoding schema define the same columns.
 const supportCaseDetail = SqlSchema.findOneOption({
   Request: GetSupportCaseInputSchema,
   Result: SupportCaseDetailProjectionSchema,
   execute: Effect.fn("SupportCases.detailQuery")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
-    return yield* sql<SqliteRow>`
+    return yield* sql<StructValue>`
       SELECT ${SupportCaseProjection.object(sql, "support_case")} AS ${sql("case")},
         ${SupportCustomerProjection.object(sql, "customer")} AS ${sql("customer")},
         (
@@ -112,33 +113,41 @@ const supportCaseDetail = SqlSchema.findOneOption({
   SqlClient.SqlClient
 >
 
-const requireCustomer = Effect.fn("SupportCases.requireCustomer")(function* (customerId: string) {
-  return yield* pipe(
-    Resource.repository(SupportCustomersResource).get(customerId),
-    Effect.catchTag("ResourceNotFound", () => SupportCustomerNotFound.make({ customerId })),
-  )
-})
+const requireResource = <
+  Value,
+  Failure,
+  Requirements,
+  Missing,
+>(
+  get: (id: string) => Effect.Effect<Value, ResourceNotFound | Failure, Requirements>,
+  missing: (id: string) => Missing,
+) => (id: string) => pipe(
+  get(id),
+  Effect.catchTag("ResourceNotFound", () => pipe(
+    id,
+    missing,
+    Effect.fail,
+  )),
+)
 
-const requireAgent = Effect.fn("SupportCases.requireAgent")(function* (agentId: string) {
-  return yield* pipe(
-    Resource.repository(SupportAgentsResource).get(agentId),
-    Effect.catchTag("ResourceNotFound", () => SupportAgentNotFound.make({ agentId })),
-  )
-})
+const customerRepository = Resource.repository(SupportCustomersResource)
+const agentRepository = Resource.repository(SupportAgentsResource)
+const caseRepository = Resource.repository(SupportCasesResource)
 
-const requireCase = Effect.fn("SupportCases.requireCase")(function* (caseId: string) {
-  return yield* pipe(
-    Resource.repository(SupportCasesResource).get(caseId),
-    Effect.catchTag("ResourceNotFound", () => SupportCaseNotFound.make({ caseId })),
-  )
-})
+const missingCustomer = (customerId: string) => SupportCustomerNotFound.make({ customerId })
+const missingAgent = (agentId: string) => SupportAgentNotFound.make({ agentId })
+const missingCase = (caseId: string) => SupportCaseNotFound.make({ caseId })
 
-const sameAction = Equivalence.strictEqual<string>()
+const requireCustomer = requireResource(customerRepository.get, missingCustomer)
+const requireAgent = requireResource(agentRepository.get, missingAgent)
+const requireCase = requireResource(caseRepository.get, missingCase)
+
+
 
 const assignmentFor = Effect.fn("SupportCases.assignmentFor")(function* (
   input: typeof AdvanceSupportCaseInputSchema.Type,
 ) {
-  const assigning = sameAction(input.action, "assign")
+  const assigning = Equivalence.strictEqual<string>()(input.action, "assign")
 
   if (!assigning) return Option.none<string>()
 
@@ -150,6 +159,7 @@ const assignmentFor = Effect.fn("SupportCases.assignmentFor")(function* (
   const agent = yield* requireAgent(agentId)
 
   if (!agent.onDuty) return yield* AgentOffDuty.make({ agentId: agent.id })
+
   return Option.some(agent.id)
 })
 
@@ -234,6 +244,7 @@ const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.a
   input: typeof AdvanceSupportCaseInputSchema.Type,
 ) {
   yield* requireCase(input.caseId)
+
   const assignment = yield* assignmentFor(input)
 
   const changes = pipe(

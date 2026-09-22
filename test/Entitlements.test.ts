@@ -131,6 +131,7 @@ const tableEntitlements = Entitlements.fromTables([reportSubscriptionSource])
 it.effect("table entitlement resolvers grant matching records, deny misses, and ignore unknown names", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([accountReportsTable])
+
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO account_reports (id, tenantId, title) VALUES
@@ -141,6 +142,7 @@ it.effect("table entitlement resolvers grant matching records, deny misses, and 
     const denied = yield* entitlements.has({ name: "reports.subscription", key: "denied", subject: alice })
     const hidden = yield* entitlements.has({ name: "reports.subscription", key: "other", subject: alice })
     const unknown = yield* entitlements.has({ name: "unknown", key: "anything", subject: {} })
+
     expect(granted).toBe(true)
     expect(denied).toBe(false)
     expect(hidden).toBe(false)
@@ -153,6 +155,7 @@ it.effect("table entitlement resolvers grant matching records, deny misses, and 
 it.effect("grant expressions compose time ordering with cancellation grace", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([accessWindowsTable])
+
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO access_windows (id, tenantId, status, validUntil, graceUntil) VALUES
@@ -176,23 +179,35 @@ it.effect("grant expressions compose time ordering with cancellation grace", () 
 it.effect("account gates reject empty lists, distinguish resolver outages, and observe revocation", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([accountReportsTable])
+
     const locked = yield* pipe(Resource.repository(AccountReports).list(), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+
     expect(locked._tag).toBe("EntitlementRequired")
+
     const missing = yield* pipe(Resource.repository(AccountReports).list(), asAlice, Effect.flip)
+
     expect(missing._tag).toBe("EntitlementUnavailable")
+
     const unavailable = Entitlements.of({ has: () => EntitlementUnavailable.make({}) })
     const outage = yield* pipe(Resource.repository(AccountReports).list(), asAlice, Effect.provideService(Entitlements, unavailable), Effect.flip)
+
     expect(outage._tag).toBe("EntitlementUnavailable")
+
     const granted = yield* Ref.make(false)
     const dynamic = Entitlements.of({ has: () => Ref.get(granted) })
     const list = pipe(Resource.repository(AccountReports).list(), asAlice, Effect.provideService(Entitlements, dynamic))
     const initial = yield* Effect.flip(list)
+
     expect(initial._tag).toBe("EntitlementRequired")
     yield* Ref.set(granted, true)
+
     const allowed = yield* list
+
     expect(allowed).toEqual({ items: [], nextCursor: null })
     yield* Ref.set(granted, false)
+
     const revoked = yield* Effect.flip(list)
+
     expect(revoked._tag).toBe("EntitlementRequired")
   }), Effect.provide(sqlite),
 ))
@@ -200,6 +215,7 @@ it.effect("account gates reject empty lists, distinguish resolver outages, and o
 it.effect("purchase gates preserve hidden rows and pagination without filtering locked items", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([purchasedReportsTable])
+
     const sql = yield* SqlClient.SqlClient
 
     yield* sql`INSERT INTO purchased_reports (id, tenantId, title) VALUES
@@ -208,15 +224,24 @@ it.effect("purchase gates preserve hidden rows and pagination without filtering 
     const purchases = Entitlements.of({ has: ({ key }) => Effect.sync(() => equals(key, "1-paid")) })
     // Omit the resolver because premature entitlement lookup must not reveal hidden rows.
     const hidden = yield* pipe(Resource.repository(PurchasedReports).get("0-hidden"), asAlice, Effect.flip)
+
     expect(hidden._tag).toBe("ResourceNotFound")
+
     const paid = yield* pipe(Resource.repository(PurchasedReports).get("1-paid"), asAlice, Effect.provideService(Entitlements, purchases))
+
     expect(paid.title).toBe("available")
+
     const first = yield* pipe(Resource.repository(PurchasedReports).list({ limit: 1 }), asAlice, Effect.provideService(Entitlements, purchases))
+
     expect(first.items).toEqual([paid])
+
     const cursor = yield* Effect.fromNullishOr(first.nextCursor)
     const continuation = yield* pipe(Resource.repository(PurchasedReports).list({ limit: 1, cursor }), asAlice, Effect.provideService(Entitlements, purchases), Effect.flip)
+
     expect(continuation._tag).toBe("EntitlementRequired")
+
     const mixed = yield* pipe(Resource.repository(PurchasedReports).list({ limit: 2 }), asAlice, Effect.provideService(Entitlements, purchases), Effect.flip)
+
     expect(mixed._tag).toBe("EntitlementRequired")
   }), Effect.provide(sqlite),
 ))
@@ -224,13 +249,19 @@ it.effect("purchase gates preserve hidden rows and pagination without filtering 
 it.effect("denied writes and entitlement revocation during a write leave no partial state", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([paidWritesTable])
+
     const deniedInput = WriteSchema.make({ id: "denied", tenantId: "a", visible: true })
     const deniedWrite = yield* pipe(Resource.repository(PaidWrites).create(deniedInput), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+
     expect(deniedWrite._tag).toBe("EntitlementRequired")
+
     const unreadableInput = WriteSchema.make({ id: "unreadable", tenantId: "a", visible: false })
     const unreadable = yield* pipe(Resource.repository(PaidWrites).create(unreadableInput), asAlice, Effect.provideService(Entitlements, admitted), Effect.flip)
+
     expect(unreadable._tag).toBe("Forbidden")
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`CREATE TABLE grants (active INTEGER NOT NULL)`
     yield* sql`INSERT INTO grants VALUES (1)`
     yield* sql`CREATE TRIGGER revoke_after_insert AFTER INSERT ON paid_writes BEGIN UPDATE grants SET active = 0; END`
@@ -238,16 +269,22 @@ it.effect("denied writes and entitlement revocation during a write leave no part
     const currentGrant = Entitlements.of({
       has: Effect.fn("Entitlements.test.currentGrant")(function* () {
         const rows = yield* pipe(sql<{ readonly active: number }>`SELECT active FROM grants WHERE active = 1`, Effect.mapError(() => EntitlementUnavailable.make({})))
+
         return rows.length > 0
       }),
     })
 
     const revokedInput = WriteSchema.make({ id: "revoked", tenantId: "a", visible: true })
     const revokedWrite = yield* pipe(Resource.repository(PaidWrites).create(revokedInput), asAlice, Effect.provideService(Entitlements, currentGrant), Effect.flip)
+
     expect(revokedWrite._tag).toBe("EntitlementRequired")
+
     const rows = yield* sql`SELECT id FROM paid_writes`
+
     expect(rows).toEqual([])
+
     const grants = yield* sql`SELECT active FROM grants`
+
     expect(grants).toEqual([{ active: 1 }])
   }), Effect.provide(sqlite),
 ))
@@ -259,14 +296,23 @@ it.effect("standalone and subject policies enforce requirements after ordinary s
     const next = Option.none()
     const values = new AuthorizationValues({ row, next })
     const accountDenied = yield* pipe(Authorization.require(accountPolicy, "read", values), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+
     expect(accountDenied._tag).toBe("EntitlementRequired")
+
     const purchaseDenied = yield* pipe(Authorization.require(purchasedPolicy, "read", values), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+
     expect(purchaseDenied._tag).toBe("EntitlementRequired")
+
     const subjectDenied = yield* pipe(Authorization.requireSubject(paidSubjectPolicy), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+
     expect(subjectDenied._tag).toBe("EntitlementRequired")
+
     const forbidden = yield* pipe(Authorization.requireSubject(paidSubjectPolicy), Effect.provideService(AuthorizationSubject, bob), Effect.flip)
+
     expect(forbidden._tag).toBe("Forbidden")
+
     const allowed = yield* pipe(Authorization.requireSubject(paidSubjectPolicy), asAlice, Effect.provideService(Entitlements, admitted))
+
     expect(allowed).toEqual(alice)
   }),
 ))
@@ -286,6 +332,7 @@ it.effect("entitlement declarations validate phases and snapshot mutable inputs"
 
     const resolver = Entitlements.of({ has: ({ name, key }) => Effect.sync(() => equals(name, "report_exports") && equals(key, "a")) })
     const allowed = yield* pipe(Authorization.requireSubject(policy), asAlice, Effect.provideService(Entitlements, resolver))
+
     expect(allowed).toEqual(alice)
     expect(() => p.policy({ scope, allow: { read: access }, require: { read: [{ name: "", key: p.subject.tenantId } as never] } })).toThrow()
     expect(() => p.policy({ scope, allow: { create: access }, require: { create: [purchase as never] } })).toThrow()
@@ -308,12 +355,15 @@ const accountResolver = Entitlements.of({ has: ({ subject, key }) => Effect.sync
 it.effect("RPC gates isolate request identity and return typed entitlement errors", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([accountReportsTable])
+
     const client = yield* RpcTest.makeClient(AccountReportsRuntime.group)
     const aliceRequest = client["account_reports.list"]({}, { headers: { authorization: "Bearer alice" } })
     const bobRequest = pipe(client["account_reports.list"]({}, { headers: { authorization: "Bearer bob" } }), Effect.flip)
     const [alicePage, bobFailure] = yield* Effect.all([aliceRequest, bobRequest], { concurrency: "unbounded" })
+
     expect(alicePage).toEqual({ items: [], nextCursor: null })
     expect(bobFailure._tag).toBe("EntitlementRequired")
+
     if (Predicate.isTagged(bobFailure, "EntitlementRequired")) expect(bobFailure.entitlement).toBe("report_exports")
   }),
   Effect.provide(AccountReportsRuntime.handlers),

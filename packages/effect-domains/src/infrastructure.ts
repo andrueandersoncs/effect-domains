@@ -126,24 +126,29 @@ export type Domain = Extract<InfrastructureResource, { readonly _tag: "Domain" }
 export type OtlpDestination = Extract<InfrastructureResource, { readonly _tag: "OtlpDestination" }>
 export type Extension = Extract<InfrastructureResource, { readonly _tag: "Extension" }>
 
-export class InfrastructureSpec extends Data.Class<{
-  readonly _tag: "InfrastructureSpec"
-  readonly name: string
-  readonly parts: ReadonlyArray<InfrastructureResource>
-}> {}
+export type InfrastructureSpec = Data.TaggedEnum<{
+  InfrastructureSpec: {
+    readonly name: string
+    readonly parts: ReadonlyArray<InfrastructureResource>
+  }
+}>
 
-export class ApplicationInfrastructureSpec<App extends ApplicationIR> extends Data.Class<{
-  readonly _tag: "ApplicationInfrastructureSpec"
-  readonly name: string
-  readonly parts: ReadonlyArray<InfrastructureResource>
-  readonly application: App
-}> {}
+export type ApplicationInfrastructureSpec<App extends ApplicationIR> = Data.TaggedEnum<{
+  ApplicationInfrastructureSpec: {
+    readonly name: string
+    readonly parts: ReadonlyArray<InfrastructureResource>
+    readonly application: App
+  }
+}>
+
+const InfrastructureSpecs = Data.taggedEnum<InfrastructureSpec>()
 
 const define = (
   definition: Readonly<{ name: string; parts: ReadonlyArray<InfrastructureResource> }>,
 ) => {
   const parts = Array.fromIterable(definition.parts)
-  return new InfrastructureSpec({ _tag: "InfrastructureSpec", name: definition.name, parts })
+
+  return InfrastructureSpecs.InfrastructureSpec({ name: definition.name, parts })
 }
 
 const lifecycle = (
@@ -205,6 +210,7 @@ const backgroundRuntime = (
   }> & Readonly<Partial<{ bindings: ReadonlyArray<InfrastructureBinding> }>>,
 ) => {
   const bindings = Array.fromIterable(options.bindings ?? [])
+
   return Resources.BackgroundRuntime({ id, application: options.application, execution: options.execution, bindings })
 }
 
@@ -232,6 +238,7 @@ const durableFilesystem = (
   options: Readonly<Partial<{ lifecycle: InfrastructureLifecycle }>> = {},
 ) => {
   const resourceLifecycle = options.lifecycle ?? lifecycle()
+
   return Resources.DurableFilesystem({ id, lifecycle: resourceLifecycle })
 }
 
@@ -240,6 +247,7 @@ const objectStore = (
   options: Readonly<Partial<{ lifecycle: InfrastructureLifecycle }>> = {},
 ) => {
   const resourceLifecycle = options.lifecycle ?? lifecycle()
+
   return Resources.ObjectStore({ id, lifecycle: resourceLifecycle })
 }
 
@@ -251,6 +259,7 @@ const variable = (
   options: Readonly<Partial<{ defaultValue: string }>> = {},
 ) => {
   const defaultValue = Option.fromNullishOr(options.defaultValue)
+
   return Resources.Variable({ id, configurationKey, defaultValue })
 }
 

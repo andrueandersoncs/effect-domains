@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, Function, HashSet, Option, Record, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, HashSet, Option, Predicate, Record, Schema, pipe } from "effect"
 import { SqlClient, Statement } from "effect/unstable/sql"
 import { Page } from "./page.ts"
 import { RepositoryOrder, RepositorySelect } from "./repository-store.ts"
@@ -42,7 +42,7 @@ const StoredRangeBoundsSchema = Schema.Struct({
 
 const StoredRangeSchema = Schema.Record(Schema.String, StoredRangeBoundsSchema)
 const unknownEquals = Equivalence.strictEqual<unknown>()
-const stringEquals = Equivalence.strictEqual<string>()
+
 const directionEquals = Equivalence.strictEqual<"asc" | "desc">()
 
 const optionalFieldEntry = (schema: (field: string) => Schema.Constraint) => (field: string) =>
@@ -95,16 +95,21 @@ const make = <InputError, CodecError, CursorError>(
 
   const validateFilter = (field: string) => {
     if (HashSet.has(filterFields, field)) return Effect.void
+
     const error = definition.errors.filter(field)
+
     return Effect.fail(error)
   }
 
   const validateRange = (field: string) => {
     if (HashSet.has(rangeFields, field)) return Effect.void
+
     const error = definition.errors.range(field)
+
     return Effect.fail(error)
   }
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const prepare = Effect.fn("SqliteList.prepare")(function* (
     requestedFilter: StoredFilter,
     requestedRange: StoredRange,
@@ -115,6 +120,7 @@ const make = <InputError, CodecError, CursorError>(
 
     if (!isLimit(limit)) {
       const error = definition.errors.limit(definition.maximum)
+
       return yield* Effect.fail(error)
     }
 
@@ -147,14 +153,15 @@ const make = <InputError, CodecError, CursorError>(
 
       const actualFilter = JSON.stringify(state.filter)
       const actualRange = JSON.stringify(state.range)
-      const filterMatches = stringEquals(actualFilter, expectedFilter)
-      const rangeMatches = stringEquals(actualRange, expectedRange)
+      const filterMatches = Equivalence.strictEqual<string>()(actualFilter, expectedFilter)
+      const rangeMatches = Equivalence.strictEqual<string>()(actualRange, expectedRange)
       const filterMismatch = !filterMatches
       const rangeMismatch = !rangeMatches
       const mismatch = filterMismatch || rangeMismatch
 
       if (mismatch) {
         const error = definition.errors.cursorMismatch()
+
         return yield* Effect.fail(error)
       }
 
@@ -190,6 +197,7 @@ const make = <InputError, CodecError, CursorError>(
   ) {
     const stored = Array.take(rows, prepared.pageSize)
     const items = yield* decode(stored)
+
     if (rows.length <= prepared.pageSize) return { items, nextCursor: null }
 
     const lastOption = Array.last(stored)
@@ -261,10 +269,12 @@ const keysetFragment = (
     const equalities = Array.map(previous, previousClause)
     const comparison = comparisonClause(entry)
     const conditions = Array.append(equalities, comparison)
+
     return sql.and(conditions)
   }
 
   const clauses = Array.map(order, clause)
+
   return sql.or(clauses)
 }
 
@@ -280,10 +290,11 @@ const render = (
   const rangeEntries = Record.toEntries(query.range)
 
   const renderBounds = ([field, bounds]: readonly [string, StoredRange[string]]) => {
-    const hasFrom = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "from")
-    const hasTo = Record.has(bounds as Readonly<Record<"from" | "to", unknown>>, "to")
+    const hasFrom = Predicate.hasProperty(bounds, "from")
+    const hasTo = Predicate.hasProperty(bounds, "to")
     const lower = hasFrom ? Option.some(sql`${column(field)} >= ${bounds.from}`) : Option.none()
     const upper = hasTo ? Option.some(sql`${column(field)} <= ${bounds.to}`) : Option.none()
+
     return Array.getSomes([lower, upper])
   }
 
@@ -292,6 +303,7 @@ const render = (
 
   const withAfter = (after: StoredFilter) => {
     const keyset = keysetFragment(sql, column, query.order, after)
+
     return Array.append(predicates, keyset)
   }
 
@@ -306,11 +318,13 @@ const render = (
   const orderClause = ({ field, direction }: RepositoryOrder) => {
     const ascending = directionEquals(direction, "asc")
     const keyword = ascending ? "ASC" : "DESC"
+
     return sql`${column(field)} ${sql.literal(keyword)}`
   }
 
   const orderClauses = Array.map(query.order, orderClause)
   const order = sql.csv(orderClauses)
+
   return { where, order }
 }
 

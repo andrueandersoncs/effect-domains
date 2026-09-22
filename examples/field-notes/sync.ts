@@ -144,6 +144,7 @@ export const syncedNoteReplicaLayer = (replicaId: string) => {
 
 export const editSyncedNote = Effect.fn("FieldNotes.Sync.edit")(function* (edit: NoteEdit) {
   const write = yield* EventLog.makeClient(SyncedNoteEventLog)
+
   return yield* write("NoteEdited", edit)
 })
 
@@ -151,11 +152,13 @@ const eventLogEntries = Struct.get<EventLog.EventLog["Service"], "entries">("ent
 
 export const syncedNoteEntries = Effect.fn("FieldNotes.Sync.entries")(function* () {
   const eventLog = yield* EventLog.EventLog
+
   return yield* eventLogEntries(eventLog)
 })()
 
 export const findSyncedNote = Effect.fn("FieldNotes.Sync.findProjected")(function* (noteId: string) {
   const projection = yield* SyncedNoteProjection
+
   return yield* projection.find(noteId)
 })
 

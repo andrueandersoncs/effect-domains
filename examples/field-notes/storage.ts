@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer"
-import { Context, Effect, Equivalence, Option, Schema, SchemaAST, SchemaGetter, SchemaIssue, Struct, pipe } from "effect"
+import { Config, Context, Effect, Equivalence, Layer, Option, Schema, SchemaAST, SchemaGetter, SchemaIssue, Struct, pipe } from "effect"
 import { FieldReportSchema } from "./domain.ts"
 
 const EnvelopeVersion = "v1"
@@ -9,14 +9,14 @@ const KeyLength = 32
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
 
-export class FieldNoteEncryption extends Context.Service<FieldNoteEncryption, { readonly key: CryptoKey }>()("examples/field-notes/FieldNoteEncryption") {}
+class FieldNoteEncryption extends Context.Service<FieldNoteEncryption, { readonly key: CryptoKey }>()("examples/field-notes/FieldNoteEncryption") {}
 
 class FieldNoteEncryptionKeyError extends Schema.TaggedError<FieldNoteEncryptionKeyError>()(
   "FieldNoteEncryptionKeyError",
   { reason: Schema.String },
 ) {}
 
-export const makeFieldNoteEncryption = Effect.fn("FieldNoteEncryption.make")(function* (encodedKey: string) {
+const fieldNoteEncryption = Effect.fn("FieldNoteEncryption.make")(function* (encodedKey: string) {
   const material = Buffer.from(encodedKey, "base64url")
   const canonical = material.toString("base64url")
   const validEncoding = Equivalence.strictEqual<string>()(canonical, encodedKey)
@@ -38,6 +38,17 @@ export const makeFieldNoteEncryption = Effect.fn("FieldNoteEncryption.make")(fun
   return { key }
 })
 
+const encryptionKey = Config.string("FIELD_NOTES_ENCRYPTION_KEY")
+const configuredEncryption = Effect.flatMap(encryptionKey, fieldNoteEncryption)
+
+export const FieldNoteEncryptionLive = Layer.effect(FieldNoteEncryption, configuredEncryption)
+
+export const fieldNoteEncryptionLayer = (encodedKey: string) => {
+  const encryption = fieldNoteEncryption(encodedKey)
+
+  return Layer.effect(FieldNoteEncryption, encryption)
+}
+
 const invalidStoredBody = (value: string, options: SchemaAST.ParseOptions, expected: string) =>
   new SchemaIssue.InvalidValue({ expected }, value, options)
 
@@ -52,6 +63,7 @@ const decodePart = Effect.fn("StoredFieldReportBody.decodePart")(function* (
 
   if (!validEncoding) {
     const issue = invalidStoredBody(envelope, options, "a canonical Base64URL AES-GCM envelope")
+
     return yield* Effect.fail(issue)
   }
 
@@ -71,6 +83,7 @@ const decodeStoredBody = SchemaGetter.transformOrFail<string, string, FieldNoteE
 
     if (invalidEnvelope) {
       const issue = invalidStoredBody(value, options, "a versioned AES-GCM field-report envelope")
+
       return yield* Effect.fail(issue)
     }
 
@@ -84,6 +97,7 @@ const decodeStoredBody = SchemaGetter.transformOrFail<string, string, FieldNoteE
 
     if (invalidLengths) {
       const issue = invalidStoredBody(value, options, "an AES-GCM envelope with a 96-bit nonce and authentication tag")
+
       return yield* Effect.fail(issue)
     }
 
@@ -131,6 +145,7 @@ const encodeStoredBody = SchemaGetter.transformOrFail<string, string, FieldNoteE
 
     const encodedIv = Buffer.from(iv.buffer).toString("base64url")
     const encodedCiphertext = Buffer.from(ciphertext).toString("base64url")
+
     return `${EnvelopeVersion}.${encodedIv}.${encodedCiphertext}`
   }),
 )

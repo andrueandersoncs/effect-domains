@@ -45,6 +45,7 @@ const validateDeclarations = Effect.fn("Transitions.validateDeclarations")(funct
   declarations: TransitionDeclarations,
 ) {
   const entries = Record.toEntries(declarations)
+
   if (Array.isReadonlyArrayEmpty(entries)) return yield* definitionFailure(name, "must declare at least one transition")
 
   yield* Effect.forEach(entries, ([action, declaration]) => {
@@ -57,6 +58,7 @@ const validateDeclarations = Effect.fn("Transitions.validateDeclarations")(funct
     }
 
     const knownSources = Array.every(declaration.from, isStatus)
+
     return knownSources ? Effect.void : definitionFailure(name, `transition ${action} declares a status outside the status schema`)
   }, { discard: true })
 })
@@ -64,6 +66,7 @@ const validateDeclarations = Effect.fn("Transitions.validateDeclarations")(funct
 const freezeDeclaration = <Status extends string>(declaration: TransitionDeclaration<Status>) => {
   const copiedFrom = Array.copy(declaration.from)
   const from = Object.freeze(copiedFrom)
+
   return Object.freeze({ from, to: declaration.to })
 }
 
@@ -72,8 +75,9 @@ const allStrings = (values: ReadonlyArray<unknown>) => Array.every(values, Predi
 const stringValues = flow(arrayValues, Option.filter(Array.isReadonlyArrayNonEmpty), Option.exists(allStrings))
 
 const statusValues = (status: Schema.Schema<string>) => {
-  const document = Schema.toJsonSchemaDocument(status) as Readonly<{ readonly schema: Readonly<Record<string, unknown>> }>
-  const values = Record.get(document.schema, "enum")
+  const document = Schema.toJsonSchemaDocument(status)
+  const values = Predicate.hasProperty(document.schema, "enum") ? Option.some(document.schema.enum) : Option.none()
+
   return pipe(values, Option.filter(stringValues))
 }
 
@@ -90,16 +94,20 @@ const make = <
   type Action = Extract<keyof Declarations, string>
   type Target<A extends Action> = Declarations[A]["to"]
   type Applied<Row, A extends Action> = Omit<Row, Field> & Readonly<Record<Field, Target<A>>>
+
   const literals = statusValues(input.status)
 
   if (Option.isNone(literals)) {
     const invalidStatus = definitionFailure(input.name, "status must be a non-empty string literal schema")
+
     Effect.runSync(invalidStatus)
   }
 
   const isStatus = Schema.is(input.status)
   const validDeclarations = validateDeclarations(input.name, isStatus, input.transitions)
+
   Effect.runSync(validDeclarations)
+
   const tag = `Invalid${input.name}Transition` as const
 
   const ErrorSchema = Schema.TaggedError<Readonly<{
@@ -111,14 +119,18 @@ const make = <
   }>>()(tag, TransitionErrorFields)
 
   const frozenTransitions = Record.map(input.transitions, freezeDeclaration)
+  // SAFETY: The frozen map retains Declarations because Record.map preserves every key while freezing changes only mutability.
   const transitions = Object.freeze(frozenTransitions) as Declarations
+  // SAFETY: Every returned key is an Action because transitions has the exact Declarations key set.
   const actions = Record.keys(transitions) as Array<Action>
+  // SAFETY: The literals enumerate every Action because actions was derived from the exact Declarations key set.
   const ActionsSchema = Schema.Literals(actions) as Schema.Literals<ReadonlyArray<Action>>
 
   const invalid = (action: string, key: string, actual: string) =>
     ErrorSchema.make({ key, action, actual, message: `${input.name} ${key} cannot ${action} while ${actual}` })
 
   const allows = (actual: string) => (entry: TransitionDeclaration<Status["Type"]>) =>
+    // SAFETY: The status has the declared status type because callers pass the value read from the typed transition field.
     Array.contains(entry.from, actual as Status["Type"])
 
   const guard = <A extends Action>(action: A, key: string, actual: string): Effect.Effect<Target<A>, Schema.Schema.Type<typeof ErrorSchema>> => {
@@ -130,12 +142,14 @@ const make = <
       applicable,
       Option.match({
         onNone: () => Effect.fail(failure),
+        // SAFETY: The target belongs to action A because entry was selected from transitions by that action key.
         onSome: (entry) => Effect.succeed(entry.to as Target<A>),
       }),
     )
   }
 
   const applyTo = <Row extends Readonly<Record<Field, Status["Type"]>>, A extends Action>(row: Row) =>
+    // SAFETY: The result is Applied<Row, A> because Struct.assign updates exactly the declared transition field with Target<A>.
     (to: Target<A>) => Struct.assign(row, { [input.field]: to }) as Applied<Row, A>
 
   const apply = <A extends Action>(action: A, key: string) =>

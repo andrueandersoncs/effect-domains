@@ -7,4 +7,5 @@ export const LegacyDocumentSchema = Schema.Struct({
 })
 
 interface LegacyDocument extends Schema.Schema.Type<typeof LegacyDocumentSchema> {}
+
 export const LegacyDocumentsResource = Resource.define({ authorization: Authorization.public, name: "documents", schema: LegacyDocumentSchema, capabilities: [] })

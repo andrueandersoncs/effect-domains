@@ -8,6 +8,7 @@ const quoteLiteral = (value: string | number) => {
   if (Predicate.isString(value)) return `'${value.replaceAll("'", "''")}'`
 
   const finite = Schema.Finite.make(value)
+
   return String(finite)
 }
 
@@ -29,6 +30,7 @@ const typeCheck = (field: TableField) => {
   const column = quoteIdentifier(field.name)
   const accepted = acceptsFor(field.scalar)
   const expression = `typeof(${column}) ${accepted}`
+
   return field.nullable ? `CHECK (${column} IS NULL OR ${expression})` : `CHECK (${expression})`
 }
 
@@ -39,6 +41,7 @@ const renderCheck = (field: TableField) => (check: TableCheck) => {
   return pipe(Match.value(check), Match.tagsExhaustive({
     OneOf: ({ values }) => {
       const literals = pipe(values, Array.map(quoteLiteral), Array.join(", "))
+
       return `CHECK (${column} IN (${literals}))`
     },
     GreaterThan: ({ value }) => `CHECK (${column} > ${quoteLiteral(value)})`,
@@ -69,17 +72,20 @@ export const renderColumn = (field: TableField, primaryKey: boolean) => {
   const generated = Option.isSome(field.generation) ? ` ${uuidV7Default}` : ""
   const type = typeFor(field.scalar)
   const column = quoteIdentifier(field.name)
+
   return `${column} ${type}${primaryKeyConstraint}${nullability}${generated} ${constraints}`
 }
 
 const renderFields = (fields: ReadonlyArray<string>) => {
   const quoted = Array.map(fields, quoteIdentifier)
+
   return Array.join(quoted, ", ")
 }
 
 const renderUnique = (constraint: TableUnique) => {
   const fields = renderFields(constraint.fields)
   const name = quoteIdentifier(constraint.name)
+
   return `CONSTRAINT ${name} UNIQUE (${fields})`
 }
 
@@ -88,11 +94,13 @@ const renderForeignKey = (constraint: TableForeignKey) => {
   const referenceFields = renderFields(constraint.references.fields)
   const name = quoteIdentifier(constraint.name)
   const table = quoteIdentifier(constraint.references.table)
+
   return `CONSTRAINT ${name} FOREIGN KEY (${fields}) REFERENCES ${table} (${referenceFields})`
 }
 
 const renderTableColumn = (identifier: string) => (field: TableField) => {
   const primaryKey = primaryKeyFor(identifier)(field)
+
   return renderColumn(field, primaryKey)
 }
 
@@ -107,6 +115,7 @@ export const renderCreateTable = (table: TableSnapshot) => {
   const definitions = Array.appendAll(tableItems, foreignKeys)
   const rendered = Array.join(definitions, ", ")
   const name = quoteIdentifier(table.name)
+
   return `CREATE TABLE ${name} (${rendered})`
 }
 
@@ -114,6 +123,7 @@ export const renderIndex = (table: string) => (index: TableIndex) => {
   const name = quoteIdentifier(index.name)
   const tableName = quoteIdentifier(table)
   const fields = renderFields(index.fields)
+
   return `CREATE INDEX ${name} ON ${tableName} (${fields})`
 }
 

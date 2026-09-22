@@ -37,6 +37,7 @@ const call = Effect.fn("ApplicationUi.testCall")(function* (
 
   const response = yield* Effect.promise(() => handler(request))
   const decoded = yield* Effect.promise(() => response.json())
+
   return { status: response.status, body: decoded }
 })
 
@@ -44,7 +45,9 @@ const serverFor = Effect.fn("ApplicationUi.testServer")(function* (
   routes: Layer.Layer<never, unknown, HttpRouter.HttpRouter>,
 ) {
   const server = HttpRouter.toWebHandler(routes, { disableLogger: true })
+
   yield* Effect.addFinalizer(() => Effect.promise(server.dispose))
+
   return server.handler
 })
 
@@ -80,13 +83,18 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
     const handler = yield* serverFor(routes)
     const documentRequest = new Request("http://localhost/")
     const documentResponse = yield* Effect.promise(() => handler(documentRequest))
+
     expect(documentResponse.status).toBe(200)
+
     const document = yield* Effect.promise(() => documentResponse.text())
+
     expect(document).toContain('src="/client.js"')
 
     const metadataRequest = new Request("http://localhost/api")
     const metadataResponse = yield* Effect.promise(() => handler(metadataRequest))
+
     expect(metadataResponse.status).toBe(200)
+
     const metadata = yield* Effect.promise(() => metadataResponse.json())
 
     expect(metadata).toMatchObject({
@@ -98,6 +106,7 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
     })
 
     const denied = yield* call(handler, "mutate", null)
+
     expect(denied.status).toBe(422)
     expect(denied.body).toEqual({ error: { _tag: "Unauthenticated" } })
 
@@ -118,10 +127,12 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
 
     const foreignHeaders = HeaderValuesSchema.make({ ...alice, origin: "http://foreign.example" })
     const foreign = yield* call(handler, "mutate", null, foreignHeaders)
+
     expect(foreign.status).toBe(403)
 
     const nullOriginHeaders = HeaderValuesSchema.make({ ...alice, origin: "null" })
     const nullOrigin = yield* call(handler, "mutate", null, nullOriginHeaders)
+
     expect(nullOrigin.status).toBe(403)
 
     const reboundBody = JSON.stringify({ operation: "mutate", input: null })
@@ -137,18 +148,23 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
     })
 
     const rebound = yield* Effect.promise(() => handler(reboundRequest))
+
     expect(rebound.status).toBe(403)
 
     const initialWrites = yield* Ref.get(writes)
+
     expect(initialWrites).toBe(0)
 
     const accepted = yield* call(handler, "mutate", null, alice)
+
     expect(accepted.body).toEqual({ result: 1 })
 
     const unauthenticated = yield* call(handler, "mutate", null)
+
     expect(unauthenticated.status).toBe(422)
 
     const finalWrites = yield* Ref.get(writes)
+
     expect(finalWrites).toBe(1)
   }),
   Effect.scoped,
@@ -156,6 +172,7 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
 ))
 
 class TooEarly extends Schema.TaggedError<TooEarly>()("TooEarly", { at: Schema.Date }) {}
+
 const DateCodecSchema = Schema.toCodecJson(Schema.Date)
 const TooEarlyCodecSchema = Schema.toCodecJson(TooEarly)
 
@@ -185,25 +202,33 @@ it.effect("application UI preserves wire codecs and void while distinguishing va
     const handler = yield* serverFor(routes)
     const valid = "2026-09-09T00:00:00.000Z"
     const validResponse = yield* call(handler, "time", valid)
+
     expect(validResponse).toEqual({ status: 200, body: { result: valid } })
 
     const early = "2025-01-01T00:00:00.000Z"
     const earlyResponse = yield* call(handler, "time", early)
+
     expect(earlyResponse).toEqual({ status: 422, body: { error: { _tag: "TooEarly", at: early } } })
 
     const invalidDate = yield* call(handler, "time", "not a date")
+
     expect(invalidDate.status).toBe(400)
 
     const absent = yield* call(handler, "absent", null)
+
     expect(absent.status).toBe(400)
 
     const cleared = yield* call(handler, "clear", null)
+
     expect(cleared).toEqual({ status: 200, body: { result: null } })
 
     const defect = yield* call(handler, "broken", null)
+
     expect(defect.status).toBe(500)
+
     const serializedDefect = JSON.stringify(defect.body)
     const defectExpectation = expect(serializedDefect)
+
     defectExpectation.not.toContain("private database details")
   }),
   Effect.scoped,
@@ -220,6 +245,7 @@ it.effect("application UI isolates a slow call from an unrelated handler defect"
     const slowHandler = Effect.fn("ApplicationUi.testSlowHandler")(function* () {
       yield* Deferred.succeed(started, undefined)
       yield* Deferred.await(release)
+
       return "healthy"
     })
 
@@ -245,6 +271,7 @@ it.effect("application UI isolates a slow call from an unrelated handler defect"
     )
 
     yield* Deferred.await(started)
+
     const defectResponse = yield* call(handler, "defect", null)
 
     yield* Deferred.succeed(release, undefined)
@@ -319,6 +346,7 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const expected = Schema.toJsonSchemaDocument(Schema.toCodecJson(Schema.Union([probe.errorSchema, ...middlewareErrors])))
   const operationOption = Array.get(inspection.operations, 0)
   const operation = Option.getOrUndefined(operationOption)
+
   expect(operation?.name).toBe("probe")
   expect(operation?.error).toEqual(expected)
 })

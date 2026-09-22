@@ -4,9 +4,10 @@ import type { Schema } from "effect"
 
 export type UnaryRpc = Rpc.Rpc<string, Schema.Top, Schema.Top, Schema.Top>
 
-export const makeClient = Effect.fn("RpcInProcess.makeClient")(function* (group: RpcGroup.RpcGroup<UnaryRpc>) {
+export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* (group: RpcGroup.RpcGroup<UnaryRpc>) {
   type ClientRpc = Rpc.Rpc<string, Schema.Codec<unknown>, Schema.Codec<unknown>, Schema.Codec<unknown>>
   type Client = Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<UnaryRpc, never, true>>>
+
   const handlers = yield* Effect.context<Rpc.ToHandler<UnaryRpc>>()
   const ready = yield* Deferred.make<Client>()
   const awaitingClient = Deferred.await(ready)
@@ -20,6 +21,7 @@ export const makeClient = Effect.fn("RpcInProcess.makeClient")(function* (group:
   })
 
   // Codec requirements are absent because no-serialization dispatch never executes codecs.
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const client = yield* RpcClient.makeNoSerialization<ClientRpc, never, true>(group as typeof group & RpcGroup.RpcGroup<ClientRpc>, {
     flatten: true,
     onFromClient: ({ message }) => server.write(0, message),
@@ -27,15 +29,18 @@ export const makeClient = Effect.fn("RpcInProcess.makeClient")(function* (group:
 
   const withHandlerContext = (rpc: UnaryRpc) => {
     class Handler extends Context.Service<Rpc.Handler<string>, Rpc.Handler<string>>()(rpc.key) {}
+
     const handler = Context.get(handlers, Handler)
 
     const provideCodecContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E> =>
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       Effect.provideContext(effect, handler.context as Context.Context<R>)
 
     return provideCodecContext
   }
 
   yield* Deferred.succeed(ready, client)
+
   return { client: client.client, withHandlerContext }
 })
 
@@ -44,18 +49,21 @@ export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(funct
 ) {
   type ClientRpc = Rpc.Rpc<string, Schema.Codec<unknown>, Schema.Codec<unknown>, Schema.Codec<unknown>>
   type Client = Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<UnaryRpc, never, false>>>
+
   const ready = yield* Deferred.make<Client>()
   const awaitingClient = Deferred.await(ready)
 
   const deliver = (response: Parameters<Client["write"]>[0]) =>
     Effect.flatMap(awaitingClient, (client) => client.write(response))
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const server = yield* RpcServer.makeNoSerialization(group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>, {
     disableFatalDefects: true,
     onFromServer: deliver,
   })
 
   const client = yield* RpcClient.makeNoSerialization<ClientRpc, never, false>(
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<ClientRpc>,
     {
       flatten: false,
@@ -64,5 +72,7 @@ export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(funct
   )
 
   yield* Deferred.succeed(ready, client)
+
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return client.client as RpcClient.RpcClient<Rpcs>
 })

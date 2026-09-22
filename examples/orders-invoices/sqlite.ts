@@ -2,6 +2,7 @@ import { Effect, Equivalence, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlError, SqlSchema } from "effect/unstable/sql"
 import { ExampleRoles, ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { Command } from "effect-domains/command"
+import type { StructValue } from "effect-domains/domain"
 import { VersionConflict } from "effect-domains/repository-store"
 import { Resource } from "effect-domains/resource"
 import { Table } from "effect-domains/table"
@@ -33,7 +34,6 @@ import {
   OrderTransitions,
 } from "./resources.ts"
 
-type SqliteRow = Readonly<Record<string, unknown>>
 
 const ordersTable = Resource.table(OrdersResource)
 const orderLinesTable = Resource.table(OrderLinesResource)
@@ -44,55 +44,55 @@ const OrderSummaryInputSchema = Schema.Struct({
   tenantId: TenantIdSchema,
 })
 
-const OrderProjection = Table.project(ordersTable, [
-  "id",
-  "tenantId",
-  "number",
-  "customer",
-  "status",
-  "totalMinor",
-  "version",
-])
-
-const OrderLineProjection = Table.project(orderLinesTable, [
-  "id",
-  "tenantId",
-  "orderId",
-  "lineNumber",
-  "description",
-  "quantity",
-  "unitAmountMinor",
-])
-
-const InvoiceProjection = Table.project(invoicesTable, [
-  "id",
-  "tenantId",
-  "orderId",
-  "number",
-  "status",
-  "totalMinor",
-  "version",
-])
+const projections = {
+  order: Table.project(ordersTable, [
+    "id",
+    "tenantId",
+    "number",
+    "customer",
+    "status",
+    "totalMinor",
+    "version",
+  ]),
+  orderLine: Table.project(orderLinesTable, [
+    "id",
+    "tenantId",
+    "orderId",
+    "lineNumber",
+    "description",
+    "quantity",
+    "unitAmountMinor",
+  ]),
+  invoice: Table.project(invoicesTable, [
+    "id",
+    "tenantId",
+    "orderId",
+    "number",
+    "status",
+    "totalMinor",
+    "version",
+  ]),
+}
 
 const OrderSummaryProjectionSchema = pipe(
   Schema.Struct({
-    order: OrderProjection.json,
-    lines: Schema.fromJsonString(Schema.Array(OrderLineProjection.schema)),
-    invoice: Schema.NullOr(InvoiceProjection.json),
+    order: projections.order.json,
+    lines: Schema.fromJsonString(Schema.Array(projections.orderLine.schema)),
+    invoice: Schema.NullOr(projections.invoice.json),
   }),
   Schema.decodeTo(OrderSummary),
 )
 
-const orderSummaryForTenant = SqlSchema.findOneOption({
+const orderSummaryForTenant = /* SAFETY: The result type matches because the SQL projection and decoding schema define the same columns. */ SqlSchema.findOneOption({
   Request: OrderSummaryInputSchema,
   Result: OrderSummaryProjectionSchema,
   execute: Effect.fn("Billing.orderSummaryForTenant")(function* (input) {
     const sql = yield* SqlClient.SqlClient
 
-    return yield* sql<SqliteRow>`
-      SELECT ${OrderProjection.object(sql, "o")} AS ${sql("order")},
+    return yield* sql<StructValue>`
+      SELECT ${projections.order.object(sql, "o")} AS ${sql("order")},
         COALESCE((
-          SELECT json_group_array(${OrderLineProjection.object(sql, "l")})
+          SELECT json_group_array(${projections.orderLine.object(sql, "l")})
           FROM (
             SELECT * FROM ${sql(orderLinesTable.name)}
             WHERE ${sql("tenantId")} = o.${sql("tenantId")} AND ${sql("orderId")} = o.${sql("id")}
@@ -100,7 +100,7 @@ const orderSummaryForTenant = SqlSchema.findOneOption({
           ) l
         ), '[]') AS ${sql("lines")},
         (
-          SELECT ${InvoiceProjection.object(sql, "i")}
+          SELECT ${projections.invoice.object(sql, "i")}
           FROM ${sql(invoicesTable.name)} i
           WHERE i.${sql("tenantId")} = o.${sql("tenantId")} AND i.${sql("orderId")} = o.${sql("id")}
           LIMIT 1
@@ -138,7 +138,7 @@ const requireInvoice = Effect.fn("Billing.requireInvoice")(function* (invoiceId:
   )
 })
 
-const noLines = Equivalence.strictEqual<number>()
+
 const addLineErrorSchema = Schema.Union([OrderNotFound, OrderNotDraft, TotalOverflow, VersionConflict])
 
 const issueInvoiceErrorSchema = Schema.Union([
@@ -234,7 +234,7 @@ const issueInvoice = Command.implement(issueInvoiceSpec, Effect.fn("Billing.issu
 ) {
   const current = yield* requireOrder(input.orderId)
 
-  if (noLines(current.lines.length, 0)) {
+  if (Equivalence.strictEqual<number>()(current.lines.length, 0)) {
     return yield* InvoiceRequiresLines.make({ orderId: input.orderId })
   }
 

@@ -3,9 +3,13 @@ import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 
 const ScoredDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.String, score: Schema.Int })
+
 interface ScoredDocument extends Schema.Schema.Type<typeof ScoredDocumentSchema> {}
+
 const PolicyAuthorSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String, roles: Schema.Array(Schema.String) })
+
 interface PolicyAuthor extends Schema.Schema.Type<typeof PolicyAuthorSchema> {}
+
 const p = Authorization.for({ resource: ScoredDocumentSchema, subject: PolicyAuthorSchema })
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const owned = p.eq(p.row.ownerId, p.subject.userId)
@@ -13,7 +17,9 @@ const candidateOwned = p.eq(p.next.ownerId, p.subject.userId)
 const unchanged = p.unchanged("ownerId")
 
 const sharedTenant = p.sameAs("tenantId")
+
 void sharedTenant
+
 const policy = p.policy({ scope, allow: { read: owned, create: candidateOwned, patch: unchanged } })
 const typedAuthorizationCapabilities = [Resource.get()]
 
@@ -40,11 +46,14 @@ const BoundDocument = Resource.define({
 
 const BoundDocumentRepository = Resource.repository(BoundDocument)
 const boundCreate: Parameters<typeof BoundDocumentRepository.create>[0] = { score: 1 }
+
 void boundCreate
 
 // @ts-expect-error because subject-bound fields are not caller-controlled.
 const forgedBoundCreate: Parameters<typeof BoundDocumentRepository.create>[0] = { score: 1, ownerId: "forged" }
+
 void forgedBoundCreate
+
 const invalidSubjectBindingSources = { score: Resource.fromSubject(p.subject.userId) }
 
 const invalidSubjectBindingCreation = Resource.create({
@@ -80,6 +89,7 @@ Resource.define({
 })
 
 const NullableOwnerDocumentSchema = Schema.Struct({ tenantId: Schema.String, ownerId: Schema.NullOr(Schema.String), score: Schema.Int })
+
 interface NullableOwnerDocument extends Schema.Schema.Type<typeof NullableOwnerDocumentSchema> {}
 
 const nullableOwner = Authorization.for({ resource: NullableOwnerDocumentSchema, subject: PolicyAuthorSchema })
@@ -101,6 +111,7 @@ Resource.define({
 })
 
 const NullableBindingIdentitySchema = Schema.Struct({ userId: Schema.NullOr(Schema.String) })
+
 interface NullableBindingIdentity extends Schema.Schema.Type<typeof NullableBindingIdentitySchema> {}
 
 const nullableOwnerSubject = Authorization.for({ resource: ScoredDocumentSchema, subject: NullableBindingIdentitySchema })
@@ -143,6 +154,7 @@ p.policy({ scope: unchanged, allow: { read: owned } })
 const subject = Authorization.subject(PolicyAuthorSchema)
 const editorRole = subject.includes(subject.subject.roles, "editor")
 const canEdit = subject.policy(editorRole)
+
 p.policy({ scope: canEdit, allow: { read: canEdit } })
 // @ts-expect-error Because a subject policy cannot depend on a current resource row.
 subject.policy(owned)
@@ -153,6 +165,7 @@ subject.includes(subject.subject.roles, 1)
 
 const LiteralRolesSchema = Schema.Struct({ roles: Schema.Array(Schema.Literals(["reader", "editor"])) })
 const literalRoles = Authorization.subject(LiteralRolesSchema)
+
 literalRoles.includes(literalRoles.subject.roles, "reader")
 // @ts-expect-error Because a literal collection only includes members of its literal union.
 literalRoles.includes(literalRoles.subject.roles, "adnim")

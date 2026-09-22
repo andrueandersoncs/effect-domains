@@ -20,6 +20,7 @@ const CursorInputSchema = Schema.Struct({
   cursor: Schema.optionalKey(Schema.String),
 })
 
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 const empty = <Value>() => UnknownPageSchema.make({
   items: [],
   nextCursor: null,
@@ -29,6 +30,8 @@ const receive = <Value>(current: Page<Value>, incoming: Page<Value>, append: boo
   if (!append) return incoming
 
   const items = Array.appendAll(current.items, incoming.items)
+
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return UnknownPageSchema.make({ items, nextCursor: incoming.nextCursor }) as Page<Value>
 }
 

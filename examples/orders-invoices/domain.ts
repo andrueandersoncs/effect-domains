@@ -79,7 +79,9 @@ export const PayInvoiceInputSchema = Schema.Struct({
 })
 
 interface PayInvoiceInput extends Schema.Schema.Type<typeof PayInvoiceInputSchema> {}
+
 export const GetOrderInputSchema = Schema.Struct({ orderId: UuidV7Schema })
+
 interface GetOrderInput extends Schema.Schema.Type<typeof GetOrderInputSchema> {}
 
 export class OrderNotFound extends Schema.TaggedError<OrderNotFound>()(

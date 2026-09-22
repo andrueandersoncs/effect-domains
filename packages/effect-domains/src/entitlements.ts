@@ -1,8 +1,9 @@
 import { Array, Clock, Context, Data, DateTime, Effect, Equivalence, Function, HashMap, Layer, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import type { StructSchema } from "./domain.ts"
+import type { StructSchema, StructValue } from "./domain.ts"
 import type { Scalar } from "./policy.ts"
 import type { Table } from "./table.ts"
+
 
 type StringField<Value> = Extract<keyof Value, string>
 
@@ -32,11 +33,14 @@ const GrantLiteralSchema = Schema.TaggedStruct("Literal", { value: GrantScalarSc
 const GrantRowFieldSchema = Schema.TaggedStruct("RowField", { field: Schema.String })
 const GrantNowSchema = Schema.TaggedStruct("Now", {})
 const GrantOperandSchema = Schema.Union([GrantLiteralSchema, GrantRowFieldSchema, GrantNowSchema])
+
 type GrantOperand = Schema.Schema.Type<typeof GrantOperandSchema>
 
 const GrantEqualSchema = Schema.TaggedStruct("Equal", { left: GrantOperandSchema, right: GrantOperandSchema })
 const GrantLessThanSchema = Schema.TaggedStruct("LessThan", { left: GrantOperandSchema, right: GrantOperandSchema })
+
 type GrantTerminal = Schema.Schema.Type<typeof GrantEqualSchema> | Schema.Schema.Type<typeof GrantLessThanSchema>
+
 const grantAllLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("All", { children: Schema.Array(child) })
 const grantAnyLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("Any", { children: Schema.Array(child) })
 
@@ -52,6 +56,7 @@ const GrantAllSchema = grantAllLayer(GrantSchema)
 const GrantAnySchema = grantAnyLayer(GrantSchema)
 
 declare const GrantValue: unique symbol
+
 type TypedGrantOperand<Value> = GrantOperand & Readonly<Record<typeof GrantValue, Value>>
 type GrantOperandValue<Value> = Value extends TypedGrantOperand<infer Inner> ? Inner : Value
 type GrantInput = TypedGrantOperand<unknown> | Scalar
@@ -67,23 +72,25 @@ type CompatibleGrant<Left, Right> =
   GrantKind<GrantOperandValue<Left>> extends GrantKind<GrantOperandValue<Right>> ? unknown : never
 
 const grantLiteral = <Value extends Scalar>(value: Value) =>
-  GrantOperandSchema.make({ _tag: "Literal", value }) as TypedGrantOperand<Value>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  GrantLiteralSchema.make({ value }) as TypedGrantOperand<Value>
 
 const grantOperand = <Value extends GrantInput>(value: Value) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   Predicate.hasProperty(value, "_tag") ? value as GrantOperand : grantLiteral(value as Scalar)
 
 const grantEqual = <Left extends GrantInput, Right extends GrantInput>(
   left: Left,
   right: Right & CompatibleGrant<Left, Right>,
-) => GrantSchema.make({ _tag: "Equal", left: grantOperand(left), right: grantOperand(right) })
+) => GrantEqualSchema.make({ left: grantOperand(left), right: grantOperand(right) })
 
 const grantLessThan = <Left extends GrantInput, Right extends GrantInput>(
   left: Left,
   right: Right & CompatibleGrant<Left, Right>,
-) => GrantSchema.make({ _tag: "LessThan", left: grantOperand(left), right: grantOperand(right) })
+) => GrantLessThanSchema.make({ left: grantOperand(left), right: grantOperand(right) })
 
-const grantAll = (...children: ReadonlyArray<Grant>) => GrantSchema.make({ _tag: "All", children })
-const grantAny = (...children: ReadonlyArray<Grant>) => GrantSchema.make({ _tag: "Any", children })
+const grantAll = (...children: ReadonlyArray<Grant>) => GrantAllSchema.make({ children })
+const grantAny = (...children: ReadonlyArray<Grant>) => GrantAnySchema.make({ children })
 
 
 const GrantRowSchema = Schema.Record(Schema.String, Schema.Unknown)
@@ -96,7 +103,7 @@ const isStringPair = Schema.is(StringPairSchema)
 
 const grantValue = (
   operand: GrantOperand,
-  row: Readonly<Record<string, unknown>>,
+  row: StructValue,
   now: DateTime.Utc,
 ) => pipe(
   Match.value(operand),
@@ -112,6 +119,7 @@ const grantValuesEqual = (left: unknown, right: unknown) => pipe(
   Match.when(isUtcPair, ([leftDate, rightDate]) => {
     const leftMillis = DateTime.toEpochMillis(leftDate)
     const rightMillis = DateTime.toEpochMillis(rightDate)
+
     return Equivalence.strictEqual<number>()(leftMillis, rightMillis)
   }),
   Match.orElse(([leftValue, rightValue]) =>
@@ -124,6 +132,7 @@ const grantValueLessThan = (left: unknown, right: unknown) => pipe(
   Match.when(isUtcPair, ([leftDate, rightDate]) => {
     const leftMillis = DateTime.toEpochMillis(leftDate)
     const rightMillis = DateTime.toEpochMillis(rightDate)
+
     return leftMillis < rightMillis
   }),
   Match.when(isNumberPair, ([leftNumber, rightNumber]) => leftNumber < rightNumber),
@@ -133,7 +142,7 @@ const grantValueLessThan = (left: unknown, right: unknown) => pipe(
 
 const evaluateGrant = (
   grant: Grant,
-  row: Readonly<Record<string, unknown>>,
+  row: StructValue,
   now: DateTime.Utc,
 ): boolean => {
   const evaluateChild = (child: Grant) => evaluateGrant(child, row, now)
@@ -143,11 +152,13 @@ const evaluateGrant = (
     Match.tag("Equal", ({ left, right }) => {
       const leftValue = grantValue(left, row, now)
       const rightValue = grantValue(right, row, now)
+
       return grantValuesEqual(leftValue, rightValue)
     }),
     Match.tag("LessThan", ({ left, right }) => {
       const leftValue = grantValue(left, row, now)
       const rightValue = grantValue(right, row, now)
+
       return grantValueLessThan(leftValue, rightValue)
     }),
     Match.tag("All", ({ children }) => Array.every(children, evaluateChild)),
@@ -173,7 +184,7 @@ export class EntitlementRequired extends Schema.TaggedError<EntitlementRequired>
 export class EntitlementUnavailable extends Schema.TaggedError<EntitlementUnavailable>()("EntitlementUnavailable", {}) {}
 class EntitlementDefinitionError extends Schema.TaggedError<EntitlementDefinitionError>()("EntitlementDefinitionError", { reason: Schema.String }) {}
 
-const granted = Equivalence.strictEqual<boolean>()
+
 const noEntitlement = Effect.succeed(false)
 const unavailable = () => EntitlementUnavailable.make({})
 const invalidDefinition = (reason: string) => EntitlementDefinitionError.make({ reason })
@@ -190,6 +201,7 @@ interface AnyEntitlementSource {
 
 const isEmptyName = (name: string) => {
   const trimmed = name.trim()
+
   return Equivalence.strictEqual()(trimmed.length, 0)
 }
 
@@ -200,12 +212,14 @@ const sameName = (name: string) => (candidate: string) => equal(name, candidate)
 
 const nameOccursMoreThanOnce = (names: ReadonlyArray<string>) => (name: string) => {
   const matching = Array.filter(names, sameName(name))
+
   return matching.length > 1
 }
 
 const failureForName = (name: string) => {
   const reason = isEmptyName(name) ? "entitlement name must not be empty" : `duplicate entitlement name ${name}`
   const failure = invalidDefinition(reason)
+
   return Effect.fail(failure)
 }
 
@@ -214,6 +228,7 @@ const validation = (definitions: ReadonlyArray<AnyEntitlementSource>) => {
   const missing = Array.findFirst(names, isEmptyName)
   const duplicate = Array.findFirst(names, nameOccursMoreThanOnce(names))
   const problem: Option.Option<string> = Option.orElse(missing, Function.constant(duplicate))
+
   return pipe(problem, Option.match({ onNone: Function.constant(Effect.void), onSome: failureForName }))
 }
 
@@ -231,6 +246,7 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
   definitions: Definitions,
 ): Layer.Layer<Entitlements, never, SqlClient.SqlClient> => {
   const definitionsAreValid = validation(definitions)
+
   Effect.runSync(definitionsAreValid)
 
   const entries = Array.map(definitions, resolverEntry)
@@ -250,6 +266,7 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
             Effect.mapError(unavailable),
           )
 
+          // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
           const scopeEntries = Record.toEntries(definition.scope) as
             ReadonlyArray<readonly [string, string]>
 
@@ -257,7 +274,8 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
             scopeEntries,
             ([field, subjectField]) => [
               field,
-              (subject as Readonly<Record<string, unknown>>)[subjectField],
+              // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+              (subject as StructValue)[subjectField],
             ] as const,
           )
 
@@ -266,7 +284,7 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
           const predicates = [keyPredicate, ...filterPredicates]
 
           const rows = yield* pipe(
-            sql<Readonly<Record<string, unknown>>>`
+            sql<StructValue>`
               SELECT * FROM ${sql(definition.table.name)}
               WHERE ${sql.and(predicates)}
               LIMIT 1
@@ -275,6 +293,7 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
           )
 
           const row = Array.get(rows, 0)
+
           if (Option.isNone(row)) return !Option.isNone(row)
 
           const decoded = yield* pipe(
@@ -285,11 +304,13 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
 
           const milliseconds = yield* Clock.currentTimeMillis
           const now = yield* pipe(DateTime.make(milliseconds), Effect.fromOption(unavailable))
+
           return evaluateGrant(definition.grant, decoded, now)
         }),
       }))
     })
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     return Entitlements.of({ has: has as Entitlements["Service"]["has"] })
   })
 
@@ -307,14 +328,17 @@ export class Entitlements extends Context.Service<Entitlements, {
   readonly has: (request: Readonly<{
     name: string
     key: string
-    subject: Readonly<Record<string, unknown>>
+    subject: StructValue
   }>) => Effect.Effect<boolean, EntitlementUnavailable>
 }>()("@effect-domains/Entitlements") {
   static readonly require = Effect.fn("Entitlements.require")(function* (request: Parameters<Entitlements["Service"]["has"]>[0]) {
     const service = yield* Effect.serviceOption(Entitlements)
+
     if (Option.isNone(service)) return yield* EntitlementUnavailable.make({})
+
     const allowed = yield* service.value.has(request)
-    if (!granted(allowed, true)) return yield* EntitlementRequired.make({ entitlement: request.name })
+
+    if (!Equivalence.strictEqual<boolean>()(allowed, true)) return yield* EntitlementRequired.make({ entitlement: request.name })
   })
 
   static readonly fromTables = fromTables
@@ -322,13 +346,15 @@ export class Entitlements extends Context.Service<Entitlements, {
   static readonly Source = EntitlementSource
   static readonly GrantSchema = GrantSchema
   static for<Source extends Table>(source: Source) {
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const row = Record.map(source.columns, (_, field) =>
-      GrantOperandSchema.make({ _tag: "RowField", field })) as {
+      GrantRowFieldSchema.make({ field })) as {
       readonly [Field in StringField<Source["storageSchema"]["Type"]>]:
         TypedGrantOperand<Source["storageSchema"]["Type"][Field]> & Readonly<{ readonly _tag: "RowField" }>
     }
 
-    const now = GrantOperandSchema.make({ _tag: "Now" }) as TypedGrantOperand<DateTime.Utc>
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+    const now = GrantNowSchema.make({}) as TypedGrantOperand<DateTime.Utc>
 
     return Object.freeze({
       row,

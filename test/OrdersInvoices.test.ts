@@ -10,13 +10,16 @@ import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { BillingApplication } from "@effect-domains/example-orders-invoices/application"
 import { BillingMigrations } from "@effect-domains/example-orders-invoices/migrations"
 import { InvoiceNumberSchema, OrderNumberSchema } from "@effect-domains/example-orders-invoices/domain"
+
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: BillingMigrations })
 const orderNumber = OrderNumberSchema.make("SO-1")
 const invoiceNumber = InvoiceNumberSchema.make("INV-1")
 
 const billingTest = Effect.gen(function* () {
   const schemaStore = yield* SchemaStore
+
   yield* Application.prepare(BillingApplication, schemaStore)
+
   const client = yield* RpcTest.makeClient(BillingApplication.group)
   const alice = yield* sessionFor("alice")
   const reader = yield* sessionFor("bob")
@@ -24,13 +27,17 @@ const billingTest = Effect.gen(function* () {
   const database = yield* SqlClient.SqlClient
   const aliceOrder = yield* client["billing.createOrder"]({ number: orderNumber, customer: "Alice customer" }, { headers: alice })
   const outsiderOrder = yield* client["billing.createOrder"]({ number: orderNumber, customer: "Other customer" }, { headers: outsider })
+
   expect(aliceOrder.number).toBe(outsiderOrder.number)
   expect(aliceOrder.tenantId).toBe("acme")
   expect(outsiderOrder.tenantId).toBe("other")
+
   const readerOrder = yield* client["orders.get"]({ id: aliceOrder.id }, { headers: reader })
+
   expect(readerOrder.id).toBe(aliceOrder.id)
 
   const hiddenGeneratedRead = yield* pipe(client["orders.get"]({ id: aliceOrder.id }, { headers: outsider }), Effect.result)
+
   expect(hiddenGeneratedRead).toMatchObject({ _tag: "Failure", failure: { _tag: "ResourceNotFound" } })
 
 
@@ -105,6 +112,7 @@ const billingTest = Effect.gen(function* () {
   `, Effect.result)
 
   const foreignKeyRejected = Result.isFailure(forgedLine)
+
   expect(foreignKeyRejected).toBe(true)
 
   yield* database`CREATE TRIGGER reject_invoice BEFORE INSERT ON invoices BEGIN SELECT RAISE(ABORT, 'reject invoice'); END`
@@ -119,6 +127,7 @@ const billingTest = Effect.gen(function* () {
   yield* database`DROP TRIGGER reject_invoice`
 
   const afterRollback = yield* client["billing.getOrder"]({ orderId: aliceOrder.id }, { headers: alice })
+
   expect(afterRollback.order.status).toBe("draft")
   expect(afterRollback.order.version).toBe(2)
   expect(afterRollback.invoice).toBeNull()
@@ -134,6 +143,7 @@ const billingTest = Effect.gen(function* () {
 
 
   const paid = yield* client["billing.payInvoice"]({ invoiceId: invoice.id, expectedVersion: 1 }, { headers: alice })
+
   expect(paid.status).toBe("paid")
   expect(paid.version).toBe(2)
 

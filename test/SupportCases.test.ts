@@ -18,7 +18,9 @@ const sqlite = SqliteBunRuntime.sqlClient(":memory:", {
 
 const supportCasesTest = Effect.gen(function* () {
   const schemaStore = yield* SchemaStore
+
   yield* Application.prepare(SupportCasesApplication, schemaStore)
+
   const client = yield* RpcTest.makeClient(SupportCasesApplication.group)
   const database = yield* SqlClient.SqlClient
   const readerSession = yield* sessionFor("bob")
@@ -112,6 +114,7 @@ const supportCasesTest = Effect.gen(function* () {
   expect(interrupted).toMatchObject({ _tag: "Failure", failure: { _tag: "SupportCasesUnavailable" } })
 
   const afterRollback = yield* client["support_cases.get"]({ id: opened.id })
+
   expect(afterRollback.status).toBe("assigned")
   expect(afterRollback.version).toBe(3)
 
@@ -128,11 +131,14 @@ const supportCasesTest = Effect.gen(function* () {
   expect(resolved.version).toBe(4)
 
   const detail = yield* client["support.caseDetail"]({ caseId: opened.id })
+
   expect(detail.case).toEqual(resolved)
   expect(detail.customer.name).toBe("Acme Industries")
   expect(detail.agent).toMatchObject({ id: "sam", name: "Sam", onDuty: true })
+
   const eventKinds = Array.map(detail.events, Struct.get("kind"))
   const lastEvent = Array.last(detail.events)
+
   expect(eventKinds).toEqual(["opened", "triaged", "assigned", "resolved"])
   expect(lastEvent).toMatchObject({ _tag: "Some", value: { note: "Export permission repaired." } })
 
@@ -147,7 +153,9 @@ const supportCasesTest = Effect.gen(function* () {
   }), Effect.result)
 
   expect(auditInterrupted).toMatchObject({ _tag: "Failure", failure: { _tag: "SupportCasesUnavailable" } })
+
   const afterAuditRollback = yield* client["support_cases.get"]({ id: opened.id })
+
   expect(afterAuditRollback).toMatchObject({ status: "resolved", version: 4 })
   yield* database`DROP TRIGGER reject_case_audit`
 
@@ -165,30 +173,41 @@ const supportCasesTest = Effect.gen(function* () {
   )
 
   expect(deniedAudit).toMatchObject({ _tag: "Failure", failure: { _tag: "Forbidden" } })
+
   const audit = yield* client["support.auditTrail"]({ caseId: opened.id }, { headers: adminSession })
+
   expect(audit).toHaveLength(4)
+
   const actions = Array.map(audit, Struct.get("action"))
+
   expect(actions).toEqual(["open", "triage", "assign", "resolve"])
+
   const sameString = Equivalence.strictEqual<string>()
 
   const validAuditEvent = (event: typeof audit[number]) => {
     const publicActor = sameString(event.actorId, "public-api")
     const succeeded = sameString(event.outcome, "succeeded")
+
     return publicActor && succeeded
   }
 
   const validAudit = Array.every(audit, validAuditEvent)
+
   expect(validAudit).toBe(true)
+
   const auditIds = Array.map(audit, Struct.get("id"))
   const distinctIds = HashSet.fromIterable(auditIds)
   const distinctAuditCount = HashSet.size(distinctIds)
+
   expect(distinctAuditCount).toBe(4)
+
   const inspection = ApplicationInspect.describe(SupportCasesApplication)
 
   const auditOperation = (operation: typeof inspection.operations[number]) =>
     operation.name.startsWith("support_case_audits.")
 
   const exposesAuditResource = Array.some(inspection.operations, auditOperation)
+
   expect(exposesAuditResource).toBe(false)
 })
 
@@ -215,7 +234,9 @@ it.effect("persists application-owned audit evidence across a database restart",
   yield* pipe(
     Effect.gen(function* () {
       const schemaStore = yield* SchemaStore
+
       yield* Application.prepare(SupportCasesApplication, schemaStore)
+
       const sql = yield* SqlClient.SqlClient
 
       yield* sql`INSERT INTO support_case_audits
@@ -230,8 +251,11 @@ it.effect("persists application-owned audit evidence across a database restart",
   const persisted = yield* pipe(
     Effect.gen(function* () {
       const schemaStore = yield* SchemaStore
+
       yield* Application.prepare(SupportCasesApplication, schemaStore)
+
       const sql = yield* SqlClient.SqlClient
+
       return yield* sql<{ readonly id: string }>`SELECT id FROM support_case_audits WHERE id = 'restart-audit'`
     }),
     Effect.provide(databaseLayer),

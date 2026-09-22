@@ -107,14 +107,16 @@ export const ReportExportExecutionStatusSchema = Schema.Literals([
   "failed",
 ])
 
-export const ReportExportPollResultSchema = Schema.Union([
-  Schema.TaggedStruct("Unknown", {}),
-  Schema.TaggedStruct("Pending", { stage: ReportExportExecutionStatusSchema }),
-  Schema.TaggedStruct("Recoverable", { reason: Schema.String }),
-  Schema.TaggedStruct("Succeeded", ReportArtifactSchema.fields),
-  Schema.TaggedStruct("Cancelled", {}),
-  Schema.TaggedStruct("Failed", { reason: Schema.String }),
-])
+const ReportExportPollResultCases = {
+  Unknown: {},
+  Pending: { stage: ReportExportExecutionStatusSchema },
+  Recoverable: { reason: Schema.String },
+  Succeeded: ReportArtifactSchema.fields,
+  Cancelled: {},
+  Failed: { reason: Schema.String },
+}
+
+export const ReportExportPollResultSchema = Schema.TaggedUnion(ReportExportPollResultCases)
 
 export class ReportExportNotFound extends Schema.TaggedError<ReportExportNotFound>()(
   "ReportExportNotFound",

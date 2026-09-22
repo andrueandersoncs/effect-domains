@@ -7,7 +7,6 @@ import { CollectedSignal, decodeSignalBody, telemetryCollector } from "./telemet
 
 const applicationDefinition = Application.define({ name: "telemetry-privacy-test", parts: [] })
 const application = Effect.runSync(Application.compile(applicationDefinition))
-const sameString = Equivalence.strictEqual<string>()
 
 class OtlpAttribute extends Schema.Class<OtlpAttribute>("OtlpAttribute")({
   key: Schema.String,
@@ -54,8 +53,8 @@ const OtlpMetricsJsonSchema = Schema.fromJsonString(OtlpMetrics)
 const decodeMetrics = Schema.decodeUnknownEffect(OtlpMetricsJsonSchema)
 const trimJson = (json: string) => json.trim()
 const parseMetrics = flow(trimJson, decodeMetrics)
-const hasMetricsPath = (signal: CollectedSignal) => sameString(signal.path, "/v1/metrics")
-const hasRpcMetricName = (metric: OtlpMetric) => sameString(metric.name, "rpc.server.call.duration")
+const hasMetricsPath = (signal: CollectedSignal) => Equivalence.strictEqual<string>()(signal.path, "/v1/metrics")
+const hasRpcMetricName = (metric: OtlpMetric) => Equivalence.strictEqual<string>()(metric.name, "rpc.server.call.duration")
 const dataPoints = (metric: OtlpMetric) => metric.histogram?.dataPoints ?? []
 const serializeOtlpdatapoint = (point: OtlpDataPoint) => JSON.stringify(point.attributes)
 
@@ -124,6 +123,7 @@ it.effect("keeps generated telemetry payload-free and metric cardinality operati
   const decodedBodies = Array.map(bodies, decodeSignalBody)
   const serialized = Array.join(decodedBodies, "\n")
   const serializedAssertion = expect(serialized)
+
   serializedAssertion.not.toContain("private-id-")
   serializedAssertion.not.toContain("private-token-")
   serializedAssertion.not.toContain("private.example")
@@ -142,10 +142,12 @@ it.effect("keeps generated telemetry payload-free and metric cardinality operati
   const serializedPoints = Array.map(rpcPoints, serializeOtlpdatapoint)
   const series = HashSet.fromIterable(serializedPoints)
   const seriesCount = HashSet.size(series)
+
   expect(seriesCount).toBe(1)
 
   const firstPoint = pipe(Array.head(rpcPoints), Option.getOrThrow)
   const keys = Array.map(firstPoint.attributes, Struct.get("key"))
   const sortedKeys = Array.sort(keys, Order.String)
+
   expect(sortedKeys).toEqual(["rpc.method", "rpc.system.name", "unit"])
 }))

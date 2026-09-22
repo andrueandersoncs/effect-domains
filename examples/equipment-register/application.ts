@@ -4,4 +4,7 @@ import { Effect } from "effect"
 
 const parts = [Part.resource(AssetsResource)]
 const equipmentRegister = Application.define({ name: "equipment-register", parts })
-export const EquipmentRegisterApplication = Effect.runSync(Application.compile(equipmentRegister))
+const equipmentRegisterCompiler = Application.compile(equipmentRegister)
+const equipmentRegisterApplication = Effect.runSync(equipmentRegisterCompiler)
+
+export { equipmentRegisterApplication as EquipmentRegisterApplication }

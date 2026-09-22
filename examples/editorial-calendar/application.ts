@@ -4,4 +4,7 @@ import { Effect } from "effect"
 
 const parts = [Part.resource(DocumentsResource)]
 const editorialCalendar = Application.define({ name: "editorial-calendar", parts })
-export const EditorialCalendarApplication = Effect.runSync(Application.compile(editorialCalendar))
+const editorialCalendarCompiler = Application.compile(editorialCalendar)
+const editorialCalendarApplication = Effect.runSync(editorialCalendarCompiler)
+
+export { editorialCalendarApplication as EditorialCalendarApplication }

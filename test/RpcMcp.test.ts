@@ -20,11 +20,13 @@ const send = Effect.fn("RpcMcp.testSend")(function* (
 ) {
   const body = JSON.stringify(message)
   const request = new Request("http://localhost/mcp", { method: "POST", headers, body })
+
   return yield* Effect.promise(() => handler(request))
 })
 
 const decode = Effect.fn("RpcMcp.testDecode")(function* <S extends Schema.Constraint>(response: Response, schema: S) {
   const text = yield* Effect.promise(() => response.text())
+
   return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text)
 })
 
@@ -41,16 +43,22 @@ const openSession = Effect.fn("RpcMcp.testOpenSession")(function* (
   })
 
   expect(response.status).toBe(200)
+
   const sessionId = yield* pipe(response.headers.get("mcp-session-id"), Option.fromNullishOr, Effect.fromOption)
+
   headers.set("mcp-session-id", sessionId)
   headers.set("mcp-protocol-version", "2025-11-25")
   yield* send(handler, headers, { jsonrpc: "2.0", method: "notifications/initialized" })
+
   return headers
 })
 
 const CallResponseSchema = Schema.Struct({ result: McpSchema.CallToolResult })
+
 interface CallResponse extends Schema.Schema.Type<typeof CallResponseSchema> {}
+
 const ListResponseSchema = Schema.Struct({ result: Schema.Struct({ tools: Schema.Array(McpSchema.Tool) }) })
+
 interface ListResponse extends Schema.Schema.Type<typeof ListResponseSchema> {}
 
 const call = Effect.fn("RpcMcp.testCall")(function* (
@@ -63,16 +71,20 @@ const call = Effect.fn("RpcMcp.testCall")(function* (
   input: Schema.Json,
 ) {
   const response = yield* send(handler, headers, { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: { input } } })
+
   return yield* decode(response, CallResponseSchema)
 })
 
 const makeServer = Effect.fn("RpcMcp.testMakeServer")(function* (routes: Layer.Layer<never, unknown, HttpRouter.HttpRouter>) {
   const server = HttpRouter.toWebHandler(routes, { disableLogger: true })
+
   yield* Effect.addFinalizer(() => Effect.promise(server.dispose))
+
   return server
 })
 
 class TimeUnavailable extends Schema.TaggedError<TimeUnavailable>()("TimeUnavailable", { at: Schema.Date }) {}
+
 const DateCodecSchema = Schema.toCodecJson(Schema.Date)
 const TimeUnavailableCodecSchema = Schema.toCodecJson(TimeUnavailable)
 
@@ -103,6 +115,7 @@ const clockRoutes = pipe(
 )
 
 const preservesCodecService = true satisfies Types.Equals<Layer.Services<typeof clockRoutes>, HttpRouter.HttpRouter | StoragePrefix>
+
 void preservesCodecService
 
 it.effect("MCP discovers codecs and preserves scalar, array, void, and declared error results", () => pipe(
@@ -115,23 +128,36 @@ it.effect("MCP discovers codecs and preserves scalar, array, void, and declared 
     const listed: ListResponse = yield* decode(discovery, ListResponseSchema)
     const isTime = (tool: McpSchema.Tool) => Equivalence.strictEqual<string>()(tool.name, "clock.time")
     const timeTool = yield* pipe(listed.result.tools, Array.findFirst(isTime), Effect.fromOption)
+
     expect(timeTool?.inputSchema.properties?.input).toMatchObject({ type: "string" })
     expect(timeTool?.outputSchema?.properties?.result).toMatchObject({ type: "string" })
+
     const at = "2026-02-03T04:05:06.000Z"
     const success: CallResponse = yield* call(server.handler, headers, 3, "clock.time", at)
+
     expect(success.result.structuredContent).toEqual({ result: at })
     expect(success.result.content).toEqual([{ type: "text", text: `{"result":"${at}"}` }])
+
     const array = yield* call(server.handler, headers, 4, "clock.list", null)
+
     expect(array.result.structuredContent).toEqual({ result: ["one", "two"] })
+
     const cleared = yield* call(server.handler, headers, 5, "clock.clear", null)
+
     expect(cleared.result.structuredContent).toEqual({ result: null })
+
     const rejected = yield* call(server.handler, headers, 6, "clock.time", "2025-01-01T00:00:00.000Z")
+
     expect(rejected.result.isError).toBe(true)
     expect(rejected.result.content).toEqual([{ type: "text", text: '{"_tag":"TimeUnavailable","at":"2025-01-01T00:00:00.000Z"}' }])
+
     const defect = yield* call(server.handler, headers, 7, "clock.broken", null)
+
     expect(defect.result.isError).toBe(true)
+
     const defectText = JSON.stringify(defect)
     const leaked = defectText.includes("private database credential")
+
     expect(leaked).toBe(false)
 
     const invalidResponse = yield* send(server.handler, headers, {
@@ -139,8 +165,11 @@ it.effect("MCP discovers codecs and preserves scalar, array, void, and declared 
     })
 
     const invalid = yield* decode(invalidResponse, CallResponseSchema)
+
     expect(invalid.result.isError).toBe(true)
+
     const transformed = yield* call(server.handler, headers, 9, "clock.wire", "wire:canonical")
+
     expect(transformed.result.structuredContent).toEqual({ result: "wire:canonical!" })
   }),
   Effect.scoped,
@@ -223,13 +252,18 @@ it.effect("MCP authenticates each call rather than trusting sessions or captured
     const server = yield* makeServer(routes)
     const headers = yield* openSession(server.handler)
     const anonymous = yield* call(server.handler, headers, 2, "identity.subject", null)
+
     expect(anonymous.result.isError).toBe(true)
     expect(anonymous.result.content).toEqual([{ type: "text", text: '{"_tag":"Unauthenticated"}' }])
+
     const aliceSession = yield* sessionFor("alice")
     const bobSession = yield* sessionFor("bob")
     const alice = new globalThis.Headers(headers)
+
     alice.set("authorization", aliceSession.authorization)
+
     const bob = new globalThis.Headers(headers)
+
     bob.set("authorization", bobSession.authorization)
 
     const aliceCall = call(server.handler, alice, 3, "identity.subject", null)
@@ -238,12 +272,18 @@ it.effect("MCP authenticates each call rather than trusting sessions or captured
 
     expect(results.alice.result.structuredContent).toMatchObject({ result: { userId: "alice", roles: ["editor"] } })
     expect(results.bob.result.structuredContent).toMatchObject({ result: { userId: "bob", roles: ["reader"] } })
+
     const unauthenticatedAgain = yield* call(server.handler, headers, 5, "identity.subject", null)
+
     expect(unauthenticatedAgain.result.isError).toBe(true)
+
     const unconfigured = yield* makeServer(identityRoutes)
     const unconfiguredHeaders = yield* openSession(unconfigured.handler)
+
     unconfiguredHeaders.set("authorization", aliceSession.authorization)
+
     const missingAuthenticator = yield* call(unconfigured.handler, unconfiguredHeaders, 2, "identity.subject", null)
+
     expect(missingAuthenticator.result.content).toEqual([{ type: "text", text: '{"_tag":"Unauthenticated"}' }])
   }),
   Effect.scoped,
@@ -258,6 +298,7 @@ it.effect("MCP closes handler scopes after success and failure without closing t
 
     const handler = Effect.fn("RpcMcp.scope")(function* (fail: boolean) {
       yield* Effect.addFinalizer(() => Ref.update(released, (count) => count + 1))
+
       if (fail) return yield* Effect.fail("rejected")
     })
 
@@ -275,14 +316,19 @@ it.effect("MCP closes handler scopes after success and failure without closing t
     const headers = yield* openSession(server.handler)
     const first = yield* call(server.handler, headers, 2, "scope", false)
     const afterFirst = yield* Ref.get(released)
+
     expect(first.result.isError).toBe(false)
     expect(afterFirst).toBe(1)
+
     const failed = yield* call(server.handler, headers, 3, "scope", true)
     const afterFailure = yield* Ref.get(released)
+
     expect(failed.result.isError).toBe(true)
     expect(afterFailure).toBe(2)
+
     const next = yield* call(server.handler, headers, 4, "scope", false)
     const afterNext = yield* Ref.get(released)
+
     expect(next.result.isError).toBe(false)
     expect(afterNext).toBe(3)
   }),

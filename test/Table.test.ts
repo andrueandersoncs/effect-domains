@@ -28,9 +28,12 @@ describe("Table", () => {
   })
 
   interface Event extends Schema.Schema.Type<typeof EventSchema> {}
+
   const Events = Table.make({ name: "events", schema: EventSchema })
   const DateSchema = Schema.Struct({ date: Schema.DateFromString })
+
   interface Date extends Schema.Schema.Type<typeof DateSchema> {}
+
   const Dates = Table.make({ name: "dates", schema: DateSchema })
 
   const OrderedFieldsSchema = Schema.Struct({
@@ -45,10 +48,13 @@ describe("Table", () => {
   )
 
   const OrderedSchema = OrderedFieldsSchema.check(orderedFilter)
+
   interface Ordered extends Schema.Schema.Type<typeof OrderedSchema> {}
+
   const Ordered = Table.make({ name: "ordered", schema: OrderedSchema })
   const NullableOptionSchema = Schema.OptionFromNullOr(Schema.String)
   const NullableOptionsSchema = Schema.Struct({ value: NullableOptionSchema })
+
   interface NullableOptions extends Schema.Schema.Type<typeof NullableOptionsSchema> {}
 
   const NullableOptionsTable = Table.make({
@@ -85,6 +91,7 @@ describe("Table", () => {
   )
 
   const UnicodeLabelsSchema = Schema.Struct({ label: UnicodeLabelSchema })
+
   interface UnicodeLabels extends Schema.Schema.Type<typeof UnicodeLabelsSchema> {}
 
   const UnicodeLabels = Resource.define({ name: "unicode_labels",
@@ -92,6 +99,7 @@ describe("Table", () => {
   authorization: Authorization.public, capabilities: [],  })
 
   const NumberStringsSchema = Schema.Struct({ value: Schema.NumberFromString })
+
   interface NumberStrings extends Schema.Schema.Type<typeof NumberStringsSchema> {}
 
   const NumberStrings = Table.make({
@@ -145,11 +153,15 @@ describe("Table", () => {
       storedInsertExpectation.not.toHaveProperty("id")
       expect(decodedInsert).toEqual(insert)
       expect(typeof storedDate.date).toBe("string")
+
       const decodedDateMillis = decodedDate.date.getTime()
       const expectedDateMillis = Date.parse("2025-01-02T00:00:00.000Z")
+
       expect(decodedDateMillis).toBe(expectedDateMillis)
       expect(storedNone).toEqual({ value: null })
+
       const expectedSome = Option.some("retained")
+
       expect(loadedSome).toEqual({ value: expectedSome })
     }),
   )
@@ -182,6 +194,7 @@ describe("Table", () => {
     "preserves root struct checks after compiling storage fields",
     Effect.fn("Table.preservesRootStructChecks")(function* () {
       const UncheckedOrderedRowSchema = Schema.Struct(Ordered.rowSchema.fields)
+
       interface UncheckedOrderedRow extends Schema.Schema.Type<typeof UncheckedOrderedRowSchema> {}
 
       const invalidRow = UncheckedOrderedRowSchema.make({
@@ -247,8 +260,10 @@ describe("Table", () => {
   it.effect("preserves canonical Unicode length semantics through SQLite", () => pipe(
     Effect.gen(function* () {
       yield* prepareTables([unicodeLabelsTable])
+
       const created = yield* Resource.repository(UnicodeLabels).create({ label: "😀" })
       const loaded = yield* Resource.repository(UnicodeLabels).get(created.id)
+
       expect(loaded.label).toBe("😀")
     }),
     Effect.provide(sqlite),
@@ -268,6 +283,7 @@ describe("Table", () => {
     })
 
     interface Algebra extends Schema.Schema.Type<typeof AlgebraSchema> {}
+
     const compiled = Table.make({ name: "algebra", schema: AlgebraSchema })
     const fields = Array.drop(compiled.fields, 1)
 
@@ -320,6 +336,7 @@ describe("Table", () => {
       const childSnapshot = Table.snapshot(child)
       const relationSnapshots = [parentSnapshot, childSnapshot]
       const relationsValidation = Table.validateRelations(relationSnapshots)
+
       Effect.runSync(relationsValidation)
 
       expect(parentSnapshot.relations).toMatchObject({
@@ -338,6 +355,7 @@ describe("Table", () => {
       const invalidParent = Table.make({ name: "scoped_parents", schema: ParentSchema })
       const invalidParentSnapshot = Table.snapshot(invalidParent)
       const invalidRelations = Table.validateRelations([invalidParentSnapshot, childSnapshot])
+
       expect(() => Effect.runSync(invalidRelations)).toThrow()
     }))
 
@@ -355,6 +373,7 @@ describe("Table", () => {
     })
 
     const rendered = renderColumn(field, false)
+
     expect(rendered).toBe(`"value" REAL NOT NULL CHECK (typeof("value") IN ('integer', 'real')) CHECK ("value" > 0) CHECK ("value" >= 1) CHECK ("value" < 10) CHECK ("value" <= 9) CHECK ("value" IN (1, 'a''b')) CHECK (length("value") >= 1) CHECK (length("value") <= 9)`)
   }))
 
@@ -366,18 +385,24 @@ describe("Table", () => {
       })
 
       interface Bounds extends Schema.Schema.Type<typeof BoundsSchema> {}
+
       const bounds = Table.make({ name: "bounds", schema: BoundsSchema })
+
       yield* prepareTables([bounds])
+
       const sql = yield* SqlClient.SqlClient
       const created = yield* sql`INSERT INTO bounds (value, state) VALUES (1, 'queued') RETURNING *`
       const row = Array.head(created)
       const stored = Option.getOrThrow(row)
       const decoded = yield* Schema.decodeUnknownEffect(bounds.storageSchema)(stored)
+
       expect(decoded.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+
       const lower = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (0, 'queued')`)
       const upper = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (3, 'queued')`)
       const integer = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (1.5, 'queued')`)
       const enumeration = yield* Effect.result(sql`INSERT INTO bounds (value, state) VALUES (1, 'invalid')`)
+
       expect(lower._tag).toBe("Failure")
       expect(upper._tag).toBe("Failure")
       expect(integer._tag).toBe("Failure")
@@ -397,21 +422,33 @@ describe("Table", () => {
       })
 
       interface Ambiguous extends Schema.Schema.Type<typeof AmbiguousSchema> {}
+
       const OptionalNameSchema = Schema.optionalKey(Schema.String)
       const OptionalSchema = Schema.Struct({ name: OptionalNameSchema })
+
       interface Optional extends Schema.Schema.Type<typeof OptionalSchema> {}
+
       const OptionValueSchema = Schema.Option(Schema.String)
       const OptionSchema = Schema.Struct({ value: OptionValueSchema })
+
       interface Option extends Schema.Schema.Type<typeof OptionSchema> {}
+
       const NestedValueSchema = Schema.Struct({ value: Schema.String })
+
       interface NestedValue extends Schema.Schema.Type<typeof NestedValueSchema> {}
+
       const NestedSchema = Schema.Struct({ nested: NestedValueSchema })
+
       interface Nested extends Schema.Schema.Type<typeof NestedSchema> {}
+
       const CyclicValueSchema: Schema.Codec<never> = Schema.suspend(() => CyclicValueSchema)
       const CyclicSchema = Schema.Struct({ value: CyclicValueSchema })
+
       interface Cyclic extends Schema.Schema.Type<typeof CyclicSchema> {}
+
       const NullableIdentifierSchema = pipe(Schema.NullOr(Schema.String), identifier)
       const NullableIdentifierTableSchema = Schema.Struct({ id: NullableIdentifierSchema })
+
       interface NullableIdentifierTable extends Schema.Schema.Type<typeof NullableIdentifierTableSchema> {}
 
       expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow()
@@ -437,11 +474,16 @@ describe("Table", () => {
 
       const projection = Table.project(Events, ["id", "active"])
       const ResultSchema = Schema.Array(Schema.Struct({ body: projection.json }))
+
       yield* prepareTables([Events])
+
       const sql = yield* SqlClient.SqlClient
+
       yield* sql`INSERT INTO projection_events (id, active) VALUES ('event-a', 1)`
+
       const rows = yield* sql<{ body: string }>`SELECT ${projection.object(sql, "e")} AS body FROM projection_events e`
       const result = yield* Schema.decodeUnknownEffect(ResultSchema)(rows)
+
       expect(result).toEqual([{ body: { id: "event-a", active: true } }])
     }),
     Effect.provide(sqlite),

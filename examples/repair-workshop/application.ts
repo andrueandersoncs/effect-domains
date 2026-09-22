@@ -18,4 +18,7 @@ const parts = [
 
 const repairWorkshop = Application.define({ name: "repair-workshop", parts })
 
-export const RepairWorkshopApplication = Effect.runSync(Application.compile(repairWorkshop))
+const repairWorkshopCompiler = Application.compile(repairWorkshop)
+const repairWorkshopApplication = Effect.runSync(repairWorkshopCompiler)
+
+export { repairWorkshopApplication as RepairWorkshopApplication }

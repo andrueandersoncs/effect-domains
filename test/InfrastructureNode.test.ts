@@ -78,14 +78,17 @@ const runNode = Effect.fn("InfrastructureNode.run")(function* () {
   const child = yield* spawner.spawn(command)
   const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
   const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
+
   return yield* Effect.all({ stdout, stderr, exitCode: child.exitCode }, { concurrency: "unbounded" })
 })
 
 it.effect("provider UI artifacts serve through the portable Node runtime", Effect.fn("InfrastructureNode.smoke")(function* () {
   const destinations = Array.map(applicationUiExtraFiles, Struct.get("dest"))
+
   expect(destinations).toEqual(["application-ui/client.js", "application-ui/style.css"])
 
   const result = yield* runNode()
+
   expect(result.exitCode, result.stderr).toBe(0)
 
   const output = JSON.parse(result.stdout)

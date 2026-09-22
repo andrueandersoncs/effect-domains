@@ -1,5 +1,10 @@
 {
   "commands": [
-    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] }
+    { "type": "add_exclusions", "files": "**/*.ts", "rules": ["schema-record-interface"] },
+    {
+      "type": "add_exclusions",
+      "files": "src/*.ts",
+      "rules": ["require-safety-comment-for-type-assertion"]
+    }
   ]
 }

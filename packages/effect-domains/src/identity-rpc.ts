@@ -13,7 +13,9 @@ export const authenticateIdentity = Effect.fn("Identity.authenticate")(function*
   )
 
   if (Option.isNone(token)) return yield* Unauthenticated.make({})
+
   const identity = yield* IdentityRuntime
+
   return yield* identity.authenticate(token.value)
 })
 
@@ -31,17 +33,20 @@ export const IdentityRpcs = RpcGroup.make(login, current, logout)
 
 const loginHandler = Effect.fn("Identity.login")(function* (credentials: Schema.Schema.Type<typeof CredentialsSchema>) {
   const identity = yield* IdentityRuntime
+
   return yield* identity.login(credentials)
 })
 
 const currentHandler = Effect.fn("Identity.current")(function* (headers: Headers.Headers) {
   const identity = yield* authenticateIdentity(headers)
+
   return CurrentSessionSchema.make({ expiresAt: identity.expiresAt, subject: identity.subject })
 })
 
 const logoutHandler = Effect.fn("Identity.logout")(function* (headers: Headers.Headers) {
   const authenticated = yield* authenticateIdentity(headers)
   const identity = yield* IdentityRuntime
+
   yield* identity.revoke(authenticated.sessionId)
 })
 

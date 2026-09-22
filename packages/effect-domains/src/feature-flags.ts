@@ -25,8 +25,8 @@ class FeatureFlagDefinitionError extends Schema.TaggedError<FeatureFlagDefinitio
   }
 }
 
-const sameString = Equivalence.strictEqual<string>()
-const sameFlag = Equivalence.strictEqual<FeatureFlag>()
+
+
 
 const define = <const Name extends string>(
   definition: FeatureFlag<Name>,
@@ -46,13 +46,15 @@ const define = <const Name extends string>(
 )
 
 const duplicateName = (names: ReadonlyArray<string>) => (name: string) => {
-  const matches = Array.filter(names, (candidate) => sameString(candidate, name))
+  const matches = Array.filter(names, (candidate) => Equivalence.strictEqual<string>()(candidate, name))
+
   return matches.length > 1
 }
 
 const isBlankFlagName = (name: string) => {
   const trimmed = name.trim()
-  return sameString(trimmed, "")
+
+  return Equivalence.strictEqual<string>()(trimmed, "")
 }
 
 const validate = Effect.fn("FeatureFlags.validate")(function* (
@@ -76,6 +78,7 @@ const compileFlags = (
   declarations: ReadonlyArray<FeatureFlag>,
 ) => {
   const flags = Object.freeze([...declarations])
+
   return pipe(validate(flags), Effect.as(flags))
 }
 
@@ -86,7 +89,7 @@ const requireRegistered = (
   registered: ReadonlyArray<FeatureFlag>,
   flag: FeatureFlag,
 ) => pipe(
-  Array.findFirst(registered, (candidate) => sameFlag(candidate, flag)),
+  Array.findFirst(registered, (candidate) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag)),
   Effect.fromOption,
   Effect.mapError(unavailableFor(flag)),
 )
@@ -107,13 +110,14 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
     const flags = yield* compileFlags(declarations)
 
     const overrideMatches = (flag: FeatureFlag) =>
-      ([candidate]: FeatureFlagOverrides<Flags>[number]) => sameFlag(candidate, flag)
+      ([candidate]: FeatureFlagOverrides<Flags>[number]) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag)
 
-    const isRegistered = (flag: FeatureFlag) => Array.some(flags, (candidate) => sameFlag(candidate, flag))
+    const isRegistered = (flag: FeatureFlag) => Array.some(flags, (candidate) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag))
     const unknownOverride = Array.findFirst(overrides, ([flag]) => !isRegistered(flag))
 
     const overrideOccursMoreThanOnce = ([flag]: FeatureFlagOverrides<Flags>[number]) => {
       const matches = Array.filter(overrides, overrideMatches(flag))
+
       return matches.length > 1
     }
 
@@ -170,6 +174,7 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
       return yield* Ref.modify(states, (current) => {
         const enabled = pipe(HashMap.get(current, flag.name), Option.getOrElse(() => flag.default))
         const next = !enabled
+
         return [next, HashMap.set(current, flag.name, next)] as const
       })
     })
@@ -191,6 +196,7 @@ export class FeatureFlags extends Context.Service<FeatureFlags, {
 
   static readonly isEnabled = Effect.fn("FeatureFlags.isEnabled")(function* (flag: FeatureFlag) {
     const featureFlags = yield* FeatureFlags
+
     return yield* featureFlags.isEnabled(flag)
   })
 
@@ -199,6 +205,7 @@ export class FeatureFlags extends Context.Service<FeatureFlags, {
     enabled: boolean,
   ) {
     const featureFlags = yield* FeatureFlags
+
     return yield* featureFlags.setEnabled(flag, enabled)
   })
 
@@ -212,6 +219,7 @@ export class FeatureFlags extends Context.Service<FeatureFlags, {
 
   static readonly toggle = Effect.fn("FeatureFlags.toggle")(function* (flag: FeatureFlag) {
     const featureFlags = yield* FeatureFlags
+
     return yield* featureFlags.toggle(flag)
   })
 }

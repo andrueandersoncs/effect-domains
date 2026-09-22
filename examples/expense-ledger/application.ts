@@ -5,4 +5,7 @@ import { Effect } from "effect"
 
 const parts = [Part.resource(ExpensesResource), Part.command(ExpenseLedgerOperations)]
 const expenseLedger = Application.define({ name: "expense-ledger", parts })
-export const ExpenseLedgerApplication = Effect.runSync(Application.compile(expenseLedger))
+const expenseLedgerCompiler = Application.compile(expenseLedger)
+const expenseLedgerApplication = Effect.runSync(expenseLedgerCompiler)
+
+export { expenseLedgerApplication as ExpenseLedgerApplication }

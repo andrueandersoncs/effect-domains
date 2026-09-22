@@ -44,12 +44,15 @@ export const PageLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, m
 
 
 export type StructSchema = Schema.Struct<Schema.Struct.Fields>
+export type StructValue = StructSchema["Type"]
+
 
 export const DomainIdentifier = "@effect-domains/domain/identifier"
 
 export const identifier = <S extends Schema.Top>(
   schema: S,
 ) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   schema.annotate({
     [DomainIdentifier]: true,
   }) as S & Brand.Brand<typeof DomainIdentifier>

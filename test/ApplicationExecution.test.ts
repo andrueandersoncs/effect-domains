@@ -47,7 +47,9 @@ const runProbe = Effect.fn("ApplicationExecution.runProbe")(function* (database:
   const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
   const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
   const result = yield* Effect.all({ stdout, stderr, exitCode: child.exitCode }, { concurrency: "unbounded" })
+
   expect(result.exitCode, result.stderr).toBe(0)
+
   return result.stdout
 })
 
@@ -63,6 +65,7 @@ it.effect("private execution clients preserve application SQL isolation", Effect
   const application = path.join(directory, "application.sqlite")
   const execution = path.join(directory, "execution.sqlite")
   const output = yield* runProbe(application, execution)
+
   expect(output).toContain(isolatedTables)
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
@@ -75,19 +78,24 @@ it.effect("private execution clients reject aliased application databases", Effe
   const database = path.join(directory, "application.sqlite")
   const symbolic = path.join(directory, "symbolic.sqlite")
   const hardlink = path.join(directory, "hardlink.sqlite")
+
   yield* fs.writeFileString(database, "")
   yield* fs.symlink(database, symbolic)
   yield* fs.link(database, hardlink)
 
   yield* Effect.forEach([symbolic, hardlink], Effect.fn("ApplicationExecution.checkAlias")(function* (execution) {
     const output = yield* runProbe(database, execution)
+
     expect(output).toContain('"_tag":"PrivateDatabaseConflict"')
+
     const assertion = expect(output)
+
     assertion.not.toContain('"applicationTables"')
   }))
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
 it.effect("distinct in-memory native connections remain isolated", Effect.fn("ApplicationExecution.memory")(function* () {
   const output = yield* runProbe(":memory:", ":memory:")
+
   expect(output).toContain(isolatedTables)
 }, Effect.scoped, Effect.provide(BunServices.layer)))

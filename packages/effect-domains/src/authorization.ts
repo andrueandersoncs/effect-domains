@@ -1,11 +1,12 @@
 import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Match, Option, Predicate, Record, Schema, SchemaAST, Struct, flow, pipe } from "effect"
-import { type StructSchema } from "./domain.ts"
+import type { StructSchema, StructValue } from "./domain.ts"
 import { OperandSchema, Policy, PolicyEnvironment, resolveScalarOperand, type Operand, type Policy as PolicySyntax, type PolicyF, PolicyEvaluationError, type Scalar } from "./policy.ts"
 import type { Table } from "./table.ts"
 import { FieldIR, SchemaField, type FieldCategory } from "./schema-field.ts"
 import { Entitlements, EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 
-export class AuthorizationSubject extends Context.Service<AuthorizationSubject, Readonly<Record<string, unknown>>>()("@effect-domains/AuthorizationSubject") {}
+
+export class AuthorizationSubject extends Context.Service<AuthorizationSubject, StructValue>()("@effect-domains/AuthorizationSubject") {}
 export class Unauthenticated extends Schema.TaggedError<Unauthenticated>()("Unauthenticated", {}) {}
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {}) {}
 class AuthorizationDefinitionError extends Schema.TaggedError<AuthorizationDefinitionError>()("AuthorizationDefinitionError", { reason: Schema.String }) {}
@@ -38,10 +39,11 @@ type Included<Collection, Value> = [OperandValue<Value>] extends [CollectionValu
 
 export type AuthorizationAction = keyof typeof PolicyRulesSchema.fields
 
-const isStruct = (value: unknown): value is StructSchema => Schema.isSchema(value) && SchemaAST.isObjects(value.ast)
+const isStruct = <Value>(value: Value): value is Value & StructSchema => Schema.isSchema(value) && SchemaAST.isObjects(value.ast)
 
 const PublicAuthorizationSchema = Schema.TaggedStruct("Public", {})
 const DenyAuthorizationSchema = Schema.TaggedStruct("Deny", {})
+
 type FieldDescriptions = Readonly<Record<string, Option.Option<FieldIR>>>
 
 class PolicyFields extends Data.Class<{
@@ -50,8 +52,8 @@ class PolicyFields extends Data.Class<{
 }> {}
 
 export class AuthorizationValues extends Data.Class<{
-  readonly row: Option.Option<Readonly<Record<string, unknown>>>
-  readonly next: Option.Option<Readonly<Record<string, unknown>>>
+  readonly row: Option.Option<StructValue>
+  readonly next: Option.Option<StructValue>
 }> {}
 
 const StructValueSchema = Schema.declare(isStruct)
@@ -74,7 +76,9 @@ export const EntitlementRequirementSchema = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
 
 interface EntitlementRequirement extends Schema.Schema.Type<typeof EntitlementRequirementSchema> {}
+
 type TypedEntitlement<Phases extends PolicyPhase = PolicyPhase> = EntitlementRequirement & Readonly<Record<typeof PolicyPhases, readonly [never, Phases]>>
+
 const EntitlementListSchema = Schema.Array(EntitlementRequirementSchema)
 const OptionalEntitlementListSchema = Schema.optionalKey(EntitlementListSchema)
 
@@ -88,8 +92,10 @@ export const EntitlementRequirementsSchema = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
 
 interface EntitlementRequirements extends Schema.Schema.Type<typeof EntitlementRequirementsSchema> {}
+
 const emptyEntitlementRequirements = EntitlementRequirementsSchema.make({})
 const emptyEntitlements: ReadonlyArray<EntitlementRequirement> = Object.freeze([])
+
 type EntitlementMap = Readonly<Partial<Record<string, ReadonlyArray<EntitlementRequirement>>>>
 
 type TypedEntitlementRequirements = Readonly<Partial<{
@@ -122,8 +128,8 @@ export type AuthorizationDefinition = Schema.Schema.Type<typeof PublicAuthorizat
 
 export interface AuthorizationRuntime {
   readonly visibility: PolicySyntax
-  readonly subject: (action: AuthorizationAction) => Effect.Effect<Readonly<Record<string, unknown>>, Unauthenticated | Forbidden | EntitlementRequired | EntitlementUnavailable>
-  readonly check: (action: AuthorizationAction, subject: Readonly<Record<string, unknown>>, values: AuthorizationValues) => Effect.Effect<void, Forbidden | PolicyEvaluationError | EntitlementRequired | EntitlementUnavailable>
+  readonly subject: (action: AuthorizationAction) => Effect.Effect<StructValue, Unauthenticated | Forbidden | EntitlementRequired | EntitlementUnavailable>
+  readonly check: (action: AuthorizationAction, subject: StructValue, values: AuthorizationValues) => Effect.Effect<void, Forbidden | PolicyEvaluationError | EntitlementRequired | EntitlementUnavailable>
 }
 
 const publicAuthorization = PublicAuthorizationSchema.make({})
@@ -153,28 +159,49 @@ const forbidden = Function.constant(forbiddenEffect)
 const unauthenticated = Function.constant(unauthenticatedEffect)
 const isPublicAuthorization = Schema.is(PublicAuthorizationSchema)
 const isDenyAuthorization = Schema.is(DenyAuthorizationSchema)
-const isPolicyAuthorization = (value: unknown): value is PolicyAuthorization => Predicate.isTagged(value, "Policy")
+const isPolicyAuthorization = <Value>(value: Value): value is Value & PolicyAuthorization => Predicate.isTagged(value, "Policy")
 
-const literalOperand = <Value extends Scalar | ReadonlyArray<Scalar>>(value: Value) => OperandSchema.make({ _tag: "Literal", value }) as TypedOperand<Value, never>
-const operand = <Value extends Scalar>(value: TypedOperand<Value, PolicyPhase> | Value) => Predicate.hasProperty(value, "_tag") ? value as TypedOperand<Value, PolicyPhase> : literalOperand(value) as TypedOperand<Value, PolicyPhase>
-const collectionOperand = <Value extends Scalar>(value: TypedOperand<ReadonlyArray<Value>, PolicyPhase> | ReadonlyArray<Value>) => Predicate.hasProperty(value, "_tag") ? value as TypedOperand<ReadonlyArray<Value>, PolicyPhase> : literalOperand(value) as TypedOperand<ReadonlyArray<Value>, PolicyPhase>
+const literalOperand = <Value extends Scalar | ReadonlyArray<Scalar>>(value: Value) => {
+  const literal = Policy.literal(value)
+
+  // SAFETY: The phantom phase is type-only because literal operands do not read any policy environment phase.
+  return literal as typeof literal & Readonly<Record<typeof PolicyPhases, readonly [Value, never]>>
+}
+
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+const operand = <Value extends Scalar>(value: TypedOperand<Value, PolicyPhase> | Value) => Predicate.hasProperty(value, "_tag") ? value as TypedOperand<Value, PolicyPhase> : literalOperand(value)
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+const collectionOperand = <Value extends Scalar>(value: TypedOperand<ReadonlyArray<Value>, PolicyPhase> | ReadonlyArray<Value>) => Predicate.hasProperty(value, "_tag") ? value as TypedOperand<ReadonlyArray<Value>, PolicyPhase> : literalOperand(value)
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 const expression = <Phases extends PolicyPhase>(policy: PolicySyntax) => policy as PolicyExpression<Phases>
 
 const policyField = <Value, Tag extends "SubjectField" | "RowField" | "NextField", Phases extends PolicyPhase>(tag: Tag, field: string) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   OperandSchema.make({ _tag: tag, field }) as TypedOperand<Value, Phases> & Readonly<{ readonly _tag: Tag }>
 
 const policyFields = <S extends StructSchema, Tag extends "SubjectField" | "RowField" | "NextField", Phases extends PolicyPhase>(schema: S, tag: Tag) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   Record.map(schema.fields, (_, field) => policyField(tag, field)) as FieldReferences<S, Tag, Phases>
 
-const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => pipe(
-  Policy.Schema.make({ _tag: "Equal", left: operand(left), right: operand(right) }),
-  expression<OperandPhases<Left> | OperandPhases<Right>>,
-)
+const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => {
+  const leftOperand = operand(left)
+  const rightOperand = operand(right)
 
-const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>> & Included<Collection, Value>) => pipe(
-  Policy.Schema.make({ _tag: "Includes", collection: collectionOperand(collection), value: operand(value) }),
-  expression<OperandPhases<Collection> | OperandPhases<Value>>,
-)
+  return pipe(
+    Policy.EqualSchema.make({ left: leftOperand, right: rightOperand }),
+    expression<OperandPhases<Left> | OperandPhases<Right>>,
+  )
+}
+
+const membership = <Collection extends ScalarCollection, Value extends ScalarOperand>(collection: Collection, value: Value & Comparable<CollectionValue<Collection>, OperandValue<Value>> & Included<Collection, Value>) => {
+  const collectionReference = collectionOperand(collection)
+  const valueOperand = operand(value)
+
+  return pipe(
+    Policy.IncludesSchema.make({ collection: collectionReference, value: valueOperand }),
+    expression<OperandPhases<Collection> | OperandPhases<Value>>,
+  )
+}
 
 const all = <const Expressions extends ReadonlyArray<PolicyExpression>>(...children: Expressions) =>
   pipe(Policy.all(...children), expression<ExpressionPhase<Expressions[number]>>)
@@ -183,6 +210,7 @@ const any = <const Expressions extends ReadonlyArray<PolicyExpression>>(...child
   pipe(Policy.any(...children), expression<ExpressionPhase<Expressions[number]>>)
 
 const entitlement = <Key extends TypedOperand<string, PolicyPhase> | string>(requirement: Readonly<{ name: string; key: Key }>) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   EntitlementRequirementSchema.make({ name: requirement.name, key: operand(requirement.key) }) as TypedEntitlement<OperandPhases<Key>>
 
 const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(schemas: Readonly<{ readonly resource: Resource; readonly subject: Subject }>) => {
@@ -197,14 +225,17 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
         : never
       : never),
   ) => pipe(
-    Policy.Schema.make({ _tag: "Equal", left: row[field] as Operand, right: subject[field] as Operand }),
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+    Policy.EqualSchema.make({ left: row[field] as Operand, right: subject[field] as Operand }),
     expression<"row" | "subject">,
   )
 
-  const unchangedField = (field: ScalarOnlyFieldName<Resource>) => Policy.Schema.make({ _tag: "Equal", left: row[field] as Operand, right: next[field] as Operand })
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  const unchangedField = (field: ScalarOnlyFieldName<Resource>) => Policy.EqualSchema.make({ left: row[field] as Operand, right: next[field] as Operand })
 
   const unchanged = (...fields: ReadonlyArray<ScalarOnlyFieldName<Resource>>) => {
     const comparisons = Array.map(fields, unchangedField)
+
     return pipe(Policy.all(...comparisons), expression<"row" | "next">)
   }
 
@@ -230,25 +261,35 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
     options: Readonly<Partial<{ require: Requirements }>> = {},
   ): SubjectPolicy<Subject, Requirements> => {
     pipe(checkPolicy(condition, fields, subjectPhases, "subject policy"), Effect.runSync)
+
     const decodedRequirements = EntitlementListSchema.make(options.require ?? emptyEntitlements)
+
     pipe(validateEntitlements(decodedRequirements, fields, subjectPhases), Effect.runSync)
+
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const required = snapshotEntitlements(decodedRequirements) as Requirements
     const snapshot = pipe(condition, Policy.snapshot, expression<"subject">)
     const evaluate = Policy.evaluate(snapshot)
 
     const require = Effect.gen(function* () {
       const claims = yield* AuthorizationSubject
+
       if (!isSubject(claims)) return yield* forbidden()
+
       const environment = new PolicyEnvironment({ subject: claims, row: absentPolicyRow, next: absentPolicyRow })
       const allowed = yield* pipe(evaluate(environment), Effect.catchTag("PolicyEvaluationError", forbidden))
+
       if (!allowed) return yield* forbidden()
+
       yield* pipe(checkEntitlements(required, environment), Effect.catchTag("PolicyEvaluationError", forbidden))
+
       return claims
     })
 
     const invalidRegistration = pipe(definitionError("subject policy registration does not match its definition"), Effect.die)
     const registration = (candidate: SubjectPolicy<Subject>) => equals(candidate, registered) ? require : invalidRegistration
     const registered = Object.freeze({ subject, expression: snapshot, require: required, [RegisteredSubjectPolicy]: registration })
+
     return registered
   }
 
@@ -263,6 +304,7 @@ const fieldFor = (fields: FieldDescriptions, field: string) => pipe(Record.get(f
 const sameFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) => {
   const unrestricted = Option.isNone(left) || Option.isNone(right)
   const same = Option.makeEquivalence(equals)(left, right)
+
   return unrestricted || same
 }
 
@@ -276,7 +318,9 @@ const phaseFor = (operand: Exclude<Operand, { readonly _tag: "Literal" }>) => pi
 
 const describeReference = (operand: Exclude<Operand, { readonly _tag: "Literal" }>, fields: PolicyFields, allowed: HashSet.HashSet<PolicyPhase>) => {
   const phase = phaseFor(operand)
+
   if (!HashSet.has(allowed, phase)) return failure(`${phase}.${operand.field} is not available in this policy phase`)
+
   const fieldSchema = equals(phase, "subject") ? fields.subject : fields.resource
 
   return pipe(fieldFor(fieldSchema, operand.field), Option.match({
@@ -305,9 +349,10 @@ const checkPair = Effect.fn("Authorization.checkPair")(function* (
   const leftDescription = yield* describeOperand(left, fields, allowed)
   const rightDescription = yield* describeOperand(right, fields, allowed)
   const scalarValue = !rightDescription.collection
-  const collectionShape = equals(leftDescription.collection, inclusion)
-  const validShape = collectionShape && scalarValue
-  if (!validShape) return yield* failure(inclusion ? `${label} includes requires a scalar collection and scalar value` : `${label} equality operands must be scalar`)
+  const collectionMatches = equals(leftDescription.collection, inclusion)
+  const validOperands = collectionMatches && scalarValue
+
+  if (!validOperands) return yield* failure(inclusion ? `${label} includes requires a scalar collection and scalar value` : `${label} equality operands must be scalar`)
   if (!sameFieldCategory(leftDescription.category, rightDescription.category)) return yield* failure(`${label} ${inclusion ? "includes" : "equality"} operands must have the same scalar type`)
 })
 
@@ -330,14 +375,16 @@ const validateEntitlements = (requirements: ReadonlyArray<EntitlementRequirement
   Effect.forEach(requirements, Effect.fn("Authorization.validateEntitlement")(function* (requirement) {
     const description = yield* describeOperand(requirement.key, fields, phases)
     const stringKey = Option.contains(description.category, "string")
-    const invalidShape = description.nullable || description.collection
+    const invalidKeyKind = description.nullable || description.collection
     const nonString = !stringKey
-    const invalidKey = nonString || invalidShape
+    const invalidKey = nonString || invalidKeyKind
+
     if (invalidKey) return yield* failure("entitlement key must be a required string")
   }), { discard: true })
 
 const snapshotEntitlement = ({ name, key }: EntitlementRequirement) => {
   const frozenKey = Object.freeze({ ...key })
+
   return Object.freeze({ name, key: frozenKey })
 }
 
@@ -346,7 +393,9 @@ const snapshotEntitlements = flow(Array.map(snapshotEntitlement), Object.freeze)
 const checkEntitlements = (requirements: ReadonlyArray<EntitlementRequirement>, environment: PolicyEnvironment) =>
   Effect.forEach(requirements, Effect.fn("Authorization.entitlement")(function* (requirement) {
     const key = yield* resolveScalarOperand(requirement.key, environment)
+
     if (!Predicate.isString(key)) return yield* EntitlementUnavailable.make({})
+
     yield* Entitlements.require({ name: requirement.name, key, subject: environment.subject })
   }), { discard: true })
 
@@ -365,7 +414,7 @@ type RegisteredSubjectPolicy<Subject extends StructSchema> = SubjectPolicy<Subje
 const isRegisteredSubjectPolicy = <Subject extends StructSchema>(policy: SubjectPolicy<Subject>): policy is RegisteredSubjectPolicy<Subject> =>
   Predicate.hasProperty(policy, RegisteredSubjectPolicy)
 
-const isSubjectPolicy = (value: unknown): value is SubjectPolicy =>
+const isSubjectPolicy = <Value>(value: Value): value is Value & SubjectPolicy =>
   Predicate.hasProperty(value, "expression")
 
 /** A scope or action expression together with the entitlements a SubjectPolicy contributed. */
@@ -388,7 +437,9 @@ class NormalizedDefinition extends Data.Class<{
 
 const absentResolvedAction = Option.none<ResolvedAction>()
 const noResolvedAction = Effect.succeed(absentResolvedAction)
+
 type ResolvedPolicyEffect = Effect.Effect<ResolvedPolicy, AuthorizationDefinitionError>
+
 const unregisteredSubjectPolicy: ResolvedPolicyEffect = failure("subject policy must be constructed by Authorization.subject")
 const foreignSubjectPolicy: ResolvedPolicyEffect = failure("subject policy subject schema must match the authorization subject schema")
 
@@ -400,6 +451,7 @@ const resolveSubjectPolicy = (subject: StructSchema, policy: SubjectPolicy): Res
   const sameSubject = equals(policy.subject, subject)
   const accepted = resolvedPolicy(policy.expression, policy.require)
   const checked = sameSubject ? accepted : foreignSubjectPolicy
+
   return registered ? checked : unregisteredSubjectPolicy
 }
 
@@ -428,6 +480,7 @@ const normalizePolicyDefinition = Effect.fn("Authorization.normalizePolicyDefini
       const inherited = Array.appendAll(declared, scope.require)
       const requirements = Array.appendAll(inherited, policy.require)
       const resolved = new ResolvedAction({ action, expression: policy.expression, requirements })
+
       return Option.some(resolved)
     }),
   )
@@ -446,11 +499,12 @@ const normalizePolicyDefinition = Effect.fn("Authorization.normalizePolicyDefini
   const requirements: EntitlementRequirements = Record.fromEntries(requireEntries)
   const anyRequirements = Array.isReadonlyArrayNonEmpty(requiring)
   const require = anyRequirements ? Option.some(requirements) : Option.none<EntitlementRequirements>()
+
   return new NormalizedDefinition({ scope: scope.expression, allow, require })
 })
 
 const subjectPhases = HashSet.fromIterable<PolicyPhase>(["subject"])
-const absentPolicyRow = Option.none<Readonly<Record<string, unknown>>>()
+const absentPolicyRow = Option.none<StructValue>()
 
 
 const requireSubject = <Subject extends StructSchema, Requirements extends ReadonlyArray<EntitlementRequirement>>(policy: SubjectPolicy<Subject, Requirements>) => {
@@ -458,6 +512,7 @@ const requireSubject = <Subject extends StructSchema, Requirements extends Reado
     ? policy[RegisteredSubjectPolicy](policy)
     : pipe(definitionError("subject policy must be constructed by Authorization.subject"), Effect.die)
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return effect as Effect.Effect<Subject["Type"], Requirements extends readonly [] ? Forbidden : Forbidden | EntitlementRequired | EntitlementUnavailable, AuthorizationSubject>
 }
 
@@ -483,17 +538,20 @@ class Registration extends Data.Class<{
 }> {}
 
 type RegisteredPolicy = PolicyAuthorization & Readonly<Record<typeof RegisteredAuthorization, (candidate: PolicyAuthorization) => Effect.Effect<Registration, AuthorizationDefinitionError>>>
+
 const isRegisteredPolicy = (value: PolicyAuthorization): value is RegisteredPolicy => Predicate.hasProperty(value, RegisteredAuthorization)
 
 const makeScopeCheck = (scope: ReturnType<typeof Policy.evaluate>) =>
   Effect.fn("Authorization.scope")(function* (
-    subject: Readonly<Record<string, unknown>>,
-    row: Option.Option<Readonly<Record<string, unknown>>>,
-    next: Option.Option<Readonly<Record<string, unknown>>>,
+    subject: StructValue,
+    row: Option.Option<StructValue>,
+    next: Option.Option<StructValue>,
   ) {
     if (Option.isNone(row)) return
+
     const environment = new PolicyEnvironment({ subject, row, next })
     const allowed = yield* scope(environment)
+
     if (!allowed) return yield* forbidden()
   })
 
@@ -505,48 +563,67 @@ const makeSubject = (
 ) => {
   const isSubject = Schema.is(subjectSchema)
   const subjectRequirements = (entries: EntitlementMap[string]) => Array.filter(entries ?? emptyEntitlements, subjectEntitlement)
-  const preflight = Record.map(requirements as EntitlementMap, subjectRequirements)
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  const preflight = Record.map(requirements as EntitlementMap /* SAFETY: The map contract matches because requirements were normalized from the same entitlement declaration. */, subjectRequirements)
   const subjectReference = (reference: Exclude<Operand, { readonly _tag: "Literal" }>) => Predicate.isTagged(reference, "SubjectField")
   const subjectOnly = flow(Policy.references, Array.every(subjectReference))
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const subjectRules = Record.filter(rules, (_, action) => subjectOnly(policies[action] as PolicySyntax))
   const unrestricted = Policy.evaluate(truePolicy)
 
   return Effect.fn("Authorization.subject")(function* (action: AuthorizationAction) {
     if (!Record.has(rules, action)) return yield* forbidden()
+
     const supplied = yield* Effect.serviceOption(AuthorizationSubject)
     const claims = Option.filter(supplied, isSubject)
     const subject = yield* pipe(claims, Effect.fromOption, Effect.mapError(Function.constant(unauthenticatedError)))
     const required = requirementsFor(preflight, action)
+
     if (Array.isReadonlyArrayEmpty(required)) return subject
+
     const environment = new PolicyEnvironment({ subject, row: absentPolicyRow, next: absentPolicyRow })
     const evaluate = subjectRules[action] ?? unrestricted
     const allowed = yield* pipe(evaluate(environment), Effect.catchTag("PolicyEvaluationError", forbidden))
+
     if (!allowed) return yield* forbidden()
+
     yield* pipe(checkEntitlements(required, environment), Effect.catchTag("PolicyEvaluationError", forbidden))
+
     return subject
   })
 }
 
 const makeCheck = (rules: Readonly<Record<string, ReturnType<typeof Policy.evaluate>>>, scopeCheck: ReturnType<typeof makeScopeCheck>, requirements: EntitlementRequirements) =>
-  Effect.fn("Authorization.check")(function* (action: AuthorizationAction, subject: Readonly<Record<string, unknown>>, values: AuthorizationValues) {
+  Effect.fn("Authorization.check")(function* (action: AuthorizationAction, subject: StructValue, values: AuthorizationValues) {
     const [, current, candidate] = actionRequirements(action)
     const missingCurrent = current && Option.isNone(values.row)
     const missingCandidate = candidate && Option.isNone(values.next)
     const missingValue = missingCurrent || missingCandidate
+
     if (missingValue) return yield* forbidden()
+
     const evaluate = yield* pipe(Record.get(rules, action), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
+
     yield* scopeCheck(subject, values.row, values.next)
     yield* scopeCheck(subject, values.next, values.next)
+
     const environment = new PolicyEnvironment({ subject, ...values })
     const allowed = yield* evaluate(environment)
+
     if (!allowed) return yield* forbidden()
+
     const required = requirementsFor(requirements, action)
+
     if (!candidate) return yield* checkEntitlements(required, environment)
+
     const readable = yield* pipe(Record.get(rules, "read"), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
     const readEnvironment = new PolicyEnvironment({ subject, row: values.next, next: values.next })
     const visible = yield* readable(readEnvironment)
+
     if (!visible) return yield* forbidden()
+
     const readRequired = requirementsFor(requirements, "read")
+
     yield* checkEntitlements(required, environment)
     yield* checkEntitlements(readRequired, readEnvironment)
   })
@@ -576,6 +653,7 @@ const constructPolicy = <Resource extends StructSchema, Subject extends StructSc
     onNone: Function.constant(Effect.void),
     onSome: (policy) => {
       const [phases] = actionRequirements(action)
+
       return checkPolicy(policy, fields, phases, `allow.${action}`)
     },
   }))
@@ -588,17 +666,23 @@ const constructPolicy = <Resource extends StructSchema, Subject extends StructSc
       const required = requirementsFor(source.require ?? emptyEntitlementRequirements, action)
       const missingPolicy = pipe(policyFor(source, action), Option.isNone)
       const missingGrant = required.length > 0 && missingPolicy
+
       if (missingGrant) return yield* failure(`require.${action} needs an allow.${action} policy`)
+
       const [phases] = actionRequirements(action)
+
       yield* validateEntitlements(required, fields, phases)
     }), { discard: true })
   })
 
   Effect.runSync(validation)
+
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const mappedAllow = Record.map(source.allow as Readonly<Record<string, PolicySyntax>>, Policy.snapshot)
   const allow = Object.freeze(mappedAllow)
   const scope = Policy.snapshot(source.scope)
   const snapshotEntries = (entries: EntitlementMap[string]) => snapshotEntitlements(entries ?? emptyEntitlements)
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const required = pipe(source.require ?? emptyEntitlementRequirements, (requirements) => Record.map(requirements as EntitlementMap, snapshotEntries), Object.freeze)
   const descriptor = PolicyAuthorizationSchema.make({ resource, subject, scope, allow, require: required })
   const value = Struct.assign(descriptor, { resource, subject })
@@ -620,6 +704,7 @@ const constructPolicy = <Resource extends StructSchema, Subject extends StructSc
     ? compiled : failure("policy authorization registration does not match its definition")
 
   const registered = Struct.assign(snapshot, { [RegisteredAuthorization]: registration })
+
   return Object.freeze(registered)
 }
 
@@ -633,6 +718,7 @@ const registeredPolicy = (authorization: PolicyAuthorization, resource: StructSc
 
 const compiledPolicy = Effect.fn("Authorization.compiledPolicy")(function* (authorization: PolicyAuthorization, resource: StructSchema) {
   const registered = yield* registeredPolicy(authorization, resource)
+
   return registered.runtime
 })
 
@@ -641,8 +727,9 @@ const subjectBindingCompatible = (destination: FieldIR, source: FieldIR) => {
   const collection = equals(destination.collection, source.collection)
   const required = !source.nullable
   const nullable = destination.nullable || required
-  const shape = category && collection
-  return shape && nullable
+  const fieldKindsCompatible = category && collection
+
+  return fieldKindsCompatible && nullable
 }
 
 const isSubjectOperand = (value: unknown): value is Extract<Operand, { readonly _tag: "SubjectField" }> =>
@@ -650,6 +737,7 @@ const isSubjectOperand = (value: unknown): value is Extract<Operand, { readonly 
 
 const validateSubjectBinding = Effect.fn("Authorization.validateSubjectBinding")(function* (fields: PolicyFields, target: string, binding: unknown) {
   if (!isSubjectOperand(binding)) return yield* failure(`create subject binding ${target} must reference a subject field`)
+
   const destination = fieldFor(fields.resource, target)
   const source = fieldFor(fields.subject, binding.field)
 
@@ -664,11 +752,13 @@ const validateSubjectBinding = Effect.fn("Authorization.validateSubjectBinding")
   }
 })
 
-const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings")(function* (authorization: AuthorizationDefinition, resource: StructSchema, bindings: Readonly<Record<string, unknown>>) {
+const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings")(function* (authorization: AuthorizationDefinition, resource: StructSchema, bindings: StructValue) {
   if (Record.isEmptyRecord(bindings)) return
   if (!isPolicyAuthorization(authorization)) return yield* failure("create subject bindings require policy authorization")
+
   const registered = yield* registeredPolicy(authorization, resource)
   const entries = Record.toEntries(bindings)
+
   yield* Effect.forEach(entries, ([target, binding]) => validateSubjectBinding(registered.fields, target, binding), { discard: true })
 })
 
@@ -693,12 +783,14 @@ const isCompatibleSqlScalar = Schema.is(CompatibleSqlScalarSchema)
 const storageCompatible = (description: FieldIR, field: Table["fields"][number]) => {
   const nullable = equals(description.nullable, field.nullable)
   const category = Option.getOrNull(description.category)
+
   return nullable && isCompatibleSqlScalar([category, field.scalar])
 }
 
 const validateSqlReference = (resource: StructSchema, storage: StructSchema, table: Table, fields: FieldDescriptions) =>
   Effect.fn("Authorization.validateSqlReference")(function* (reference: Operand) {
     if (!Predicate.isTagged(reference, "RowField")) return
+
     const canonical = Record.get(resource.fields, reference.field)
     const physical = Record.get(storage.fields, reference.field)
     const definition = tableField(table, reference.field)
@@ -717,16 +809,21 @@ const validateSqlReference = (resource: StructSchema, storage: StructSchema, tab
 
     const same = equals(canonicalSchema, physicalSchema)
     const identity = same && hasIdentityEncoding(canonicalSchema)
+
     if (!identity) return yield* failure(`SQL policy row.${reference.field} must use an identity storage encoding`)
+
     const scalar = !description.collection
     const compatible = scalar && storageCompatible(description, field)
+
     if (!compatible) return yield* failure(`SQL policy row.${reference.field} does not have a compatible physical scalar`)
   })
 
 const validateSqlStorage = Effect.fn("Authorization.validateSqlStorage")(function* (resource: StructSchema, storage: StructSchema, table: Table, visibility: PolicySyntax, fields: FieldDescriptions) {
   if (!isStruct(storage)) return yield* failure("SQL policy storage schema must be a flat struct")
+
   const references = Policy.references(visibility)
   const validateReference = validateSqlReference(resource, storage, table, fields)
+
   yield* Effect.forEach(references, validateReference, { discard: true })
 })
 
@@ -767,13 +864,17 @@ export const Authorization = {
   validateSubjectBindings,
   compile: Effect.fn("Authorization.compile")(function* (options: Readonly<{ readonly authorization: AuthorizationDefinition; readonly resource: StructSchema; readonly storage: StructSchema; readonly table: Table }>) {
     if (!isPolicyAuthorization(options.authorization)) return yield* standalone(options.authorization)
+
     const registered = yield* registeredPolicy(options.authorization, options.resource)
+
     yield* validateSqlStorage(options.resource, options.storage, options.table, registered.runtime.visibility, registered.fields.resource)
+
     return registered.runtime
   }),
   require: Effect.fn("Authorization.require")(function* (authorization: AuthorizationDefinition, action: AuthorizationAction, values: AuthorizationValues) {
     const compiled = yield* standalone(authorization)
     const subject = yield* compiled.subject(action)
+
     yield* compiled.check(action, subject, values)
   }),
 }

@@ -23,7 +23,6 @@ const databaseOptions = {
 
 const DatabaseFileSchema = Schema.Struct({ name: Schema.String, file: Schema.String })
 const DatabaseFilesSchema = Schema.Array(DatabaseFileSchema)
-const sameString = Equivalence.strictEqual<string>()
 
 it("compiles application infrastructure into a canonical inspectable dependency graph", () => {
   const inspection = InfrastructureInspect.describe(ReadingListInfrastructureIR)
@@ -112,8 +111,9 @@ it.effect("uses in-memory SQLite for ephemeral local infrastructure", () => {
       const sql = yield* SqlClient.SqlClient
       const rows = yield* sql`PRAGMA database_list`
       const databases = yield* Schema.decodeUnknownEffect(DatabaseFilesSchema)(rows)
-      const selectedDatabase = Array.findFirst(databases, ({ name }) => sameString(name, "main"))
+      const selectedDatabase = Array.findFirst(databases, ({ name }) => Equivalence.strictEqual<string>()(name, "main"))
       const main = Option.getOrThrow(selectedDatabase)
+
       yield* Deferred.succeed(databaseFile, main.file)
     })
 
@@ -132,6 +132,7 @@ it.effect("uses in-memory SQLite for ephemeral local infrastructure", () => {
 
       const running = yield* Effect.forkScoped(runningEffect)
       const filename = yield* Deferred.await(databaseFile)
+
       expect(filename).toBe("")
       yield* Fiber.interrupt(running)
     })
@@ -292,6 +293,7 @@ it.effect("requires shared state for production provider stages", () =>
     Effect.flip,
     Effect.flatMap((failure) => {
       expect(failure.message).toContain("production deployments require a shared state store")
+
       return validateDeploymentState("Railway", "production", "postgres")
     }),
   ))

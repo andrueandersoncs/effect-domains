@@ -35,6 +35,7 @@ const selectWorkerLayer = Effect.fn("ExampleCluster.selectWorkerLayer")(function
   layer: Layer.Layer<A, E, R>,
 ) {
   const mode = yield* clusterMode
+
   return same(mode, "client") ? Layer.empty : layer
 })
 
@@ -152,6 +153,7 @@ export const advanceClusterTopology = Effect.fn("ExampleCluster.advanceTopology"
   `)
 
   const changedHead = Array.head(changed)
+
   if (Option.isSome(changedHead)) return
 
   const rows = yield* database<Readonly<TopologyRow>>`

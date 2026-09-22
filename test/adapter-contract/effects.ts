@@ -55,6 +55,7 @@ export const adapterContract = Effect.fn("AdapterContract.verify")(function* <
   }>
 }>) {
   const created = yield* options.create.execute(options.original)
+
   assert.deepStrictEqual(created, options.original)
 
   const createdKey = options.keyOf(created)

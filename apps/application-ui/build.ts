@@ -26,6 +26,7 @@ const build = Effect.fn("ApplicationUi.build")(function* () {
 
   if (!result.success) {
     const error = ApplicationUiBuildError.make({ message: "Could not build application UI assets." })
+
     return yield* Effect.fail(error)
   }
 })

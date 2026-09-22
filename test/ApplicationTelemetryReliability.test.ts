@@ -29,8 +29,7 @@ const emit = pipe(
   Effect.withSpan("telemetry-reliability-probe"),
 )
 
-const sameStatus = Equivalence.strictEqual<number>()
-const acceptedPath = (signal: CollectedSignal) => sameStatus(signal.status, 200)
+const acceptedPath = (signal: CollectedSignal) => Equivalence.strictEqual<number>()(signal.status, 200)
 const sufficientAttempts = (count: number) => count >= 3
 
 it.live("keeps application work successful through throttling and collector failure, then recovers", Effect.fn(
@@ -41,6 +40,7 @@ it.live("keeps application work successful through throttling and collector fail
   const program = Effect.gen(function* () {
     yield* emit
     yield* Effect.sleep("2 seconds")
+
     return "application-success"
   })
 
@@ -60,7 +60,9 @@ it.live("keeps application work successful through throttling and collector fail
 
   expect(result).toBe("application-success")
   expect(accepted).toEqual(expectedSignals)
+
   const enoughAttempts = Array.every(attemptCounts, sufficientAttempts)
+
   expect(enoughAttempts).toBe(true)
 }))
 
@@ -84,6 +86,7 @@ it.live("flushes all signals on graceful scope close", Effect.fn(
 
   const received = yield* collector.received
   const accepted = pipe(received, Array.map(Struct.get("path")), HashSet.fromIterable)
+
   expect(accepted).toEqual(expectedSignals)
 }))
 
@@ -102,6 +105,7 @@ it.live("does not surface connection refusal as an application failure", Effect.
 
   const endedAt = yield* Clock.currentTimeMillis
   const elapsed = endedAt - startedAt
+
   expect(result).toBe("application-success")
   expect(elapsed).toBeLessThan(1_000)
 }))
@@ -122,5 +126,6 @@ it.live("bounds shutdown when a collector never responds", Effect.fn(
 
   const endedAt = yield* Clock.currentTimeMillis
   const elapsed = endedAt - startedAt
+
   expect(elapsed).toBeLessThan(1_000)
 }))

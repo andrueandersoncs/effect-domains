@@ -141,9 +141,11 @@ export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.ex
     })
 
     const writable = yield* executions.beginWriting(executionId)
+
     if (!writable) return yield* Effect.interrupt
 
     const artifact = yield* DurableQueue.process(ReportArtifactQueue, job)
+
     yield* executions.succeed(executionId, artifact)
 
     const metricAttributes = ReportMetricAttributesSchema.make({
@@ -152,9 +154,13 @@ export const executeFinancialReportExport = Effect.fn("ReportExports.Generate.ex
     })
 
     const completedMetric = Metric.withAttributes(completedExports, metricAttributes)
+
     yield* Metric.update(completedMetric, 1)
+
     const amountMetric = Metric.withAttributes(exportedAmountMinor, metricAttributes)
+
     yield* Metric.update(amountMetric, job.totalCreditMinor + job.totalDebitMinor)
+
     return artifact
   },
 )
@@ -186,7 +192,9 @@ const accept = Effect.fn("ReportExports.accept")(function* (
   const workflow = reportExportWorkflowRequest(request, subject.tenantId)
   const executionId = yield* FinancialReportExport.executionId(workflow)
   const executions = yield* ReportExportExecutionStore
+
   yield* executions.accept({ id: executionId, tenantId: subject.tenantId, request })
+
   return { executionId, workflow } as const
 })
 
@@ -195,6 +203,7 @@ const selectGenerateDiscard = Effect.fn("ReportExports.selectGenerateDiscard")(f
   subject: typeof ExampleSubjectSchema.Type,
 ) {
   const accepted = yield* accept(request, subject)
+
   return accepted.executionId
 })
 
@@ -206,6 +215,7 @@ const selectGenerate = Effect.fn("ReportExports.selectGenerate")(function* (
 ) {
   const accepted = yield* accept(request, subject)
   const execution = FinancialReportExport.execute(accepted.workflow)
+
   return yield* native(execution)
 })
 
@@ -237,13 +247,16 @@ const generateDiscardSpec = ReportGenerationCommand.define({
 
 const generateDiscard = Command.implement(generateDiscardSpec, selectGenerateDiscard)
 
-const resumeSpec = ReportOperatorTransaction.define({
-  name: "GenerateResume",
-  payload: ReportExportExecutionInputSchema,
-  success: Schema.Void,
-  errors: ReportExportOperatorErrorsSchema,
-  dependencies: [ReportExportAuditsResource],
-})
+const operatorTransactionSpec = <const Name extends string>(name: Name) =>
+  ReportOperatorTransaction.define({
+    name,
+    payload: ReportExportExecutionInputSchema,
+    success: Schema.Void,
+    errors: ReportExportOperatorErrorsSchema,
+    dependencies: [ReportExportAuditsResource],
+  })
+
+const resumeSpec = operatorTransactionSpec("GenerateResume")
 
 const resume = Command.implement(
   resumeSpec,
@@ -262,6 +275,7 @@ const resume = Command.implement(
     }
 
     const recovery = FinancialReportExport.resume(executionId)
+
     yield* native(recovery)
 
     yield* appendReportExportAudit({
@@ -273,13 +287,7 @@ const resume = Command.implement(
   }),
 )
 
-const releaseSpec = ReportOperatorTransaction.define({
-  name: "Release",
-  payload: ReportExportExecutionInputSchema,
-  success: Schema.Void,
-  errors: ReportExportOperatorErrorsSchema,
-  dependencies: [ReportExportAuditsResource],
-})
+const releaseSpec = operatorTransactionSpec("Release")
 
 const release = Command.implement(
   releaseSpec,
@@ -292,6 +300,7 @@ const release = Command.implement(
     }
 
     const releasedBy = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(subject.userId)
+
     yield* releaseFinancialReportExport(executionId, releasedBy)
 
     yield* appendReportExportAudit({
@@ -303,20 +312,17 @@ const release = Command.implement(
   }),
 )
 
-const cancelSpec = ReportOperatorTransaction.define({
-  name: "Cancel",
-  payload: ReportExportExecutionInputSchema,
-  success: Schema.Void,
-  errors: ReportExportOperatorErrorsSchema,
-  dependencies: [ReportExportAuditsResource],
-})
+const cancelSpec = operatorTransactionSpec("Cancel")
 
 const cancel = Command.implement(
   cancelSpec,
   Effect.fn("ReportExports.Cancel")(function* ({ executionId }, subject) {
     const executions = yield* ReportExportExecutionStore
+
     yield* executions.cancel(executionId)
+
     const interruption = FinancialReportExport.interrupt(executionId)
+
     yield* native(interruption)
 
     yield* appendReportExportAudit({
@@ -331,30 +337,28 @@ const cancel = Command.implement(
 const applicationPollResult = (execution: ReportExportExecution) => pipe(
   Match.value(execution.status),
   Match.when("accepted", () => pipe(
-    ReportExportPollResultSchema.make({
-      _tag: "Pending",
+    ReportExportPollResultSchema.cases.Pending.make({
       stage: execution.status,
     }),
     Option.some,
   )),
   Match.when("cancelled", () => pipe(
-    ReportExportPollResultSchema.make({ _tag: "Cancelled" }),
+    ReportExportPollResultSchema.cases.Cancelled.make({}),
     Option.some,
   )),
   Match.when("failed", () => pipe(
-    ReportExportPollResultSchema.make({
-      _tag: "Failed",
+    ReportExportPollResultSchema.cases.Failed.make({
       reason: execution.failure ?? "Workflow failed",
     }),
     Option.some,
   )),
   Match.when("succeeded", () => {
     const artifact = Option.fromNullishOr(execution.artifact)
+
     if (Option.isNone(artifact)) return Option.none()
 
     return pipe(
-      ReportExportPollResultSchema.make({
-        _tag: "Succeeded",
+      ReportExportPollResultSchema.cases.Succeeded.make({
         ...artifact.value,
       }),
       Option.some,
@@ -375,7 +379,8 @@ const poll = Command.implement(
   Effect.fn("ReportExports.Poll")(function* ({ executionId }) {
     const executions = yield* ReportExportExecutionStore
     const found = yield* executions.find(executionId)
-    if (Option.isNone(found)) return ReportExportPollResultSchema.make({ _tag: "Unknown" })
+
+    if (Option.isNone(found)) return ReportExportPollResultSchema.cases.Unknown.make({})
 
     const { value: execution } = found
     const succeeded = sameStatus(execution.status, "succeeded")
@@ -388,13 +393,14 @@ const poll = Command.implement(
     }
 
     const applicationResult = applicationPollResult(execution)
+
     if (Option.isSome(applicationResult)) return applicationResult.value
 
     const polling = FinancialReportExport.poll(executionId)
     const result = yield* native(polling)
 
     if (Option.isNone(result)) {
-      return ReportExportPollResultSchema.make({ _tag: "Pending", stage: execution.status })
+      return ReportExportPollResultSchema.cases.Pending.make({ stage: execution.status })
     }
 
     return yield* pipe(
@@ -410,17 +416,20 @@ const poll = Command.implement(
             }),
           )
 
-          const recoverable = ReportExportPollResultSchema.make({ _tag: "Recoverable", reason })
+          const recoverable = ReportExportPollResultSchema.cases.Recoverable.make({ reason })
+
           return Effect.succeed(recoverable)
         },
         Complete: ({ exit }) => Exit.match(exit, {
           onFailure: (cause) => {
             const reason = Cause.pretty(cause)
-            const failed = ReportExportPollResultSchema.make({ _tag: "Failed", reason })
+            const failed = ReportExportPollResultSchema.cases.Failed.make({ reason })
+
             return pipe(executions.fail(executionId, reason), Effect.as(failed))
           },
           onSuccess: (artifact) => {
-            const succeeded = ReportExportPollResultSchema.make({ _tag: "Succeeded", ...artifact })
+            const succeeded = ReportExportPollResultSchema.cases.Succeeded.make({ ...artifact })
+
             return pipe(executions.succeed(executionId, artifact), Effect.as(succeeded))
           },
         }),

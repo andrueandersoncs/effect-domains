@@ -1,4 +1,7 @@
 import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import type { StructValue } from "./domain.ts"
+
+
 
 export type Scalar = string | number | boolean | null
 
@@ -18,7 +21,9 @@ type Literal = Schema.Schema.Type<typeof LiteralSchema>
 const ConstantSchema = Schema.TaggedStruct("Constant", { value: Schema.Boolean })
 const EqualSchema = Schema.TaggedStruct("Equal", { left: OperandSchema, right: OperandSchema })
 const IncludesSchema = Schema.TaggedStruct("Includes", { collection: OperandSchema, value: OperandSchema })
+
 type PolicyTerminal = Schema.Schema.Type<typeof ConstantSchema> | Schema.Schema.Type<typeof EqualSchema> | Schema.Schema.Type<typeof IncludesSchema>
+
 const allLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("All", { children: Schema.Array(child) })
 const anyLayer = <A extends Schema.Constraint>(child: A) => Schema.TaggedStruct("Any", { children: Schema.Array(child) })
 
@@ -32,9 +37,9 @@ const AnyPolicySchema = anyLayer(PolicySchema)
 export class PolicyEvaluationError extends Schema.TaggedError<PolicyEvaluationError>()("PolicyEvaluationError", { reason: Schema.String }) {}
 
 export class PolicyEnvironment extends Data.Class<{
-  readonly subject: Readonly<Record<string, unknown>>
-  readonly row: Option.Option<Readonly<Record<string, unknown>>>
-  readonly next: Option.Option<Readonly<Record<string, unknown>>>
+  readonly subject: StructValue
+  readonly row: Option.Option<StructValue>
+  readonly next: Option.Option<StructValue>
 }> {}
 
 type Algebra<A> = (layer: PolicyF<A>) => A
@@ -44,6 +49,7 @@ type FieldReference = Exclude<Operand, Literal>
 const transformLayer = <A, B>(layer: PolicyF<A>, child: (value: A) => B): PolicyF<B> => {
   const transformChildren = (group: Extract<PolicyF<A>, { readonly _tag: "All" | "Any" }>) => {
     const children = Array.map(group.children, child)
+
     return Struct.assign(group, { children })
   }
 
@@ -56,10 +62,17 @@ const transformLayer = <A, B>(layer: PolicyF<A>, child: (value: A) => B): Policy
 
 const fold = <A>(algebra: Algebra<A>) => {
   const interpret = (policy: Policy) => pipe(transformLayer<Policy, A>(policy, interpret), algebra)
+
   return interpret
 }
 
-const literal = (value: Scalar | ReadonlyArray<Scalar>) => LiteralSchema.make({ value })
+const literal = <const Value extends Scalar | ReadonlyArray<Scalar>>(value: Value) => {
+  const operand = LiteralSchema.make({ value })
+
+  // SAFETY: The literal schema preserves the supplied value because construction does not transform its value field.
+  return operand as typeof operand & Readonly<{ readonly value: Value }>
+}
+
 const constant = (value: boolean) => ConstantSchema.make({ value })
 const all = (...children: ReadonlyArray<Policy>) => AllPolicySchema.make({ children })
 const any = (...children: ReadonlyArray<Policy>) => AnyPolicySchema.make({ children })
@@ -71,7 +84,7 @@ export const policyFailure = Effect.fn("Policy.failure")(function* (reason: stri
 const isScalar = Schema.is(ScalarSchema)
 const isScalarCollection = Schema.is(ScalarCollectionSchema)
 
-const valueFrom = (record: Option.Option<Readonly<Record<string, unknown>>>, source: string, field: string) =>
+const valueFrom = (record: Option.Option<StructValue>, source: string, field: string) =>
   pipe(
     record,
     Option.match({
@@ -94,6 +107,7 @@ const resolve = (operand: Operand, environment: PolicyEnvironment) =>
       Literal: ({ value }) => Effect.succeed(value),
       SubjectField: ({ field }) => {
         const subject = Option.some(environment.subject)
+
         return valueFrom(subject, "subject", field)
       },
       RowField: ({ field }) => valueFrom(environment.row, "row", field),
@@ -137,11 +151,13 @@ const evaluateLayer: Algebra<Evaluator> = (layer) =>
       Equal: ({ left, right }) => Effect.fn("Policy.equal")(function* (environment: PolicyEnvironment) {
         const leftValue = yield* resolveScalarOperand(left, environment)
         const rightValue = yield* resolveScalarOperand(right, environment)
+
         return scalarEquals(leftValue, rightValue)
       }),
       Includes: ({ collection, value }) => Effect.fn("Policy.includes")(function* (environment: PolicyEnvironment) {
         const values = yield* collectionOperand(collection, environment)
         const member = yield* resolveScalarOperand(value, environment)
+
         return containsScalar(values, member)
       }),
       All: ({ children }) => Effect.fn("Policy.all")(function* (environment: PolicyEnvironment) {
@@ -202,6 +218,7 @@ const freezeOperand = (operand: Operand): Operand => {
   }
 
   const value = isScalarCollection(operand.value) ? Object.freeze([...operand.value]) : operand.value
+
   return pipe(LiteralSchema.make({ value }), (snapshot) => Object.freeze(snapshot))
 }
 
@@ -219,4 +236,4 @@ const snapshotLayer: Algebra<Policy> = (layer) => pipe(
 
 const snapshot = fold(snapshotLayer)
 
-export const Policy = { Schema: PolicySchema, fold, map: transformLayer, constant, all, any, evaluate, references, render, literal, snapshot }
+export const Policy = { Schema: PolicySchema, EqualSchema, IncludesSchema, fold, map: transformLayer, constant, all, any, evaluate, references, render, literal, snapshot }

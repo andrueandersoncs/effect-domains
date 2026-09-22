@@ -148,6 +148,7 @@ const inspectFlyPlan = (parameters: Readonly<{
 }>) => {
   const resolvedEffect = resolvePlan(parameters)
   const resolved = Effect.runSync(resolvedEffect)
+
   return resolved.deployment
 }
 
@@ -203,6 +204,7 @@ const make = (parameters: Readonly<{
         Effect.orDie,
       )
 
+      // SAFETY: The asserted infrastructure type matches because this branch constructs the corresponding provider declaration.
       return { fetch: fetch as HttpEffect }
     }),
     Effect.provide(MountVolumeLive),

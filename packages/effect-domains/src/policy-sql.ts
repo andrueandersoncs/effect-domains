@@ -43,11 +43,13 @@ const scalarSqlValue = (value: Scalar) =>
 const makeScalarExpression = (sql: SqlClient.SqlClient, value: Scalar) => {
   const fragment = nativeFragment(sql`${scalarSqlValue(value)}`)
   const kind = scalarKind(value)
+
   return new Expression({ fragment, kind })
 }
 
 const makeRowExpression = (sql: SqlClient.SqlClient, field: string) => {
   const fragment = nativeFragment(sql`${sql(field)}`)
+
   return new Expression({ fragment, kind: "row" })
 }
 
@@ -60,6 +62,7 @@ const numericType = (sql: SqlClient.SqlClient, expression: Statement.Fragment) =
 const typeMatches = (sql: SqlClient.SqlClient, expression: Statement.Fragment, kind: ScalarKind) => {
   const storageType = (kind: ScalarKind) => {
     const storage = scalarKindEquals(kind, "null") ? "null" : "text"
+
     return nativeFragment(sql`typeof(${expression}) = ${storage}`)
   }
 
@@ -73,6 +76,7 @@ const typeMatches = (sql: SqlClient.SqlClient, expression: Statement.Fragment, k
 const rowEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
   const bothNumbers = nativeFragment(sql`${numericType(sql, left.fragment)} AND ${numericType(sql, right.fragment)}`)
   const sameStorageKind = nativeFragment(sql`typeof(${left.fragment}) = typeof(${right.fragment})`)
+
   return nativeFragment(sql`(${bothNumbers} OR ${sameStorageKind}) AND ${left.fragment} IS ${right.fragment}`)
 }
 
@@ -88,7 +92,9 @@ const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expres
   )),
   Match.orElse((kind) => {
     if (scalarKindEquals(right.kind, "row")) return rowScalarEquality(sql, right.fragment, left.fragment, kind)
+
     const sameKind = scalarKindEquals(kind, right.kind)
+
     return sameKind ? nativeFragment(sql`${left.fragment} IS ${right.fragment}`) : falseExpression(sql)
   }),
 )
@@ -124,27 +130,34 @@ const bindEqual = ({ left, right }: Extract<PolicyF<Binder>, { readonly _tag: "E
   Effect.fn("PolicySql.equal")(function* (sql, environment) {
     const leftExpression = yield* scalarOperand(sql, environment, left)
     const rightExpression = yield* scalarOperand(sql, environment, right)
+
     return totalEquality(sql, leftExpression, rightExpression)
   })
 
 const entryEquality = (sql: SqlClient.SqlClient, member: Expression) => (entry: Scalar) => {
   const expression = makeScalarExpression(sql, entry)
+
   return totalEquality(sql, member, expression)
 }
 
 const bindIncludes = ({ collection, value }: Extract<PolicyF<Binder>, { readonly _tag: "Includes" }>): Binder =>
   Effect.fn("PolicySql.includes")(function* (sql, environment) {
     const entries = yield* collectionValues(environment, collection)
+
     if (Array.isReadonlyArrayEmpty(entries)) return falseExpression(sql)
+
     const member = yield* scalarOperand(sql, environment, value)
     const equalities = Array.map(entries, entryEquality(sql, member))
     const statement = sql.or(equalities)
+
     return nativeFragment(statement)
   })
 
 const joinFragments = (sql: SqlClient.SqlClient, all: boolean, fragments: ReadonlyArray<Statement.Fragment>) => {
   if (Array.isReadonlyArrayEmpty(fragments)) return all ? trueExpression(sql) : falseExpression(sql)
+
   const statement = all ? sql.and(fragments) : sql.or(fragments)
+
   return nativeFragment(statement)
 }
 
@@ -152,6 +165,7 @@ const bindJunction = (children: ReadonlyArray<Binder>, all: boolean): Binder =>
   Effect.fn("PolicySql.junction")(function* (sql, environment) {
     const effects = Array.map(children, (child) => child(sql, environment))
     const fragments = yield* Effect.all(effects)
+
     return joinFragments(sql, all, fragments)
   })
 

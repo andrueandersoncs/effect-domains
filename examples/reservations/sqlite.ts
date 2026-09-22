@@ -88,6 +88,7 @@ const transition = (action: "confirm" | "release") =>
 
     if (Equivalence.strictEqual()(action, "release")) {
       const database = yield* SqlClient.SqlClient
+
       yield* restoreStock(database, reservation)
     }
 

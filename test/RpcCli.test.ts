@@ -16,6 +16,7 @@ const runBun = Effect.fn("RpcCli.runBun")(function* (arguments_: ReadonlyArray<s
   const child = yield* spawner.spawn(command)
   const stdout = pipe(child.stdout, Stream.decodeText(), Stream.mkString)
   const stderr = pipe(child.stderr, Stream.decodeText(), Stream.mkString)
+
   return yield* Effect.all({ stdout, stderr, exitCode: child.exitCode }, { concurrency: "unbounded" })
 })
 
@@ -74,6 +75,7 @@ const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields
 
   expect(result.exitCode).toBe(0)
   expect(result.stderr).toBe("")
+
   const output = JSON.parse(result.stdout)
 
   expect(output).toEqual({
@@ -140,8 +142,10 @@ it.effect(
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
+
     const outputLines = result.stdout.trim().split("\n")
     const values = Array.map(outputLines, (line) => JSON.parse(line, undefined))
+
     expect(values).toEqual([null, null, null, null, { pingPayloadIsVoid: true, emptyPayloadIsEmpty: true }])
   }, Effect.provide(BunServices.layer)),
 )
@@ -157,6 +161,7 @@ it.effect(
 
     yield* Effect.forEach(argumentsList, Effect.fn("RpcCli.testRejectedArguments")(function* (arguments_) {
       const result = yield* runBun(["run", "examples/reservations/main.ts", "reserve", ...arguments_])
+
       expect(result.exitCode).toBe(1)
       expect(result.stdout).toBe("")
       expect(result.stderr.length).toBeGreaterThan(0)
@@ -168,19 +173,28 @@ it.effect(
   "help exposes JSON input and application subcommands retain inspection schemas",
   Effect.fn("RpcCli.testHelpAndInspect")(function* () {
     const help = yield* runBun(["run", "examples/reservations/main.ts", "reserve", "--help"])
+
     expect(help.exitCode).toBe(0)
     expect(help.stdout).toContain("--input-json")
+
     const helpOutput = expect(help.stdout)
+
     helpOutput.not.toContain("--sku")
     helpOutput.not.toContain("--quantity")
+
     const rootHelp = yield* runBun(["run", "examples/reservations/main.ts", "--help"])
+
     expect(rootHelp.exitCode).toBe(0)
     expect(rootHelp.stdout).toContain("serve")
     expect(rootHelp.stdout).toContain("inspect")
+
     const inspection = yield* runBun(["run", "examples/reservations/main.ts", "inspect", "reserve"])
+
     expect(inspection.exitCode).toBe(0)
     expect(inspection.stderr).toBe("")
+
     const metadata = JSON.parse(inspection.stdout)
+
     expect(metadata.operations).toHaveLength(1)
     expect(inspection.stdout).toContain('"sku"')
     expect(inspection.stdout).toContain('"quantity"')
@@ -197,6 +211,7 @@ it.effect(
 
     yield* Effect.forEach(argumentsList, Effect.fn("RpcCli.testNativeFlag")(function* (arguments_) {
       const result = yield* runBun(["run", "examples/reservations/main.ts", "reserve", ...arguments_])
+
       expect(result.exitCode).toBe(1)
       expect(result.stderr).toContain("sku")
       expect(result.stdout).toContain("USAGE")
@@ -298,8 +313,10 @@ it.effect(
     `
 
     const result = yield* runBun(["--eval", source])
+
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
+
     const lines = result.stdout.trim().split("\n")
     const values = Array.map(lines, (line) => JSON.parse(line, undefined))
 

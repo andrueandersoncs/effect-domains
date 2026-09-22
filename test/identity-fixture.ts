@@ -30,5 +30,6 @@ export const sessionFor = Effect.fn("IdentityTest.sessionFor")(function* (userna
   const identity = yield* IdentityRuntime
   const credentials = CredentialsSchema.make({ username, password })
   const session = yield* identity.login(credentials)
+
   return { authorization: `Bearer ${Redacted.value(session.token)}` }
 })

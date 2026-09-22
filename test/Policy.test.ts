@@ -51,8 +51,10 @@ const policies = [Policy.constant(true), Policy.constant(false), Policy.all(), P
 it.effect("the same policy selects identical canonical and SQL rows including nulls and hostile literals", () => pipe(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`CREATE TABLE policy_rows (id INTEGER PRIMARY KEY, label TEXT, amount REAL NOT NULL)`
     yield* sql`INSERT INTO policy_rows (id, label, amount) VALUES (1, NULL, 0), (2, 'one', 1), (3, ${hostile}, 2), (4, '1', 1), (5, 'other', 3)`
+
     const rows = yield* sql<Readonly<Record<string, unknown>>>`SELECT * FROM policy_rows ORDER BY id`
 
     const verifyPolicy = Effect.fn("Policy.testParity")(function* (source: Policy) {
@@ -63,6 +65,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 
       const visible = (row: Readonly<Record<string, unknown>>) => {
         const present = Option.some(row)
+
         return pipe(new PolicyEnvironment({ subject, row: present, next: absent }), evaluate)
       }
 
@@ -70,10 +73,12 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
       const predicate = yield* PolicySql.compile(policy)(sql, environment)
       const actualRows = yield* sql<Readonly<Record<string, unknown>>>`SELECT id FROM policy_rows WHERE ${predicate} ORDER BY id`
       const actual = Array.map(actualRows, Struct.get("id"))
+
       expect(actual).toEqual(expected)
     })
 
     yield* Effect.forEach(policies, verifyPolicy)
+
     const binder = PolicySql.compile(minimumAmount)
     const firstEnvironment = new PolicyEnvironment({ subject: { minimum: 1 }, row: absent, next: absent })
     const secondEnvironment = new PolicyEnvironment({ subject: { minimum: 3 }, row: absent, next: absent })
@@ -81,6 +86,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
     const second = yield* binder(sql, secondEnvironment)
     const firstRows = yield* sql`SELECT id FROM policy_rows WHERE ${first} ORDER BY id`
     const secondRows = yield* sql`SELECT id FROM policy_rows WHERE ${second} ORDER BY id`
+
     expect(firstRows).toEqual([{ id: 2 }, { id: 4 }])
     expect(secondRows).toEqual([{ id: 5 }])
   }), Effect.provide(sqlite),
@@ -97,13 +103,20 @@ it.effect("fold evaluation short circuits without turning missing operands or ma
   const required = Policy.all(yes, missing)
   const granted = yield* Policy.evaluate(alternative)(environment)
   const denied = yield* Policy.evaluate(conjunction)(environment)
+
   expect(granted).toBe(true)
   expect(denied).toBe(false)
+
   const failure = yield* pipe(Policy.evaluate(required)(environment), Effect.result, Effect.map(Result.isFailure))
+
   expect(failure).toBe(true)
+
   const unknown = yield* pipe(Schema.decodeUnknownEffect(Policy.Schema)({ _tag: "Execute", code: "allow" }), Effect.result, Effect.map(Result.isFailure))
+
   expect(unknown).toBe(true)
+
   const invalidScalar = yield* pipe(Schema.decodeUnknownEffect(OperandSchema)({ _tag: "Literal", value: Infinity }), Effect.result, Effect.map(Result.isFailure))
+
   expect(invalidScalar).toBe(true)
 }))
 
@@ -141,6 +154,7 @@ it.effect("embedded subject policies apply scope and action entitlement requirem
   )
 
   const entitlementCalls = yield* Ref.get(calls)
+
   expect(entitlementCalls).toContain("scope")
   expect(entitlementCalls).toContain("action")
 
@@ -148,5 +162,6 @@ it.effect("embedded subject policies apply scope and action entitlement requirem
   const otherSubject = Authorization.subject(OtherSubjectSchema)
   const otherAccess = otherSubject.all()
   const other = otherSubject.policy(otherAccess)
+
   expect(() => resource.policy({ scope: other, allow: { read: allow } })).toThrow()
 }))

@@ -1,6 +1,9 @@
 import { Context, Data, Effect, Option, Schema } from "effect"
 import { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
+import type { StructValue } from "./domain.ts"
+
+
 
 
 export class RepositoryOrder extends Data.Class<{
@@ -16,16 +19,16 @@ export class RepositoryOrder extends Data.Class<{
  * of the previous page; the store continues strictly after that row (keyset).
  */
 export class RepositorySelect extends Data.Class<{
-  readonly filter: Readonly<Record<string, unknown>>
+  readonly filter: StructValue
   readonly range: Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>
   readonly order: ReadonlyArray<RepositoryOrder>
-  readonly after: Option.Option<Readonly<Record<string, unknown>>>
+  readonly after: Option.Option<StructValue>
   readonly limit: number
 }> {}
 
 export class RepositoryAccess extends Data.Class<{
   readonly policy: Policy
-  readonly subject: Readonly<Record<string, unknown>>
+  readonly subject: StructValue
 }> {}
 
 
@@ -70,14 +73,14 @@ export class VersionConflict extends Schema.TaggedError<VersionConflict>()(
 type RepositoryUpdate = {
   (
     table: Table,
-    value: Readonly<Record<string, unknown>>,
+    value: StructValue,
     access: RepositoryAccess,
   ): Effect.Effect<Option.Option<unknown>, RepositoryError | UniqueViolation>;
   (
     table: Table,
-    value: Readonly<Record<string, unknown>>,
+    value: StructValue,
     access: RepositoryAccess,
-    guard: Readonly<Record<string, unknown>>,
+    guard: StructValue,
   ): Effect.Effect<Option.Option<unknown>, RepositoryError | UniqueViolation>;
 }
 
@@ -86,10 +89,10 @@ export class RepositoryStore extends Context.Service<RepositoryStore, {
     table: Table,
     query: RepositorySelect,
     access: RepositoryAccess,
-  ) => Effect.Effect<ReadonlyArray<Readonly<Record<string, unknown>>>, RepositoryError>
+  ) => Effect.Effect<ReadonlyArray<StructValue>, RepositoryError>
   readonly insert: (
     table: Table,
-    value: Readonly<Record<string, unknown>>,
+    value: StructValue,
   ) => Effect.Effect<unknown, RepositoryError | UniqueViolation>
   /** Updates the row whose identifier matches `value`, only where `access` and `guard` both hold. */
   readonly update: RepositoryUpdate

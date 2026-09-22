@@ -20,7 +20,7 @@ import { Application } from "effect-domains/application"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
-import { makeMigrationStore } from "effect-domains/sqlite-migrations"
+import { sqliteMigrationStore } from "effect-domains/sqlite-migrations"
 import { SchemaStore } from "effect-domains/migrations"
 
 const sku = SkuSchema.make("book")
@@ -40,6 +40,7 @@ const withInventory = <A, E, R>(
   pipe(
     Effect.fn("Reservations.withInventory")(function* () {
       const schemaStore = yield* SchemaStore
+
       yield* Application.prepare(ReservationApplication, schemaStore)
       yield* seedStock(initialStock)
 
@@ -66,8 +67,10 @@ const onlyOneConcurrentReservationAction = Effect.fn(
 
   const successes = Array.filter(outcomes, Result.isSuccess)
   const failures = Array.filter(outcomes, Result.isFailure)
+
   expect(successes).toHaveLength(1)
   expect(failures).toHaveLength(1)
+
   const reservedOption = Array.get(successes, 0)
   const rejectedOption = Array.get(failures, 0)
   const reserved = Option.getOrThrow(reservedOption)
@@ -167,7 +170,9 @@ const failedInsertRollsBackStockAction = Effect.fn(
   const inventoryUnavailable = InventoryUnavailable.make({})
   const expectedOutcome = Result.fail(inventoryUnavailable)
   const stockAfterFailure = yield* Resource.repository(StockResource).get(sku)
+
   yield* database`DROP TRIGGER reject_reservation`
+
   const recovered = yield* client.reserve(request)
   const stockAfterRecovery = yield* Resource.repository(StockResource).get(sku)
 
@@ -194,20 +199,25 @@ const historicalSecondsMigrationAction = Effect.fn(
   const database = yield* SqlClient.SqlClient
   const initialOption = Array.get(InventoryMigrations, 0)
   const initial = Option.getOrThrow(initialOption)
-  const initialStore = makeMigrationStore(database, [initial])
+  const initialStore = sqliteMigrationStore(database, [initial])
+
   yield* initialStore.prepare(initial.to.tables)
 
   const id = ReservationIdSchema.make("01941f29-7c00-7000-8000-000000000001")
   const seconds = 1735689600
+
   yield* database`INSERT INTO stock (sku, available) VALUES (${sku}, 0)`
 
   yield* database`INSERT INTO reservations (id, sku, quantity, status, created_at_seconds)
     VALUES (${id}, ${sku}, 1, 'held', ${seconds})`
 
   const schemaStore = yield* SchemaStore
+
   yield* Application.prepare(ReservationApplication, schemaStore)
   yield* Application.prepare(ReservationApplication, schemaStore)
+
   const historicalStock = StockSchema.make({ sku, available: 99 })
+
   yield* seedStock(historicalStock)
 
   const reservation = yield* Resource.repository(ReservationResource).get(id)

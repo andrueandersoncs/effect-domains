@@ -43,6 +43,7 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   ) as Layer.Layer<never, unknown, HttpRouter.HttpRouter>
 
   const server = HttpRouter.toWebHandler(providedRoutes, { disableLogger: true })
+
   yield* Effect.addFinalizer(() => Effect.promise(() => server.dispose()))
 
   const baseHeaders = new Headers({
@@ -62,10 +63,12 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const accepted = yield* Effect.promise(() => server.handler(acceptedRequest))
+
   expect(accepted.status).toBe(200)
 
   const received = yield* collector.received
   const first = pipe(received, Array.head, Option.getOrThrow)
+
   expect(received).toHaveLength(1)
 
   expect(first).toMatchObject({
@@ -76,6 +79,7 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
 
   const crossOriginBytes = new Uint8Array([4])
   const crossOriginHeaders = new Headers(baseHeaders)
+
   crossOriginHeaders.set("origin", "http://attacker.example")
   crossOriginHeaders.set("sec-fetch-site", "cross-site")
 
@@ -86,6 +90,7 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const crossOrigin = yield* Effect.promise(() => server.handler(crossOriginRequest))
+
   expect(crossOrigin.status).toBe(403)
 
   const oversizedBytes = new Uint8Array(9)
@@ -97,10 +102,12 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const oversized = yield* Effect.promise(() => server.handler(oversizedRequest))
+
   expect(oversized.status).toBe(413)
 
   const unsupportedBytes = new Uint8Array([1])
   const unsupportedHeaders = new Headers(baseHeaders)
+
   unsupportedHeaders.set("content-type", "text/plain")
 
   const unsupportedRequest = new Request("http://localhost/otel/v1/metrics", {
@@ -110,10 +117,12 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const unsupported = yield* Effect.promise(() => server.handler(unsupportedRequest))
+
   expect(unsupported.status).toBe(415)
 
   const compressedBytes = new Uint8Array([1])
   const compressedHeaders = new Headers(baseHeaders)
+
   compressedHeaders.set("content-encoding", "gzip")
 
   const compressedRequest = new Request("http://localhost/otel/v1/metrics", {
@@ -123,6 +132,7 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const compressed = yield* Effect.promise(() => server.handler(compressedRequest))
+
   expect(compressed.status).toBe(415)
 
   const disabledBytes = new Uint8Array([1])
@@ -134,8 +144,10 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   })
 
   const disabled = yield* Effect.promise(() => server.handler(disabledRequest))
+
   expect(disabled.status).toBe(404)
 
   const finalReceived = yield* collector.received
+
   expect(finalReceived).toHaveLength(1)
 }))

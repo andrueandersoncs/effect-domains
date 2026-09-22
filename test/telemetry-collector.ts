@@ -37,8 +37,6 @@ class CollectorServerOptions extends Data.Class<{
 
 
 
-const sameMode = Equivalence.strictEqual<CollectorMode>()
-const sameStatus = Equivalence.strictEqual<number>()
 
 const makeTelemetryCollector = Effect.fn("TelemetryCollector.make")(function* (
   mode: CollectorMode,
@@ -54,6 +52,7 @@ const makeTelemetryCollector = Effect.fn("TelemetryCollector.make")(function* (
     const attempt = yield* Ref.modify(attempts, (current) => {
       const previous = pipe(HashMap.get(current, url.pathname), Option.getOrElse(Function.constant(0)))
       const next = previous + 1
+
       return [next, HashMap.set(current, url.pathname, next)] as const
     })
 
@@ -64,16 +63,18 @@ const makeTelemetryCollector = Effect.fn("TelemetryCollector.make")(function* (
       Match.orElse(Function.constant(200)),
     )
 
-    const status = sameMode(mode, "retry-twice") ? retryStatus : 200
+    const status = Equivalence.strictEqual<CollectorMode>()(mode, "retry-twice") ? retryStatus : 200
 
-    if (sameMode(mode, "slow")) yield* Effect.sleep("5 seconds")
+    if (Equivalence.strictEqual<CollectorMode>()(mode, "slow")) yield* Effect.sleep("5 seconds")
 
     const buffer = yield* Effect.promise(() => request.arrayBuffer())
     const body = new Uint8Array(buffer)
     const authorization = request.headers.get("authorization")
     const signal = CollectedSignal.make({ path: url.pathname, authorization, body, status, attempt })
+
     yield* Ref.update(received, Array.append(signal))
-    const throttled = sameStatus(status, 429)
+
+    const throttled = Equivalence.strictEqual<number>()(status, 429)
 
     return new Response(body, {
       status,
@@ -104,6 +105,7 @@ const makeTelemetryCollector = Effect.fn("TelemetryCollector.make")(function* (
   })
 
   const close = Effect.sync(() => server.stop(true))
+
   return new CollectorLease({ collector, close })
 })
 
@@ -112,5 +114,6 @@ export const telemetryCollector = Effect.fn("TelemetryCollector.scoped")(functio
 ) {
   const acquire = makeTelemetryCollector(mode)
   const lease = yield* Effect.acquireRelease(acquire, Struct.get("close"))
+
   return lease.collector
 })

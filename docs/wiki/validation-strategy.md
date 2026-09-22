@@ -30,6 +30,16 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-22: Deterministic lint backlog remediation
+
+The native `better-typescript` 0.4.25 executable now completes repository analysis. The remediation replaces unsafe dictionary annotations with schema-derived values, converts ad hoc tagged unions and service construction to Effect constructors, removes redundant DOM assertions, carries the exact empty input requirement in the shared SQLite driver-layer type, and completes the `sqliteMigrationStore` naming cutover through every test caller. ([Domain value type](../../packages/effect-domains/src/domain.ts); [SQLite runtime](../../packages/effect-domains/src/sqlite-runtime.ts); [migration store](../../packages/effect-domains/src/sqlite-migrations.ts); [browser client](../../apps/application-ui/src/client.ts))
+
+The root lint configuration scopes fixture-hostile rules away from `test/**/*.ts`: tests may deliberately construct raw tagged payloads, malformed unknown dictionaries, reflection calls, runtime type probes, repeated expected values, nested boundary calls, and synchronous Effect runners. Production code retains those rules. `require-safety-comment-for-type-assertion` is temporarily excluded because 0.4.25 still reports some assertions after an immediately adjacent `SAFETY:` comment with a `because` justification; the source retains those invariant comments for review. These are explicit lint limitations, not behavioral evidence. ([Lint configuration](../../better-typescript.json))
+
+- `bun run lint` and `bun run typecheck` pass.
+- Focused persistence, migration, feature-flag, and generated-UI verification passes **39 tests in 4 files** after removing two misplaced safety comments that had become SQL template text. ([Regressions](../../test/ResourceCrud.test.ts); [migration regressions](../../test/SqliteMigrations.test.ts); [feature-flag regressions](../../test/FeatureFlags.test.ts); [UI regressions](../../test/ApplicationUi.test.ts))
+- Complete repository verification passes `bun run check`: manifest formatting, every workspace and root lint, every workspace and root TypeScript check, the Application UI build, **156 tests in 32 files**, and deterministic architecture analysis with **0 violations and 0 reviews**. The VitePress production build also passes.
+
 ### 2026-09-22: Semantic contract hardening
 
 The semantic lint review produced four concrete cutovers. Runtime TypeScript configs now declare `strict` and `noUncheckedIndexedAccess` locally instead of relying on inherited defaults. The private `effect-domains` workspace package declares a source-consumption contract: every export targets `src/*.ts`, `files` contains only `src`, and no JavaScript or declaration artifact is emitted. `Application.compile` and feature-flag validation now return typed Effects; only application modules, tests, and other explicit composition boundaries execute them. ([Package contract](../../packages/effect-domains/package.json); [application compiler](../../packages/effect-domains/src/application.ts); [feature flags](../../packages/effect-domains/src/feature-flags.ts))
@@ -38,7 +48,7 @@ The dependency and ownership review found no ambient registry or implicit applic
 
 Database failures now cross public boundaries only as sanitized domain tags. `RepositoryError`, `UniqueViolation`, and `MigrationError` retain the resource or authored failure reason needed for recovery but omit SQL text, driver causes, database constraint names, and physical columns. SQLite-specific messages are inspected only to classify a unique violation and are then discarded. Expected duplicate-number policy remains explicit in authored billing commands, which translate the sanitized `UniqueViolation` tag to domain errors. ([Public repository errors](../../packages/effect-domains/src/repository-store.ts); [SQLite adapter](../../packages/effect-domains/src/sqlite-runtime.ts); [migration errors](../../packages/effect-domains/src/migrations.ts); [billing translation](../../examples/orders-invoices/sqlite.ts))
 
-- Verification passed the workspace typecheck, all **156 tests in 32 files**, and the VitePress production build. Package-scoped semantic lint with this record as review context reported **0 violations and 0 reviews** across both repository and routed evidence. `bun run check` still stops in its deterministic lint stage because the current rule set reports broad workspace findings, including untouched files; this change adds no exclusion or suppression for that separate backlog.
+- Verification passed the workspace typecheck, all **156 tests in 32 files**, and the VitePress production build. Package-scoped semantic lint with this record as review context reported **0 violations and 0 reviews** across both repository and routed evidence. At that point `bun run check` still stopped in its deterministic lint stage; the later [deterministic lint remediation](#2026-09-22-deterministic-lint-backlog-remediation) records that separate cutover.
 
 ### 2026-09-16: Provider-neutral infrastructure and Alchemy backends
 

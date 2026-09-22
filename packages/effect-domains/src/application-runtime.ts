@@ -67,6 +67,7 @@ const buildContext = Effect.fn("ApplicationRuntime.buildContext")(function* <
 ) {
   const databaseContext = yield* Layer.build(database)
   const schemaStore = Context.get(databaseContext, SchemaStore)
+
   yield* Application.prepare(application, schemaStore)
 
   const services = yield* pipe(
@@ -75,6 +76,7 @@ const buildContext = Effect.fn("ApplicationRuntime.buildContext")(function* <
   )
 
   const serviceContext = Context.merge(databaseContext, services)
+
   yield* Effect.provideContext(options.initialize ?? Effect.void, serviceContext)
 
   const background = yield* pipe(
@@ -128,6 +130,7 @@ export const httpLayer = Effect.fn("ApplicationRuntime.httpLayer")(function* (
   const rpc = rpcDisabled
     ? Layer.empty
     : RpcServer.layerHttp({
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       group: application.group as RpcGroup.RpcGroup<Rpc.AnyWithProps>,
       path: rpcPath,
       protocol: "http",
@@ -186,6 +189,7 @@ export const use = Effect.fn("ApplicationRuntime.use")(function* <
   effect: Effect.Effect<A, E, R>,
 ) {
   const runtimeContext = yield* buildContext(application, database, options)
+
   return yield* Effect.provideContext(effect, runtimeContext)
 })
 

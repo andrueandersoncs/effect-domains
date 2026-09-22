@@ -5,6 +5,7 @@ export class StoragePrefix extends Context.Service<StoragePrefix, { readonly val
 const decode = SchemaGetter.transformOrFail<string, string, StoragePrefix>(
   Effect.fn("Prefix.decode")(function* (value) {
     const prefix = yield* StoragePrefix
+
     return value.slice(prefix.value.length)
   }),
 )
@@ -12,6 +13,7 @@ const decode = SchemaGetter.transformOrFail<string, string, StoragePrefix>(
 const encode = SchemaGetter.transformOrFail<string, string, StoragePrefix>(
   Effect.fn("Prefix.encode")(function* (value) {
     const prefix = yield* StoragePrefix
+
     return `${prefix.value}${value}`
   }),
 )

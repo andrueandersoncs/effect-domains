@@ -19,6 +19,7 @@ import { writeReportArtifact } from "./writer.ts"
 const configuredServices = Effect.gen(function* () {
   const directory = yield* Config.string("REPORT_EXPORTS_OUTPUT_DIR")
   const output = Layer.succeed(ReportArtifactOutput, { directory })
+
   return Layer.mergeAll(output, ReportExportEntitlements)
 })
 

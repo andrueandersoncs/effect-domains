@@ -53,6 +53,7 @@ new Entitlements.Source({
 })
 
 Entitlements.fromTable(invalidReportSource)
+
 const p = Authorization.for({ resource: ReportSchema, subject: SubjectSchema })
 const access = p.all()
 const report = p.entitlement({ name: "report", key: p.row.id })
@@ -80,6 +81,7 @@ p.policy({ scope: access, allow: { read: access }, require: { remove: [report] }
 const subject = Authorization.subject(SubjectSchema)
 const subjectAccess = subject.all()
 const subjectAccount = subject.entitlement({ name: "account", key: subject.subject.tenantId })
+
 subject.policy(subjectAccess, { require: [subjectAccount] })
 // @ts-expect-error because subject policies cannot require row-dependent entitlements.
 subject.policy(subjectAccess, { require: [report] })

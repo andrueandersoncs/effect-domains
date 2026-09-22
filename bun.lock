@@ -5,7 +5,7 @@
     "": {
       "name": "effect-domains",
       "devDependencies": {
-        "@better-typescript/better-typescript": "0.4.24",
+        "@better-typescript/better-typescript": "0.4.25",
         "@effect-domains/alchemy": "workspace:*",
         "@effect-domains/example-field-notes": "workspace:*",
         "@effect-domains/example-orders-invoices": "workspace:*",
@@ -274,15 +274,15 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.24", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.24", "@better-typescript/better-typescript-darwin-arm64": "0.4.24", "@better-typescript/better-typescript-linux-amd64": "0.4.24", "@better-typescript/better-typescript-linux-arm64": "0.4.24" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-B3Sj+bcPcbACngE10LpQNIV5Z2yXMmvfp2YPj6Ff67K6Joy9jPjF7JIfabCPV+20FaZNy0X+dKkLOpWfYqhNnQ=="],
+    "@better-typescript/better-typescript": ["@better-typescript/better-typescript@0.4.25", "", { "optionalDependencies": { "@better-typescript/better-typescript-darwin-amd64": "0.4.25", "@better-typescript/better-typescript-darwin-arm64": "0.4.25", "@better-typescript/better-typescript-linux-amd64": "0.4.25", "@better-typescript/better-typescript-linux-arm64": "0.4.25" }, "bin": { "better-typescript": "bin/better-typescript.js" } }, "sha512-t8tyrkY9QSWqa2QUSkiwOhuFSGyY3TLAXcOVUOH6Pce59l30dNmqenBB0u5SZe6pMQgijJ/Z6czQr7Fz1ryFPA=="],
 
-    "@better-typescript/better-typescript-darwin-amd64": ["@better-typescript/better-typescript-darwin-amd64@0.4.24", "", { "os": "darwin", "cpu": "x64" }, "sha512-idWJcaOlh5rpla8RQ0rbiUOwpzxDJCuOcakq8rYM3wFwjqu50iNabf19qpSsyuqUq1/s9hXpDr22sYo4pYftTA=="],
+    "@better-typescript/better-typescript-darwin-amd64": ["@better-typescript/better-typescript-darwin-amd64@0.4.25", "", { "os": "darwin", "cpu": "x64" }, "sha512-7zL8TBBIzVsf7tAySW4R6ZjA+hWUfY5lwLqlEV1yLBzBbPW5v3AXJXkrnQeZUSHRtRB94A3fXyljxM6uQGsmDQ=="],
 
-    "@better-typescript/better-typescript-darwin-arm64": ["@better-typescript/better-typescript-darwin-arm64@0.4.24", "", { "os": "darwin", "cpu": "arm64" }, "sha512-UQpVbkv3NDwC1gpVsQA+4g71tGOLoonY2JfU1K5fMuTjJm1W2wDp7VC9w39cXJtORmubh5J0PrTGNSOA8fB9tQ=="],
+    "@better-typescript/better-typescript-darwin-arm64": ["@better-typescript/better-typescript-darwin-arm64@0.4.25", "", { "os": "darwin", "cpu": "arm64" }, "sha512-hNDFAfCu51WthAuhjN+uc2G051Yje8smy3Y1Sfjik4Xil0KbbhDXgvM/rrQziJzCpgreAslexio1uNKKGnQjbw=="],
 
-    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.24", "", { "os": "linux", "cpu": "x64" }, "sha512-8+oCdBTP2i1Xyu+M/yDz3f4MXbaEa7aTFNlbageOmo+7hi6Tdr7jrBnu85/mGZfO10roMRasFXJ27er2+3w6eg=="],
+    "@better-typescript/better-typescript-linux-amd64": ["@better-typescript/better-typescript-linux-amd64@0.4.25", "", { "os": "linux", "cpu": "x64" }, "sha512-VJXJAFoZbzrTmegsumPYrePfqWSYgxTRGpR/ZGtVVPfj2BrNA8hVjOCzeSeqhouo2YrspzsEHqr8L50EMMnvYQ=="],
 
-    "@better-typescript/better-typescript-linux-arm64": ["@better-typescript/better-typescript-linux-arm64@0.4.24", "", { "os": "linux", "cpu": "arm64" }, "sha512-5rjyuA9bKirKoqLKPUs3CO8+EWK2jxeUQ1DnI+UZjVSkIIL7UuPPEAk6Wwr6NWWZWtOdcMOztIIp887L1ZHuXQ=="],
+    "@better-typescript/better-typescript-linux-arm64": ["@better-typescript/better-typescript-linux-arm64@0.4.25", "", { "os": "linux", "cpu": "arm64" }, "sha512-lb7P8YveowPWqHqBo7BAzEK7IfFH0CvRXFILHGv1+6kl/xryQeNMa3iFVzhtT0kuLaYcuJGhIe7NQZqjhRCTgg=="],
 
     "@chevrotain/cst-dts-gen": ["@chevrotain/cst-dts-gen@10.5.0", "", { "dependencies": { "@chevrotain/gast": "10.5.0", "@chevrotain/types": "10.5.0", "lodash": "4.17.21" } }, "sha512-lhmC/FyqQ2o7pGK4Om+hzuDrm9rhFYIJ/AXoQBeongmn870Xeb0L6oGEiuR8nohFNL5sMaQEJWCxr1oIVIVXrw=="],
 

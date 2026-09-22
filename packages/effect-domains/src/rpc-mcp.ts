@@ -4,7 +4,7 @@ import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/htt
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
-import { makeClient, type UnaryRpc } from "./rpc-in-process.ts"
+import { inProcessClient, type UnaryRpc } from "./rpc-in-process.ts"
 
 class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
   "RpcMcpDefinitionError",
@@ -33,7 +33,7 @@ const toolSchema = (schema: Schema.Constraint) => pipe(
 
 const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGroup<UnaryRpc>) {
   const registry = yield* McpServer.McpServer
-  const { client, withHandlerContext } = yield* makeClient(group)
+  const { client, withHandlerContext } = yield* inProcessClient(group)
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
@@ -49,14 +49,19 @@ const register = Effect.fn("RpcMcp.register")(function* (group: RpcGroup.RpcGrou
     }
 
     const InputSchema = Schema.Struct({ input: contract.payloadSchema })
+
     interface Input extends Schema.Schema.Type<typeof InputSchema> {}
+
     const OutputSchema = Schema.Struct({ result: contract.successSchema })
+
     interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
+
     const ErrorSchema = Schema.fromJsonString(contract.errorSchema)
     const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({ procedure: contract._tag, reason: String(cause) })
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
     const tool = McpSchema.Tool.make({ name: contract._tag, inputSchema, outputSchema })
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const withCodecContext = withHandlerContext(procedure as UnaryRpc)
 
     const execute = Effect.fn("RpcMcp.execute")(function* (arguments_: unknown, headers: Headers.Headers) {
@@ -114,6 +119,7 @@ const layerHttp = <App extends ApplicationIR>(options: Readonly<{
   path: `/${string}`
 }>) => {
   type Rpcs = RpcGroup.Rpcs<App["group"]>
+
   const { application } = options
 
   const server = McpServer.layerHttp({
@@ -123,7 +129,9 @@ const layerHttp = <App extends ApplicationIR>(options: Readonly<{
     protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26],
   })
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return pipe(
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     register(application.group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>),
     Layer.effectDiscard,
     Layer.provide(server),

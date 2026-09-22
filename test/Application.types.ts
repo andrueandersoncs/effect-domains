@@ -14,8 +14,11 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
 const emptyDefinition = Application.define({ name: "empty", parts: [] })
 const emptyApplication = Effect.runSync(Application.compile(emptyDefinition))
 const NoteSchema = Schema.Struct({ text: Schema.String })
+
 interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
+
 const StoredNoteSchema = Schema.Struct({ text: StoredTextSchema })
+
 interface StoredNote extends Schema.Schema.Type<typeof StoredNoteSchema> {}
 
 const noteCapabilities = Resource.crud()
@@ -75,6 +78,7 @@ class RoutesDependency extends Context.Service<RoutesDependency, {}>()("test/App
 
 const makeExecution = Effect.gen(function* () {
   yield* ExecutionDependency
+
   return {}
 })
 
@@ -88,6 +92,7 @@ const background = pipe(BackgroundDependency, Effect.asVoid, Layer.effectDiscard
 
 const route = Effect.gen(function* () {
   yield* RoutesDependency
+
   return HttpServerResponse.empty()
 })
 
@@ -152,6 +157,7 @@ const preservesMiddlewareRequirement = true satisfies Equal<
 
 void preservesMiddlewareRequirement
 void preservesNativeRequirements
+
 const defaultsAreRunnable = true satisfies Equal<Effect.Services<typeof minimal>, never>
 const preservesWireCodec = true satisfies Equal<Effect.Services<typeof storedTextCli>, StoragePrefix>
 

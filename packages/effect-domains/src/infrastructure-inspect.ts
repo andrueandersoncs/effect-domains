@@ -207,10 +207,12 @@ const inspectResource = (value: InfrastructureResource): unknown => pipe(
     },
     PublicEndpoint: (resource) => {
       const target = Infrastructure.target(resource)
+
       return TargetInspectionSchema.make({ kind: "PublicEndpoint", id: resource.id, target: target.id })
     },
     Domain: (resource) => {
       const target = Infrastructure.target(resource)
+
       return DomainInspectionSchema.make({ kind: "Domain", id: resource.id, name: resource.name, target: target.id })
     },
     OtlpDestination: (resource) => ConfigurationInspectionSchema.make({

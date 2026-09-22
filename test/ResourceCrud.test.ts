@@ -11,7 +11,7 @@ import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
 import { FieldReportsResource } from "@effect-domains/example-field-notes/resources"
-import { FieldNoteEncryption, makeFieldNoteEncryption } from "@effect-domains/example-field-notes/storage"
+import { fieldNoteEncryptionLayer } from "@effect-domains/example-field-notes/storage"
 import { FieldReportIdSchema } from "@effect-domains/example-field-notes/domain"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { RpcTest } from "effect/unstable/rpc"
@@ -19,7 +19,9 @@ import { RpcTest } from "effect/unstable/rpc"
 const fieldReportsTable = Resource.table(FieldReportsResource)
 
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
+
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
+
 const completedDefault = Resource.default(false)
 const generatedTodoSources = Object.freeze({ completed: completedDefault })
 
@@ -90,6 +92,7 @@ const CursorDescendingTodos = Resource.define({
 })
 
 const DefaultTodoSchema = Schema.Struct({ id: identifier(Schema.Int), title: Schema.NonEmptyString })
+
 interface DefaultTodo extends Schema.Schema.Type<typeof DefaultTodoSchema> {}
 
 const defaultTodoCapabilities = [...Resource.crud(), Resource.patch()]
@@ -107,23 +110,33 @@ const DefaultTodosRuntime = Resource.compile(DefaultTodos)
 it.effect("default generated lists return bounded identifier-ordered pages through repository and RPC", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([defaultTodosTable])
+
     const client = yield* RpcTest.makeClient(DefaultTodosRuntime.group)
     const empty = yield* client["default_todos.list"]({})
+
     expect(empty).toEqual({ items: [], nextCursor: null })
     yield* pipe(Array.range(1, 51), Effect.forEach((id) => Resource.repository(DefaultTodos).create({ id, title: "todo" })))
+
     const first = yield* Resource.repository(DefaultTodos).list()
     const identifiers = Array.map(first.items, Struct.get("id"))
     const expectedIdentifiers = Array.range(1, 50)
+
     expect(identifiers).toEqual(expectedIdentifiers)
+
     const rpcFirst = yield* client["default_todos.list"]({})
+
     expect(rpcFirst).toEqual(first)
+
     const cursor = yield* Effect.fromNullishOr(first.nextCursor)
     const last = yield* client["default_todos.list"]({ cursor })
+
     expect(last).toEqual({ items: [{ id: 51, title: "todo" }], nextCursor: null })
+
     const zeroLimit = yield* pipe(Resource.repository(DefaultTodos).list({ limit: 0 }), Effect.result)
     const excessiveLimit = yield* pipe(Resource.repository(DefaultTodos).list({ limit: 51 }), Effect.result)
     const zeroFailed = Result.isFailure(zeroLimit)
     const excessiveFailed = Result.isFailure(excessiveLimit)
+
     expect(zeroFailed).toBe(true)
     expect(excessiveFailed).toBe(true)
   }),
@@ -135,17 +148,25 @@ it.effect("default generated lists return bounded identifier-ordered pages throu
 it.effect("generated CRUD retains all six operations with a uniform list page", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([defaultTodosTable])
+
     const client = yield* RpcTest.makeClient(DefaultTodosRuntime.group)
     const created = yield* client["default_todos.create"]({ id: 1, title: "created" })
     const found = yield* client["default_todos.get"]({ id: created.id })
+
     expect(found).toEqual(created)
+
     const updated = yield* client["default_todos.update"]({ ...created, title: "updated" })
+
     expect(updated.title).toBe("updated")
+
     const patched = yield* client["default_todos.patch"]({ key: created.id, changes: { title: "patched" } })
     const listed = yield* client["default_todos.list"]({})
+
     expect(listed).toEqual({ items: [patched], nextCursor: null })
     yield* client["default_todos.remove"]({ id: created.id })
+
     const empty = yield* client["default_todos.list"]({})
+
     expect(empty).toEqual({ items: [], nextCursor: null })
   }),
   Effect.provide(DefaultTodosRuntime.handlers),
@@ -195,23 +216,28 @@ const generatedCrudProgram = Effect.gen(function* () {
   `
 
   expect(note.body).toBe("visible\u0000\ud800")
+
   const storedOption = Array.head(rows)
   const stored = Option.getOrThrow(storedOption)
   const encrypted = stored.body !== note.body
+
   expect(encrypted).toBe(true)
+
   const loaded = yield* pipe(Resource.repository(FieldReportsResource).get(note.id), Effect.provideService(AuthorizationSubject, noteAuthor))
+
   expect(loaded).toEqual(note)
 
-  const wrongEncryption = makeFieldNoteEncryption("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE")
+  const wrongEncryption = fieldNoteEncryptionLayer("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE")
 
   const wrongKey = yield* pipe(
     Resource.repository(FieldReportsResource).get(note.id),
     Effect.provideService(AuthorizationSubject, noteAuthor),
-    Effect.provideServiceEffect(FieldNoteEncryption, wrongEncryption),
+    Effect.provide(wrongEncryption),
     Effect.result,
   )
 
   expect(wrongKey).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
+
   const invalidCiphertext = `${stored.body.slice(0, 20)}AAAAAAAAAAAAAAAAAAAAAA`
 
   yield* database`
@@ -225,7 +251,9 @@ const generatedCrudProgram = Effect.gen(function* () {
   )
 
   expect(tampered).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
+
   const todo = yield* Resource.repository(GeneratedTodos).create({ title: "defaulted" })
+
   expect(todo.completed).toBe(false)
 
   const override = generatedTodosTable.rowSchema.make({
@@ -237,11 +265,13 @@ const generatedCrudProgram = Effect.gen(function* () {
   const overrideCreation = Resource.repository(GeneratedTodos).create(override)
   const rejectedOverride = yield* Effect.result(overrideCreation)
   const overrideFailed = Result.isFailure(rejectedOverride)
+
   expect(overrideFailed).toBe(true)
 })
 
-const testEncryption = makeFieldNoteEncryption("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-it.effect("generated CRUD protects encrypted text, preserves canonical Unicode, and applies defaults", () => pipe(generatedCrudProgram, Effect.provideServiceEffect(FieldNoteEncryption, testEncryption), Effect.provide(sqlite)))
+const testEncryption = fieldNoteEncryptionLayer("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+
+it.effect("generated CRUD protects encrypted text, preserves canonical Unicode, and applies defaults", () => pipe(generatedCrudProgram, Effect.provide(testEncryption), Effect.provide(sqlite)))
 
 const pagedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([pagedTodosTable])
@@ -251,9 +281,12 @@ const pagedCrudProgram = Effect.gen(function* () {
 
   const first = yield* Resource.repository(PagedTodos).list({ filter: { completed: false }, limit: 1 })
   const firstIdentifiers = Array.map(first.items, todoIdentifier)
+
   expect(firstIdentifiers).toEqual(["1"])
+
   const firstCursor = Option.fromNullishOr(first.nextCursor)
   const hasFirstCursor = Option.isSome(firstCursor)
+
   expect(hasFirstCursor).toBe(true)
 
   const second = yield* Resource.repository(PagedTodos).list({
@@ -263,6 +296,7 @@ const pagedCrudProgram = Effect.gen(function* () {
   })
 
   const secondIdentifiers = Array.map(second.items, todoIdentifier)
+
   expect(secondIdentifiers).toEqual(["2"])
   expect(second.nextCursor).toBeNull()
 
@@ -274,6 +308,7 @@ const pagedCrudProgram = Effect.gen(function* () {
 
   const malformed = yield* Effect.result(malformedPage)
   const malformedFailed = Result.isFailure(malformed)
+
   expect(malformedFailed).toBe(true)
 
   const missingAfterCursor = JSON.stringify({ after: {} })
@@ -284,6 +319,7 @@ const pagedCrudProgram = Effect.gen(function* () {
   const wrongAfterType = yield* Effect.result(wrongAfterPage)
   const missingAfterFailed = Result.isFailure(missingAfter)
   const wrongAfterTypeFailed = Result.isFailure(wrongAfterType)
+
   expect(missingAfterFailed).toBe(true)
   expect(wrongAfterTypeFailed).toBe(true)
 
@@ -296,14 +332,17 @@ const pagedCrudProgram = Effect.gen(function* () {
   const redirectedPatch = Resource.repository(PagedTodos).patch("1", redirectedPatchInput)
   const immutable = yield* Effect.result(redirectedPatch)
   const immutableFailed = Result.isFailure(immutable)
+
   expect(immutableFailed).toBe(true)
 
   const invalidPatch = Resource.repository(PagedTodos).patch("1", { title: "" })
   const invalid = yield* Effect.result(invalidPatch)
   const invalidFailed = Result.isFailure(invalid)
+
   expect(invalidFailed).toBe(true)
 
   const todo = yield* Resource.repository(PagedTodos).get("1")
+
   expect(todo).toMatchObject({ id: "1", title: "alpha" })
 })
 
@@ -314,10 +353,12 @@ it.effect("generated cursors reject a different declared ordering for the same t
     yield* prepareTables([cursorAscendingTodosTable])
     yield* Resource.repository(CursorAscendingTodos).create({ id: "1", title: "alpha", completed: false })
     yield* Resource.repository(CursorAscendingTodos).create({ id: "2", title: "zulu", completed: false })
+
     const first = yield* Resource.repository(CursorAscendingTodos).list({ limit: 1 })
     const cursor = yield* pipe(Option.fromNullishOr(first.nextCursor), Effect.fromOption)
     const result = yield* pipe(Resource.repository(CursorDescendingTodos).list({ limit: 1, cursor }), Effect.result)
     const rejected = Result.isFailure(result)
+
     expect(rejected).toBe(true)
   }),
   Effect.provide(sqlite),
@@ -325,10 +366,12 @@ it.effect("generated cursors reject a different declared ordering for the same t
 
 const orderedCrudProgram = Effect.gen(function* () {
   yield* prepareTables([orderedTodosTable])
+
   const database = yield* SqlClient.SqlClient
   const invalidCreateEffect = Resource.repository(OrderedTodos).create({ lower: 4, upper: 1 })
   const invalidCreate = yield* Effect.result(invalidCreateEffect)
   const invalidCreateFailed = Result.isFailure(invalidCreate)
+
   expect(invalidCreateFailed).toBe(true)
 
   const created = yield* Resource.repository(OrderedTodos).create({ lower: 1, upper: 4 })
@@ -355,6 +398,7 @@ it.effect(
 )
 
 const TimestampSchema = Schema.Struct({ id: identifier(Schema.String), at: Schema.DateTimeUtc })
+
 interface Timestamp extends Schema.Schema.Type<typeof TimestampSchema> {}
 
 const timestampCapabilities = [Resource.list({
@@ -375,17 +419,23 @@ const timestampsTable = Resource.table(Timestamps)
 it.effect("timestamp filters use the physical codec across cursor pages", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([timestampsTable])
+
     const at = yield* pipe(DateTime.make("2026-09-09T00:00:00.000Z"), Effect.fromOption)
     const different = yield* pipe(DateTime.make("2026-09-10T00:00:00.000Z"), Effect.fromOption)
+
     yield* Resource.repository(Timestamps).create({ id: "a", at })
     yield* Resource.repository(Timestamps).create({ id: "b", at: different })
     yield* Resource.repository(Timestamps).create({ id: "c", at })
+
     const first = yield* Resource.repository(Timestamps).list({ filter: { at } })
     const firstIds = Array.map(first.items, Struct.get("id"))
+
     expect(firstIds).toEqual(["a"])
+
     const cursor = yield* pipe(Option.fromNullishOr(first.nextCursor), Effect.fromOption)
     const second = yield* Resource.repository(Timestamps).list({ filter: { at }, cursor })
     const secondIds = Array.map(second.items, Struct.get("id"))
+
     expect(secondIds).toEqual(["c"])
     expect(second.nextCursor).toBeNull()
   }),
@@ -393,6 +443,7 @@ it.effect("timestamp filters use the physical codec across cursor pages", () => 
 ))
 
 const EncodedNumberSchema = Schema.Struct({ id: identifier(Schema.NumberFromString), quantity: Schema.Number })
+
 interface EncodedNumber extends Schema.Schema.Type<typeof EncodedNumberSchema> {}
 
 it("rejects generated list for an identifier with a semantic order-breaking codec", () => {
@@ -445,8 +496,11 @@ it.effect("generated patch envelopes cannot collide with canonical field names",
     })
 
     const client = yield* RpcTest.makeClient(PatchNamedKeysRuntime.group)
+
     yield* client["patch_named_keys.patch"](decoded)
+
     const stored = yield* Resource.repository(PatchNamedKeys).get("row")
+
     expect(stored).toEqual({ patch: "row", key: "after-key", changes: "after-changes" })
   }),
   Effect.provide(PatchNamedKeysRuntime.handlers),
@@ -459,11 +513,14 @@ it("compiled creation inspection and input agree on implicit generation and defa
   const definition = Application.define({ name: "creation-product", parts })
   const application = Effect.runSync(Application.compile(definition))
   const inspection = ApplicationInspect.describe(application)
+
   expect(inspection.resources).toMatchObject([{ creation: { defaults: { completed: false }, generated: { id: "uuidV7" }, fromSubject: {} } }])
+
   const valid = Schema.is(GeneratedTodosRuntime.createInputSchema)
   const absentDefault = valid({ title: "draft" })
   const suppliedDefault = valid({ title: "draft", completed: true })
   const suppliedGeneration = valid({ id: "forbidden", title: "draft" })
+
   expect(absentDefault).toBe(true)
   expect(suppliedDefault).toBe(true)
   expect(suppliedGeneration).toBe(false)
@@ -482,10 +539,12 @@ it("creation configuration cannot redeclare an implicit identifier", () => {
   })
 
   const spec = Reflect.apply(Resource.define, null, [definition])
+
   expect(() => Resource.compile(spec)).toThrow()
 })
 
 const GeneratedRecordSchema = Schema.Struct({ id: identifier(Schema.String), at: Schema.DateTimeUtc, summary: Schema.NullOr(Schema.String) })
+
 interface GeneratedRecord extends Schema.Schema.Type<typeof GeneratedRecordSchema> {}
 
 const summaryDefault = Resource.default(null)
@@ -513,12 +572,14 @@ const GeneratedRecordsRepository = Resource.repository(GeneratedRecords)
 it.effect("creation plans evaluate runtime generators per call and default only absent inputs", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([generatedRecordsTable])
+
     const counter = yield* Ref.make(0)
     const at = yield* pipe(DateTime.make("2026-09-10T00:00:00.000Z"), Effect.fromOption)
 
     const values = Value.of({
       uuidV7: Effect.fn("Test.uuidV7")(function* () {
         const value = yield* Ref.updateAndGet(counter, (value) => value + 1)
+
         return `generated-${value}`
       }),
       now: Effect.fn("Test.now")(function* () { return at }),
@@ -529,12 +590,17 @@ it.effect("creation plans evaluate runtime generators per call and default only 
 
     const first = yield* create({})
     const second = yield* create({ summary: "authored" })
+
     expect(first).toEqual({ id: "generated-1", at, summary: null })
     expect(second).toEqual({ id: "generated-2", at, summary: "authored" })
+
     const override = yield* pipe(create(first), Effect.result)
     const rejected = Result.isFailure(override)
+
     expect(rejected).toBe(true)
+
     const calls = yield* Ref.get(counter)
+
     expect(calls).toBe(2)
   }),
   Effect.provide(sqlite),
@@ -574,26 +640,36 @@ it.effect("nullable create fields default to null, version writes are guarded, a
 
   Effect.gen(function* () {
     yield* prepareTables([versionedTodosTable])
+
     const first = yield* Resource.repository(VersionedTodos).create({ id: "a", title: "a", rank: 3 })
+
     yield* Resource.repository(VersionedTodos).create({ id: "b", title: "b", rank: 2 })
     yield* Resource.repository(VersionedTodos).create({ id: "c", title: "c", rank: 1 })
     expect(first).toMatchObject({ summary: null, version: 1 })
 
     const page = yield* Resource.repository(VersionedTodos).list({ range: { rank: { from: 1, to: 3 } } })
     const pageIdentifiers = Array.map(page.items, Struct.get("id"))
+
     expect(pageIdentifiers).toEqual(["a", "b"])
+
     const cursor = yield* Effect.fromNullishOr(page.nextCursor)
     const next = yield* Resource.repository(VersionedTodos).list({ range: { rank: { from: 1, to: 3 } }, cursor })
     const nextIdentifiers = Array.map(next.items, Struct.get("id"))
+
     expect(nextIdentifiers).toEqual(["c"])
 
     const patched = yield* Resource.repository(VersionedTodos).patch("a", { title: "patched" }, 1)
+
     expect(patched.version).toBe(2)
+
     const patchConflictEffect = Resource.repository(VersionedTodos).patch("a", { title: "stale" }, 1)
     const patchConflict = yield* Effect.result(patchConflictEffect)
+
     expect(patchConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
+
     const updateConflictEffect = Resource.repository(VersionedTodos).update({ ...first, title: "stale update" })
     const updateConflict = yield* Effect.result(updateConflictEffect)
+
     expect(updateConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
   }),
   Effect.provide(sqlite),
@@ -648,12 +724,18 @@ const implicitEnsuredTodosTable = Resource.table(ImplicitEnsuredTodos)
 it.effect("ensure returns the first authorized row without a duplicate insert", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([ensuredTodosTable, versionedTodosTable, implicitEnsuredTodosTable])
+
     const inserted = yield* Resource.repository(EnsuredTodos).ensure({ id: "same", title: "first" })
     const repeated = yield* Resource.repository(EnsuredTodos).ensure({ id: "same", title: "second" })
+
     expect(repeated).toEqual(inserted)
+
     const versioned = yield* Resource.repository(VersionedTodos).ensure({ id: "versioned", title: "versioned", summary: null, rank: 0, version: 1 })
+
     expect(versioned).toMatchObject({ id: "versioned", version: 1 })
+
     const implicit = yield* Resource.repository(ImplicitEnsuredTodos).ensure({ id: "01890f6e-0000-7000-8000-000000000000", title: "implicit" })
+
     expect(implicit).toMatchObject({ id: "01890f6e-0000-7000-8000-000000000000", title: "implicit" })
   }),
   Effect.provide(sqlite),
@@ -695,18 +777,24 @@ const ReservationsRuntime = Resource.compile(Reservations)
 it.effect("transitions reject an invalid source state and atomically publish the target state", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([reservationsTable])
+
     const held = yield* Resource.repository(Reservations).create({ id: "reservation", status: "held", note: "draft" })
     const procedure = yield* pipe(ReservationsRuntime.group.requests.get("reservations.transition"), Option.fromUndefinedOr, Effect.fromOption)
     const decodePayload = Schema.decodeUnknownEffect(procedure.payloadSchema)
     const prohibitedPayload = decodePayload({ key: held.id, action: "confirm", expectedVersion: held.version, changes: { status: "confirmed" } })
     const prohibitedStatus = yield* Effect.result(prohibitedPayload)
     const prohibitedStatusFailed = Result.isFailure(prohibitedStatus)
+
     expect(prohibitedStatusFailed).toBe(true)
+
     const client = yield* RpcTest.makeClient(ReservationsRuntime.group)
     const confirmed = yield* client["reservations.transition"]({ key: held.id, action: "confirm", changes: { note: "confirmed" }, expectedVersion: held.version })
+
     expect(confirmed).toMatchObject({ status: "confirmed", note: "confirmed", version: 2 })
+
     const rejectedTransition = Resource.repository(Reservations).transition(held.id, "release", {}, confirmed.version)
     const rejected = yield* Effect.result(rejectedTransition)
+
     expect(rejected).toMatchObject({ _tag: "Failure", failure: { _tag: "InvalidReservationTransition", actual: "confirmed", action: "release" } })
   }),
   Effect.provide(ReservationsRuntime.handlers),

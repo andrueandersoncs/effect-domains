@@ -138,6 +138,7 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
   yield* pipe(
     Effect.gen(function* () {
       const schemaStore = yield* SchemaStore
+
       yield* Application.prepare(ReportExportsApplication, schemaStore)
       yield* appendReportExportAudit({ action: "release", actorId: "admin", targetId: "export-1" })
       yield* appendReportExportAudit({ action: "resume", actorId: "admin", targetId: "export-1" })
@@ -154,6 +155,7 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
 
       const transaction = sql.withTransaction(rollback)
       const rolledBack = yield* pipe(transaction, Effect.result)
+
       expect(rolledBack._tag).toBe("Failure")
 
       const client = yield* RpcTest.makeClient(reportAuditCommands.group)
@@ -182,6 +184,7 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
       const actions = Array.map(audit, Struct.get("action"))
       const observedActions = HashSet.fromIterable(actions)
       const expectedActions = HashSet.make("release", "resume", "cancel", "reconcile")
+
       expect(observedActions).toEqual(expectedActions)
 
       const absent = yield* sql<{ readonly count: number }>`
@@ -199,7 +202,9 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
   const persisted = yield* pipe(
     Effect.gen(function* () {
       const schemaStore = yield* SchemaStore
+
       yield* Application.prepare(ReportExportsApplication, schemaStore)
+
       const sql = yield* SqlClient.SqlClient
 
       return yield* sql<{ readonly count: number }>`

@@ -6,7 +6,7 @@ import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { identifier } from "./domain.ts"
 import { CredentialsSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema, SubjectSchema } from "./identity.ts"
 import { authenticateIdentity } from "./identity-rpc.ts"
-import { makeMigrationStore, SqliteMigrations } from "./sqlite-migrations.ts"
+import { sqliteMigrationStore, SqliteMigrations } from "./sqlite-migrations.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { Table } from "./table.ts"
 
@@ -71,7 +71,7 @@ const SessionLookupSchema = Schema.Struct({ digest: Schema.String, now: Schema.I
 
 interface IdentityAccount {
   readonly username: string
-  readonly subject: Readonly<Record<string, unknown>>
+  readonly subject: typeof SubjectSchema.Type
 }
 
 interface SqliteIdentityOptionalOptions {
@@ -97,6 +97,7 @@ const newSessionId = () => Effect.try({ try: () => randomBytes(16).toString("hex
 const hashPassword = (password: Redacted.Redacted<string>) => Effect.tryPromise({
   try: () => {
     const value = Redacted.value(password)
+
     return Bun.password.hash(value, { algorithm: "argon2id", memoryCost: 65536, timeCost: 2 })
   },
   catch: unavailable,
@@ -105,14 +106,16 @@ const hashPassword = (password: Redacted.Redacted<string>) => Effect.tryPromise(
 const verifyPassword = (password: Redacted.Redacted<string>, hash: string) => Effect.tryPromise({
   try: () => {
     const value = Redacted.value(password)
+
     return Bun.password.verify(value, hash)
   },
   catch: unavailable,
 })
 
 const prepare = Effect.fn("SqliteIdentity.prepare")(function* (sql: SqlClient.SqlClient) {
-  const store = makeMigrationStore(sql, IdentityMigrations)
+  const store = sqliteMigrationStore(sql, IdentityMigrations)
   const tables = [Table.snapshot(Accounts), Table.snapshot(Sessions)]
+
   yield* pipe(store.prepare(tables), database)
 })
 
@@ -123,6 +126,7 @@ const seedAccounts = Effect.fn("SqliteIdentity.seedAccounts")(function* (
 ) {
   const seed = Effect.fn("SqliteIdentity.seedAccount")(function* (account: IdentityAccount) {
     const existing = yield* database(sql`SELECT 1 FROM ${sql(Accounts.name)} WHERE username = ${account.username} LIMIT 1`)
+
     if (existing.length > 0) return
 
     const password_hash = yield* hashPassword(password)
@@ -151,8 +155,10 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
 ) {
   const sql = yield* SqlClient.SqlClient
   const clock = yield* Clock.Clock
+
   yield* prepare(sql)
   yield* seedAccounts(sql, accounts, password)
+
   const dummyPassword = yield* pipe(newToken(), Effect.map(Redacted.make))
   const dummyHash = yield* hashPassword(dummyPassword)
   const passwordVerifications = yield* Semaphore.make(2)
@@ -184,6 +190,7 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     const now = yield* clock.currentTimeMillis
     const session = yield* pipe(sessionFor({ digest, now }), database, Effect.flatMap(Effect.fromOption(unauthenticated)))
     const expiresAt = yield* pipe(DateTime.make(session.expires_at), Effect.fromOption(unavailable))
+
     return { sessionId: session.id, expiresAt, subject: session.subject_json }
   })
 
@@ -192,11 +199,14 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
       const account = yield* pipe(accountFor(credentials.username), database)
       const hash = Option.match(account, { onNone: Function.constant(dummyHash), onSome: Struct.get("password_hash") })
       const valid = yield* pipe(verifyPassword(credentials.password, hash), Effect.uninterruptible)
+
       return { account, valid }
     })
 
     const result = yield* pipe(attempt, passwordVerifications.withPermitsIfAvailable(1), Effect.flatMap(Effect.fromOption(unavailable)))
+
     if (!result.valid) return yield* unauthenticated()
+
     const account = yield* pipe(result.account, Effect.fromOption(unauthenticated))
     const token = yield* newToken()
     const sessionId = yield* newSessionId()
@@ -222,6 +232,7 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     authenticate,
     revoke: Effect.fn("SqliteIdentity.revoke")(function* (sessionId: string) {
       const now = yield* clock.currentTimeMillis
+
       yield* database(sql`UPDATE ${sql(Sessions.name)} SET revoked_at = ${now} WHERE id = ${sessionId} AND revoked_at IS NULL`)
     }),
   })
@@ -250,6 +261,7 @@ const layer = (options: SqliteIdentityOptions) => {
   if (!validLifetime) {
     const invalidLifetime = IdentityUnavailable.make({})
     const failedLifetime = Effect.fail(invalidLifetime)
+
     Effect.runSync(failedLifetime)
   }
 
@@ -261,6 +273,7 @@ const layer = (options: SqliteIdentityOptions) => {
 
   const identityRuntime = Effect.gen(function* () {
     const password = yield* passwordValue(options.password)
+
     return yield* makeRuntime(options.accounts, password, lifetime)
   })
 

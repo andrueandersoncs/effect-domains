@@ -23,16 +23,22 @@ it.effect("identity rejects invalid, revoked, and expired issued sessions", () =
     const session = yield* identity.login(alice)
     const token = Redacted.value(session.token)
     const authenticated = yield* identity.authenticate(token)
+
     expect(authenticated.subject).toMatchObject({ userId: "alice", tenantId: "acme", roles: ["editor"] })
     yield* identity.revoke(authenticated.sessionId)
+
     const revoked = yield* pipe(identity.authenticate(token), Effect.result)
+
     expect(revoked).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
 
     const bob = CredentialsSchema.make({ username: "bob", password })
     const expiring = yield* identity.login(bob)
+
     yield* TestClock.adjust("8 hours")
+
     const expiringToken = Redacted.value(expiring.token)
     const expiry = yield* pipe(identity.authenticate(expiringToken), Effect.result)
+
     expect(expiry).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
   }),
   Effect.provide(TestIdentity),

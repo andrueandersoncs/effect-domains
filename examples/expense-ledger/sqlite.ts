@@ -3,6 +3,7 @@ import { Effect, Option, Schema, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 
 import { Command } from "effect-domains/command"
+import type { StructValue } from "effect-domains/domain"
 import { ResourceNotFound } from "effect-domains/repository-store"
 import { Resource } from "effect-domains/resource"
 
@@ -24,7 +25,6 @@ import { ExpensesResource } from "./resources.ts"
 const expensesTable = Resource.table(ExpensesResource)
 const expensesRepository = Resource.repository(ExpensesResource)
 
-type SqliteRow = Readonly<Record<string, unknown>>
 
 const expenseDateRange = (
   database: SqlClient.SqlClient,
@@ -56,7 +56,7 @@ const calculateTotals = SqlSchema.findAll({
     const database = yield* SqlClient.SqlClient
     const conditions = expenseConditions(database, input)
 
-    return yield* database<SqliteRow>`
+    return yield* database<StructValue>`
       SELECT ${database("category")}, ${database("currency")},
         SUM(${database("amountMinor")}) AS ${database("totalMinor")}
       FROM ${database(expensesTable.name)}
@@ -95,6 +95,7 @@ const totals = Effect.fn("ExpenseLedger.totals")(function* (
   input: ExpenseQueryInput,
 ) {
   yield* validateDateRange(input)
+
   return yield* calculateTotals(input)
 })
 
@@ -111,7 +112,9 @@ const remove = Effect.fn("ExpenseLedger.remove")(function* (
   input: ExpenseIdentifierInput,
 ) {
   const expense = yield* get(input)
+
   yield* expensesRepository.remove(input.id)
+
   return expense
 })
 

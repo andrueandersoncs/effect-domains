@@ -18,7 +18,8 @@ import {
   pipe,
 } from "effect"
 
-import { DomainIdentifier, type StructSchema, UuidV7Schema } from "./domain.ts"
+
+import { DomainIdentifier, type StructSchema, type StructValue, UuidV7Schema } from "./domain.ts"
 import { FieldIR, ScalarSchema, SchemaField, ownValue, scalarChecks, type ScalarF } from "./schema-field.ts"
 
 const isTrue = (value: boolean) => value
@@ -70,6 +71,7 @@ export const TableCheckSchema = Schema.Union([
 ])
 
 export type TableCheck = Schema.Schema.Type<typeof TableCheckSchema>
+
 const TableChecksSchema = Schema.Array(TableCheckSchema)
 
 export class TableField extends Schema.TaggedClass<TableField>()("TableField", {
@@ -191,6 +193,7 @@ const unsupportedTableScalar = (table: string, field: string) =>
 const numericScalar = (scalar: TableField["scalar"]) => {
   const integer = Equivalence.strictEqual<TableField["scalar"]>()(scalar, "integer")
   const number = Equivalence.strictEqual<TableField["scalar"]>()(scalar, "number")
+
   return integer || number
 }
 
@@ -199,6 +202,7 @@ const relationConstraints = (relations: TableRelations): ReadonlyArray<RelationC
   const foreignKeys = relations.foreignKeys ?? []
   const indexes = relations.indexes ?? []
   const local = Array.appendAll(unique, foreignKeys)
+
   return Array.appendAll(local, indexes)
 }
 
@@ -237,9 +241,11 @@ const validateConstraintFields = (
 const validateConstraint = (table: string, available: HashSet.HashSet<string>) =>
   Effect.fn("Table.validateConstraint")(function* (names: HashSet.HashSet<string>, constraint: RelationConstraint) {
     const duplicate = HashSet.has(names, constraint.name)
+
     if (duplicate) return yield* failTableDefinition(table, `duplicate relation constraint name ${constraint.name}`)
 
     yield* validateConstraintFields(table, constraint.name, constraint.fields, available)
+
     return HashSet.add(names, constraint.name)
   })
 
@@ -257,6 +263,7 @@ const validateForeignKeyReference = (table: string) =>
 
 
     const referenceNames = HashSet.fromIterable(foreignKey.references.fields)
+
     yield* validateConstraintFields(table, foreignKey.name, foreignKey.references.fields, referenceNames)
   })
 
@@ -280,6 +287,7 @@ const validateLocalRelations = (
       const fieldNames = Array.map(fields, Struct.get("name"))
       const available = HashSet.fromIterable(fieldNames)
       const constraints = relationConstraints(value)
+
       yield* Effect.reduce(constraints, emptyNames, validateConstraint(table, available))
       yield* Effect.forEach(value.foreignKeys ?? [], validateForeignKeyReference(table))
       yield* Effect.forEach(value.indexes ?? [], validateReservedIndex(table))
@@ -297,6 +305,7 @@ const comparisonChecks = (representation: unknown): ReadonlyArray<TableCheck> =>
 
   const check = (key: string, constructor: typeof GreaterThan | typeof GreaterThanOrEqualTo | typeof LessThan | typeof LessThanOrEqualTo) => {
     const value = ownValue(payload, key)
+
     return Predicate.isNumber(value) ? [constructor.make({ value })] : []
   }
 
@@ -309,11 +318,14 @@ const comparisonChecks = (representation: unknown): ReadonlyArray<TableCheck> =>
       const minimum = ownValue(payload, "minimum")
       const maximum = ownValue(payload, "maximum")
       const valid = Predicate.isNumber(minimum) && Predicate.isNumber(maximum)
+
       if (!valid) return []
+
       const exclusiveMinimum = ownValue(payload, "exclusiveMinimum")
       const exclusiveMaximum = ownValue(payload, "exclusiveMaximum")
       const lowerSchema = Equivalence.strictEqual<unknown>()(exclusiveMinimum, true) ? GreaterThan : GreaterThanOrEqualTo
       const upperSchema = Equivalence.strictEqual<unknown>()(exclusiveMaximum, true) ? LessThan : LessThanOrEqualTo
+
       return [lowerSchema.make({ value: minimum }), upperSchema.make({ value: maximum })]
     }),
     Match.orElse(() => []),
@@ -341,16 +353,21 @@ const scalarAlgebra = (table: string, field: string) => (
 
   const literals = (values: ReadonlyArray<string | number>): Effect.Effect<ScalarCompilation, TableDefinitionError> => {
     const empty = Array.isReadonlyArrayEmpty(values)
+
     if (empty) return unsupportedTableScalar(table, field)
+
     const strings = Array.every(values, Predicate.isString)
     const numbers = Array.every(values, Predicate.isNumber)
     const supported = strings || numbers
+
     if (!supported) return unsupportedTableScalar(table, field)
+
     const integers = Array.every(values, Number.isSafeInteger)
     const numeric = integers ? "integer" : "number"
     const scalar = Option.some<TableField["scalar"]>(strings ? "string" : numeric)
     const oneOf = OneOf.make({ values })
     const result = new ScalarCompilation({ ...base, scalar, checks: [...checks, oneOf] })
+
     return Effect.succeed(result)
   }
 
@@ -359,36 +376,44 @@ const scalarAlgebra = (table: string, field: string) => (
     Match.tag("String", "TemplateLiteral", () => {
       const scalar = Option.some("string" as const)
       const result = new ScalarCompilation({ ...base, scalar })
+
       return Effect.succeed(result)
     }),
     Match.tag("Number", () => {
       const integerCheck = (filter: SchemaAST.Filter<unknown>) => {
         const id = representationId(filter.annotations?.representation)
+
         return Equivalence.strictEqual<unknown>()(id, IntegerId)
       }
 
       const integer = Array.some(filters, integerCheck)
       const scalar = Option.some(integer ? "integer" as const : "number" as const)
       const result = new ScalarCompilation({ ...base, scalar })
+
       return Effect.succeed(result)
     }),
     Match.tag("Boolean", () => {
       const scalar = Option.some("integer" as const)
       const storageCodec = Option.some(Schema.BooleanFromBit)
       const result = new ScalarCompilation({ ...base, scalar, storageCodec })
+
       return Effect.succeed(result)
     }),
     Match.tag("Declaration", (declaration) => {
       const id = representationId(declaration.annotations?.representation)
       const dateTime = Equivalence.strictEqual<unknown>()(id, DateTimeUtcId)
+
       if (!dateTime) return unsupportedTableScalar(table, field)
+
       const scalar = Option.some("string" as const)
       const storageCodec = Option.some(Schema.DateTimeUtcFromString)
       const result = new ScalarCompilation({ ...base, scalar, storageCodec })
+
       return Effect.succeed(result)
     }),
     Match.tag("Literal", ({ literal }) => {
       const supported = Predicate.isString(literal) || Predicate.isNumber(literal)
+
       return supported ? literals([literal]) : unsupportedTableScalar(table, field)
     }),
     Match.tag("Enum", flow(Struct.get<SchemaAST.Enum, "enums">("enums"), Array.map(([, value]) => value), literals)),
@@ -406,14 +431,18 @@ const scalarAlgebra = (table: string, field: string) => (
       const hasScalar = (member: ScalarCompilation) => Option.isSome(member.scalar)
       const physical = Array.filter(members, hasScalar)
       const head = Array.head(physical)
+
       if (Option.isNone(head)) return yield* unsupportedTableScalar(table, field)
+
       const first = Option.getOrThrow(head)
       const sameScalar = (member: ScalarCompilation) => Option.makeEquivalence(Equivalence.strictEqual<TableField["scalar"]>())(member.scalar, first.scalar)
       const isNumeric = (member: ScalarCompilation) => Option.exists(member.scalar, numericScalar)
       const uniform = Array.every(physical, sameScalar)
       const numeric = Array.every(physical, isNumeric)
       const supported = uniform || numeric
+
       if (!supported) return yield* unsupportedTableScalar(table, field)
+
       const nullable = Array.some(members, Struct.get("nullable"))
       const orderable = Array.every(members, Struct.get("orderable"))
       const single = Equivalence.strictEqual<number>()(physical.length, 1)
@@ -428,6 +457,7 @@ const scalarAlgebra = (table: string, field: string) => (
 
       const scalar = uniform ? first.scalar : Option.some("number" as const)
       const storageCodec = single ? first.storageCodec : Option.none<Schema.Constraint>()
+
       return new ScalarCompilation({ scalar, nullable, checks: [...checks, ...unionChecks], orderable, storageCodec })
     }),
   }))
@@ -455,6 +485,7 @@ const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
   const canonical = SchemaField.compile(schema)
   const transformsStoredNull = SchemaField.transformsStoredNull(schema.ast)
   const compiled = yield* compileScalar(table, field, schema.ast)
+
   if (Option.isNone(compiled.scalar)) return yield* unsupportedTableScalar(table, field)
 
   if (Option.isNone(compiled.storageCodec)) {
@@ -463,11 +494,14 @@ const storageFieldFor = Effect.fn("Table.storageFieldFor")(function* (
 
   const typeAst = SchemaAST.toType(schema.ast)
   const decoded = yield* compileScalar(table, field, typeAst)
+
   if (Option.isNone(decoded.storageCodec)) return yield* unsupportedTableScalar(table, field)
+
   const codec = decoded.nullable ? Schema.NullOr(decoded.storageCodec.value) : decoded.storageCodec.value
   const storageSchema = Schema.decodeTo(schema)(codec)
   const storedAst = SchemaAST.toEncoded(storageSchema.ast)
   const stored = yield* compileScalar(table, field, storedAst)
+
   return { ...stored, canonical, transformsStoredNull, orderable: compiled.orderable, storageSchema }
 })
 
@@ -486,8 +520,11 @@ const compileStorageSchema = (schema: StructSchema, fields: ReadonlyArray<Compil
   const entries = Array.map(fields, storageFieldEntry)
   const storageFields = Record.fromEntries(entries)
   const StoredRowSchema = Schema.Struct(storageFields)
+
   interface StoredRow extends Schema.Schema.Type<typeof StoredRowSchema> {}
+
   const typeAst = SchemaAST.toType(schema.ast)
+
   return typeAst.checks ? StoredRowSchema.check(...typeAst.checks) : StoredRowSchema
 }
 
@@ -512,18 +549,22 @@ const hasIdentifier = (schema: Schema.Constraint) => {
   const annotations = Schema.resolveAnnotations(schema)
   const value = pipe(Option.fromNullishOr(annotations), Option.map((all) => all[DomainIdentifier]))
   const booleanValue = pipe(value, Option.filter(Predicate.isBoolean))
+
   return pipe(booleanValue, Option.exists(isTrue))
 }
 
 const sourceField = <S extends StructSchema>(schema: S) => (name: string) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   Option.fromNullishOr(schema.fields[name as Extract<keyof S["fields"], string>])
 
 const compileField = <S extends StructSchema>(table: string, schema: S) =>
   Effect.fn("Table.compileField")(function* (property: SchemaAST.PropertySignature) {
     const stringName = Predicate.isString(property.name)
+
     if (!stringName) return yield* failTableDefinition(table, "field names must be strings")
 
     const optional = SchemaAST.isOptional(property.type)
+
     if (optional) return yield* failTableDefinition(table, `field ${property.name} must be required`)
 
     const fieldOption = sourceField(schema)(property.name)
@@ -540,7 +581,9 @@ const compileField = <S extends StructSchema>(table: string, schema: S) =>
     } = yield* storageFieldFor(table, property.name, fieldSchema)
 
     if (Option.isNone(scalar)) return yield* unsupportedTableScalar(table, property.name)
+
     const field = TableField.make({ name: property.name, scalar: scalar.value, nullable, generation: NoGeneration, checks })
+
     return new CompiledField({ field, storageSchema, orderable, canonical, transformsStoredNull })
   })
 
@@ -559,14 +602,17 @@ const namedIdentifierField = (value: CompiledField) =>
 const compileTable = Effect.fn("Table.compile")(function* <const Name extends string, const S extends StructSchema>(name: Name, schema: S) {
   const encodedSchema = Schema.toEncoded(schema)
   const flat = SchemaAST.isObjects(encodedSchema.ast)
+
   if (!flat) return yield* failTableDefinition(name, "schema must encode to a flat struct")
 
   const indexed = encodedSchema.ast.indexSignatures.length > 0
+
   if (indexed) return yield* failTableDefinition(name, "schema must not contain index signatures")
 
   const compiled = yield* Effect.forEach(encodedSchema.ast.propertySignatures, compileField(name, schema))
   const identifiers = Array.filter(compiled, compiledIdentifier(schema))
   const multipleIdentifiers = Array.length(identifiers) > 1
+
   if (multipleIdentifiers) return yield* failTableDefinition(name, "schema must contain at most one Domain.identifier field")
 
   const identifier = Array.head(identifiers)
@@ -624,9 +670,8 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   }
 })
 
-type EncodedRecord = Readonly<Record<string, unknown>>
-type InsertSchema<S extends StructSchema> = Schema.Codec<S["Type"], EncodedRecord, S["DecodingServices"], S["EncodingServices"]>
-type StoredRowSchema<Row extends StructSchema> = Schema.Codec<Row["Type"], EncodedRecord, Row["DecodingServices"], Row["EncodingServices"]>
+type InsertSchema<S extends StructSchema> = Schema.Codec<S["Type"], StructValue, S["DecodingServices"], S["EncodingServices"]>
+type StoredRowSchema<Row extends StructSchema> = Schema.Codec<Row["Type"], StructValue, Row["DecodingServices"], Row["EncodingServices"]>
 type IdentifierStorageSchema<Identifier extends Schema.Constraint> = Schema.Codec<Identifier["Type"], unknown, Identifier["DecodingServices"], Identifier["EncodingServices"]>
 
 export interface Table<
@@ -659,6 +704,7 @@ export type TableFieldName<S extends StructSchema> = Extract<keyof RowSchema<S>[
 const constraintName = (table: string, fields: ReadonlyArray<string>, suffix: string) => {
   const segments = Array.map(fields, String.camelToSnake)
   const joined = Array.join(segments, "_")
+
   return `${table}_${joined}_${suffix}`
 }
 
@@ -688,6 +734,7 @@ const cloneRelations = <Fields extends string>(table: string, relations: TableRe
       )
 
       const references = TableForeignKeyReference.make({ table: constraint.references.table.name, fields: referenced })
+
       return TableForeignKey.make({ name, fields, references })
     })),
   )
@@ -733,6 +780,7 @@ const make = <const Name extends string, const S extends StructSchema>(
     onNone: Function.constant(Effect.void),
     onSome: (value) => {
       const localRelations = Option.some(value)
+
       return validateLocalRelations(result.name, result.fields, localRelations)
     },
   }))
@@ -741,6 +789,7 @@ const make = <const Name extends string, const S extends StructSchema>(
 
   const withTargets = Struct.assign(result, { relationTargets })
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return pipe(copiedRelations, Option.match({
     onNone: Function.constant(withTargets),
     onSome: (value) => Struct.assign(withTargets, { relations: value }),
@@ -763,6 +812,7 @@ const fieldsEqual = Equivalence.Array(Equivalence.strictEqual<string>())
 const compatibleForeignKeyScalars = (source: TableField["scalar"], target: TableField["scalar"]) => {
   const same = Equivalence.strictEqual<TableField["scalar"]>()(source, target)
   const numeric = numericScalar(source) && numericScalar(target)
+
   return same || numeric
 }
 
@@ -780,10 +830,13 @@ const validateTable = Effect.fn("Table.validateTable")(function* (
 ) {
   const normalized = table.name.toLowerCase()
   const duplicate = HashSet.has(names, normalized)
+
   if (duplicate) return yield* failTableDefinition(table.name, `duplicate table ${table.name}`)
 
   const relations = Option.fromNullishOr(table.relations)
+
   yield* validateLocalRelations(table.name, table.fields, relations)
+
   return HashSet.add(names, normalized)
 })
 
@@ -880,6 +933,7 @@ const validateForeignKey = (
   const sourceFields = HashMap.fromIterable(sourceEntries)
   const targetFields = HashMap.fromIterable(targetEntries)
   const pairs = Array.zip(foreignKey.fields, foreignKey.references.fields)
+
   yield* Effect.forEach(pairs, validateForeignKeyPair(table, foreignKey, sourceFields, target, targetFields))
 })
 
@@ -893,6 +947,7 @@ const validateRelations = Effect.fn("Table.validateRelations")(function* (
   const byName = HashMap.fromIterable(tableEntries)
   const tableNames = yield* Effect.reduce(tables, emptyNames, validateTable)
   const indexes = Array.flatMap(tables, tableIndexPairs)
+
   yield* Effect.reduce(indexes, emptyNames, validateIndex(tableNames))
   yield* Effect.forEach(tables, validateForeignKeys(byName))
 })
@@ -905,6 +960,7 @@ const reference = <
 >(table: Target, fields: Fields): TableReference => {
   const copiedFields = Array.copy(fields)
   const frozenFields = Object.freeze(copiedFields)
+
   return Object.freeze({ table, fields: frozenFields })
 }
 
@@ -918,7 +974,7 @@ const project = <
 
   const ProjectionSchema = Schema.make<Schema.Codec<
     Pick<TableDefinition["rowSchema"]["Type"], Fields[number]>,
-    Readonly<Record<Fields[number], unknown>>,
+    { readonly [Key in Fields[number]]: TableDefinition["columns"][Key]["storageSchema"]["Encoded"] },
     TableDefinition["storageSchema"]["DecodingServices"],
     TableDefinition["storageSchema"]["EncodingServices"]
   >>(StorageSchema.ast)
@@ -926,6 +982,7 @@ const project = <
   const object = (sql: import("effect/unstable/sql").SqlClient.SqlClient, alias: string) => {
     const entry = (field: Fields[number]) => sql`${field}, ${sql(alias)}.${sql(field)}`
     const entries = Array.map(selection, entry)
+
     return sql`json_object(${sql.csv(entries)})`
   }
 

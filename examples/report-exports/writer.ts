@@ -4,7 +4,7 @@ import { ReportArtifactConflict, ReportArtifactSchema, type ReportExportJob } fr
 import { ReportArtifactOutput } from "./output.ts"
 
 const isSafeExecutionId = (value: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
-const sameContents = Equivalence.strictEqual<string>()
+
 
 export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact")(
   function* (input: ReportExportJob) {
@@ -26,7 +26,7 @@ export const writeReportArtifact = Effect.fn("ReportExports.writeReportArtifact"
 
     const contents = yield* pipe(fileSystem.readFileString(artifactPath), Effect.orDie)
 
-    if (!sameContents(contents, input.contents)) {
+    if (!Equivalence.strictEqual<string>()(contents, input.contents)) {
       return yield* ReportArtifactConflict.make({ path: artifactPath })
     }
 

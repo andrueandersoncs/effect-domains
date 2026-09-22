@@ -5,6 +5,7 @@ const UsernameSchema = Schema.NonEmptyString.check(Schema.isMaxLength(320))
 const PasswordSchema = Schema.NonEmptyString.check(Schema.isMaxLength(1024))
 
 export class IdentityUnavailable extends Schema.TaggedError<IdentityUnavailable>()("IdentityUnavailable", {}) {}
+
 export const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
 
 export const CredentialsSchema = Schema.Struct({
@@ -26,7 +27,7 @@ export const CurrentSessionSchema = Schema.Struct({
 interface AuthenticatedIdentity {
   readonly sessionId: string
   readonly expiresAt: DateTime.Utc
-  readonly subject: Readonly<Record<string, unknown>>
+  readonly subject: typeof SubjectSchema.Type
 }
 
 export class IdentityRuntime extends Context.Service<IdentityRuntime, {

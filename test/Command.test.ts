@@ -17,7 +17,9 @@ const isDeclared = Equivalence.strictEqual<Schema.Schema.Type<typeof FailurePayl
 
 const makeFailures = (input: Schema.Schema.Type<typeof FailurePayloadSchema>) => {
   if (isDeclared(input, "declared")) return DeclaredFailure.make({})
+
   const unexpectedFailure = UnexpectedHandlerFailure.make({})
+
   return Effect.die(unexpectedFailure)
 }
 
@@ -33,7 +35,9 @@ const failures = Command.implement(failuresSpec, makeFailures)
 
 
 const SubjectSchema = Schema.Struct({ userId: Schema.String })
+
 type Subject = Schema.Schema.Type<typeof SubjectSchema>
+
 const authenticatedSubject = (userId: string) => SubjectSchema.make({ userId })
 
 
@@ -87,7 +91,9 @@ const transactional = Command.implement(
   transactionalSpec,
   Effect.fn("Command.test.transactional")(function* () {
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO operation_events (value) VALUES (${"written"})`
+
     return yield* DeclaredFailure.make({})
   }),
 )
@@ -114,8 +120,11 @@ const runtime = <A, E, R>(effect: Effect.Effect<A, E, R>) => pipe(
 const replacementFailures = Effect.gen(function* () {
   const client = yield* RpcTest.makeClient(bundle.group)
   const declared = yield* pipe(client["command.failures"]("declared"), Effect.flip)
+
   expect(declared._tag).toBe("DeclaredFailure")
+
   const unavailable = yield* pipe(client["command.failures"]("unexpected"), Effect.flip)
+
   expect(unavailable._tag).toBe("CommandUnavailable")
 })
 
@@ -124,12 +133,17 @@ it.effect("replaces undeclared handler failures while preserving declared errors
 const subjectPolicy = Effect.gen(function* () {
   const client = yield* RpcTest.makeClient(bundle.group)
   const anonymous = yield* pipe(client["command.protected"](), Effect.flip)
+
   expect(anonymous._tag).toBe("Unauthenticated")
+
   const result = yield* client["command.protected"](undefined, { headers: { authorization: "alice" } })
   const familyResult = yield* client["family.member"](undefined, { headers: { authorization: "alice" } })
+
   expect(familyResult).toBe("alice")
   expect(result).toBe("alice")
+
   const denied = yield* pipe(client["command.deniedInside"](undefined, { headers: { authorization: "alice" } }), Effect.flip)
+
   expect(denied._tag).toBe("Forbidden")
 })
 
@@ -137,11 +151,16 @@ it.effect("enforces subject policy, passes the typed subject, and keeps nested d
 
 const transactionalRollback = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+
   yield* sql`CREATE TABLE operation_events (value TEXT NOT NULL)`
+
   const client = yield* RpcTest.makeClient(bundle.group)
   const failed = yield* pipe(client["command.transactional"](), Effect.flip)
+
   expect(failed._tag).toBe("DeclaredFailure")
+
   const rows = yield* sql`SELECT value FROM operation_events`
+
   expect(rows).toEqual([])
 })
 

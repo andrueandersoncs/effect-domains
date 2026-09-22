@@ -106,6 +106,7 @@ const KnownStoreErrorSchema = Schema.Struct({
 const isKnownStoreError = Schema.is(KnownStoreErrorSchema)
 
 const knownCancelError = (error: unknown) => isKnownStoreError(error)
+  // SAFETY: The asserted error type matches because the preceding schema guard validates the discriminant.
   ? error as ReportExportUnavailable | ReportExportNotFound | ReportExportCancellationRejected
   : storeUnavailable(error)
 
@@ -114,27 +115,31 @@ const makeExecutionStore = Effect.gen(function* () {
   const table = database(executionTable.name)
 
   const find = Effect.fn("ReportExports.ExecutionStore.find")(function* (executionId: string) {
-    const rows = yield* database<Readonly<Record<string, unknown>>>`
+    const rows = yield* database<typeof StoredExecutionResultSchema.Encoded>`
       SELECT id, tenantId, request, status, artifact, failure
       FROM ${table}
       WHERE id = ${executionId}
     `
 
     const row = Array.head(rows)
+
     if (Option.isNone(row)) return Option.none<ReportExportExecution>()
 
     const decoded = yield* decodeExecution(row.value)
+
     return Option.some(decoded)
   }, Effect.mapError(storeUnavailable))
 
   const requireExecution = Effect.fn("ReportExports.ExecutionStore.require")(function* (executionId: string) {
     const execution = yield* find(executionId)
+
     if (Option.isNone(execution)) return yield* ReportExportNotFound.make({ executionId })
+
     return execution.value
   })
 
   const pending = pipe(
-    database<Readonly<Record<string, unknown>>>`
+    database<typeof StoredExecutionResultSchema.Encoded>`
       SELECT id, tenantId, request, status, artifact, failure
       FROM ${table}
       WHERE status = 'accepted'
@@ -204,7 +209,9 @@ const makeExecutionStore = Effect.gen(function* () {
     `
 
     const execution = yield* requireExecution(executionId)
+
     if (sameStatus(execution.status, "cancelled")) return execution
+
     return yield* ReportExportCancellationRejected.make({ executionId, status: execution.status })
   }, Effect.mapError(knownCancelError))
 
@@ -237,7 +244,9 @@ const makeExecutionStore = Effect.gen(function* () {
     )
 
     const accepted = yield* find(id)
+
     if (Option.isNone(accepted)) return yield* storeUnavailable(`Accepted execution missing: ${id}`)
+
     return accepted.value
   })
 

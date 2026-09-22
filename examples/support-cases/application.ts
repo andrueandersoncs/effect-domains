@@ -45,4 +45,7 @@ const application = Application.define({
   parts: applicationParts,
 })
 
-export const SupportCasesApplication = Effect.runSync(Application.compile(application))
+const supportCasesCompiler = Application.compile(application)
+const supportCasesApplication = Effect.runSync(supportCasesCompiler)
+
+export { supportCasesApplication as SupportCasesApplication }

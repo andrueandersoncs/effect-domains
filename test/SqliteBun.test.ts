@@ -50,6 +50,7 @@ describe("Bun SQLite tables and authored operations", () => {
     CodecPrefix
   >(Effect.fn("StoredString.decode")(function* (value) {
     const { prefix } = yield* CodecPrefix
+
     return value.slice(prefix.length)
   }))
 
@@ -59,6 +60,7 @@ describe("Bun SQLite tables and authored operations", () => {
     CodecPrefix
   >(Effect.fn("StoredString.encode")(function* (value) {
     const { prefix } = yield* CodecPrefix
+
     return `${prefix}${value}`
   }))
 
@@ -84,6 +86,7 @@ describe("Bun SQLite tables and authored operations", () => {
   })
 
   interface User extends Schema.Schema.Type<typeof UserSchema> {}
+
   const Users = Table.make({ name: "users", schema: UserSchema })
 
   const CreateUser = SqlSchema.findOne({
@@ -159,6 +162,7 @@ describe("Bun SQLite tables and authored operations", () => {
   })
 
   interface Article extends Schema.Schema.Type<typeof ArticleSchema> {}
+
   const Articles = Table.make({ name: "articles", schema: ArticleSchema })
 
   const StoreRowSchema = Schema.Struct({
@@ -234,6 +238,7 @@ describe("Bun SQLite tables and authored operations", () => {
       return yield* pipe(
         Effect.gen(function* () {
           yield* prepareTables([Articles])
+
           return yield* CreateArticle(article)
         }),
         Effect.provide(adapter),
@@ -305,6 +310,7 @@ describe("Bun SQLite tables and authored operations", () => {
     pipe(
       Effect.gen(function* () {
         yield* prepareTables([StoreRows])
+
         const store = yield* RepositoryStore
 
         const rows = [
@@ -317,6 +323,7 @@ describe("Bun SQLite tables and authored operations", () => {
         ]
 
         const insertRow = (row: typeof StoreRowSchema.Type) => store.insert(StoreRows, row)
+
         yield* Effect.forEach(rows, insertRow)
 
         const order = [
@@ -350,6 +357,7 @@ describe("Bun SQLite tables and authored operations", () => {
         const getStoreRowId = flow(Record.get("id"), Option.getOrThrow)
         const firstIds = Array.map(first, getStoreRowId)
         const secondIds = Array.map(second, getStoreRowId)
+
         expect(firstIds).toEqual(["a2", "a1"])
         expect(secondIds).toEqual(["b2", "b1"])
       }),
@@ -360,8 +368,10 @@ describe("Bun SQLite tables and authored operations", () => {
     pipe(
       Effect.gen(function* () {
         yield* prepareTables([StoreRows])
+
         const store = yield* RepositoryStore
         const original = storedRow("guarded", "a", "guarded", 1)
+
         yield* store.insert(StoreRows, original)
 
         const updated = yield* store.update(
@@ -372,6 +382,7 @@ describe("Bun SQLite tables and authored operations", () => {
         )
 
         const isUnchanged = Option.isNone(updated)
+
         expect(isUnchanged).toBe(true)
       }),
       Effect.provide(adapter),
@@ -381,14 +392,17 @@ describe("Bun SQLite tables and authored operations", () => {
     pipe(
       Effect.gen(function* () {
         yield* prepareTables([StoreRows])
+
         const store = yield* RepositoryStore
         const firstRow = storedRow("first", "a", "duplicate", 1)
+
         yield* store.insert(StoreRows, firstRow)
 
         const secondRow = storedRow("second", "a", "duplicate", 2)
         const insertingSecondRow = store.insert(StoreRows, secondRow)
         const result = yield* Effect.result(insertingSecondRow)
         const isUniqueViolation = Result.isFailure(result)
+
         expect(isUniqueViolation).toBe(true)
 
         if (isUniqueViolation) {
@@ -396,8 +410,11 @@ describe("Bun SQLite tables and authored operations", () => {
             _tag: "UniqueViolation",
             resource: "store_rows",
           })
-          expect(result.failure).not.toHaveProperty("constraint")
-          expect(result.failure).not.toHaveProperty("fields")
+
+          const failureAssertion = expect(result.failure)
+
+          failureAssertion.not.toHaveProperty("constraint")
+          failureAssertion.not.toHaveProperty("fields")
         }
 
         const duplicateIdRow = storedRow("first", "b", "other", 2)
@@ -417,6 +434,7 @@ describe("Bun SQLite tables and authored operations", () => {
 
   const selectOne = Effect.fn("SqliteBun.selectOne")(function* () {
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`SELECT 1`
   })
 
@@ -459,6 +477,7 @@ describe("Bun SQLite tables and authored operations", () => {
     Effect.fn("SqliteBun.opensPrivateClient")(function* () {
       const sql = yield* SqlClient.SqlClient
       const rows = yield* sql<Readonly<{ value: number }>>`SELECT 1 AS value`
+
       expect(rows).toEqual([{ value: 1 }])
     })(),
     Effect.provide(privateIdentityClient),
@@ -477,6 +496,7 @@ describe("Bun SQLite tables and authored operations", () => {
   const rejectsPrivateClientTest = Function.constant(rejectsPrivateClientEffect)
   const opensPrivateClientTest = Function.constant(opensPrivateClient)
   const crudContractTest = Function.constant(crudContractEffect)
+
   it.effect("applies inclusive bounds and two-field descending keyset pagination", paginatedStoreRowsTest)
   it.effect("returns None when a guarded update no longer matches", guardedUpdateTest)
   it.effect("reports sanitized unique violations", declaredUniqueConstraintsTest)

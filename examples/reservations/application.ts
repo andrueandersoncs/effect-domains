@@ -5,4 +5,7 @@ import { Effect } from "effect"
 
 const parts = [Part.resource(StockResource), Part.resource(ReservationResource), Part.command(InventoryOperations)]
 const reservations = Application.define({ name: "reservations", parts })
-export const ReservationApplication = Effect.runSync(Application.compile(reservations))
+const reservationsCompiler = Application.compile(reservations)
+const reservationApplication = Effect.runSync(reservationsCompiler)
+
+export { reservationApplication as ReservationApplication }

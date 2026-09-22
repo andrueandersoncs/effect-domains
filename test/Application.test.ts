@@ -23,6 +23,7 @@ it("rejects table and command collisions across nested applications", () => {
   const nestedStorage = Application.define({ name: "nested-storage", parts: nestedStorageParts })
   const collisionParts = [Part.application(storage), Part.application(nestedStorage)]
   const collision = Application.define({ name: "collision", parts: collisionParts })
+
   expect(() => Effect.runSync(Application.compile(collision))).toThrow()
 
   const ping = Rpc.make("ping")
@@ -44,6 +45,7 @@ it("rejects table and command collisions across nested applications", () => {
 
   const commandCollisionParts = [Part.application(commands), Part.application(nestedCommands)]
   const commandCollision = Application.define({ name: "collision", parts: commandCollisionParts })
+
   expect(() => Effect.runSync(Application.compile(commandCollision))).toThrow()
 })
 
@@ -91,6 +93,7 @@ it("validates foreign keys across sibling applications by exact descriptor", () 
   const makeInvalid = () => Effect.runSync(Application.compile(invalid))
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
+
   validExpectation.not.toThrow()
   invalidExpectation.toThrow("references unregistered table exact_parents")
 })
@@ -167,6 +170,7 @@ it("validates command dependencies across sibling applications by descriptor ide
   const makeInvalid = () => Effect.runSync(Application.compile(invalid))
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
+
   validExpectation.not.toThrow()
   invalidExpectation.toThrow("reads unregistered table resource_dependency")
 })
@@ -214,9 +218,11 @@ it("keeps authoring specifications free of derived runtime products", () => {
 
   const hasForbiddenProperty = (keys: ReadonlyArray<string>) => {
     const isForbidden = (property: string) => Array.contains(keys, property)
+
     return Array.some(forbidden, isForbidden)
   }
 
   const forbiddenProperties = Array.map(specificationKeys, hasForbiddenProperty)
+
   expect(forbiddenProperties).toEqual([false, false, false, false])
 })

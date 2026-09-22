@@ -119,6 +119,7 @@ export const loadApplicationUiAssets = Effect.fn("AlchemyBackend.loadApplication
   const javascriptEffect = files.readFileString(ApplicationUiAssetPaths.javascript)
   const stylesheetEffect = files.readFileString(ApplicationUiAssetPaths.stylesheet)
   const [javascript, stylesheet] = yield* Effect.all([javascriptEffect, stylesheetEffect])
+
   return new ApplicationUiAssets({ javascript, stylesheet })
 })
 
@@ -135,6 +136,7 @@ const supportsExtension = (
   const supportedExtension = (extension: InfrastructureBackendCapabilities["extensions"][number]) => {
     const matchingNamespace = same(extension.namespace, namespace)
     const matchingVersion = Array.some(extension.versions, supportedVersion)
+
     return matchingNamespace && matchingVersion
   }
 
@@ -185,6 +187,7 @@ export const resolveApplicationPlan = Effect.fn("InfrastructureBackend.resolveAp
   infrastructure: AnyApplicationInfrastructure,
 ) {
   yield* validateCapabilities(backend, capabilities, infrastructure)
+
   return yield* ApplicationInfrastructure.plan(backend, infrastructure)
 })
 
@@ -207,6 +210,7 @@ const validateState = (backend: string) => Effect.fn("InfrastructureBackend.vali
 ) {
   const { stage } = yield* Stack
   const service = yield* Context.get(context, State)
+
   yield* pipe(validateDeploymentState(backend, stage, service.id), Effect.orDie)
 })
 
@@ -225,5 +229,6 @@ export const retainedInProduction = (
 ) => {
   const production = same(stage, "production")
   const retained = same(database.lifecycle.productionRemoval, "retain")
+
   return production && retained
 }

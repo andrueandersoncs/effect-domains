@@ -25,35 +25,35 @@ class ApplicationSpec<
 
 const ApplicationParts = Data.taggedEnum<ApplicationPart>()
 
-const resourcePart = <const Spec extends ResourceSpec>(resource: Spec) => {
-  const part = ApplicationParts.ResourcePart({ resource })
-  return Struct.assign(part, { resource })
+const partConstructor = <
+  Fields extends object,
+  Part extends ApplicationPart,
+>(
+  construct: (fields: Fields) => Part,
+) => <const Exact extends Fields>(fields: Exact) => {
+  const part = construct(fields)
+
+  return Struct.assign(part, fields)
 }
 
-const commandPart = <const Bundle extends AnyCommandBundle>(bundle: Bundle) => {
-  const part = ApplicationParts.CommandPart({ bundle })
-  return Struct.assign(part, { bundle })
-}
+const makeResourcePart = partConstructor(ApplicationParts.ResourcePart)
+const makeCommandPart = partConstructor(ApplicationParts.CommandPart)
+const makeNativePart = partConstructor(ApplicationParts.NativePart)
+const makeFeatureFlagPart = partConstructor(ApplicationParts.FeatureFlagPart)
+const makeApplicationPart = partConstructor(ApplicationParts.ApplicationPart)
 
-const nativePart = <const Bundle extends RpcBundle>(bundle: Bundle) => {
-  const part = ApplicationParts.NativePart({ bundle })
-  return Struct.assign(part, { bundle })
-}
-
-const featureFlagPart = <const Flag extends FeatureFlag>(flag: Flag) => {
-  const part = ApplicationParts.FeatureFlagPart({ flag })
-  return Struct.assign(part, { flag })
-}
-
-const applicationPart = <const Spec extends ApplicationSpec>(application: Spec) => {
-  const part = ApplicationParts.ApplicationPart({ application })
-  return Struct.assign(part, { application })
-}
+const resourcePart = <const Spec extends ResourceSpec>(resource: Spec) => makeResourcePart({ resource })
+const commandPart = <const Bundle extends AnyCommandBundle>(bundle: Bundle) => makeCommandPart({ bundle })
+const nativePart = <const Bundle extends RpcBundle>(bundle: Bundle) => makeNativePart({ bundle })
+const featureFlagPart = <const Flag extends FeatureFlag>(flag: Flag) => makeFeatureFlagPart({ flag })
+const applicationPart = <const Spec extends ApplicationSpec>(application: Spec) => makeApplicationPart({ application })
 
 const define = <const Parts extends ReadonlyArray<ApplicationPart>>(
   definition: Readonly<{ name: string; parts: Parts }>,
 ): ApplicationSpec<Parts> => {
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const parts = Object.freeze([...definition.parts]) as Parts
+
   return new ApplicationSpec({ name: definition.name, parts })
 }
 
@@ -164,6 +164,7 @@ const validateApplication = Effect.fn("Application.validate")(function* (
   }))
 
   const snapshots = Array.map(tables, Table.snapshot)
+
   yield* Table.validateRelations(snapshots)
 
   const proceduresForGroup = (group: RpcBundle["group"]) =>

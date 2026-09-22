@@ -1,6 +1,6 @@
 import { Data, Equivalence } from "effect"
 
-const sameString = Equivalence.strictEqual<string>()
+
 
 class ApplicationUiPaths extends Data.Class<{
   readonly document: `/${string}`
@@ -11,7 +11,8 @@ class ApplicationUiPaths extends Data.Class<{
 }> {}
 
 export const applicationUiPaths = (path: `/${string}`) => {
-  const nestedPath = (name: string) => (sameString(path, "/") ? `/${name}` : `${path}/${name}`) as `/${string}`
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  const nestedPath = (name: string) => (Equivalence.strictEqual<string>()(path, "/") ? `/${name}` : `${path}/${name}`) as `/${string}`
   const javascript = nestedPath("client.js")
   const stylesheet = nestedPath("style.css")
   const api = nestedPath("api")

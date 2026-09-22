@@ -26,4 +26,7 @@ const application = Application.define({
   parts: applicationParts,
 })
 
-export const BillingApplication = Effect.runSync(Application.compile(application))
+const billingCompiler = Application.compile(application)
+const billingApplication = Effect.runSync(billingCompiler)
+
+export { billingApplication as BillingApplication }

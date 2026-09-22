@@ -1,11 +1,11 @@
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
-import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, Struct, pipe } from "effect"
 
 import type { ApplicationIR } from "./application.ts"
 import type { ApplicationInfrastructureIR, InfrastructureIR } from "./infrastructure-compiler.ts"
 
 import {
-  ApplicationInfrastructureSpec,
+  type ApplicationInfrastructureSpec,
   Infrastructure,
   type HttpRuntime,
   type InfrastructureBinding,
@@ -76,6 +76,7 @@ class ApplicationInfrastructureHttpOptions extends Data.Class<{
 }> {}
 
 const same = Equivalence.strictEqual<unknown>()
+const ApplicationInfrastructureSpecs = Data.taggedEnum<ApplicationInfrastructureSpec<ApplicationIR>>()
 
 const resolvePath = (fallback: `/${string}`) => (value: PathOption) => {
   if (Predicate.isBoolean(value)) {
@@ -96,7 +97,9 @@ const uiPublication = (option: UiOption) => Predicate.isBoolean(option)
 
 const enabledUi = (option: UiOption) => {
   const publication = uiPublication(option)
+
   if (Predicate.isBoolean(option)) return option ? Option.some(publication) : Option.none()
+
   return Option.some(publication)
 }
 
@@ -120,10 +123,12 @@ const publicEndpoint = (
 ) => {
   if (Predicate.isBoolean(option)) {
     const endpoint = Infrastructure.publicEndpoint({ id: "public", target: runtime })
+
     return option ? Option.some(endpoint) : Option.none()
   }
 
   const endpoint = Infrastructure.publicEndpoint({ id: option.id ?? "public", target: runtime })
+
   return Option.some(endpoint)
 }
 
@@ -158,12 +163,13 @@ const define = <App extends ApplicationIR>(definition: ApplicationInfrastructure
   const parts = pipe(base, Array.appendAll(endpointResources), Array.appendAll(additionalParts))
   const specificationParts = Array.fromIterable(parts)
 
-  return new ApplicationInfrastructureSpec({
-    _tag: "ApplicationInfrastructureSpec",
+  const specification = ApplicationInfrastructureSpecs.ApplicationInfrastructureSpec({
     name: definition.application.name,
     parts: specificationParts,
     application: definition.application,
   })
+
+  return Struct.assign(specification, { application: definition.application })
 }
 
 const resourceTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(tag: Tag) => (
@@ -232,6 +238,7 @@ const resolvePlan = Effect.fn("ApplicationInfrastructure.plan")(function* <App e
   if (!same(unsupported.length, 0)) {
     const labels = Array.map(unsupported, unsupportedResourceLabel)
     const resources = Array.join(labels, ", ")
+
     return yield* ApplicationInfrastructureError.make({ interpreter, reason: `unsupported resources ${resources}` })
   }
 
@@ -279,6 +286,7 @@ const resolvePlan = Effect.fn("ApplicationInfrastructure.plan")(function* <App e
 
   if (!endpointTargetsRuntime) {
     const logicalId = pipe(endpoint, Option.map(({ logicalId }) => logicalId), Option.getOrElse(Function.constant("public endpoint")))
+
     return yield* ApplicationInfrastructureError.make({ interpreter, reason: `${logicalId} must target ${runtime.logicalId}` })
   }
 

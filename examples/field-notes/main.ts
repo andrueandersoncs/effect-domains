@@ -1,17 +1,13 @@
-import { Config, Effect, Layer, pipe } from "effect"
+import { Layer, pipe } from "effect"
 import { ApplicationBun } from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { FieldNotesApplication } from "./application.ts"
 import { FieldNotesMigrations } from "./migrations.ts"
-import { FieldNoteEncryption, makeFieldNoteEncryption } from "./storage.ts"
-
-const encryption = pipe(Effect.gen(function* () {
-  const encodedKey = yield* Config.string("FIELD_NOTES_ENCRYPTION_KEY")
-  return yield* makeFieldNoteEncryption(encodedKey)
-}), Layer.effect(FieldNoteEncryption))
+import { FieldNoteEncryptionLive } from "./storage.ts"
 
 const identity = ExampleIdentity.layer("field-notes")
-const services = Layer.mergeAll(encryption, identity)
+const services = Layer.mergeAll(FieldNoteEncryptionLive, identity)
+
 
 
 const program = ApplicationBun.run(FieldNotesApplication, {

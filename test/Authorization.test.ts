@@ -12,6 +12,7 @@ import { Table } from "effect-domains/table"
 import { prepareTables } from "./prepare-tables.ts"
 
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String, roles: Schema.Array(Schema.String) })
+
 interface Subject extends Schema.Schema.Type<typeof SubjectSchema> {}
 
 const OwnedDocumentSchema = Schema.Struct({
@@ -20,16 +21,15 @@ const OwnedDocumentSchema = Schema.Struct({
 
 interface OwnedDocument extends Schema.Schema.Type<typeof OwnedDocumentSchema> {}
 
-const policyMarkerEquals = Equivalence.strictEqual<string>()
 
-const FabricatedPolicyShapeSchema = Schema.TaggedStruct("Policy", {
+const FabricatedPolicyDescriptorSchema = Schema.TaggedStruct("Policy", {
   resource: Schema.Unknown,
   subject: Schema.Unknown,
   scope: Policy.Schema,
   allow: Schema.Record(Schema.String, Policy.Schema),
 })
 
-const FabricatedPolicySchema = Schema.make<Schema.Codec<PolicyAuthorization>>(FabricatedPolicyShapeSchema.ast)
+const FabricatedPolicySchema = Schema.make<Schema.Codec<PolicyAuthorization>>(FabricatedPolicyDescriptorSchema.ast)
 
 const UnsafeResourceSourcesSchema = Schema.Record(Schema.String, Schema.Unknown)
 
@@ -86,6 +86,7 @@ const rejectedTag = <A, E extends { readonly _tag: string }, R>(effect: Effect.E
 
 const seed = Effect.gen(function* () {
   yield* prepareTables([documentsTable])
+
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`INSERT INTO authorized_documents (id, tenantId, ownerId, title) VALUES
@@ -98,10 +99,15 @@ it.effect("subject policies snapshot allowed values and reject invalid claims an
   const allowedUsers = ["alice"]
   const allowed = subject.includes(allowedUsers, subject.subject.userId)
   const policy = subject.policy(allowed)
+
   yield* Effect.sync(() => Reflect.set(allowedUsers, "0", "bob"))
+
   const admitted = yield* pipe(Authorization.requireSubject(policy), asAlice)
+
   expect(admitted.userId).toBe("alice")
+
   const denied = yield* pipe(Authorization.requireSubject(policy), asBob, rejectedTag)
+
   expect(denied).toBe("Forbidden")
 
   const invalid = yield* pipe(
@@ -136,37 +142,59 @@ it.effect("sameAs compares a shared resource and subject field", Effect.fn("Auth
 it.effect("repository visibility scopes identifiers and pagination before computing continuations", () => pipe(
   Effect.gen(function* () {
     yield* seed
+
     const unauthenticated = yield* pipe(Resource.repository(Documents).get("1"), rejectedTag)
+
     expect(unauthenticated).toBe("Unauthenticated")
+
     const invalidSubject = yield* pipe(Resource.repository(Documents).get("1"), Effect.provideService(AuthorizationSubject, { userId: "alice" }), rejectedTag)
+
     expect(invalidSubject).toBe("Unauthenticated")
+
     const hidden = yield* pipe(Resource.repository(Documents).find("2"), asAlice, Effect.map(Option.isNone))
+
     expect(hidden).toBe(true)
+
     const missing = yield* pipe(Resource.repository(Documents).get("absent"), asAlice, rejectedTag)
     const forbidden = yield* pipe(Resource.repository(Documents).get("2"), asAlice, rejectedTag)
+
     expect(forbidden).toBe(missing)
     expect(forbidden).toBe("ResourceNotFound")
+
     const tenantBoundary = yield* pipe(Resource.repository(Documents).get("3"), asAdmin, rejectedTag)
+
     expect(tenantBoundary).toBe("ResourceNotFound")
+
     const visible = yield* pipe(Resource.repository(Documents).list(), asAlice, Effect.map(Struct.get("items")), Effect.map(documentIds), Effect.map(Array.sort(Order.String)))
+
     expect(visible).toEqual(["1", "4"])
+
     const first = yield* pipe(Resource.repository(Documents).list({ limit: 1 }), asAlice)
     const firstIds = documentIds(first.items)
+
     expect(firstIds).toEqual(["1"])
+
     const cursor = yield* Effect.fromNullishOr(first.nextCursor)
     const second = yield* pipe(Resource.repository(Documents).list({ limit: 1, cursor }), asAlice)
     const secondIds = documentIds(second.items)
+
     expect(secondIds).toEqual(["4"])
     expect(second.nextCursor).toBeNull()
+
     const replay = yield* pipe(Resource.repository(Documents).list({ limit: 2, cursor }), asBob)
     const replayIds = documentIds(replay.items)
+
     expect(replayIds).toEqual(["2"])
     expect(replay.nextCursor).toBeNull()
+
     const filtered = yield* pipe(Resource.repository(Documents).list({ filter: { ownerId: "bob" } }), asAlice)
+
     expect(filtered).toEqual({ items: [], nextCursor: null })
+
     const privileged = yield* pipe(Resource.repository(Documents).list({ limit: 1 }), asAdmin)
     const privilegedCursor = yield* Effect.fromNullishOr(privileged.nextCursor)
     const revoked = yield* pipe(Resource.repository(Documents).list({ cursor: privilegedCursor }), Effect.provideService(AuthorizationSubject, { ...admin, roles: [] }))
+
     expect(revoked).toEqual({ items: [], nextCursor: null })
   }), Effect.provide(sqlite),
 ))
@@ -190,25 +218,41 @@ it.effect("create update patch and remove enforce current and candidate authoriz
     )
 
     expect(crossTenant).toBe("RepositoryError")
+
     const original = yield* pipe(Resource.repository(Documents).get("1"), asAlice)
     const transfer = yield* pipe(Resource.repository(Documents).update({ ...original, ownerId: "bob" }), asAdmin, rejectedTag)
+
     expect(transfer).toBe("Forbidden")
+
     const move = yield* pipe(Resource.repository(Documents).patch("1", { tenantId: "b" }), asAdmin, rejectedTag)
+
     expect(move).toBe("Forbidden")
+
     const hiddenPatch = yield* pipe(Resource.repository(Documents).patch("2", { ownerId: "alice" }), asAlice, rejectedTag)
+
     expect(hiddenPatch).toBe("ResourceNotFound")
+
     const hiddenDelete = yield* pipe(Resource.repository(Documents).remove("3"), asAdmin, rejectedTag)
+
     expect(hiddenDelete).toBe("ResourceNotFound")
+
     const unchanged = yield* pipe(Resource.repository(Documents).get("1"), asAlice)
+
     expect(unchanged).toEqual(original)
+
     const created = yield* pipe(Resource.repository(Documents).create({ id: "7", title: "new" }), asAlice)
+
     expect(created).toMatchObject({ id: "7", tenantId: "a", ownerId: "alice" })
+
     const changed = yield* pipe(Resource.repository(Documents).patch("7", { title: "changed" }), asAlice)
+
     expect(changed.title).toBe("changed")
     yield* pipe(Resource.repository(Documents).remove("7"), asAlice)
+
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<Pick<OwnedDocument, "id">>`SELECT id FROM authorized_documents ORDER BY id`
     const ids = Array.map(rows, Struct.get("id"))
+
     expect(ids).toEqual(["1", "2", "3", "4"])
   }), Effect.provide(sqlite),
 ))
@@ -216,7 +260,8 @@ it.effect("create update patch and remove enforce current and candidate authoriz
 it("rejects unsafe create subject binding definitions", () => {
   const authorizationFrom = (authorization: unknown) => {
     if (typeof authorization !== "string") return authorization
-    return policyMarkerEquals(authorization, "policy") ? policy : authorization
+
+    return Equivalence.strictEqual<string>()(authorization, "policy") ? policy : authorization
   }
 
   const compileUnsafe = (definition: UnsafeResourceDefinition) => {
@@ -231,11 +276,13 @@ it("rejects unsafe create subject binding definitions", () => {
     })
 
     const spec = Reflect.apply(Resource.define, null, [resourceDefinition])
+
     return Resource.compile(spec)
   }
 
   const subject = (field: string) => {
     const operand = new Data.Class({ _tag: "SubjectField", field })
+
     return new Data.Class({ _tag: "Subject", operand })
   }
 
@@ -303,6 +350,7 @@ it.effect("populates nullable resource fields from required subject fields", () 
     })
 
     interface NullableOwner extends Schema.Schema.Type<typeof NullableOwnerSchema> {}
+
     const nullableOwner = Authorization.for({ resource: NullableOwnerSchema, subject: SubjectSchema })
     const all = nullableOwner.all()
     const policy = nullableOwner.policy({ scope: all, allow: { create: all, read: all } })
@@ -324,7 +372,9 @@ it.effect("populates nullable resource fields from required subject fields", () 
     const nullableOwnerTable = Resource.table(resource)
 
     yield* prepareTables([nullableOwnerTable])
+
     const created = yield* pipe(Resource.repository(resource).create({ id: "bound" }), asAlice)
+
     expect(created.ownerId).toBe("alice")
   }),
   Effect.provide(sqlite),
@@ -338,6 +388,7 @@ it("rejects nullable subject fields bound to required resource fields", () => {
   })
 
   interface NullableOwnerSubject extends Schema.Schema.Type<typeof NullableOwnerSubjectSchema> {}
+
   const nullableOwnerSubject = Authorization.for({ resource: OwnedDocumentSchema, subject: NullableOwnerSubjectSchema })
   const all = nullableOwnerSubject.all()
   const policy = nullableOwnerSubject.policy({ scope: all, allow: { create: all } })
@@ -357,12 +408,15 @@ it("rejects nullable subject fields bound to required resource fields", () => {
   })
 
   const spec = Reflect.apply(Resource.define, null, [definition])
+
   expect(() => Resource.compile(spec)).toThrow()
 })
 
 
 const PublicationSchema = Schema.Struct({ id: identifier(Schema.String), state: Schema.Literals(["draft", "published"]), title: Schema.String })
+
 interface Publication extends Schema.Schema.Type<typeof PublicationSchema> {}
+
 const q = Authorization.for({ resource: PublicationSchema, subject: SubjectSchema })
 const published = q.eq(q.row.state, "published")
 const publisher = q.includes(q.subject.roles, "publisher")
@@ -377,17 +431,25 @@ const publicationsTable = Resource.table(Publications)
 it.effect("write permission cannot expose an unreadable candidate and missing action rules deny", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([publicationsTable])
+
     const subject = SubjectSchema.make({ ...alice, roles: ["publisher"] })
     const asPublisher = Effect.provideService(AuthorizationSubject, subject)
     const draft = yield* pipe(Resource.repository(Publications).create({ id: "draft", state: "draft", title: "hidden" }), asPublisher, rejectedTag)
+
     expect(draft).toBe("Forbidden")
+
     const visible = yield* pipe(Resource.repository(Publications).create({ id: "published", state: "published", title: "visible" }), asPublisher)
     const hide = yield* pipe(Resource.repository(Publications).patch(visible.id, { state: "draft" }), asPublisher, rejectedTag)
+
     expect(hide).toBe("Forbidden")
+
     const remove = yield* pipe(Resource.repository(Publications).remove(visible.id), asPublisher, rejectedTag)
+
     expect(remove).toBe("Forbidden")
+
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql`SELECT id, state FROM authorized_publications ORDER BY id`
+
     expect(rows).toEqual([{ id: "published", state: "published" }])
   }), Effect.provide(sqlite),
 ))
@@ -406,6 +468,7 @@ const failureTag = <A, E extends { readonly _tag: string }>(result: Result.Resul
 it.effect("concurrent transfers cannot both authorize against the previous owner", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([transfersTable])
+
     const initial = yield* pipe(Resource.repository(Transfers).create({ id: "transfer", tenantId: "a", ownerId: "alice", title: "transfer" }), asAlice)
     const store = yield* RepositoryStore
 
@@ -419,9 +482,12 @@ it.effect("concurrent transfers cannot both authorize against the previous owner
     const changes = Effect.all([bobTransfer, carolTransfer], { concurrency: 2 })
     const results = yield* pipe(changes, Effect.provideService(RepositoryStore, interleavedStore), asAlice)
     const outcomes = pipe(results, Array.map(failureTag), Array.sort(Order.String))
+
     expect(outcomes).toEqual(["Forbidden", "Success"])
+
     const final = yield* pipe(Resource.repository(Transfers).get(initial.id), asAlice)
     const success = yield* pipe(Array.findFirst(results, Result.isSuccess), Effect.fromOption)
+
     expect(final.ownerId).toBe(success.success.ownerId)
   }), Effect.provide(sqlite),
 ))
@@ -464,8 +530,11 @@ const authorizedTransitionTable = Resource.table(AuthorizedTransitionResource)
 it.effect("transitions use their own authorization action rather than patch permission", () => pipe(
   Effect.gen(function* () {
     yield* prepareTables([authorizedTransitionTable])
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO authorized_transitions (id, state) VALUES ('publication', 'draft')`
+
     const subject = SubjectSchema.make({ userId: "publisher", tenantId: "a", roles: ["publisher"] })
 
     const published = yield* pipe(
@@ -479,6 +548,7 @@ it.effect("transitions use their own authorization action rather than patch perm
 ))
 
 const FeaturePermissionSchema = Schema.Struct({ id: identifier(Schema.String), enabled: Schema.NullOr(Schema.Boolean) })
+
 interface FeaturePermission extends Schema.Schema.Type<typeof FeaturePermissionSchema> {}
 
 const FeatureSubjectSchema = Schema.Struct({
@@ -524,16 +594,25 @@ it.effect("native Boolean storage preserves equality, membership, subject, and n
     const withheldPresent = Option.some(withheldRow)
     const withheld = new AuthorizationValues({ row: withheldPresent, next: absent })
     const denied = yield* pipe(Authorization.require(featurePermission, "read", withheld), asEnabled, rejectedTag)
+
     expect(denied).toBe("Forbidden")
 
     yield* prepareTables([featurePermissionsTable])
+
     const sql = yield* SqlClient.SqlClient
+
     yield* sql`INSERT INTO feature_permissions (id, enabled) VALUES ('disabled', 0), ('enabled', 1), ('unset', NULL)`
+
     const visible = yield* pipe(Resource.repository(FeaturePermissions).list(), asEnabled)
+
     expect(visible).toEqual({ items: [{ id: "enabled", enabled: true }], nextCursor: null })
+
     const page = yield* pipe(Resource.repository(FeaturePermissions).list({ limit: 1 }), asEnabled)
+
     expect(page).toEqual({ items: [{ id: "enabled", enabled: true }], nextCursor: null })
+
     const nullVisible = yield* pipe(Resource.repository(FeaturePermissions).list(), asNull)
+
     expect(nullVisible).toEqual({ items: [{ id: "unset", enabled: null }], nextCursor: null })
   }),
   Effect.provide(sqlite),
@@ -543,26 +622,36 @@ it.effect("policy construction snapshots compiled rules and rejects fabricated p
   Effect.gen(function* () {
     const malformed = JSON.parse('{"_tag":"Equal","left":{"_tag":"RowField","field":"ownerId"}}')
     const policyScope = p.all()
+
     expect(() => p.policy({ scope: policyScope, allow: { read: malformed } })).toThrow()
 
     const rule = p.eq(p.row.ownerId, p.subject.userId)
-    const rules = FabricatedPolicyShapeSchema.fields.allow.make({ read: rule })
+    const rules = FabricatedPolicyDescriptorSchema.fields.allow.make({ read: rule })
     const compiled = p.policy({ scope: policyScope, allow: rules })
     const compiledRow = OwnedDocumentSchema.make({ id: "owned", tenantId: "a", ownerId: "alice", title: "private" })
     const compiledValuesPresent = Option.some(compiledRow)
     const compiledValues = new AuthorizationValues({ row: compiledValuesPresent, next: absent })
 
     yield* pipe(Authorization.require(compiled, "read", compiledValues), asAlice)
+
     const clone = Struct.assign(compiled, {})
     const cloneDenied = yield* pipe(Authorization.require(clone, "read", compiledValues), asAlice, rejectedTag)
+
     expect(cloneDenied).toBe("AuthorizationDefinitionError")
+
     const alwaysAllowed = Policy.constant(true)
+
     yield* Effect.sync(() => Reflect.set(rules, "read", alwaysAllowed))
+
     const stillDenied = yield* pipe(Authorization.require(compiled, "read", compiledValues), asBob, rejectedTag)
+
     expect(stillDenied).toBe("Forbidden")
+
     const copied = Struct.assign(compiled, { allow: { read: alwaysAllowed } })
     const copiedDenied = yield* pipe(Authorization.require(copied, "read", compiledValues), asBob, rejectedTag)
+
     expect(copiedDenied).toBe("AuthorizationDefinitionError")
+
     const fabricatedRead = Policy.constant(true)
     const fabricatedScope = Policy.constant(true)
 
@@ -577,6 +666,7 @@ it.effect("policy construction snapshots compiled rules and rejects fabricated p
     const fabricatedValuesPresent = Option.some(fabricatedRow)
     const fabricatedValues = new AuthorizationValues({ row: fabricatedValuesPresent, next: absent })
     const rejected = yield* pipe(Authorization.require(fabricated, "read", fabricatedValues), asAlice, rejectedTag)
+
     expect(rejected).toBe("AuthorizationDefinitionError")
   }),
 ))

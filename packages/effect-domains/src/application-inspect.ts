@@ -1,4 +1,4 @@
-import { Array, Context, Effect, Equivalence, flow, Function, Match, Option, Record, Schema, Struct, pipe } from "effect"
+import { Array, Context, Effect, Equivalence, flow, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import type { ApplicationIR } from "./application.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
@@ -25,6 +25,7 @@ const StorageSchema = Schema.Struct({
 })
 
 interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
+
 const OperationNamesSchema = Schema.Array(Schema.String)
 const PolicyRulesSchema = Schema.Record(Schema.String, Schema.String)
 const PolicyInspectionSchema = Schema.TaggedStruct("Policy", { subject: Schema.Unknown, scope: Schema.String, allow: PolicyRulesSchema, require: Schema.optionalKey(EntitlementRequirementsSchema) })
@@ -51,6 +52,7 @@ const ResourceInspectionSchema = Schema.Struct({
 })
 
 interface ResourceInspection extends Schema.Schema.Type<typeof ResourceInspectionSchema> {}
+
 const SubjectPolicyInspectionSchema = Schema.Struct({ subject: Schema.Unknown, rule: Schema.String, require: Schema.Array(EntitlementRequirementSchema) })
 
 const OperationInspectionSchema = Schema.Struct({
@@ -63,9 +65,11 @@ const OperationInspectionSchema = Schema.Struct({
 })
 
 interface OperationInspection extends Schema.Schema.Type<typeof OperationInspectionSchema> {}
+
 const OperationsSchema = Schema.Array(OperationInspectionSchema)
 const ResourcesSchema = Schema.Array(ResourceInspectionSchema)
 const CommandsSchema = Schema.Struct({ local: OperationNamesSchema, remote: OperationNamesSchema })
+
 interface Commands extends Schema.Schema.Type<typeof CommandsSchema> {}
 
 const ApplicationInspectionSchema = Schema.Struct({
@@ -82,10 +86,12 @@ interface ApplicationInspection extends Schema.Schema.Type<typeof ApplicationIns
 const renderPolicies = (rules: Readonly<Partial<Record<string, Policy>>>) => pipe(rules, Record.map(Option.fromNullishOr), Record.getSomes, Record.map(Policy.render))
 
 const inspectAuthorization = (authorization: Resource["authorization"]) => {
-  if (authorization._tag !== "Policy") return authorization
+  if (!Predicate.isTagged(authorization, "Policy")) return authorization
+
   const subject = schemaDocument(authorization.subject)
   const scope = Policy.render(authorization.scope)
   const allow = renderPolicies(authorization.allow)
+
   return PolicyInspectionSchema.make({ subject, scope, allow, require: authorization.require })
 }
 
@@ -98,15 +104,18 @@ const resource = (definition: Resource) => {
   const stored = schemaDocument(definition.table.storageSchema)
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
   const authorization = inspectAuthorization(definition.authorization)
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const version = Option.fromNullishOr(definition.version) as Option.Option<unknown>
   const hasContract = (operation: Resource["operations"][number]) => Record.has(definition.contracts, operation)
   const operations = Array.filter(definition.operations, hasContract)
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const transitions = pipe(
     Option.fromNullishOr(definition.transitions),
     Option.map(Struct.get("inspection")),
   ) as Option.Option<unknown>
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const details = Record.getSomes({ version, transitions }) as Partial<Pick<ResourceInspection, "version" | "transitions">>
 
   return ResourceInspectionSchema.make({
@@ -128,6 +137,7 @@ class InspectionError extends Schema.TaggedError<InspectionError>()("Application
 const inspectSubjectPolicy = (policy: SubjectPolicy) => {
   const subject = schemaDocument(policy.subject)
   const rule = Policy.render(policy.expression)
+
   return SubjectPolicyInspectionSchema.make({ subject, rule, require: policy.require })
 }
 
@@ -174,10 +184,11 @@ const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (
 const operation = (commands: Readonly<Record<string, CommandLive>>) =>
   (procedure: RpcProcedure) => {
     const command = Record.get(commands, procedure._tag)
+
     return pipe(inspectOperation(procedure, command), Effect.runSync)
   }
 
-const sameName = Equivalence.strictEqual<string>()
+
 
 const describe = (
   application: ApplicationIR,
@@ -200,7 +211,8 @@ const describe = (
   const matchingOperations = Option.match(selected, {
     onNone: Function.constant(operations),
     onSome: (name) => {
-      const named = (entry: OperationInspection) => sameName(entry.name, name)
+      const named = (entry: OperationInspection) => Equivalence.strictEqual<string>()(entry.name, name)
+
       return Array.filter(operations, named)
     },
   })

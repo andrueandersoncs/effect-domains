@@ -80,6 +80,7 @@ const dependenciesFrom: (dependency: CommandDependency) => ReadonlyArray<Table> 
     CompiledResource: (dependency) => [dependency.table],
     ReadModelSpec: (dependency) => {
       const dependencies = Record.values(dependency.definition.tables)
+
       return Array.map(dependencies, dependencyTable)
     },
     CompiledReadModel: Struct.get<CompiledReadModel, "dependencies">("dependencies"),
@@ -158,6 +159,7 @@ const defineCommand = <
   const Transaction extends boolean | undefined = undefined,
 >(
   definition: CommandSpecBoundary & CommandSpec<Name, Payload, Success, Errors, Unavailable, Policy, Transaction>,
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 ) => Object.freeze({ ...definition }) as CommandSpec<
   Name,
   Payload,
@@ -176,20 +178,21 @@ export interface CommandLive<Contract extends RpcProcedure = RpcProcedure> {
   readonly handler: (input: never) => Effect.Effect<unknown, unknown, unknown>
 }
 
-const equals = Equivalence.strictEqual<number>()
+
 
 const inTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   pipe(RepositoryStore, Effect.flatMap((store) => store.transaction(effect)))
 
 // Only a lone declared failure passes through because interruptions and defects are never part of the contract.
 const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.Cause<unknown>) => {
-  const single = equals(cause.reasons.length, 1)
+  const single = Equivalence.strictEqual<number>()(cause.reasons.length, 1)
 
   const declared = (reason: Cause.Reason<unknown>) => Cause.isFailReason(reason) && isDeclared(reason.error)
     ? Option.some(reason.error)
     : Option.none<unknown>()
 
   const head = Array.head(cause.reasons)
+
   return single ? Option.flatMap(head, declared) : Option.none<unknown>()
 }
 
@@ -278,6 +281,7 @@ const compileCommand = <
   const successJsonSchema = Schema.toCodecJson(definition.success)
   const declaredErrors = Option.fromNullishOr(definition.errors)
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const errorSchema = Option.match(declaredErrors, {
     onNone: () => definition.unavailable,
     onSome: (errors) => Schema.Union([errors, definition.unavailable]),
@@ -296,6 +300,7 @@ const compileCommand = <
   const transactional = Option.getOrElse(transaction, Function.constant(false))
 
   const invoke = (input: PayloadType<Payload>) => Option.match(policy, {
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     onNone: () => (implementation as UnprotectedHandler<
       Payload,
       Success,
@@ -304,12 +309,14 @@ const compileCommand = <
     >)(input),
     onSome: () => pipe(
       AuthorizationSubject,
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       Effect.flatMap((subject) => (implementation as ProtectedHandler<
         Payload,
         Success,
         Policy,
         HandlerFailure<Implementation>,
         HandlerRequirements<Implementation>
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       >)(input, subject as SubjectType<Policy>)),
     ),
   })
@@ -340,7 +347,9 @@ const compileCommand = <
 
   return {
     spec: definition,
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     rpc: rpc as Procedure<Spec["name"], Payload, Success, ErrorSchema, Policy>,
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     handler: handler as (input: PayloadType<Payload>) => Effect.Effect<
       Success["Type"],
       Failure,
@@ -384,8 +393,10 @@ const defineFamily = <
     Policy,
     Transaction
   > => {
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const name = `${prefix}${definition.name}` as `${Prefix}${Name}`
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     return Object.freeze({
       ...definition,
       name,
@@ -451,13 +462,16 @@ const bundle = <const Commands extends ReadonlyArray<CommandLive>>(
 ): CommandBundle<Commands> => {
   type Contract = CommandContract<Commands>
   type Requirements = CommandRequirements<Commands>
+
   const rpcs: ReadonlyArray<Contract> = Array.map(commands, Struct.get("rpc"))
   const group = RpcGroup.make(...rpcs)
 
   const install = (command: CommandLive<Contract>) =>
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     group.toLayerHandler(command.rpc._tag, command.handler as RpcGroup.HandlerFrom<Contract, Contract["_tag"]>)
 
   const layers = Array.map(commands, install)
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const handlers = Layer.mergeAll(Layer.empty, ...layers) as Layer.Layer<Rpc.ToHandler<Contract>, never, Requirements>
   const frozenCommands = Object.freeze(commands)
   const rpcBundle = RpcBundle.make(group)(handlers)

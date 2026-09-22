@@ -3,10 +3,13 @@ import { Authorization } from "effect-domains/authorization"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 import { Table } from "effect-domains/table"
+
 const RelationSchema = Schema.Struct({ tenantId: Schema.String, number: Schema.String })
 const TenantSchema = Schema.Struct({ tenantId: Schema.String })
 const Tenants = Table.make({ name: "tenants", schema: TenantSchema })
+
 interface Relation extends Schema.Schema.Type<typeof RelationSchema> {}
+
 type TableOptions = Parameters<typeof Table.make<"relation_types", typeof RelationSchema>>[0]
 
 const implicitKey: TableOptions = {
@@ -49,7 +52,9 @@ const invalidResource = Resource.define({
 const invalidReference = Table.reference(Tenants, ["missing"])
 
 const ExplicitIdentitySchema = Schema.Struct({ key: identifier(Schema.String), value: Schema.String })
+
 interface ExplicitIdentity extends Schema.Schema.Type<typeof ExplicitIdentitySchema> {}
+
 type ExplicitOptions = Parameters<typeof Table.make<"explicit_relation_types", typeof ExplicitIdentitySchema>>[0]
 
 const invalidImplicitKey: ExplicitOptions = {

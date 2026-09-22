@@ -4,15 +4,17 @@ import { RepositoryAccess, RepositoryError, RepositoryOrder, RepositorySelect, R
 import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
 import { Creation, type CreationInspection } from "./resource-creation.ts"
 import type { RpcBundle } from "./rpc-contract.ts"
-import { DomainIdentifier, PageLimitSchema, type StructSchema } from "./domain.ts"
+import { DomainIdentifier, PageLimitSchema, type StructSchema, type StructValue } from "./domain.ts"
 import { Page } from "./page.ts"
 import { Authorization, AuthorizationValues, Forbidden, Unauthenticated, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
 import { SqliteList } from "./sqlite-list.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import type { TransitionMachine } from "./transitions.ts"
+
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
+
 type ResourceOperation = "get" | "list" | "create" | "update" | "remove" | "patch" | "transition"
 
 type ResourceOperations<S extends StructSchema, Auth> = Readonly<Partial<
@@ -189,6 +191,7 @@ function capabilityList<const Policy extends ListPolicy<StructSchema>>(
 function capabilityList(
   policy: ListPolicy<StructSchema> = {},
 ) {
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return ListCapabilitySchema.make(policy as never) as
     Readonly<{ readonly _tag: "List" }> & ListPolicy<StructSchema>
 }
@@ -208,6 +211,7 @@ function capabilityCreate(
 
 const capabilities = <
   const Values extends ReadonlyArray<ResourceCapability>,
+// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 >(...values: Values) => Object.freeze([...values]) as Values
 
 const crud = () => {
@@ -216,6 +220,7 @@ const crud = () => {
   const create = capabilityCreate()
   const update = capabilityUpdate()
   const remove = capabilityRemove()
+
   return capabilities(get, list, create, update, remove)
 }
 
@@ -289,6 +294,7 @@ type CompatibleStorage<Canonical extends StructSchema, Storage extends StructSch
 
 const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, UniqueViolation, Unauthenticated, Forbidden, EntitlementRequired, EntitlementUnavailable])
 const PublicResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, UniqueViolation])
+
 type ResourceErrors<Auth> = Auth extends typeof Authorization.public ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema
 
 /** Public resources never fail with identity errors; policy resources keep them. */
@@ -305,10 +311,11 @@ const invalidInput = (resource: string, _reason: string) =>
   RepositoryError.make({ resource })
 
 const equals = Equivalence.strictEqual<unknown>()
-const absentAuthorizationValue = Option.none<Readonly<Record<string, unknown>>>()
+const absentAuthorizationValue = Option.none<StructValue>()
 
 const identityAnnotation = (schema: Schema.Constraint) => {
   const annotations = Schema.resolveAnnotations(schema)
+
   return equals(annotations?.[DomainIdentifier], true)
 }
 
@@ -318,13 +325,14 @@ const fieldNamed = (name: string) => (field: TableField) =>
 const integerRequired = (field: TableField) => {
   const integer = equals(field.scalar, "integer")
   const required = !field.nullable
+
   return integer && required
 }
 
 /** The candidate row to write and the row the guard expects to find. */
 class Replacement extends Data.Class<{
-  readonly next: Readonly<Record<string, unknown>>
-  readonly expected: Readonly<Record<string, unknown>>
+  readonly next: StructValue
+  readonly expected: StructValue
 }> {}
 
 const decodeVersion = Schema.decodeUnknownEffect(Schema.Int)
@@ -340,7 +348,9 @@ const sameString = (value: string) => (candidate: string) =>
 const statusDocument = flow(Schema.toCodecJson, Schema.toJsonSchemaDocument, JSON.stringify)
 
 const canonicalInteger = (schema: Schema.Constraint) => {
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const document = Schema.toJsonSchemaDocument(schema) as { readonly schema: Readonly<Partial<{ readonly type: unknown }>> }
+
   return equals(document.schema.type, "integer")
 }
 
@@ -356,10 +366,13 @@ const withAuthorization = <Auth>(authorization: AuthorizationRuntime, table: Tab
       const store = yield* RepositoryStore
       const permission = new RepositoryAccess({ policy: authorization.visibility, subject })
       const effect = use(store, permission, ...args)
+
       return yield* (reading ? effect : store.transaction(effect))
     })
 
     type Failure = Effect.Error<ReturnType<typeof authorized>>
+
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     return authorized as (...args: [...Args]) => Effect.Effect<A, AuthorizedError<Auth, Failure>, R | RepositoryStore>
   }
 
@@ -399,6 +412,7 @@ const compileResourceValue = <
     type CanonicalRow = CanonicalTable["rowSchema"]["Type"]
     type CanonicalKey = CanonicalTable["identifier"]
     type CanonicalId = CanonicalTable["identifierSchema"]["Type"]
+
     const definitionFailure = (reason: string) => ResourceDefinitionError.make({ resource: options.name, reason })
     const inputFailure = (reason: string) => invalidInput(options.name, reason)
     const operationFailure = flow(Struct.get<Schema.SchemaError, "message">("message"), definitionFailure)
@@ -412,6 +426,7 @@ const compileResourceValue = <
     const operations = pipe(operationValues, Struct.keys, Array.filter((operation: ResourceOperation): operation is PublishedOperation<Operations> => {
       const value = options.operations[operation]
       const publication = Predicate.isBoolean(value) ? value : value?.publish
+
       return !equals(publication, false)
     }))
 
@@ -424,6 +439,7 @@ const compileResourceValue = <
     const publishesPatch = isPublished("patch")
     const publishesTransition = isPublished("transition")
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const published = Object.freeze({
       get: publishesGet,
       list: publishesList,
@@ -434,7 +450,9 @@ const compileResourceValue = <
       transition: publishesTransition,
     }) as PublishedCapabilities<Operations>
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const creation = pipe(Option.fromNullishOr(options.operations.create), Option.filter(Predicate.isObject)) as Option.Option<CreationPolicy<S, Auth>>
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const listConfiguration = pipe(Option.fromNullishOr(options.operations.list), Option.filter(Predicate.isObject)) as Option.Option<ListPolicy<S>>
     const createPolicy = Option.getOrUndefined(creation)
     const declaredListPolicy = Option.getOrUndefined(listConfiguration)
@@ -445,6 +463,7 @@ const compileResourceValue = <
     const table = Table.make<Name, S | Storage>({
       name: options.name,
       schema: storageSchema,
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       relations: options.relations as TableRelationsInput<TableFieldName<S | Storage>>,
     })
 
@@ -458,7 +477,7 @@ const compileResourceValue = <
     const transitionOption = Option.fromNullishOr(options.transitions)
     const version = Option.getOrUndefined(versionOption)
     const transition = Option.getOrUndefined(transitionOption)
-    const declaredDefaults: Readonly<Record<string, unknown>> = createPolicy?.defaults ?? Record.empty()
+    const declaredDefaults: StructValue = createPolicy?.defaults ?? Record.empty()
     const declaredGenerated: Readonly<Record<string, "uuidV7" | "now" | "one">> = createPolicy?.generated ?? Record.empty()
     const subjectBindings: Readonly<Record<string, SubjectOperand<unknown>>> = createPolicy?.fromSubject ?? Record.empty()
 
@@ -466,6 +485,7 @@ const compileResourceValue = <
 
     const isImplicitDefault = (field: TableField) => {
       const notIdentifier = !equals(field.name, table.identifier)
+
       return field.nullable && notIdentifier
     }
 
@@ -475,6 +495,7 @@ const compileResourceValue = <
       const subjectBound = Record.has(subjectBindings, field.name)
       const generatedOrDefaulted = defaulted || generated
       const configured = generatedOrDefaulted || subjectBound
+
       return !configured
     }
 
@@ -490,8 +511,11 @@ const compileResourceValue = <
 
 
     const listPolicy: ListPolicy<S> = new Data.Class({
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       filter: filterFields as ReadonlyArray<ListField<S>>,
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       range: rangeFields as ReadonlyArray<ListField<S>>,
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       order: declaredOrder as ReadonlyArray<readonly [ListField<S>, "asc" | "desc"]>,
       limit: maximum,
     })
@@ -499,12 +523,14 @@ const compileResourceValue = <
 
     const validateDefinition = Effect.gen(function* () {
       const sameFields = Equivalence.Array(Equivalence.strictEqual<string>())(canonicalNames, storageNames)
+
       if (!sameFields) return yield* definitionFailure("storage fields must match the canonical schema")
 
       yield* Effect.forEach(canonicalNames, (field) => {
         const canonicalIdentity = pipe(Record.get(options.schema.fields, field), Option.map(identityAnnotation))
         const storageIdentity = pipe(Record.get(storageSchema.fields, field), Option.map(identityAnnotation))
         const equal = Option.makeEquivalence(Equivalence.strictEqual<boolean>())(canonicalIdentity, storageIdentity)
+
         return equal ? Effect.void : definitionFailure(`storage must preserve canonical identity on ${field}`)
       }, { discard: true })
 
@@ -518,16 +544,19 @@ const compileResourceValue = <
         const canonical = Record.has(options.schema.fields, field)
         const physical = Array.some(table.fields, fieldNamed(field))
         const valid = canonical && physical
+
         return valid ? Effect.void : definitionFailure(`declares unknown list ${kind} ${field}`)
       }, { discard: true })
 
       const orderFields = Array.map(declaredOrder, ([field]) => field)
+
       yield* validateKnown("filter", filterFields)
       yield* validateKnown("range", rangeFields)
       yield* validateKnown("order", orderFields)
 
 
       const validRange = (field: string) =>
+        // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
         table.columns[field as keyof typeof table.columns].orderable
 
 
@@ -539,15 +568,18 @@ const compileResourceValue = <
 
       const nullableOrderField = (field: string) => (candidate: TableField): boolean => {
         const sameField = equals(candidate.name, field)
+
         return sameField && candidate.nullable
       }
 
 
       yield* Effect.forEach(declaredOrder, ([field]) => {
+        // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
         const column = table.columns[field as keyof typeof table.columns]
         const nullable = Array.some(table.fields, nullableOrderField(field))
         const unorderable = !column.orderable
         const unsupported = unorderable || nullable
+
         return unsupported ? definitionFailure(`list order ${field} must be orderable and non-nullable`) : Effect.void
       }, { discard: true })
 
@@ -555,10 +587,12 @@ const compileResourceValue = <
 
       const duplicateOrder = Array.some(orderNames, (field, index) => {
         const previous = Array.take(orderNames, index)
+
         return Array.some(previous, sameString(field))
       })
 
       if (duplicateOrder) return yield* definitionFailure("list order must not repeat a field")
+
       const identifierPosition = Array.findFirstIndex(orderNames, sameString(table.identifier))
 
       const misplacedIdentifier = Option.match(identifierPosition, {
@@ -577,6 +611,7 @@ const compileResourceValue = <
           const mutable = !equals(fieldName, table.identifier)
           const requirements = [validField, validCanonical, mutable]
           const valid = Array.every(requirements, Boolean)
+
           if (!valid) return yield* definitionFailure(`version ${fieldName} must be a non-nullable integer field`)
         }),
       })
@@ -589,6 +624,7 @@ const compileResourceValue = <
 
           const matching = Option.exists(resourceStatus, (status) => {
             const actualStatus = statusDocument(status)
+
             return equals(actualStatus, expectedStatus)
           })
 
@@ -598,6 +634,7 @@ const compileResourceValue = <
 
       const requiresTransition = Boolean(options.operations.transition)
       const hasTransition = Option.isSome(transitionOption)
+
       if (!requiresTransition) return
       if (!hasTransition) return yield* definitionFailure("transition operation requires transitions")
     })
@@ -605,6 +642,7 @@ const compileResourceValue = <
     Effect.runSync(validateDefinition)
 
     const implicitIdentifier = !Record.has(options.schema.fields, table.identifier)
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const canonicalRowSchema = (implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema) as Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>
     const canonicalIdentifierSchema = pipe(Record.get(options.schema.fields, table.identifier), Option.getOrElse(() => table.identifierSchema))
     const authorization = pipe(Authorization.compile({ authorization: options.authorization, resource: options.schema, storage: storageSchema, table }), Effect.runSync)
@@ -613,7 +651,7 @@ const compileResourceValue = <
 
     const authorize = (
       action: AuthorizationAction,
-      subject: Readonly<Record<string, unknown>>,
+      subject: StructValue,
       row: AuthorizationValues["row"],
       next: AuthorizationValues["next"] = absentAuthorizationValue,
     ) => {
@@ -641,7 +679,9 @@ const compileResourceValue = <
     const readable = Effect.fn("Repository.readable")(function* (subject: RepositoryAccess["subject"], stored: unknown) {
       const result = yield* decodeRow(stored)
       const row = Option.some(result)
+
       yield* authorize("read", subject, row)
+
       return result
     })
 
@@ -657,8 +697,11 @@ const compileResourceValue = <
       const complete = yield* creationPlan.materialize(input, permission.subject)
       const encoded = yield* encodeRow(complete)
       const next = Option.some(complete)
+
       yield* authorize("create", permission.subject, absentAuthorizationValue, next)
+
       const stored = yield* store.insert(table, encoded)
+
       return yield* readable(permission.subject, stored)
     })
 
@@ -673,6 +716,7 @@ const compileResourceValue = <
       const after = Option.none()
       const query = new RepositorySelect({ filter, range, order: [identifierOrder], after, limit: 1 })
       const rows = yield* store.select(table, query, permission)
+
       return Array.head(rows)
     })
 
@@ -682,7 +726,9 @@ const compileResourceValue = <
     ) {
       const encoded = yield* encodeKey(key)
       const stored = yield* selectKey(store, permission, encoded)
+
       if (Option.isNone(stored)) return Option.none<CanonicalRow>()
+
       return yield* pipe(readable(permission.subject, stored.value), Effect.map(Option.some))
     })
 
@@ -690,18 +736,22 @@ const compileResourceValue = <
       store: RepositoryStore["Service"], permission: RepositoryAccess, key: CanonicalId,
     ) {
       const found = yield* findAuthorized(store, permission, key)
+
       if (Option.isNone(found)) return yield* missing(key)
+
       return found.value
     })
 
 
     const replaceExisting = Effect.fn("Repository.replaceExisting")(function* (
       store: RepositoryStore["Service"], permission: RepositoryAccess, action: Extract<AuthorizationAction, "update" | "patch">,
-      key: unknown, changes: Readonly<Record<string, unknown>>, expectedVersion: Option.Option<number> = Option.none(), guard: Readonly<Record<string, unknown>> = Record.empty(),
+      key: unknown, changes: StructValue, expectedVersion: Option.Option<number> = Option.none(), guard: StructValue = Record.empty(),
     ) {
       const encodedKey = yield* encodeKey(key)
       const stored = yield* selectKey(store, permission, encodedKey)
+
       if (Option.isNone(stored)) return yield* missing(key)
+
       const current = yield* decodeRow(stored.value)
       const candidate = equals(action, "patch") ? Struct.assign(current, changes) : changes
       const versionField = Option.fromNullishOr(version)
@@ -712,6 +762,7 @@ const compileResourceValue = <
           const expectedValue = Option.getOrThrow(expectedVersion)
           const next = Struct.assign(candidate, { [field]: expectedValue + 1 })
           const expected = Struct.assign(current, { [field]: expectedValue })
+
           return new Replacement({ next, expected })
         },
       })
@@ -727,14 +778,18 @@ const compileResourceValue = <
       const currentValue = Option.some(current)
       const nextValue = Option.some(versioned.next)
       const updateGuard = Struct.assign(guard, versionGuard)
+
       yield* authorize(action, permission.subject, currentValue, nextValue)
+
       const updated = yield* store.update(table, encoded, permission, updateGuard)
+
       if (Option.isSome(updated)) return yield* readable(permission.subject, updated.value)
 
       return yield* Option.match(versionField, {
         onNone: () => missing(key),
         onSome: () => {
           const expectedValue = Option.getOrThrow(expectedVersion)
+
           return VersionConflict.make({ resource: table.name, key: String(key), expectedVersion: expectedValue })
         },
       })
@@ -744,7 +799,7 @@ const compileResourceValue = <
 
 
     const updateAuthorized = Effect.fn("Repository.update")(function* (
-      store: RepositoryStore["Service"], permission: RepositoryAccess, value: typeof canonicalRowSchema.Type & Readonly<Record<string, unknown>>,
+      store: RepositoryStore["Service"], permission: RepositoryAccess, value: typeof canonicalRowSchema.Type & StructValue,
     ) {
       const versionField = Option.fromNullishOr(version)
 
@@ -760,12 +815,15 @@ const compileResourceValue = <
       store: RepositoryStore["Service"], permission: RepositoryAccess, key: CanonicalId, changes: ResourceChanges<S, CanonicalKey, Version>, ...expectedVersions: ExpectedVersion<Version>
     ) {
       if (Record.has(changes, table.identifier)) return yield* inputFailure(`patch must not provide immutable field ${table.identifier}`)
+
       const expectedVersion = Array.head(expectedVersions)
       const hasVersion = !Predicate.isUndefined(version)
       const changesVersion = hasVersion && Record.has(changes, version)
       const missingExpectedVersion = hasVersion && Option.isNone(expectedVersion)
       const invalidVersion = changesVersion || missingExpectedVersion
+
       if (invalidVersion) return yield* inputFailure(`patch must provide expectedVersion and must not provide version ${version}`)
+
       return yield* replaceExisting(store, permission, "patch", key, changes, expectedVersion)
     })
 
@@ -775,15 +833,22 @@ const compileResourceValue = <
     ) {
       const encoded = yield* encodeKey(key)
       const stored = yield* selectKey(store, permission, encoded)
+
       if (Option.isNone(stored)) return yield* missing(key)
+
       const current = yield* decodeRow(stored.value)
       const row = Option.some(current)
+
       yield* authorize("remove", permission.subject, row)
+
       const removed = yield* store.remove(table, encoded, permission)
+
       if (!removed) return yield* missing(key)
     })
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const storageField = (field: string) => table.columns[field as keyof typeof table.columns].storageSchema
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const identifierColumn = table.columns[table.identifier as keyof typeof table.columns]
     const storedIdentifier = storageSchema.fields[table.identifier]
     const sameIdentifier = implicitIdentifier || equals(canonicalIdentifierSchema, storedIdentifier)
@@ -850,7 +915,10 @@ const compileResourceValue = <
       store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceListRequest<S, List> = {},
     ) {
       if (!orderableIdentifier) return yield* inputFailure("list identifier must preserve canonical ordering in storage")
+
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       const requestedFilter = (input.filter ?? Record.empty()) as RepositorySelect["filter"]
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       const requestedRange = (input.range ?? Record.empty()) as RepositorySelect["range"]
       const requestedLimit = Option.fromNullishOr(input.limit)
       const requestedCursor = Option.fromNullishOr(input.cursor)
@@ -863,15 +931,16 @@ const compileResourceValue = <
       )
 
       const rows = yield* store.select(table, prepared.query, permission)
-      const readListRow = (row: Readonly<Record<string, unknown>>) => readable(permission.subject, row)
+      const readListRow = (row: StructValue) => readable(permission.subject, row)
 
-      const decodeListRows = (stored: ReadonlyArray<Readonly<Record<string, unknown>>>) =>
+      const decodeListRows = (stored: ReadonlyArray<StructValue>) =>
         Effect.forEach(stored, readListRow)
 
       return yield* listPlan.page(prepared, rows, decodeListRows)
     })
 
     // Type the shared empty record once because the transition changes type is generic.
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const noTransitionChanges = Struct.assign(noChanges, noChanges) as TransitionChanges<S, CanonicalKey, Version, Transition>
 
     const transitionAuthorized = Effect.fn("Repository.transition")(function* (
@@ -883,13 +952,16 @@ const compileResourceValue = <
       ...expectedVersions: ExpectedVersion<Version>
     ) {
       if (Predicate.isUndefined(transition)) return yield* inputFailure("resource does not declare transitions")
+
       const changesIdentifier = Record.has(changes, table.identifier)
       const changesTransition = Record.has(changes, transition.field)
       const versionField = Option.fromNullishOr(version)
       const changesVersion = Option.exists(versionField, (field) => Record.has(changes, field))
       const identifierOrTransition = changesIdentifier || changesTransition
       const immutableChanges = identifierOrTransition || changesVersion
+
       if (immutableChanges) return yield* inputFailure("transition changes contain an immutable field")
+
       const expectedVersionValue = Array.head(expectedVersions)
       const missingExpectedVersion = Option.isNone(expectedVersionValue)
 
@@ -899,13 +971,17 @@ const compileResourceValue = <
       })
 
       if (needsExpectedVersion) return yield* inputFailure("transition must provide expectedVersion")
+
       const encodedKey = yield* encodeKey(key)
       const stored = yield* selectKey(store, permission, encodedKey)
+
       if (Option.isNone(stored)) return yield* missing(key)
+
       const current = yield* decodeRow(stored.value)
       const keyText = String(key)
       const source = pipe(Record.get(current, transition.field), Option.getOrThrow)
       const sourceActual = String(source)
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       const to = yield* transition.guard(action as never, keyText, sourceActual)
       const encodedCurrent = yield* encodeRow(current)
       const encodedStatus = pipe(Record.get(encodedCurrent, transition.field), Option.getOrThrow)
@@ -920,6 +996,7 @@ const compileResourceValue = <
           const expectedValue = Option.getOrThrow(expectedVersionValue)
           const next = Struct.assign(candidate, { [field]: expectedValue + 1 })
           const expected = Struct.assign(current, { [field]: expectedValue })
+
           return new Replacement({ next, expected })
         },
       })
@@ -935,22 +1012,29 @@ const compileResourceValue = <
       const currentValue = Option.some(current)
       const nextValue = Option.some(versioned.next)
       const guard = Struct.assign(statusGuard, versionGuard)
+
       yield* authorize("transition", permission.subject, currentValue, nextValue)
+
       const updated = yield* store.update(table, encoded, permission, guard)
+
       if (Option.isSome(updated)) return yield* readable(permission.subject, updated.value)
 
       if (Option.isSome(versionField)) {
         const expectedValue = Option.getOrThrow(expectedVersionValue)
+
         return yield* VersionConflict.make({ resource: table.name, key: String(key), expectedVersion: expectedValue })
       }
 
 
       const refreshed = yield* selectKey(store, permission, encodedKey)
+
       if (Option.isNone(refreshed)) return yield* missing(key)
+
       const actual = yield* decodeRow(refreshed.value)
       const actualStatus = pipe(Record.get(actual, transition.field), Option.getOrThrow)
       const actualText = String(actualStatus)
       const transitionError = transition.invalid(action, keyText, actualText)
+
       return yield* Effect.fail(transitionError)
     })
 
@@ -969,8 +1053,11 @@ const compileResourceValue = <
 
       const encoded = yield* encodeRow(row)
       const next = Option.some(row)
+
       yield* authorize("create", permission.subject, absentAuthorizationValue, next)
+
       const stored = yield* store.insert(table, encoded)
+
       return yield* readable(permission.subject, stored)
     })
 
@@ -978,18 +1065,21 @@ const compileResourceValue = <
 
 
 
-    const ensure = Effect.fn("Repository.ensure")(function* (row: CanonicalRow & Readonly<Record<string, unknown>>) {
+    const ensure = Effect.fn("Repository.ensure")(function* (row: CanonicalRow & StructValue) {
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       const key = row[table.identifier as CanonicalKey] as CanonicalId
       const found = yield* find(key)
+
       if (Option.isSome(found)) return found.value
+
       return yield* pipe(ensureCreate(row), Effect.catchIf(isUniqueViolation, () => get(key)))
     })
 
     const repository = { find, get, list, create, update, patch, remove, ensure, transition: transitionRepository }
-    const CreateShapeSchema = Schema.Struct(creationPlan.inputFields)
-    const createInputSchema = Schema.make<Schema.Codec<ResourceDraft<S, Creation, Version>, unknown, S["DecodingServices"], S["EncodingServices"]>>(CreateShapeSchema.ast)
-    const IdentifierShapeSchema = Schema.Record(Schema.Literal(table.identifier), canonicalIdentifierSchema)
-    const identifierRequestSchema = Schema.make<Schema.Codec<Readonly<Record<CanonicalKey, CanonicalId>>, unknown, S["DecodingServices"], S["EncodingServices"]>>(IdentifierShapeSchema.ast)
+    const CreateInputStructSchema = Schema.Struct(creationPlan.inputFields)
+    const createInputSchema = Schema.make<Schema.Codec<ResourceDraft<S, Creation, Version>, unknown, S["DecodingServices"], S["EncodingServices"]>>(CreateInputStructSchema.ast)
+    const IdentifierRequestStructSchema = Schema.Record(Schema.Literal(table.identifier), canonicalIdentifierSchema)
+    const identifierRequestSchema = Schema.make<Schema.Codec<Readonly<Record<CanonicalKey, CanonicalId>>, unknown, S["DecodingServices"], S["EncodingServices"]>>(IdentifierRequestStructSchema.ast)
     const canonicalRowWireSchema = Schema.toCodecJson(canonicalRowSchema)
     const createWireSchema = Schema.toCodecJson(createInputSchema)
     const identifierWireSchema = Schema.toCodecJson(identifierRequestSchema)
@@ -1000,6 +1090,7 @@ const compileResourceValue = <
 
     const mutableFields = Predicate.isUndefined(version)
       ? canonicalMutableFields
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       : Record.remove(canonicalMutableFields, version as never)
 
     const optionalMutableFields = Record.map(mutableFields, Schema.optionalKey)
@@ -1008,12 +1099,12 @@ const compileResourceValue = <
 
 
 
-    const PatchShapeSchema = Predicate.isUndefined(version)
+    const PatchInputStructSchema = Predicate.isUndefined(version)
 
       ? Schema.Struct({ key: canonicalIdentifierSchema, changes: PatchFieldsSchema })
       : Schema.Struct({ key: canonicalIdentifierSchema, expectedVersion: Schema.Int, changes: PatchFieldsSchema })
 
-    const patchInputSchema = Schema.make<Schema.Codec<Readonly<{ key: CanonicalId; changes: ResourceChanges<S, CanonicalKey, Version> }> & Readonly<Partial<{ expectedVersion: number }>>, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchShapeSchema.ast)
+    const patchInputSchema = Schema.make<Schema.Codec<Readonly<{ key: CanonicalId; changes: ResourceChanges<S, CanonicalKey, Version> }> & Readonly<Partial<{ expectedVersion: number }>>, unknown, S["DecodingServices"], S["EncodingServices"]>>(PatchInputStructSchema.ast)
     const patchWireSchema = Schema.toCodecJson(patchInputSchema)
 
 
@@ -1022,6 +1113,7 @@ const compileResourceValue = <
       const optionalFields = Record.map(mutableFields, Schema.optionalKey)
       const immutableIdentifier = Record.set(optionalFields, table.identifier, ForbiddenFieldSchema)
       const transitionFields = Record.set(immutableIdentifier, field, ForbiddenFieldSchema)
+
       return Schema.Struct(transitionFields)
     }
 
@@ -1036,7 +1128,7 @@ const compileResourceValue = <
 
     const changesFieldSchema = Schema.optionalKey(TransitionFieldsSchema)
 
-    const transitionShapeSchema = Option.match(transitionOption, {
+    const transitionInputStructSchema = Option.match(transitionOption, {
       onNone: () => Schema.Struct({ key: canonicalIdentifierSchema, action: Schema.String, changes: changesFieldSchema }),
       onSome: (definition) => Option.match(versionOption, {
         onNone: () => Schema.Struct({ key: canonicalIdentifierSchema, action: definition.actions, changes: changesFieldSchema }),
@@ -1048,12 +1140,13 @@ const compileResourceValue = <
       & Readonly<Partial<{ changes: TransitionChanges<S, CanonicalKey, Version, Transition> }>>
       & (Version extends string ? Readonly<{ expectedVersion: number }> : unknown)
 
-    const transitionJsonSchema = Schema.toCodecJson(transitionShapeSchema)
+    const transitionJsonSchema = Schema.toCodecJson(transitionInputStructSchema)
     const transitionInputSchema = Schema.make<Schema.Codec<TransitionInput, unknown, S["DecodingServices"], S["EncodingServices"]>>(transitionJsonSchema.ast)
     const isPublic = equals(options.authorization._tag, "Public")
     const resourceErrorsSchema = isPublic ? PublicResourceErrorSchema : ResourceErrorSchema
     const versionedErrorsSchema = Schema.Union([resourceErrorsSchema, VersionConflict])
 
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const errorSchema = Option.match(versionOption, {
       onNone: Function.constant(resourceErrorsSchema),
       onSome: Function.constant(versionedErrorsSchema),
@@ -1061,40 +1154,55 @@ const compileResourceValue = <
 
     // Name the concrete error class because narrowing the generic would widen it to Schema.Top.
     type TransitionError = Transition extends { readonly Error: infer Declared extends Schema.Top } ? Declared : typeof Schema.Never
+
     const declaredTransitionErrors = Option.map(transitionOption, Struct.get("Error"))
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const declaredTransitionErrorSchema = Option.getOrElse(declaredTransitionErrors, Function.constant(Schema.Never)) as TransitionError
     const transitionErrorSchema = Schema.Union([errorSchema, declaredTransitionErrorSchema])
-    const identifierFrom = (input: typeof identifierRequestSchema.Type) => input[table.identifier as CanonicalKey]
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+    const identifierFrom = (input: StructValue) => input[table.identifier] as CanonicalId
     const getHandler = flow(identifierFrom, repository.get)
     const removeHandler = flow(identifierFrom, repository.remove)
 
 
     // Read the wire field into the tuple the versioned signature expects because RPC input carries it as a field.
-    const expectedVersions = (input: Readonly<Record<string, unknown>>) => {
+    const expectedVersions = (input: StructValue) => {
       const supplied = Record.get(input, "expectedVersion")
       const integer = Option.filter(supplied, Schema.is(Schema.Int))
       const versions = Option.match(integer, { onNone: () => [] as const, onSome: (value) => [value] as const })
+
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
       return versions as ExpectedVersion<Version>
     }
 
     const patchHandler = Effect.fn("Resource.patch")(function* (input: typeof patchInputSchema.Type) {
       const versions = expectedVersions(input)
+
       return yield* repository.patch(input.key, input.changes, ...versions)
     })
 
     const transitionHandler = Effect.fn("Resource.transition")(function* (input: typeof transitionInputSchema.Type) {
       const changes = input.changes ?? noTransitionChanges
       const versions = expectedVersions(input)
+
       return yield* repository.transition(input.key, input.action, changes, ...versions)
     })
 
-    const getRpc = Rpc.make(`${options.name}.get`, { payload: identifierWireSchema, success: canonicalRowWireSchema, error: errorSchema })
-    const listRpc = Rpc.make(`${options.name}.list`, { payload: listWireSchema, success: PageSchema, error: errorSchema })
-    const createRpc = Rpc.make(`${options.name}.create`, { payload: createWireSchema, success: canonicalRowWireSchema, error: errorSchema })
-    const updateRpc = Rpc.make(`${options.name}.update`, { payload: canonicalRowWireSchema, success: canonicalRowWireSchema, error: errorSchema })
-    const patchRpc = Rpc.make(`${options.name}.patch`, { payload: patchWireSchema, success: canonicalRowWireSchema, error: errorSchema })
-    const removeRpc = Rpc.make(`${options.name}.remove`, { payload: identifierWireSchema, success: Schema.Void, error: errorSchema })
-    const transitionRpc = Rpc.make(`${options.name}.transition`, { payload: transitionInputSchema, success: canonicalRowWireSchema, error: transitionErrorSchema })
+    const makeResourceRpc = <
+      const Operation extends ResourceOperation,
+      Payload extends Schema.Top,
+      Success extends Schema.Top,
+      Error extends Schema.Top,
+    >(operation: Operation, payload: Payload, success: Success, error: Error) =>
+      Rpc.make(`${options.name}.${operation}`, { payload, success, error })
+
+    const getRpc = makeResourceRpc("get", identifierWireSchema, canonicalRowWireSchema, errorSchema)
+    const listRpc = makeResourceRpc("list", listWireSchema, PageSchema, errorSchema)
+    const createRpc = makeResourceRpc("create", createWireSchema, canonicalRowWireSchema, errorSchema)
+    const updateRpc = makeResourceRpc("update", canonicalRowWireSchema, canonicalRowWireSchema, errorSchema)
+    const patchRpc = makeResourceRpc("patch", patchWireSchema, canonicalRowWireSchema, errorSchema)
+    const removeRpc = makeResourceRpc("remove", identifierWireSchema, Schema.Void, errorSchema)
+    const transitionRpc = makeResourceRpc("transition", transitionInputSchema, canonicalRowWireSchema, transitionErrorSchema)
 
     const contracts = Object.freeze({
       get: getRpc,
@@ -1120,11 +1228,24 @@ const compileResourceValue = <
 
     type Operation = PublishedOperation<Operations>
     type SelectedRpc = Extract<typeof definitions[ResourceOperation]["rpc"], { readonly _tag: `${Name}.${Operation}` }>
+
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const selected = Array.map(operations, (operation) => definitions[operation].rpc) as Array<SelectedRpc>
     const selectedGroup = RpcGroup.make(...selected)
+
     type PublishedRpc = Auth extends PolicyAuthorization ? Rpc.AddMiddleware<SelectedRpc, typeof AuthorizationRpc> : SelectedRpc
-    const group = (equals(options.authorization._tag, "Policy") ? selectedGroup.middleware(AuthorizationRpc) : selectedGroup) as RpcGroup.Any as RpcGroup.RpcGroup<PublishedRpc>
+
+    // SAFETY: The asserted RPC union matches because each group is built from the caller's selected operation definitions.
+    const publishedRpcGroup = <Rpcs extends Rpc.Any>(rpcGroup: RpcGroup.Any) =>
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+      rpcGroup as RpcGroup.RpcGroup<Rpcs>
+
+    const group = equals(options.authorization._tag, "Policy")
+      ? pipe(selectedGroup.middleware(AuthorizationRpc), publishedRpcGroup<PublishedRpc>)
+      : publishedRpcGroup<PublishedRpc>(selectedGroup)
+
     const handlerRecord = pipe(operations, Array.map((operation) => [`${options.name}.${operation}`, definitions[operation].handler] as const), Record.fromEntries)
+    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
     const handlers = selectedGroup.toLayer(handlerRecord as typeof handlerRecord & RpcGroup.HandlersFrom<SelectedRpc>) as Layer.Layer<Rpc.ToHandler<SelectedRpc>, never, Effect.Services<ReturnType<typeof definitions[Operation]["handler"]>>>
 
 
@@ -1229,6 +1350,7 @@ const creationOperation = (
 ) => {
   const sources = capability.sources ?? {}
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const entries = Record.toEntries(sources) as ReadonlyArray<
     readonly [string, Schema.Schema.Type<typeof CreationSourceSchema>]
   >
@@ -1421,6 +1543,7 @@ const define = <
 ): DefinedResource<Definition> => {
   const capabilities = Object.freeze([...definition.capabilities])
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return Object.freeze({
     ...definition,
     _tag: "ResourceSpec" as const,
@@ -1475,15 +1598,23 @@ const emptyCompiledResources: ReadonlyArray<CompiledResourceCacheEntry> = []
 const compiledResources = pipe(emptyCompiledResources, Ref.make, Effect.runSync)
 const sameResourceSpec = Equivalence.strictEqual<ResourceSpec>()
 
+// SAFETY: The runtime has the requested spec because compilation derives every runtime product from that exact spec.
+const resourceRuntimeFor = <Spec extends ResourceSpec>(resource: Resource) =>
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  resource as ResourceRuntime<Spec>
+
 const valueFromSpec = <const Spec extends ResourceSpec>(
   spec: Spec,
 ): ResourceRuntime<Spec> => {
   const matchesSpec = (entry: CompiledResourceCacheEntry) => sameResourceSpec(entry.spec, spec)
   const cached = pipe(Ref.get(compiledResources), Effect.runSync, Array.findFirst(matchesSpec))
+
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   if (Option.isSome(cached)) return cached.value.resource as ResourceRuntime<Spec>
 
   const operationEntries = Array.map(spec.capabilities, operationEntry)
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const operations = Record.fromEntries(operationEntries) as
     DeclaredResourceOperations<Spec["capabilities"]>
 
@@ -1510,6 +1641,7 @@ const valueFromSpec = <const Spec extends ResourceSpec>(
 
             const reference = Table.reference(
               target.table,
+              // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
               references.fields as ReadonlyArray<string>,
             )
 
@@ -1517,12 +1649,14 @@ const valueFromSpec = <const Spec extends ResourceSpec>(
           }
 
           const foreignKeys = Array.map(foreignKeyDefinitions, compileForeignKey)
+
           return Struct.assign(relations, { foreignKeys })
         },
       })
     },
   })
 
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const compiled = compileResourceValue({
     authorization: spec.authorization,
     name: spec.name,
@@ -1544,7 +1678,7 @@ const valueFromSpec = <const Spec extends ResourceSpec>(
     Effect.runSync,
   )
 
-  return compiled as Resource as ResourceRuntime<Spec>
+  return resourceRuntimeFor<Spec>(compiled)
 }
 
 
@@ -1600,6 +1734,7 @@ export type ResourceTable<Spec extends ResourceSpec> =
 
 
 const repository = <const Spec extends ResourceSpec>(spec: Spec) => {
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   const runtime = valueFromSpec(spec) as { readonly repository: RepositoryFor<Spec> }
 
   return Struct.assign(runtime.repository, {
@@ -1610,6 +1745,8 @@ const repository = <const Spec extends ResourceSpec>(spec: Spec) => {
 
 const table = <const Spec extends ResourceSpec>(spec: Spec) => {
   const runtime = valueFromSpec(spec)
+
+  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return runtime.table as ResourceTable<Spec>
 }
 

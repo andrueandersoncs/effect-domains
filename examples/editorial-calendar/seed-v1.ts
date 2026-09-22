@@ -36,6 +36,7 @@ const seedVersionOneDraft = Effect.gen(function* () {
 
   const seed = Effect.gen(function* () {
     const schemaStore = yield* SchemaStore
+
     yield* schemaStore.prepare(initialMigration.to.tables)
 
     yield* Resource.repository(LegacyDocumentsResource).ensure({ id: seedId, title: seedTitle })

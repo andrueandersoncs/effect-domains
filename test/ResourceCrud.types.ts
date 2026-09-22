@@ -6,6 +6,7 @@ import { Resource } from "effect-domains/resource"
 import { Transitions } from "effect-domains/transitions"
 
 const TypeProbeSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
+
 interface TypeProbe extends Schema.Schema.Type<typeof TypeProbeSchema> {}
 
 const completedDefault = Resource.default(false)
@@ -33,6 +34,7 @@ const TypeProbeRepository = Resource.repository(TypeProbe)
 const TypeProbeRuntime = Resource.compile(TypeProbe)
 
 const NoPolicyProbeSchema = Schema.Struct({ id: identifier(Schema.String), value: Schema.Int })
+
 interface NoPolicyProbe extends Schema.Schema.Type<typeof NoPolicyProbeSchema> {}
 
 const NoPolicyProbe = Resource.define({
@@ -58,6 +60,7 @@ void listInput
 void patchInput
 
 undefined satisfies Parameters<typeof TypeProbeRepository.list>[0]
+
 const defaultListInput: Parameters<typeof NoPolicyProbeRepository.list>[0] = { limit: 1, cursor: "continuation" }
 const listPage: Effect.Success<ReturnType<typeof TypeProbeRepository.list>> = { items: [], nextCursor: null }
 const defaultListPage: Effect.Success<ReturnType<typeof NoPolicyProbeRepository.list>> = { items: [], nextCursor: "continuation" }
@@ -74,6 +77,7 @@ const contractListPage: typeof TypeProbeRuntime.contracts.list.successSchema.Typ
 
 // @ts-expect-error because generated lists never return bare arrays.
 const bareList: Effect.Success<ReturnType<typeof NoPolicyProbeRepository.list>> = []
+
 void defaultListInput
 void listPage
 void defaultListPage
@@ -99,6 +103,7 @@ const GeneratedProbeSchema = Schema.Struct({
 })
 
 interface GeneratedProbe extends Schema.Schema.Type<typeof GeneratedProbeSchema> {}
+
 const idGeneration = Resource.generated("uuidV7")
 const createdAtGeneration = Resource.generated("now")
 
@@ -126,6 +131,7 @@ const GeneratedProbeRepository = Resource.repository(GeneratedProbe)
 const generatedInput: Parameters<typeof GeneratedProbeRepository.create>[0] = { title: "only authored input" }
 // @ts-expect-error because generated fields cannot be provided by callers.
 const generatedOverride: Parameters<typeof GeneratedProbeRepository.create>[0] = { id: "override", title: "bad" }
+
 void missingTitle
 void undeclaredFilter
 void undeclaredDefaultFilter
@@ -134,18 +140,23 @@ void generatedInput
 void generatedOverride
 
 type PublishedPatch = Extract<RpcGroup.Rpcs<typeof TypeProbeRuntime.group>, { readonly _tag: "resource_type_probe.patch" }>
+
 const publishedPatch: Rpc.Payload<PublishedPatch> = { key: "row", changes: { title: "changed" } }
 
 type UnpublishedCreate = Extract<RpcGroup.Rpcs<typeof TypeProbeRuntime.group>, { readonly _tag: "resource_type_probe.create" }>
 type UnpublishedList = Extract<RpcGroup.Rpcs<typeof TypeProbeRuntime.group>, { readonly _tag: "resource_type_probe.list" }>
 type UnpublishedRemove = Extract<RpcGroup.Rpcs<typeof TypeProbeRuntime.group>, { readonly _tag: "resource_type_probe.remove" }>
 type IsNever<Value> = [Value] extends [never] ? true : false
+
 const unpublishedOperations: readonly [IsNever<UnpublishedCreate>, IsNever<UnpublishedList>, IsNever<UnpublishedRemove>] = [true, true, true]
+
 void unpublishedOperations
 // @ts-expect-error because patch identity has its own envelope field.
+
 const missingPatchKey: Rpc.Payload<PublishedPatch> = { changes: { title: "changed" } }
 // @ts-expect-error because canonical identifiers remain immutable inside changes.
 const changedPatchKey: Rpc.Payload<PublishedPatch> = { key: "row", changes: { id: "other" } }
+
 void publishedPatch
 void missingPatchKey
 void changedPatchKey
@@ -171,14 +182,17 @@ const VersionedTypeProbeRepository = Resource.repository(VersionedTypeProbe)
 
 const nullableCreate: Parameters<typeof VersionedTypeProbeRepository.create>[0] = { id: "row", title: "required" }
 const versionedPatch: Parameters<typeof VersionedTypeProbeRepository.patch> = ["row", { title: "changed" }, 1]
+
 void nullableCreate
 void versionedPatch
 // @ts-expect-error because version is framework-managed on create.
+
 const suppliedVersion: Parameters<typeof VersionedTypeProbeRepository.create>[0] = { id: "row", title: "bad", version: 1 }
 // @ts-expect-error because versioned patches require their expected version.
 const missingExpectedVersion: Parameters<typeof VersionedTypeProbeRepository.patch> = ["row", { title: "changed" }]
 // @ts-expect-error because version may not be changed through patch fields.
 const patchedVersion: Parameters<typeof VersionedTypeProbeRepository.patch> = ["row", { version: 2 }, 1]
+
 void suppliedVersion
 void missingExpectedVersion
 void patchedVersion
@@ -203,6 +217,7 @@ const NullableGeneratedProbeRepository = Resource.repository(NullableGeneratedPr
 
 // @ts-expect-error because a nullable generated field remains protected from create input.
 const generatedNullableOverride: Parameters<typeof NullableGeneratedProbeRepository.create>[0] = { id: "row", note: null }
+
 void generatedNullableOverride
 
 const TransitionStatusSchema = Schema.Literals(["held", "confirmed"])
@@ -230,10 +245,17 @@ const TransitionTypeProbe = Resource.define({
 const TransitionTypeProbeRuntime = Resource.compile(TransitionTypeProbe)
 
 TypeTransitions.field satisfies "status"
+
 const appliedTransition = TypeTransitions.apply("confirm", "key")({ status: "held" })
+
 type AppliedTransition = Effect.Success<typeof appliedTransition>
+
 const transitionTarget = "confirmed" satisfies AppliedTransition["status"]
+
 void transitionTarget
+
 type PublishedTransition = Extract<RpcGroup.Rpcs<typeof TransitionTypeProbeRuntime.group>, { readonly _tag: "transition_type_probe.transition" }>
+
 const transitionPayload: Rpc.Payload<PublishedTransition> = { key: "row", action: "confirm", expectedVersion: 1 }
+
 void transitionPayload
