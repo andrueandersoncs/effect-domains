@@ -18,18 +18,17 @@ import type { Table } from "./table.ts"
 import { SqliteList } from "./sqlite-list.ts"
 import { Value } from "./value.ts"
 
-class InsertReturnedNoRow extends Schema.TaggedError<InsertReturnedNoRow>()(
-  "InsertReturnedNoRow",
-  {},
-) {}
 
 class PrivateDatabaseConflict extends Schema.TaggedError<PrivateDatabaseConflict>()(
   "PrivateDatabaseConflict",
   { application: Schema.String, execution: Schema.String },
 ) {}
 
-const repositoryFailure = (resource: string) => (cause: unknown) =>
-  RepositoryError.make({ resource, cause })
+const repositoryFailure = (resource: string) => {
+  const failure = RepositoryError.make({ resource })
+
+  return Effect.fail(failure)
+}
 
 const unknownEquals = Equivalence.strictEqual<unknown>()
 const emptyGuard = Record.empty<string, unknown>()
@@ -42,19 +41,10 @@ const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [s
 
 
 
-const constraintColumn = (column: string) => {
-  const segments = column.trim().split(".")
-  const last = Array.get(segments, segments.length - 1)
-  return Option.getOrThrow(last)
-}
 
-const transactionFailure = (cause: SqlError.SqlError) =>
-  pipe(cause, repositoryFailure("transaction"), Effect.fail)
+const transactionFailure = () =>
+  repositoryFailure("transaction")
 
-const constraintColumns = (value: string) => {
-  const columns = value.split(",")
-  return Array.map(columns, constraintColumn)
-}
 
 const errorMessage = (value: unknown) => {
   if (value instanceof Error) return Option.some(value.message)
@@ -74,48 +64,14 @@ const isUniqueViolation = (
 ): reason is Extract<SqlError.SqlError["reason"], { readonly _tag: "UniqueViolation" }> =>
   Equivalence.strictEqual<typeof reason._tag>()(reason._tag, "UniqueViolation")
 
-const capturedConstraint = (match: RegExpExecArray) =>
-  Array.get(match, 1)
 
 const uniqueConstraint = (table: Table, cause: SqlError.SqlError) => {
   const message = pipe(errorMessage(cause.reason.cause), Option.getOrElse(Function.constant(cause.message)))
   const uniqueReason = isUniqueViolation(cause.reason)
+  const sqliteUnique = /(?:UNIQUE|PRIMARY KEY) constraint failed:/i.test(message)
+  if (!uniqueReason && !sqliteUnique) return Option.none<UniqueViolation>()
 
-  const source = uniqueReason
-    ? Option.some(cause.reason.constraint)
-    : pipe(
-      /(?:UNIQUE|PRIMARY KEY) constraint failed:\s*(.+)$/i.exec(message),
-      Option.fromNullishOr,
-      Option.flatMap(capturedConstraint),
-    )
-
-  const primaryKey = /PRIMARY KEY constraint failed/i.test(message)
-  const foundSource = Option.isSome(source)
-  const knownUnique = uniqueReason || foundSource
-  const unique = knownUnique || primaryKey
-  if (!unique) return Option.none<UniqueViolation>()
-
-  const sourceValue = pipe(source, Option.getOrElse(Function.constant("unknown")))
-  const unknownSource = Equivalence.strictEqual<string>()(sourceValue, "unknown")
-  const primaryFields = primaryKey ? [table.identifier] : []
-  const fields = unknownSource ? primaryFields : constraintColumns(sourceValue)
-  const relationEntries = table.relations?.unique ?? []
-
-  const matchesFields = (entry: typeof relationEntries[number]) => {
-    const sameSize = Equivalence.strictEqual<number>()(entry.fields.length, fields.length)
-    const containsField = (field: string) => Array.contains(fields, field)
-    const sameFields = Array.every(entry.fields, containsField)
-    return sameSize && sameFields
-  }
-
-  const declared = Array.findFirst(relationEntries, matchesFields)
-  const fieldCount = Array.length(fields)
-  const oneField = Equivalence.strictEqual<number>()(fieldCount, 1)
-  const fieldMatchesIdentifier = pipe(Array.get(fields, 0), Option.exists((field) => unknownEquals(field, table.identifier)))
-  const identifier = oneField && fieldMatchesIdentifier
-  const fallback = identifier || primaryKey ? table.identifier : Array.join(fields, ", ")
-  const constraint = pipe(declared, Option.map(Struct.get("name")), Option.getOrElse(Function.constant(fallback)))
-  const violation = UniqueViolation.make({ resource: table.name, constraint, fields })
+  const violation = UniqueViolation.make({ resource: table.name })
 
   return Option.some(violation)
 }
@@ -125,7 +81,7 @@ const persistenceFailure = (table: Table) => (
 ): Effect.Effect<never, RepositoryError | UniqueViolation> => pipe(
   uniqueConstraint(table, cause),
   Option.match({
-    onNone: () => pipe(cause, repositoryFailure(table.name), Effect.fail),
+    onNone: () => repositoryFailure(table.name),
     onSome: Effect.fail,
   }),
 )
@@ -144,7 +100,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
 
   const policyBinding = Effect.fn("RepositoryStore.policyBinding")(
     function* (table: Table, access: RepositoryAccess) {
-      const recover = Function.flow(repositoryFailure(table.name), Effect.fail)
+      const recover = () => repositoryFailure(table.name)
 
       const binder = yield* pipe(
         Ref.modify(policyBinders, registerPolicy(access.policy)),
@@ -157,7 +113,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
         next: absentPolicyValue,
       })
 
-      return yield* pipe(binder(sqlClient, environment), Effect.mapError(repositoryFailure(table.name)))
+      return yield* pipe(binder(sqlClient, environment), Effect.catch(recover))
     },
   )
 
@@ -173,7 +129,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
           ORDER BY ${rendered.order}
           LIMIT ${query.limit}
         `,
-        Effect.mapError(repositoryFailure(table.name)),
+        Effect.catch(() => repositoryFailure(table.name)),
       )
     }),
     insert: Effect.fn("RepositoryStore.insert")(function* (table, value) {
@@ -188,10 +144,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
       const row = Array.get(rows, 0)
 
       if (Option.isNone(row)) {
-        return yield* RepositoryError.make({
-          resource: table.name,
-          cause: InsertReturnedNoRow.make({}),
-        })
+        return yield* repositoryFailure(table.name)
       }
 
       return row.value
@@ -224,7 +177,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
           WHERE ${policy} AND ${sqlClient(table.identifier)} = ${key}
           RETURNING ${sqlClient(table.identifier)}
         `,
-        Effect.mapError(repositoryFailure(table.name)),
+        Effect.catch(() => repositoryFailure(table.name)),
       )
 
       return Array.isReadonlyArrayNonEmpty(rows)

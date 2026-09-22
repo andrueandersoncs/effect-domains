@@ -63,11 +63,11 @@ Use an authored operation when an action preserves a cross-record invariant, cal
 
 ## Application: which operations belong together
 
-`Application.define({ name, parts })` records explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` syntax. `Application.compile` produces the authoritative `ApplicationIR`, recursively flattens nested applications, and rejects duplicate tables, commands, and feature-flag names across the complete tree. Orders and invoices keeps its billing resources and commands together while the outer runnable application adds native identity. Support cases composes directory and case-management siblings whose relations and command dependencies cross the child boundary.
+`Application.define({ name, parts })` records explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` syntax. `Application.compile` returns an `Effect` that yields the authoritative `ApplicationIR` or fails with `ApplicationDefinitionError`, recursively flattening nested applications and rejecting duplicate tables, commands, and feature-flag names across the complete tree. Application modules execute compilation explicitly at their composition boundary. Orders and invoices keeps its billing resources and commands together while the outer runnable application adds native identity. Support cases composes directory and case-management siblings whose relations and command dependencies cross the child boundary.
 
 ```text
 ResourceSpec ──Resource.compile────┐
-CommandSpec + implementation ─────┼─Application.compile─► ApplicationIR
+CommandSpec + implementation ─────┼─Application.compile Effect─► ApplicationIR
 ReadModel syntax ──fold────────────┤                         ├── HTTP RPC / CLI
 FeatureFlag declaration ──────────┘                         ├── MCP tools
                                                           ├── inspection

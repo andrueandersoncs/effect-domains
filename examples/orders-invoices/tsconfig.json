@@ -1,5 +1,9 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "lib": ["ESNext", "DOM"] },
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "lib": ["ESNext", "DOM"]
+  },
   "include": ["**/*.ts"]
 }

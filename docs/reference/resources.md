@@ -40,7 +40,7 @@ const Books = Resource.define({
 | `version` | Optional integer version-field name. Create writes `1`; updates and patches require the read version and increment it. |
 | `transitions` | Optional `Transitions.make(...)` declaration used by local and published transition operations. |
 
-The specification exposes author declarations only. `Resource.compile(Books)` returns the complete runtime IR. Narrow helpers expose individual products: `Resource.table(Books)`, `Resource.repository(Books)`, `Resource.contracts(Books)`, `Resource.group(Books)`, `Resource.handlers(Books)`, and `Resource.published(Books)`. `Application.compile(...)` rejects duplicate table and command names.
+The specification exposes author declarations only. `Resource.compile(Books)` returns the complete runtime IR. Narrow helpers expose individual products: `Resource.table(Books)`, `Resource.repository(Books)`, `Resource.contracts(Books)`, `Resource.group(Books)`, `Resource.handlers(Books)`, and `Resource.published(Books)`. `Application.compile(...)` returns a typed Effect and rejects duplicate table and command names through `ApplicationDefinitionError`.
 
 ## Capabilities and repository
 
@@ -58,7 +58,7 @@ Published names are `${name}.get`, `${name}.list`, `${name}.create`, `${name}.up
 
 `repository.find(key)` is local-only and returns `Option`. `repository.transition(key, action, changes?, expectedVersion?)` checks the declared graph, applies the status change, and uses optimistic version checking when configured. A transition declaration also exposes `apply(action, key)(row)` for a guarded in-memory status change. Policy resources authorize transition through the distinct `allow.transition` rule, with current and candidate values; patch permission never grants transition permission.
 
-A `version` field is not caller-controlled in create or patch changes. A stale mutation fails with `VersionConflict { resource, key, expectedVersion }`. A declared unique constraint can fail with `UniqueViolation { resource, constraint, fields }`; translate that error in an authored operation only when the domain needs a distinct error name.
+A `version` field is not caller-controlled in create or patch changes. A stale mutation fails with `VersionConflict { resource, key, expectedVersion }`. A declared unique constraint can fail with sanitized `UniqueViolation { resource }`; database constraint names and physical fields remain private. Translate that error in an authored operation only when the domain needs a distinct error name.
 
 ## Create input
 

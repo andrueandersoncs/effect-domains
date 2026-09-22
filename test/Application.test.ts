@@ -23,7 +23,7 @@ it("rejects table and command collisions across nested applications", () => {
   const nestedStorage = Application.define({ name: "nested-storage", parts: nestedStorageParts })
   const collisionParts = [Part.application(storage), Part.application(nestedStorage)]
   const collision = Application.define({ name: "collision", parts: collisionParts })
-  expect(() => Application.compile(collision)).toThrow()
+  expect(() => Effect.runSync(Application.compile(collision))).toThrow()
 
   const ping = Rpc.make("ping")
   const group = RpcGroup.make(ping)
@@ -44,7 +44,7 @@ it("rejects table and command collisions across nested applications", () => {
 
   const commandCollisionParts = [Part.application(commands), Part.application(nestedCommands)]
   const commandCollision = Application.define({ name: "collision", parts: commandCollisionParts })
-  expect(() => Application.compile(commandCollision)).toThrow()
+  expect(() => Effect.runSync(Application.compile(commandCollision))).toThrow()
 })
 
 it("validates foreign keys across sibling applications by exact descriptor", () => {
@@ -83,12 +83,12 @@ it("validates foreign keys across sibling applications by exact descriptor", () 
   const child = Application.define({ name: "exact-child", parts: childParts })
   const validParts = [Part.application(parent), Part.application(child)]
   const valid = Application.define({ name: "exact-valid", parts: validParts })
-  const makeValid = () => Application.compile(valid)
+  const makeValid = () => Effect.runSync(Application.compile(valid))
   const replacementParts = [Part.resource(Replacement)]
   const replacement = Application.define({ name: "exact-replacement", parts: replacementParts })
   const invalidParts = [Part.application(replacement), Part.application(child)]
   const invalid = Application.define({ name: "exact-invalid", parts: invalidParts })
-  const makeInvalid = () => Application.compile(invalid)
+  const makeInvalid = () => Effect.runSync(Application.compile(invalid))
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
   validExpectation.not.toThrow()
@@ -150,7 +150,7 @@ it("validates command dependencies across sibling applications by descriptor ide
   const commandApplication = Application.define({ name: "commands", parts: commandParts })
   const validParts = [Part.application(dependencies), Part.application(commandApplication)]
   const valid = Application.define({ name: "dependencies-valid", parts: validParts })
-  const makeValid = () => Application.compile(valid)
+  const makeValid = () => Effect.runSync(Application.compile(valid))
 
   const replacementParts = [
     Part.resource(Replacement),
@@ -164,7 +164,7 @@ it("validates command dependencies across sibling applications by descriptor ide
 
   const invalidParts = [Part.application(replacements), Part.application(commandApplication)]
   const invalid = Application.define({ name: "dependencies-invalid", parts: invalidParts })
-  const makeInvalid = () => Application.compile(invalid)
+  const makeInvalid = () => Effect.runSync(Application.compile(invalid))
   const validExpectation = expect(makeValid)
   const invalidExpectation = expect(makeInvalid)
   validExpectation.not.toThrow()

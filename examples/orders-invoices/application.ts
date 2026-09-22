@@ -2,6 +2,7 @@ import { Application, Part } from "effect-domains/application"
 import { IdentityBundle } from "effect-domains/identity-rpc"
 import { BillingOperations } from "./sqlite.ts"
 import { InvoicesResource, OrderLinesResource, OrdersResource } from "./resources.ts"
+import { Effect } from "effect"
 
 const billingParts = [
   Part.resource(OrdersResource),
@@ -25,4 +26,4 @@ const application = Application.define({
   parts: applicationParts,
 })
 
-export const BillingApplication = Application.compile(application)
+export const BillingApplication = Effect.runSync(Application.compile(application))

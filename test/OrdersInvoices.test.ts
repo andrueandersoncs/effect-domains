@@ -5,6 +5,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { Application } from "effect-domains/application"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
+import { SchemaStore } from "effect-domains/migrations"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { BillingApplication } from "@effect-domains/example-orders-invoices/application"
 import { BillingMigrations } from "@effect-domains/example-orders-invoices/migrations"
@@ -14,7 +15,8 @@ const orderNumber = OrderNumberSchema.make("SO-1")
 const invoiceNumber = InvoiceNumberSchema.make("INV-1")
 
 const billingTest = Effect.gen(function* () {
-  yield* Application.prepare(BillingApplication)
+  const schemaStore = yield* SchemaStore
+  yield* Application.prepare(BillingApplication, schemaStore)
   const client = yield* RpcTest.makeClient(BillingApplication.group)
   const alice = yield* sessionFor("alice")
   const reader = yield* sessionFor("bob")

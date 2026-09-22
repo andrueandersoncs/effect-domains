@@ -2,7 +2,7 @@ import { Array, Data, Effect, Equivalence, HashSet, Layer, Match, Schema, Struct
 import { Rpc, RpcGroup, RpcSchema } from "effect/unstable/rpc"
 import { Command, type AnyCommandBundle, type CommandLive } from "./command.ts"
 import { FeatureFlags, type FeatureFlag } from "./feature-flags.ts"
-import { SchemaStore } from "./migrations.ts"
+import type { SchemaStore } from "./migrations.ts"
 import { Resource, type ResourceSpec, type Resource as CompiledResource, type ResourceRuntime } from "./resource.ts"
 import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
 import { Table } from "./table.ts"
@@ -245,23 +245,27 @@ const compileParts = (
   return Array.flatMap(parts, compileNestedParts)
 }
 
-function compileApplication<const Definition extends ApplicationSpec>(
-  definition: Definition,
-): ApplicationIRFor<Definition>
-
-function compileApplication(definition: ApplicationSpec): ApplicationIR
-
-
-function compileApplication(definition: ApplicationSpec): ApplicationIR {
+const compileApplicationEffect = Effect.fn("Application.compile")(function* (
+  definition: ApplicationSpec,
+) {
   const parts = compileParts(definition.parts)
   const bundles = Array.flatMap(parts, Struct.get("bundles"))
   const resources = Array.flatMap(parts, Struct.get("resources"))
   const commands = Array.flatMap(parts, Struct.get("commands"))
   const featureFlagDeclarations = Array.flatMap(parts, Struct.get("featureFlags"))
-  const featureFlags = FeatureFlags.compile(featureFlagDeclarations)
+
+  const featureFlags = yield* pipe(
+    FeatureFlags.compile(featureFlagDeclarations),
+    Effect.mapError(({ reason }) => ApplicationDefinitionError.make({ reason })),
+  )
+
   const groups = Array.map(bundles, Struct.get("group"))
-  const validationEffect = validateApplication(resources, groups, commands)
-  const validation = Effect.runSync(validationEffect)
+
+  const validation = yield* pipe(
+    validateApplication(resources, groups, commands),
+    Effect.mapError(({ message }) => ApplicationDefinitionError.make({ reason: message })),
+  )
+
   const group = RpcGroup.make().merge(...groups)
   const layers = Array.map(bundles, Struct.get("handlers"))
   const handlers = Layer.mergeAll(Layer.empty, ...layers)
@@ -274,16 +278,22 @@ function compileApplication(definition: ApplicationSpec): ApplicationIR {
     featureFlags,
     tables: validation.tables,
   })
+})
 
+function compileApplication<const Definition extends ApplicationSpec>(
+  definition: Definition,
+): Effect.Effect<ApplicationIRFor<Definition>, ApplicationDefinitionError>
+
+function compileApplication(definition: ApplicationSpec): Effect.Effect<ApplicationIR, ApplicationDefinitionError>
+
+function compileApplication(definition: ApplicationSpec): Effect.Effect<ApplicationIR, ApplicationDefinitionError> {
+  return compileApplicationEffect(definition)
 }
 
-const prepareApplication = function* (
+const prepareApplication = (
   application: ApplicationIR,
-) {
-  const snapshots = Array.map(application.tables, Table.snapshot)
-  const store = yield* SchemaStore
-  yield* store.prepare(snapshots)
-}
+  store: (typeof SchemaStore)["Service"],
+) => pipe(application.tables, Array.map(Table.snapshot), store.prepare)
 
 export const Part = {
   resource: resourcePart,

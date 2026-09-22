@@ -7,6 +7,7 @@ import { Application } from "effect-domains/application"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { ApplicationInspect } from "effect-domains/application-inspect"
+import { SchemaStore } from "effect-domains/migrations"
 import { SupportCasesApplication } from "@effect-domains/example-support-cases/application"
 import { SupportCasesMigrations } from "@effect-domains/example-support-cases/migrations"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
@@ -16,7 +17,8 @@ const sqlite = SqliteBunRuntime.sqlClient(":memory:", {
 })
 
 const supportCasesTest = Effect.gen(function* () {
-  yield* Application.prepare(SupportCasesApplication)
+  const schemaStore = yield* SchemaStore
+  yield* Application.prepare(SupportCasesApplication, schemaStore)
   const client = yield* RpcTest.makeClient(SupportCasesApplication.group)
   const database = yield* SqlClient.SqlClient
   const readerSession = yield* sessionFor("bob")
@@ -212,7 +214,8 @@ it.effect("persists application-owned audit evidence across a database restart",
 
   yield* pipe(
     Effect.gen(function* () {
-      yield* Application.prepare(SupportCasesApplication)
+      const schemaStore = yield* SchemaStore
+      yield* Application.prepare(SupportCasesApplication, schemaStore)
       const sql = yield* SqlClient.SqlClient
 
       yield* sql`INSERT INTO support_case_audits
@@ -226,7 +229,8 @@ it.effect("persists application-owned audit evidence across a database restart",
 
   const persisted = yield* pipe(
     Effect.gen(function* () {
-      yield* Application.prepare(SupportCasesApplication)
+      const schemaStore = yield* SchemaStore
+      yield* Application.prepare(SupportCasesApplication, schemaStore)
       const sql = yield* SqlClient.SqlClient
       return yield* sql<{ readonly id: string }>`SELECT id FROM support_case_audits WHERE id = 'restart-audit'`
     }),

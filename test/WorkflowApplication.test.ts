@@ -46,7 +46,7 @@ const applicationDefinition = Application.define({
   parts: applicationParts,
 })
 
-const application = Application.compile(applicationDefinition)
+const application = Effect.runSync(Application.compile(applicationDefinition))
 
 it.effect("authorizes native workflow submissions and recovery before invoking the engine", Effect.fn("WorkflowApplication.test")(function* () {
   const executions = yield* Ref.make(0)

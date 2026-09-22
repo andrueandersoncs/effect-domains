@@ -457,7 +457,7 @@ it.effect("generated patch envelopes cannot collide with canonical field names",
 it("compiled creation inspection and input agree on implicit generation and defaults", () => {
   const parts = [Part.resource(GeneratedTodos)]
   const definition = Application.define({ name: "creation-product", parts })
-  const application = Application.compile(definition)
+  const application = Effect.runSync(Application.compile(definition))
   const inspection = ApplicationInspect.describe(application)
   expect(inspection.resources).toMatchObject([{ creation: { defaults: { completed: false }, generated: { id: "uuidV7" }, fromSubject: {} } }])
   const valid = Schema.is(GeneratedTodosRuntime.createInputSchema)
@@ -717,7 +717,7 @@ it.effect("transitions reject an invalid source state and atomically publish the
 it("resource inspection includes list policy, version, transitions, and implicit defaults", () => {
   const parts = [Part.resource(VersionedTodos), Part.resource(Reservations)]
   const definition = Application.define({ name: "resource-inspection", parts })
-  const application = Application.compile(definition)
+  const application = Effect.runSync(Application.compile(definition))
   const inspection = ApplicationInspect.describe(application)
 
   expect(inspection.resources).toMatchObject([

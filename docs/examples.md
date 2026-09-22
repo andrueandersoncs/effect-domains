@@ -37,7 +37,7 @@ Use this for a board that joins repairs to current customer and optional technic
 
 ### Support cases
 
-Use this when sibling domain modules share relations and operation dependencies: the directory child owns customers and agents, while the case-management child owns cases, events, the joined board, and transactional lifecycle commands. `Application.compile` validates their cross-child references after flattening both modules. The [support-cases guide](../examples/support-cases/README.md) covers open, triage, assignment, resolution, stale writes, duty checks, joined board filters, and nested history.
+Use this when sibling domain modules share relations and operation dependencies: the directory child owns customers and agents, while the case-management child owns cases, events, the joined board, and transactional lifecycle commands. The explicitly executed `Application.compile` Effect validates their cross-child references after flattening both modules. The [support-cases guide](../examples/support-cases/README.md) covers open, triage, assignment, resolution, stale writes, duty checks, joined board filters, and nested history.
 
 [`application.ts`](../examples/support-cases/application.ts) shows the sibling `Part.application` boundaries. [`board.ts`](../examples/support-cases/board.ts) is the second bounded `ReadModel` domain. [`sqlite.ts`](../examples/support-cases/sqlite.ts) keeps the one-to-many event projection and transactional business commands authored rather than extending the read-model language into an aggregate query DSL.
 

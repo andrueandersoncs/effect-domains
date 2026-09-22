@@ -2,6 +2,7 @@ import { Application, Part } from "effect-domains/application"
 import { IdentityBundle } from "effect-domains/identity-rpc"
 import { AppointmentReminderEntityCommands } from "./appointment-reminder-entity.ts"
 import { AppointmentInboxNotificationResource } from "./resources.ts"
+import { Effect } from "effect"
 
 const parts = [
   Part.resource(AppointmentInboxNotificationResource),
@@ -14,4 +15,4 @@ const appointmentReminders = Application.define({
   parts,
 })
 
-export const AppointmentRemindersApplication = Application.compile(appointmentReminders)
+export const AppointmentRemindersApplication = Effect.runSync(Application.compile(appointmentReminders))

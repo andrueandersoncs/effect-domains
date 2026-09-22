@@ -4,7 +4,7 @@
 
 Register customers and agents, open support cases, and advance each case through triage, assignment, resolution, and reopening. The current board is a bounded `ReadModel`; the nested event history stays an authored SQL projection.
 
-The final runtime composes two sibling applications. `SupportDirectory` owns customers and agents; `CaseManagement` owns cases, events, the joined board, and authored lifecycle commands. Relations and command dependencies cross that child boundary and are validated only after `Application.compile` flattens the complete tree.
+The final runtime composes two sibling applications. `SupportDirectory` owns customers and agents; `CaseManagement` owns cases, events, the joined board, and authored lifecycle commands. Relations and command dependencies cross that child boundary and are validated only when the `Application.compile` Effect flattens the complete tree at the application composition boundary.
 
 ## Run it
 

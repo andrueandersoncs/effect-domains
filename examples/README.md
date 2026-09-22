@@ -64,7 +64,7 @@ Report exports and appointment reminders have separate native execution stores. 
 - `domain.ts`: canonical values, brands, and domain errors; use framework schemas such as `UuidV7Schema`, `SafeIntSchema`, and `PageLimitSchema`, and use `Schema.DateTimeUtc` for canonical timestamps.
 - `resources.ts`: resource schemas, policies, relation declarations, generated operations, versions, and transitions.
 - `sqlite.ts` where needed: `Command` specifications, implementations, and authored SQL for cross-record rules, aggregates, and projections.
-- `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` syntax, followed by `Application.compile`.
+- `application.ts`: `Application.define({ name, parts })` with explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` syntax, followed by explicit execution of the typed `Application.compile` Effect at the application composition boundary.
 - `migrations.ts`: frozen JSON imports passed to `SqliteMigrations.history(...)`.
 - `main.ts`: `ApplicationBun.run` builds the native entrypoint `Effect`; `ApplicationBun.runMain` exposes the native Bun boundary. Its declarative `ui.presentation` supplies display-only title, description, labels, columns, and operation copy where needed. The shared Application UI interprets the compiled `ApplicationIR`; examples do not author browser state machines, RPC clients, startup code, or static asset routes.
 
@@ -76,7 +76,7 @@ Nullable (`Schema.NullOr`) fields default to `null` when omitted on create. Do n
 
 A versioned resource has `version: "version"`. Its patch request is `{ key, expectedVersion, changes }`; stale writes return `VersionConflict`. A transition resource publishes `<resource>.transition` with `{ key, action, changes? }`, adding `expectedVersion` when versioned; local handlers use `repository.transition(key, action, changes?, expectedVersion?)`.
 
-Use `repository.ensure(row)` for every seed. It inserts by identifier only when absent, otherwise returns an existing read-authorized row. A declared unique relation reports `UniqueViolation { resource, constraint, fields }`; translate it to a domain error only where that domain needs one.
+Use `repository.ensure(row)` for every seed. It inserts by identifier only when absent, otherwise returns an existing read-authorized row. A declared unique relation reports `UniqueViolation { resource }` without exposing database constraints or physical columns; translate it to a domain error only where that domain needs one.
 
 Generated lists return `{ items, nextCursor }`. A declaration can name equality `filter` fields, inclusive `range` fields, a `limit`, and a stable `order`:
 

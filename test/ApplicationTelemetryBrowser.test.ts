@@ -6,7 +6,7 @@ import { ApplicationTelemetry } from "effect-domains/application-telemetry"
 import { telemetryCollector } from "./telemetry-collector.ts"
 
 const applicationDefinition = Application.define({ name: "telemetry-browser-test", parts: [] })
-const application = Application.compile(applicationDefinition)
+const application = Effect.runSync(Application.compile(applicationDefinition))
 
 it.effect("forwards bounded same-origin browser OTLP without exposing collector credentials", Effect.fn(
   "ApplicationTelemetry.browserGateway",

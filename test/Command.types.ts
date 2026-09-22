@@ -8,7 +8,7 @@ class CommandUnavailable extends Schema.TaggedError<CommandUnavailable>()("Comma
 
 const declared = () => DeclaredFailure.make({})
 const forgotten = () => ForgottenFailure.make({})
-const infrastructure = () => RepositoryError.make({ resource: "types", cause: "db" })
+const infrastructure = () => RepositoryError.make({ resource: "types" })
 const untagged = () => Effect.fail("plain")
 
 const declaredSpec = Command.define({

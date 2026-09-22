@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, pipe } from "effect"
+import { Array, Effect, Layer, pipe } from "effect"
 import { Application, Part } from "effect-domains/application"
 import { ApplicationInspect } from "effect-domains/application-inspect"
 import { FeatureFlags } from "effect-domains/feature-flags"
@@ -30,7 +30,7 @@ const applicationDefinition = Application.define({
   parts: [suggestionsFlagPart, checkoutApplicationPart],
 })
 
-const application = Application.compile(applicationDefinition)
+const application = Effect.runSync(Application.compile(applicationDefinition))
 const expectedFlags = [SearchSuggestions, NewCheckout]
 
 const expectedInspection = [
@@ -57,7 +57,7 @@ it("compiles nested feature flag declarations into inspectable application metad
     parts: [originalPart, replacementPart],
   })
 
-  expect(() => Application.compile(duplicate)).toThrow("duplicate feature flag name new-checkout")
+  expect(() => Effect.runSync(Application.compile(duplicate))).toThrow("duplicate feature flag name new-checkout")
 })
 
 const overrides = [[SearchSuggestions, false]] as const
@@ -91,3 +91,17 @@ it.effect("enables, disables, overrides, and atomically toggles declared flags",
   }),
   Effect.provide(featureFlagRuntime),
 ))
+
+it.effect("reports invalid overrides through layer acquisition", () => Effect.gen(function* () {
+  const replacement = FeatureFlags.define({ name: "new-checkout", default: false })
+  const invalidRuntime = FeatureFlags.layerMemory(
+    application.featureFlags,
+    [[replacement, true]],
+  )
+  const failure = yield* pipe(Layer.build(invalidRuntime), Effect.scoped, Effect.flip)
+
+  expect(failure).toMatchObject({
+    _tag: "FeatureFlagDefinitionError",
+    reason: "override references undeclared feature flag new-checkout",
+  })
+}))

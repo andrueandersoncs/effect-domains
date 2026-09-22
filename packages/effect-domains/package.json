@@ -1,5 +1,7 @@
 {
   "name": "effect-domains",
+  "private": true,
+  "description": "Private workspace package consumed directly from TypeScript source; no build artifacts are emitted.",
   "version": "0.1.0",
   "type": "module",
   "exports": {

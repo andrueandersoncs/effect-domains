@@ -59,13 +59,14 @@ export const Books = Resource.define({
 Create `scratch-library/application.ts` to register the resource in one application:
 
 ```ts
+import { Effect } from "effect"
 import { Application, Part } from "effect-domains/application"
 import { Books } from "./resource.ts"
 
-export const Library = Application.compile(Application.define({
+export const Library = Effect.runSync(Application.compile(Application.define({
   name: "library",
   parts: [Part.resource(Books)],
-}))
+})))
 ```
 
 ## 2. Author and freeze the initial migration
@@ -165,6 +166,6 @@ Before using this pattern for private data, [restrict access](/guides/authorizat
 ## Implementation sources
 
 - [`Resource.define` and `Resource.compile`](../../packages/effect-domains/src/resource.ts) separate declarative capability/creation syntax from table, repository, RPC, and handler derivation.
-- [`Application.define` and `Application.compile`](../../packages/effect-domains/src/application.ts) separate explicit parts from the authoritative `ApplicationIR` consumed by runtimes and adapters.
+- [`Application.define` and `Application.compile`](../../packages/effect-domains/src/application.ts) separate explicit parts from the authoritative `ApplicationIR`; compilation returns a typed Effect, executed explicitly by the application module before runtimes and adapters consume the IR.
 - [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index artifact. Import frozen artifacts with `SqliteMigrations.history(...)`.
 - [`ApplicationBun.run`](../../packages/effect-domains/src/application-bun.ts) creates the command Effect that hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.

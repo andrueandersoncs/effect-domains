@@ -4,6 +4,7 @@ import { ReportExportAuditsResource } from "./audit.ts"
 import { ReportExportExecutionsResource } from "./executions.ts"
 import { ReportExportCommands } from "./workflow.ts"
 import { ReportSubscriptionsResource } from "./subscriptions.ts"
+import { Effect } from "effect"
 
 const parts = [
   Part.resource(ReportSubscriptionsResource),
@@ -15,4 +16,4 @@ const parts = [
 
 const reportExports = Application.define({ name: "report-exports", parts })
 
-export const ReportExportsApplication = Application.compile(reportExports)
+export const ReportExportsApplication = Effect.runSync(Application.compile(reportExports))

@@ -394,9 +394,10 @@ describe("Bun SQLite tables and authored operations", () => {
         if (isUniqueViolation) {
           expect(result.failure).toMatchObject({
             _tag: "UniqueViolation",
-            constraint: "store_rows_bucket_label_key",
-            fields: ["bucket", "label"],
+            resource: "store_rows",
           })
+          expect(result.failure).not.toHaveProperty("constraint")
+          expect(result.failure).not.toHaveProperty("fields")
         }
 
         const duplicateIdRow = storedRow("first", "b", "other", 2)
@@ -407,8 +408,7 @@ describe("Bun SQLite tables and authored operations", () => {
           _tag: "Failure",
           failure: {
             _tag: "UniqueViolation",
-            constraint: "id",
-            fields: ["id"],
+            resource: "store_rows",
           },
         })
       }),
@@ -479,7 +479,7 @@ describe("Bun SQLite tables and authored operations", () => {
   const crudContractTest = Function.constant(crudContractEffect)
   it.effect("applies inclusive bounds and two-field descending keyset pagination", paginatedStoreRowsTest)
   it.effect("returns None when a guarded update no longer matches", guardedUpdateTest)
-  it.effect("reports declared unique constraint names", declaredUniqueConstraintsTest)
+  it.effect("reports sanitized unique violations", declaredUniqueConstraintsTest)
   it.effect("rejects a private client targeting the application database", rejectsPrivateClientTest)
   it.effect("opens a private SQLite client over an ambient application client", opensPrivateClientTest)
   it.effect("creates a derived table and runs authored CRUD operations", crudContractTest)

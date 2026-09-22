@@ -9,18 +9,19 @@ This reference covers `ApplicationBun.run` and the provider-neutral `Application
 ## Application composition
 
 ```ts
+import { Effect } from "effect"
 import { Application, Part } from "effect-domains/application"
 import { ReadingListResource } from "./resources.ts"
 
-const application = Application.compile(Application.define({
+const application = Effect.runSync(Application.compile(Application.define({
   name: "reading-list",
   parts: [Part.resource(ReadingListResource)],
-}))
+})))
 ```
 
 This example belongs beside the reading list's `resources.ts`. In your application, import the resource you want to register.
 
-Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` values. `Application.compile` produces the authoritative `ApplicationIR`; adapters do not rediscover resources or inspect arbitrary object properties. Compilation rejects duplicate table, command, and feature-flag names.
+Definitions accept explicit `Part.resource`, `Part.command`, `Part.native`, `Part.featureFlag`, and `Part.application` values. `Application.compile` returns an `Effect` whose success is the authoritative `ApplicationIR` and whose typed `ApplicationDefinitionError` reports invalid composition; adapters do not rediscover resources or inspect arbitrary object properties. Application modules execute that Effect explicitly at their composition boundary. Compilation rejects duplicate table, command, and feature-flag names.
 
 Use `Part.application(child)` when a domain module owns a coherent set of resources and commands but the runnable application adds integrations such as identity. Compilation recursively flattens the child into the same `ApplicationIR`, so adapters and dependency validation see one operation, resource, command, and table set. [Orders and invoices](../../examples/orders-invoices/application.ts) exercises this boundary with a nested billing domain and an outer native identity bundle.
 
@@ -41,10 +42,10 @@ const NewCheckout = FeatureFlags.define({
   description: "Use the replacement checkout flow",
 })
 
-const application = Application.compile(Application.define({
+const application = Effect.runSync(Application.compile(Application.define({
   name: "storefront",
   parts: [Part.featureFlag(NewCheckout)],
-}))
+})))
 
 const services = FeatureFlags.layerMemory(
   application.featureFlags,
@@ -60,7 +61,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`FeatureFlags.isEnabled`, `setEnabled`, `enable`, `disable`, and atomic `toggle` require the `FeatureFlags` service and fail with `FeatureFlagUnavailable` when the runtime does not manage the exact declared descriptor. `FeatureFlags.layerMemory(application.featureFlags, overrides?)` is the process-local implementation; its optional override entries pair an exact declaration with its initial Boolean state. It validates declarations and overrides synchronously.
+`FeatureFlags.isEnabled`, `setEnabled`, `enable`, `disable`, and atomic `toggle` require the `FeatureFlags` service and fail with `FeatureFlagUnavailable` when the runtime does not manage the exact declared descriptor. `FeatureFlags.layerMemory(application.featureFlags, overrides?)` is the process-local implementation; its optional override entries pair an exact declaration with its initial Boolean state. It validates declarations and overrides in the layer's typed error channel during acquisition.
 
 The memory layer resets on process restart. Persistent, remote, targeted, scheduled, or percentage rollout semantics require an application-provided `FeatureFlags` service implementation. The framework does not publish flag mutation RPCs or infer administrative authorization.
 

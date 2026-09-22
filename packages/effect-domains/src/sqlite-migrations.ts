@@ -146,23 +146,16 @@ const declaredIndexes = (table: TableSnapshot) => table.relations?.indexes ?? []
 const same = Equivalence.strictEqual<unknown>()
 const uniqueCount = flow(HashSet.fromIterable<string>, HashSet.size)
 
-const migrationFailure = (reason: string, cause: unknown = undefined) => {
-  const failure = MigrationError.make({ reason })
-  const optionalCause = Option.fromUndefinedOr(cause)
-
-  return Option.match(optionalCause, {
-    onNone: Function.constant(failure),
-    onSome: (value) => MigrationError.make({ reason, cause: value }),
-  })
-}
+const migrationFailure = (reason: string) =>
+  MigrationError.make({ reason })
 
 const asMigrationFailure = (reason: string) => (cause: unknown) =>
-  Schema.is(MigrationError)(cause) ? cause : migrationFailure(reason, cause)
+  Schema.is(MigrationError)(cause) ? cause : migrationFailure(reason)
 
-const relationFailure = (cause: unknown) => {
-  const reason = cause instanceof Error ? cause.message : String(cause)
-  return migrationFailure(reason, cause)
-}
+const relationFailure = flow(
+  (cause: unknown) => cause instanceof Error ? cause.message : String(cause),
+  migrationFailure,
+)
 
 const validateSnapshot = Effect.fn("SqliteMigrations.validateSnapshot")(function* (snapshot: SqliteSchemaSnapshot) {
   const tableNames = Array.map(snapshot.tables, Struct.get("name"))

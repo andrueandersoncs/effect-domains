@@ -7,6 +7,7 @@ import {
 } from "./resources.ts"
 
 import { RepairWorkshopOperations } from "./sqlite.ts"
+import { Effect } from "effect"
 
 const parts = [
   Part.resource(CustomersResource),
@@ -17,4 +18,4 @@ const parts = [
 
 const repairWorkshop = Application.define({ name: "repair-workshop", parts })
 
-export const RepairWorkshopApplication = Application.compile(repairWorkshop)
+export const RepairWorkshopApplication = Effect.runSync(Application.compile(repairWorkshop))

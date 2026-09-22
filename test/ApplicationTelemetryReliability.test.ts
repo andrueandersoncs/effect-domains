@@ -6,7 +6,7 @@ import { ApplicationTelemetry } from "effect-domains/application-telemetry"
 import { type CollectedSignal, telemetryCollector } from "./telemetry-collector.ts"
 
 const applicationDefinition = Application.define({ name: "telemetry-reliability-test", parts: [] })
-const application = Application.compile(applicationDefinition)
+const application = Effect.runSync(Application.compile(applicationDefinition))
 const events = Metric.counter("telemetry.reliability.events", { incremental: true })
 const expectedSignals = HashSet.make("/v1/traces", "/v1/metrics", "/v1/logs")
 

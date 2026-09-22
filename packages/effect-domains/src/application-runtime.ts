@@ -6,8 +6,10 @@ import { ApplicationUi, type ApplicationUiOptions } from "./application-ui.ts"
 import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RpcMcp } from "./rpc-mcp.ts"
+import { SchemaStore } from "./migrations.ts"
 
 export type RuntimeLayer = Layer.Layer<never, any, any>
+type DatabaseLayer = Layer.Layer<SchemaStore, any, any>
 export type Initialization = Effect.Effect<any, any, any>
 
 export type ApplicationRuntimeOptions<
@@ -60,11 +62,12 @@ const buildContext = Effect.fn("ApplicationRuntime.buildContext")(function* <
   Background extends RuntimeLayer,
 >(
   application: ApplicationIR,
-  database: RuntimeLayer,
+  database: DatabaseLayer,
   options: ApplicationRuntimeOptions<Services, Initialize, Background>,
 ) {
   const databaseContext = yield* Layer.build(database)
-  yield* pipe(Application.prepare(application), Effect.provideContext(databaseContext))
+  const schemaStore = Context.get(databaseContext, SchemaStore)
+  yield* Application.prepare(application, schemaStore)
 
   const services = yield* pipe(
     Layer.build(options.services ?? Layer.empty),
@@ -149,7 +152,7 @@ export const httpEffect = Effect.fn("ApplicationRuntime.httpEffect")(function* <
   Routes extends RuntimeLayer,
 >(
   application: ApplicationIR,
-  database: RuntimeLayer,
+  database: DatabaseLayer,
   options: ApplicationHttpOptions<Services, Initialize, Background, Routes>,
 ) {
   const runtimeContext = yield* buildContext(application, database, options)
@@ -178,7 +181,7 @@ export const use = Effect.fn("ApplicationRuntime.use")(function* <
   R,
 >(
   application: ApplicationIR,
-  database: RuntimeLayer,
+  database: DatabaseLayer,
   options: ApplicationRuntimeOptions<Services, Initialize, Background>,
   effect: Effect.Effect<A, E, R>,
 ) {

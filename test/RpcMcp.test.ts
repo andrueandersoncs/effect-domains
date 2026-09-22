@@ -95,7 +95,7 @@ const clockHandlers = clock.toLayer({
 
 const clockParts = [Part.native({ group: clock, handlers: clockHandlers })]
 const clockDefinition = Application.define({ name: "clock", parts: clockParts })
-const clockApplication = Application.compile(clockDefinition)
+const clockApplication = Effect.runSync(Application.compile(clockDefinition))
 
 const clockRoutes = pipe(
   RpcMcp.layerHttp({ application: clockApplication, path: "/mcp" }),
@@ -165,7 +165,7 @@ it.effect("MCP uses handler-only codec context instead of its ambient context", 
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "codec", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
 
     const handlerOnlyRoutes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),
@@ -206,7 +206,7 @@ const captured = Layer.succeed(AuthorizationSubject, { userId: "captured" })
 
 const identityParts = [Part.native({ group: identity, handlers: identityHandlers })]
 const identityDefinition = Application.define({ name: "identity", parts: identityParts })
-const identityApplication = Application.compile(identityDefinition)
+const identityApplication = Effect.runSync(Application.compile(identityDefinition))
 
 const identityRoutes = pipe(
   RpcMcp.layerHttp({ application: identityApplication, path: "/mcp" }),
@@ -264,7 +264,7 @@ it.effect("MCP closes handler scopes after success and failure without closing t
     const handlers = group.toLayer({ scope: handler })
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "scope", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
 
     const routes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),

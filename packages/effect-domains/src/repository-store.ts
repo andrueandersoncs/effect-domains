@@ -1,4 +1,4 @@
-import { Array, Context, Data, Effect, Option, Schema } from "effect"
+import { Context, Data, Effect, Option, Schema } from "effect"
 import { Policy } from "./policy.ts"
 import type { Table } from "./table.ts"
 
@@ -28,11 +28,10 @@ export class RepositoryAccess extends Data.Class<{
   readonly subject: Readonly<Record<string, unknown>>
 }> {}
 
-const RepositoryErrorCauseSchema = Schema.Defect()
 
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()(
   "RepositoryError",
-  { resource: Schema.String, cause: RepositoryErrorCauseSchema },
+  { resource: Schema.String },
 ) {
   override get message() {
     return `Persistence failed for ${this.resource}`
@@ -48,16 +47,13 @@ export class ResourceNotFound extends Schema.TaggedError<ResourceNotFound>()(
   }
 }
 
-/** A declared unique tuple (or the identifier) already holds the written values. */
-const UniqueViolationFieldsSchema = Schema.Array(Schema.String)
 
 export class UniqueViolation extends Schema.TaggedError<UniqueViolation>()(
   "UniqueViolation",
-  { resource: Schema.String, constraint: Schema.String, fields: UniqueViolationFieldsSchema },
+  { resource: Schema.String },
 ) {
   override get message() {
-    const fields = Array.join(this.fields, ", ")
-    return `${this.resource} already has a record for ${this.constraint} (${fields})`
+    return `${this.resource} already has a record with those values`
   }
 }
 

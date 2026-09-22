@@ -21,6 +21,7 @@ import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { makeMigrationStore } from "effect-domains/sqlite-migrations"
+import { SchemaStore } from "effect-domains/migrations"
 
 const sku = SkuSchema.make("book")
 const request = ReserveStockInputSchema.make({ sku, quantity: 1 })
@@ -38,7 +39,8 @@ const withInventory = <A, E, R>(
 ) =>
   pipe(
     Effect.fn("Reservations.withInventory")(function* () {
-      yield* Application.prepare(ReservationApplication)
+      const schemaStore = yield* SchemaStore
+      yield* Application.prepare(ReservationApplication, schemaStore)
       yield* seedStock(initialStock)
 
       return yield* effect
@@ -202,8 +204,9 @@ const historicalSecondsMigrationAction = Effect.fn(
   yield* database`INSERT INTO reservations (id, sku, quantity, status, created_at_seconds)
     VALUES (${id}, ${sku}, 1, 'held', ${seconds})`
 
-  yield* Application.prepare(ReservationApplication)
-  yield* Application.prepare(ReservationApplication)
+  const schemaStore = yield* SchemaStore
+  yield* Application.prepare(ReservationApplication, schemaStore)
+  yield* Application.prepare(ReservationApplication, schemaStore)
   const historicalStock = StockSchema.make({ sku, available: 99 })
   yield* seedStock(historicalStock)
 

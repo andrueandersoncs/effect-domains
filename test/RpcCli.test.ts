@@ -50,10 +50,10 @@ const preservesPrototypeNamedFields = Effect.fn("RpcCli.testPrototypeNamedFields
         return false
       }))
       const group = RpcGroup.make(Rpc.make("probe", { payload, success: Schema.Void }))
-      const application = Application.compile(Application.define({
+      const application = Effect.runSync(Application.compile(Application.define({
         name: "probe-cli",
         parts: [Part.native({ group, handlers: Layer.empty })],
-      }))
+      })))
       const protocol = RpcClient.layerProtocolHttp({ url: "http://127.0.0.1:1" }).pipe(
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(RpcSerialization.layerJson),
@@ -106,10 +106,10 @@ it.effect(
         ping: (payload) => Effect.sync(() => { observed.pingPayloadIsVoid = payload === undefined }),
         empty: (payload) => Effect.sync(() => { observed.emptyPayloadIsEmpty = Object.keys(payload).length === 0 }),
       })
-      const application = Application.compile(Application.define({
+      const application = Effect.runSync(Application.compile(Application.define({
         name: "probe-cli",
         parts: [Part.native({ group, handlers })],
-      }))
+      })))
       const routes = RpcServer.layerHttp({ group, path: "/rpc", protocol: "http" }).pipe(
         Layer.provide(handlers),
         Layer.provide(RpcSerialization.layerJson),
@@ -255,10 +255,10 @@ it.effect(
         reject: (amount) => Effect.fail({ _tag: "Rejected", amount }),
         scalar: Effect.succeed,
       })
-      const application = Application.compile(Application.define({
+      const application = Effect.runSync(Application.compile(Application.define({
         name: "probe-cli",
         parts: [Part.native({ group, handlers })],
-      }))
+      })))
       const routes = RpcServer.layerHttp({ group, path: "/rpc", protocol: "http" }).pipe(
         Layer.provide(handlers),
         Layer.provide(RpcSerialization.layerJson),

@@ -59,7 +59,7 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
 
     const parts = [Part.native({ group: identityGroup, handlers })]
     const definition = Application.define({ name: "identity", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
     const capturedSubject = Layer.succeed(AuthorizationSubject, { userId: "captured" })
     const authenticator = yield* AuthorizationRpc.Authenticator
     const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
@@ -175,7 +175,7 @@ it.effect("application UI preserves wire codecs and void while distinguishing va
 
     const parts = [Part.native({ group: clock, handlers })]
     const definition = Application.define({ name: "clock", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
 
     const routes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
@@ -230,7 +230,7 @@ it.effect("application UI isolates a slow call from an unrelated handler defect"
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "isolation", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
 
     const routes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
@@ -276,7 +276,7 @@ it.effect("application UI uses handler-only codec context instead of its ambient
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "codec", parts })
-    const application = Application.compile(definition)
+    const application = Effect.runSync(Application.compile(definition))
 
     const handlerOnlyRoutes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
@@ -312,7 +312,7 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const handlers = group.toLayer({ probe: () => Effect.succeed("ok") })
   const parts = [Part.native({ group, handlers })]
   const definition = Application.define({ name: "probe", parts })
-  const application = Application.compile(definition)
+  const application = Effect.runSync(Application.compile(definition))
   const inspection = ApplicationInspect.describe(application)
   const middlewares = Array.fromIterable(probe.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))

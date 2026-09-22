@@ -301,10 +301,8 @@ class ResourceDefinitionError extends Schema.TaggedError<ResourceDefinitionError
   { resource: Schema.String, reason: Schema.String },
 ) {}
 
-const invalidInput = (resource: string, reason: string) => {
-  const cause = ResourceDefinitionError.make({ resource, reason })
-  return RepositoryError.make({ resource, cause })
-}
+const invalidInput = (resource: string, _reason: string) =>
+  RepositoryError.make({ resource })
 
 const equals = Equivalence.strictEqual<unknown>()
 const absentAuthorizationValue = Option.none<Readonly<Record<string, unknown>>>()
@@ -623,11 +621,11 @@ const compileResourceValue = <
 
       return pipe(
         authorization.check(action, subject, values),
-        Effect.catchTag("PolicyEvaluationError", () => RepositoryError.make({ resource: table.name, cause: "Authorization evaluation failed" })),
+        Effect.catchTag("PolicyEvaluationError", () => RepositoryError.make({ resource: table.name })),
       )
     }
 
-    const repositoryFailure = (cause: Schema.SchemaError) => RepositoryError.make({ resource: table.name, cause })
+    const repositoryFailure = (_cause: Schema.SchemaError) => RepositoryError.make({ resource: table.name })
     const isCanonical = Schema.is(canonicalRowSchema)
     const canonicalFailure = inputFailure("value does not satisfy the canonical schema")
     const validateCanonical = (value: unknown) => isCanonical(value) ? Effect.succeed(value) : Effect.fail(canonicalFailure)

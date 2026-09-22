@@ -234,7 +234,7 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
   const commands = Command.bundle(command)
   const missingParts = [Part.command(commands)]
   const missing = Application.define({ name: "missing", parts: missingParts })
-  expect(() => Application.compile(missing)).toThrow()
+  expect(() => Effect.runSync(Application.compile(missing))).toThrow()
 
   const WrongPersonSchema = Schema.Struct({ name: Schema.Int })
 
@@ -247,7 +247,7 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
 
   const mismatchParts = [Part.resource(WrongPeople), Part.command(commands)]
   const mismatch = Application.define({ name: "mismatch", parts: mismatchParts })
-  expect(() => Application.compile(mismatch)).toThrow()
+  expect(() => Effect.runSync(Application.compile(mismatch))).toThrow()
 })
 
 it("rejects left projections when stored null has application-defined decoding semantics", () => {

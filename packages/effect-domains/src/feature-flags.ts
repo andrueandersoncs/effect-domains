@@ -74,11 +74,9 @@ const validate = Effect.fn("FeatureFlags.validate")(function* (
 
 const compileFlags = (
   declarations: ReadonlyArray<FeatureFlag>,
-): ReadonlyArray<FeatureFlag> => {
+) => {
   const flags = Object.freeze([...declarations])
-  const validationEffect = validate(flags)
-  Effect.runSync(validationEffect)
-  return flags
+  return pipe(validate(flags), Effect.as(flags))
 }
 
 const unavailableFor = (flag: FeatureFlag) => () =>
@@ -104,30 +102,29 @@ const stateFor = (flag: FeatureFlag) => (
 const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
   declarations: Flags,
   overrides: FeatureFlagOverrides<Flags> = [],
-): Layer.Layer<FeatureFlags> => {
-  const flags = compileFlags(declarations)
+): Layer.Layer<FeatureFlags, FeatureFlagDefinitionError> => {
+  const make = Effect.gen(function* () {
+    const flags = yield* compileFlags(declarations)
 
-  const overrideMatches = (flag: FeatureFlag) =>
-    ([candidate]: FeatureFlagOverrides<Flags>[number]) => sameFlag(candidate, flag)
+    const overrideMatches = (flag: FeatureFlag) =>
+      ([candidate]: FeatureFlagOverrides<Flags>[number]) => sameFlag(candidate, flag)
 
-  const isRegistered = (flag: FeatureFlag) => Array.some(flags, (candidate) => sameFlag(candidate, flag))
-  const unknownOverride = Array.findFirst(overrides, ([flag]) => !isRegistered(flag))
+    const isRegistered = (flag: FeatureFlag) => Array.some(flags, (candidate) => sameFlag(candidate, flag))
+    const unknownOverride = Array.findFirst(overrides, ([flag]) => !isRegistered(flag))
 
-  const overrideOccursMoreThanOnce = ([flag]: FeatureFlagOverrides<Flags>[number]) => {
-    const matches = Array.filter(overrides, overrideMatches(flag))
-    return matches.length > 1
-  }
+    const overrideOccursMoreThanOnce = ([flag]: FeatureFlagOverrides<Flags>[number]) => {
+      const matches = Array.filter(overrides, overrideMatches(flag))
+      return matches.length > 1
+    }
 
-  const duplicateOverride = Array.findFirst(overrides, overrideOccursMoreThanOnce)
+    const duplicateOverride = Array.findFirst(overrides, overrideOccursMoreThanOnce)
 
-  const validateOverrides = Effect.gen(function* () {
     if (Option.isSome(unknownOverride)) {
       const [flag] = unknownOverride.value
 
       return yield* FeatureFlagDefinitionError.make({
         reason: `override references undeclared feature flag ${flag.name}`,
       })
-
     }
 
     if (Option.isSome(duplicateOverride)) {
@@ -136,27 +133,21 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
       return yield* FeatureFlagDefinitionError.make({
         reason: `duplicate override for feature flag ${flag.name}`,
       })
-
     }
-  })
 
-  Effect.runSync(validateOverrides)
+    const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
+      const override = Array.findFirst(overrides, overrideMatches(flag))
 
-  const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
-    const override = Array.findFirst(overrides, overrideMatches(flag))
+      const enabled = Option.match(override, {
+        onNone: () => flag.default,
+        onSome: ([, enabled]) => enabled,
+      })
 
-    const enabled = Option.match(override, {
-      onNone: () => flag.default,
-      onSome: ([, enabled]) => enabled,
-    })
+      return [flag.name, enabled]
+    }
 
-    return [flag.name, enabled]
-  }
-
-  const initialEntries = Array.map(flags, initialEntry)
-  const initial = HashMap.fromIterable(initialEntries)
-
-  const make = Effect.gen(function* () {
+    const initialEntries = Array.map(flags, initialEntry)
+    const initial = HashMap.fromIterable(initialEntries)
     const states = yield* Ref.make(initial)
 
     const isEnabled = Effect.fn("FeatureFlags.isEnabled")(function* (flag: FeatureFlag) {

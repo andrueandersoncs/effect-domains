@@ -43,7 +43,7 @@ const Books = Resource.define({
 })
 ```
 
-This specification declares the five routine capabilities. `Resource.compile` derives their SQLite table, repository, and RPC contracts; `Application.compile` assembles those products into the application IR consumed by every adapter.
+This specification declares the five routine capabilities. `Resource.compile` derives their SQLite table, repository, and RPC contracts; the typed Effect returned by `Application.compile` assembles those products into the application IR consumed by every adapter.
 
 Compose the resource into an application, supply migration history, and run it with Bun. [The resource guide covers those steps](/guides/define-a-resource); [the first-run tutorial](/getting-started) uses a ready-made reading list.
 

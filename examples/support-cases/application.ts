@@ -10,6 +10,7 @@ import {
 } from "./resources.ts"
 
 import { SupportCaseOperations } from "./sqlite.ts"
+import { Effect } from "effect"
 
 const directoryParts = [
   Part.resource(SupportCustomersResource),
@@ -44,4 +45,4 @@ const application = Application.define({
   parts: applicationParts,
 })
 
-export const SupportCasesApplication = Application.compile(application)
+export const SupportCasesApplication = Effect.runSync(Application.compile(application))

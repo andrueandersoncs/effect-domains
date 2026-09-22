@@ -8,6 +8,7 @@ import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Command } from "effect-domains/command"
 import { Resource } from "effect-domains/resource"
+import { SchemaStore } from "effect-domains/migrations"
 import { ReportExportsApplication } from "@effect-domains/example-report-exports/application"
 import { appendReportExportAudit, ReportExportAuditOperation } from "@effect-domains/example-report-exports/audit"
 import { ReportExportMigrations } from "@effect-domains/example-report-exports/migrations"
@@ -136,7 +137,8 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
 
   yield* pipe(
     Effect.gen(function* () {
-      yield* Application.prepare(ReportExportsApplication)
+      const schemaStore = yield* SchemaStore
+      yield* Application.prepare(ReportExportsApplication, schemaStore)
       yield* appendReportExportAudit({ action: "release", actorId: "admin", targetId: "export-1" })
       yield* appendReportExportAudit({ action: "resume", actorId: "admin", targetId: "export-1" })
       yield* appendReportExportAudit({ action: "cancel", actorId: "admin", targetId: "export-1" })
@@ -196,7 +198,8 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
 
   const persisted = yield* pipe(
     Effect.gen(function* () {
-      yield* Application.prepare(ReportExportsApplication)
+      const schemaStore = yield* SchemaStore
+      yield* Application.prepare(ReportExportsApplication, schemaStore)
       const sql = yield* SqlClient.SqlClient
 
       return yield* sql<{ readonly count: number }>`

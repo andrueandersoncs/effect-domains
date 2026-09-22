@@ -12,7 +12,7 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false
 
 const emptyDefinition = Application.define({ name: "empty", parts: [] })
-const emptyApplication = Application.compile(emptyDefinition)
+const emptyApplication = Effect.runSync(Application.compile(emptyDefinition))
 const NoteSchema = Schema.Struct({ text: Schema.String })
 interface Note extends Schema.Schema.Type<typeof NoteSchema> {}
 const StoredNoteSchema = Schema.Struct({ text: StoredTextSchema })
@@ -35,11 +35,11 @@ const NotesDefinition = Application.define({
   parts: noteParts,
 })
 
-const NotesApplication = Application.compile(NotesDefinition)
+const NotesApplication = Effect.runSync(Application.compile(NotesDefinition))
 
 const nestedParts = [Part.application(emptyDefinition), Part.application(NotesDefinition)]
 const nestedDefinition = Application.define({ name: "nested-notes", parts: nestedParts })
-const nestedNotes = Application.compile(nestedDefinition)
+const nestedNotes = Effect.runSync(Application.compile(nestedDefinition))
 
 const missing = ApplicationBun.run(nestedNotes, {
   database: { migrations: [] },
@@ -56,7 +56,7 @@ const storedTextRpc = Rpc.make("stored-text", {
 const storedTextGroup = RpcGroup.make(storedTextRpc)
 const storedTextParts = [Part.native({ group: storedTextGroup, handlers: Layer.empty })]
 const storedTextDefinition = Application.define({ name: "stored-text", parts: storedTextParts })
-const storedTextApplication = Application.compile(storedTextDefinition)
+const storedTextApplication = Effect.runSync(Application.compile(storedTextDefinition))
 
 const storedTextCli = ApplicationBun.run(storedTextApplication, {
   database: { migrations: [] },
@@ -116,7 +116,7 @@ const middlewareGroup = RpcGroup.make(middlewareRpc).middleware(MiddlewareRequir
 
 const middlewareParts = [Part.native({ group: middlewareGroup, handlers: Layer.empty })]
 const middlewareDefinition = Application.define({ name: "middleware-requirement", parts: middlewareParts })
-const middlewareApplication = Application.compile(middlewareDefinition)
+const middlewareApplication = Effect.runSync(Application.compile(middlewareDefinition))
 
 const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
   database: { migrations: [] },
