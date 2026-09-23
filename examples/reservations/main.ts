@@ -1,5 +1,5 @@
 import { pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { ReservationApplication } from "./application.ts"
 import { SkuSchema, StockSchema } from "./domain.ts"
 import { InventoryMigrations } from "./migrations.ts"
@@ -13,7 +13,7 @@ const InitialStock = StockSchema.make({
 
 const seed = seedStock(InitialStock)
 
-const program = ApplicationBun.run(ReservationApplication, {
+const program = ApplicationBun.runApplication(ReservationApplication, {
   database: { migrations: InventoryMigrations },
   initialize: seed,
   ui: {

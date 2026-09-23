@@ -22,6 +22,7 @@ class Expression extends Data.Class<{
 }> {}
 
 const scalarKindEquals = Equivalence.strictEqual<Expression["kind"]>()
+
 const nativeFragment = (statement: Statement.Fragment) => Statement.fragment(statement.segments)
 
 const scalarKind = (value: Scalar) =>
@@ -74,7 +75,9 @@ const typeMatches = (sql: SqlClient.SqlClient, expression: Statement.Fragment, k
 }
 
 const rowEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
-  const bothNumbers = nativeFragment(sql`${numericType(sql, left.fragment)} AND ${numericType(sql, right.fragment)}`)
+  const leftIsNumeric = numericType(sql, left.fragment)
+  const rightIsNumeric = numericType(sql, right.fragment)
+  const bothNumbers = nativeFragment(sql`${leftIsNumeric} AND ${rightIsNumeric}`)
   const sameStorageKind = nativeFragment(sql`typeof(${left.fragment}) = typeof(${right.fragment})`)
 
   return nativeFragment(sql`(${bothNumbers} OR ${sameStorageKind}) AND ${left.fragment} IS ${right.fragment}`)
@@ -83,25 +86,21 @@ const rowEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expressi
 const rowScalarEquality = (sql: SqlClient.SqlClient, row: Statement.Fragment, scalar: Statement.Fragment, kind: ScalarKind) =>
   nativeFragment(sql`${typeMatches(sql, row, kind)} AND ${row} IS ${scalar}`)
 
-const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => pipe(
-  Match.value(left.kind),
-  Match.when("row", () => pipe(
-    Match.value(right.kind),
-    Match.when("row", () => rowEquality(sql, left, right)),
-    Match.orElse((kind) => rowScalarEquality(sql, left.fragment, right.fragment, kind)),
-  )),
-  Match.orElse((kind) => {
-    if (scalarKindEquals(right.kind, "row")) return rowScalarEquality(sql, right.fragment, left.fragment, kind)
+const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
+  if (left.kind === "row") {
+    if (right.kind === "row") return rowEquality(sql, left, right)
+    return rowScalarEquality(sql, left.fragment, right.fragment, right.kind)
+  }
 
-    const sameKind = scalarKindEquals(kind, right.kind)
+  if (right.kind === "row") return rowScalarEquality(sql, right.fragment, left.fragment, left.kind)
+  if (!scalarKindEquals(left.kind, right.kind)) return falseExpression(sql)
 
-    return sameKind ? nativeFragment(sql`${left.fragment} IS ${right.fragment}`) : falseExpression(sql)
-  }),
-)
+  return nativeFragment(sql`${left.fragment} IS ${right.fragment}`)
+}
 
 const scalarExpressionFor = (sql: SqlClient.SqlClient) => (value: Scalar) => makeScalarExpression(sql, value)
 
-const scalarOperand = (sql: SqlClient.SqlClient, environment: PolicyEnvironment, operand: Operand) =>
+const scalarOperand = Effect.fn("PolicySql.scalarOperand")((sql: SqlClient.SqlClient, environment: PolicyEnvironment, operand: Operand) =>
   pipe(
     Match.value(operand),
     Match.tagsExhaustive({
@@ -110,9 +109,9 @@ const scalarOperand = (sql: SqlClient.SqlClient, environment: PolicyEnvironment,
       RowField: ({ field }) => pipe(makeRowExpression(sql, field), Effect.succeed),
       NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
     }),
-  )
+  ))
 
-const collectionValues = (environment: PolicyEnvironment, operand: Operand) =>
+const collectionValues = Effect.fn("PolicySql.collectionValues")((environment: PolicyEnvironment, operand: Operand) =>
   pipe(
     Match.value(operand),
     Match.tagsExhaustive({
@@ -121,7 +120,7 @@ const collectionValues = (environment: PolicyEnvironment, operand: Operand) =>
       RowField: () => policyFailure("policy collection must resolve to finite scalar values"),
       NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
     }),
-  )
+  ))
 
 const bindConstant = ({ value }: Extract<PolicyF<Binder>, { readonly _tag: "Constant" }>): Binder =>
   flow(value ? trueExpression : falseExpression, Effect.succeed)

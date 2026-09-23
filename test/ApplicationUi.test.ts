@@ -340,7 +340,7 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const parts = [Part.native({ group, handlers })]
   const definition = Application.define({ name: "probe", parts })
   const application = Effect.runSync(Application.compile(definition))
-  const inspection = ApplicationInspect.describe(application)
+  const inspection = Effect.runSync(ApplicationInspect.describe(application))
   const middlewares = Array.fromIterable(probe.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))
   const expected = Schema.toJsonSchemaDocument(Schema.toCodecJson(Schema.Union([probe.errorSchema, ...middlewareErrors])))

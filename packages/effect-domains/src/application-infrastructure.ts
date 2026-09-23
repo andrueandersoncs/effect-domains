@@ -1,5 +1,5 @@
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
-import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Option, Predicate, Schema, Struct } from "effect"
 
 import type { ApplicationIR } from "./application.ts"
 import type { ApplicationInfrastructureIR, InfrastructureIR } from "./infrastructure-compiler.ts"
@@ -21,14 +21,16 @@ import {
 
 import type { SqliteMigration } from "./sqlite-migrations.ts"
 
-type PathOption = boolean | Readonly<Partial<{ path: `/${string}` }>>
+type EnabledOption<Configuration extends object> = boolean | Readonly<Partial<Configuration>>
 
-type UiOption = boolean | Readonly<Partial<{
+type PathOption = EnabledOption<{ path: `/${string}` }>
+
+type UiOption = EnabledOption<{
   path: `/${string}`
   presentation: ApplicationUiPresentation
-}>>
+}>
 
-type PublicOption = boolean | Readonly<Partial<{ id: string }>>
+type PublicOption = EnabledOption<{ id: string }>
 
 type ApplicationInfrastructureDefinition<App extends ApplicationIR> = Readonly<{
   application: App
@@ -61,6 +63,15 @@ export class ApplicationInfrastructureError extends Schema.TaggedError<Applicati
   }
 }
 
+const ApplicationInfrastructureSpecBase = Data.TaggedClass("ApplicationInfrastructureSpec")
+
+class ApplicationInfrastructureSpecValue<App extends ApplicationIR>
+  extends ApplicationInfrastructureSpecBase<{
+    readonly name: string
+    readonly parts: ReadonlyArray<InfrastructureResource>
+    readonly application: App
+  }> {}
+
 class ApplicationInfrastructurePlan<App extends ApplicationIR> extends Data.Class<{
   readonly name: string
   readonly application: App
@@ -75,132 +86,171 @@ class ApplicationInfrastructureHttpOptions extends Data.Class<{
   readonly ui: false | Readonly<{ path: `/${string}`; presentation: ApplicationUiPresentation }>
 }> {}
 
-const same = Equivalence.strictEqual<unknown>()
-const ApplicationInfrastructureSpecs = Data.taggedEnum<ApplicationInfrastructureSpec<ApplicationIR>>()
 
-const resolvePath = (fallback: `/${string}`) => (value: PathOption) => {
-  if (Predicate.isBoolean(value)) {
-    return value ? Option.some(fallback) : Option.none()
+const resolveEnabled = <Configuration extends object, A>(
+  option: boolean | Configuration,
+  onTrue: () => A,
+  onConfigured: (configuration: Configuration) => A,
+): Option.Option<A> => {
+  if (Predicate.isBoolean(option)) {
+    if (!option) return Option.none()
+
+    const value = onTrue()
+    return Option.some(value)
   }
 
-  return Option.some(value.path ?? fallback)
+  const value = onConfigured(option)
+  return Option.some(value)
 }
 
 const configuredPath = (
-  option: Option.Option<PathOption>,
+  option: PathOption | undefined,
   fallback: `/${string}`,
-) => pipe(option, Option.flatMap(resolvePath(fallback)))
+): Option.Option<`/${string}`> => {
+  if (option === undefined) return Option.none()
 
-const uiPublication = (option: UiOption) => Predicate.isBoolean(option)
-  ? Infrastructure.ui()
-  : Infrastructure.ui(option)
+  const onTrue = () => fallback
+  const onConfigured = (configuration: Exclude<PathOption, boolean>) => configuration.path ?? fallback
+
+  return resolveEnabled(option, onTrue, onConfigured)
+}
+
+const pathPublications = (
+  option: PathOption | undefined,
+  fallback: `/${string}`,
+  publish: (path: `/${string}`) => InfrastructurePublication,
+): ReadonlyArray<InfrastructurePublication> => {
+  const path = configuredPath(option, fallback)
+  const publication = Option.map(path, publish)
+
+  return Option.toArray(publication)
+}
 
 const enabledUi = (option: UiOption) => {
-  const publication = uiPublication(option)
+  const onTrue = () => Infrastructure.ui()
+  const onConfigured = (configuration: Exclude<UiOption, boolean>) => Infrastructure.ui(configuration)
 
-  if (Predicate.isBoolean(option)) return option ? Option.some(publication) : Option.none()
-
-  return Option.some(publication)
+  return resolveEnabled(option, onTrue, onConfigured)
 }
 
 const publications = (
   http: ApplicationInfrastructureDefinition<ApplicationIR>["http"],
 ): ReadonlyArray<InfrastructurePublication> => {
-  const rpcOption = Option.fromNullishOr(http.rpc)
-  const mcpOption = Option.fromNullishOr(http.mcp)
-  const rpcPath = configuredPath(rpcOption, "/rpc/v1")
-  const mcpPath = configuredPath(mcpOption, "/mcp")
-  const rpc = pipe(rpcPath, Option.map(Infrastructure.rpc), Option.toArray)
-  const mcp = pipe(mcpPath, Option.map(Infrastructure.mcp), Option.toArray)
-  const ui = pipe(Option.fromNullishOr(http.ui), Option.flatMap(enabledUi), Option.toArray)
+  const rpc = pathPublications(http.rpc, "/rpc/v1", Infrastructure.rpc)
+  const mcp = pathPublications(http.mcp, "/mcp", Infrastructure.mcp)
+  const uiOption = Option.fromNullishOr(http.ui)
+  const uiPublication = Option.flatMap(uiOption, enabledUi)
+  const ui = Option.toArray(uiPublication)
+  const rpcAndMcp = Array.appendAll(rpc, mcp)
 
-  return pipe(rpc, Array.appendAll(mcp), Array.appendAll(ui))
+  return Array.appendAll(rpcAndMcp, ui)
 }
 
 const publicEndpoint = (
   runtime: Parameters<typeof Infrastructure.publicEndpoint>[0]["target"],
   option: PublicOption,
 ) => {
-  if (Predicate.isBoolean(option)) {
-    const endpoint = Infrastructure.publicEndpoint({ id: "public", target: runtime })
-
-    return option ? Option.some(endpoint) : Option.none()
+  const onTrue = () => {
+    const endpointInput = { id: "public", target: runtime }
+    return Infrastructure.publicEndpoint(endpointInput)
   }
 
-  const endpoint = Infrastructure.publicEndpoint({ id: option.id ?? "public", target: runtime })
+  const onConfigured = (configuration: Exclude<PublicOption, boolean>) => {
+    const id = configuration.id ?? "public"
+    const endpointInput = { id, target: runtime }
 
-  return Option.some(endpoint)
+    return Infrastructure.publicEndpoint(endpointInput)
+  }
+
+  return resolveEnabled(option, onTrue, onConfigured)
 }
 
-const define = <App extends ApplicationIR>(definition: ApplicationInfrastructureDefinition<App>): ApplicationInfrastructureSpec<App> => {
-  const lifecycle = definition.database.lifecycle ?? Infrastructure.lifecycle()
-
-  const database = Infrastructure.sqliteStore(definition.database.id ?? "application", {
-    migrations: definition.database.migrations,
-    transactions: definition.database.transactions ?? "interactive",
-    durability: definition.database.durability ?? "persistent",
-    writerTopology: definition.database.writerTopology ?? "single",
+const define = <App extends ApplicationIR>(
+  definition: ApplicationInfrastructureDefinition<App>,
+): ApplicationInfrastructureSpec<App> => {
+  const application = definition.application
+  const databaseDefinition = definition.database
+  const httpDefinition = definition.http
+  const lifecycle = databaseDefinition.lifecycle ?? Infrastructure.lifecycle()
+  const databaseId = databaseDefinition.id ?? "application"
+  const transactions = databaseDefinition.transactions ?? "interactive"
+  const durability = databaseDefinition.durability ?? "persistent"
+  const writerTopology = databaseDefinition.writerTopology ?? "single"
+  const databaseOptions = {
+    migrations: databaseDefinition.migrations,
+    transactions,
+    durability,
+    writerTopology,
     lifecycle,
-  })
-
-  const readWrite = Infrastructure.readWrite({ target: database })
-  const additionalBindings = definition.http.bindings ?? []
+  }
+  const database = Infrastructure.sqliteStore(databaseId, databaseOptions)
+  const readWriteInput = { target: database }
+  const readWrite = Infrastructure.readWrite(readWriteInput)
+  const additionalBindings = httpDefinition.bindings ?? []
   const bindings = Array.prepend(additionalBindings, readWrite)
-  const runtimePublications = publications(definition.http)
-
-  const runtime = Infrastructure.httpRuntime(definition.http.id ?? "api", {
-    application: definition.application,
-    execution: definition.http.execution ?? "process",
+  const runtimePublications = publications(httpDefinition)
+  const runtimeId = httpDefinition.id ?? "api"
+  const execution = httpDefinition.execution ?? "process"
+  const runtimeOptions = {
+    application,
+    execution,
     bindings,
     publications: runtimePublications,
-  })
-
-  const endpointOption = Option.fromNullishOr(definition.http.public)
-  const endpoint = pipe(endpointOption, Option.flatMap((option) => publicEndpoint(runtime, option)))
-  const base = [database, runtime]
+  }
+  const runtime = Infrastructure.httpRuntime(runtimeId, runtimeOptions)
+  const endpointOption = Option.fromNullishOr(httpDefinition.public)
+  const resolveEndpoint = (option: PublicOption) => publicEndpoint(runtime, option)
+  const endpoint = Option.flatMap(endpointOption, resolveEndpoint)
+  const base: ReadonlyArray<InfrastructureResource> = [database, runtime]
   const endpointResources = Option.toArray(endpoint)
   const additionalParts = definition.parts ?? []
-  const parts = pipe(base, Array.appendAll(endpointResources), Array.appendAll(additionalParts))
+  const baseWithEndpoint = Array.appendAll(base, endpointResources)
+  const parts = Array.appendAll(baseWithEndpoint, additionalParts)
   const specificationParts = Array.fromIterable(parts)
-
-  const specification = ApplicationInfrastructureSpecs.ApplicationInfrastructureSpec({
-    name: definition.application.name,
+  const specificationInput = {
+    name: application.name,
     parts: specificationParts,
-    application: definition.application,
-  })
+    application,
+  }
+  const specification = new ApplicationInfrastructureSpecValue<App>(specificationInput)
+  const assignment = { application }
 
-  return Struct.assign(specification, { application: definition.application })
+  return Struct.assign(specification, assignment)
 }
 
-const resourceTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(tag: Tag) => (
-  resource: InfrastructureResourceIR,
-): resource is InfrastructureResourceIR & {
-  readonly resource: Extract<InfrastructureResourceIR["resource"], { readonly _tag: Tag }>
-} => same(resource.resource._tag, tag)
+const resourceTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(tag: Tag) => {
+  const hasTag = (
+    candidate: InfrastructureResourceIR,
+  ): candidate is InfrastructureResourceIR & {
+    readonly resource: Extract<InfrastructureResourceIR["resource"], { readonly _tag: Tag }>
+  } => {
+    const resource = candidate.resource
+    return resource._tag === tag
+  }
+
+  return hasTag
+}
 
 const resourcesWithTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(
   infrastructure: InfrastructureIR,
   tag: Tag,
-) => Array.filter(infrastructure.resources, resourceTag(tag))
+) => {
+  const predicate = resourceTag(tag)
+  return Array.filter(infrastructure.resources, predicate)
+}
 
-const isApplicationResource = (resource: InfrastructureResourceIR) => pipe(
-  Match.value(resource.resource),
-  Match.tagsExhaustive({
-    HttpRuntime: Function.constant(true),
-    BackgroundRuntime: Function.constant(false),
-    ScheduledRuntime: Function.constant(false),
-    SqliteStore: Function.constant(true),
-    DurableFilesystem: Function.constant(false),
-    ObjectStore: Function.constant(false),
-    Queue: Function.constant(false),
-    Secret: Function.constant(false),
-    Variable: Function.constant(false),
-    PublicEndpoint: Function.constant(true),
-    Domain: Function.constant(false),
-    OtlpDestination: Function.constant(false),
-    Extension: Function.constant(false),
-  }),
-)
+const isApplicationResource = (resource: InfrastructureResourceIR) => {
+  const tag = resource.resource._tag
+
+  switch (tag) {
+    case "HttpRuntime":
+    case "SqliteStore":
+    case "PublicEndpoint":
+      return true
+    default:
+      return false
+  }
+}
 
 const unsupportedResourceLabel = ({ logicalId, resource }: InfrastructureResourceIR) => `${logicalId} (${resource._tag})`
 const isUnsupportedApplicationResource = (resource: InfrastructureResourceIR) => !isApplicationResource(resource)
@@ -208,139 +258,151 @@ const isUnsupportedApplicationResource = (resource: InfrastructureResourceIR) =>
 const isSqliteBinding = (
   binding: HttpRuntime["bindings"][number],
 ): binding is Extract<HttpRuntime["bindings"][number], { readonly _tag: "ReadWriteSqliteBinding" }> =>
-  same(binding._tag, "ReadWriteSqliteBinding")
+  binding._tag === "ReadWriteSqliteBinding"
 
-const only = Effect.fn("ApplicationInfrastructure.only")(function* <A>(
+const makeOnly = Effect.fn("ApplicationInfrastructure.only")
+
+const only = makeOnly(function* <A>(
   interpreter: string,
   kind: string,
   values: ReadonlyArray<A>,
 ) {
-  if (!same(values.length, 1)) {
-    return yield* ApplicationInfrastructureError.make({
-      interpreter,
-      reason: `expected exactly one ${kind}, found ${values.length}`,
-    })
+  if (values.length !== 1) {
+    const reason = `expected exactly one ${kind}, found ${values.length}`
+    const error = ApplicationInfrastructureError.make({ interpreter, reason })
+    return yield* error
   }
 
-  return yield* pipe(
-    Array.head(values),
-    Effect.fromOption,
-    Effect.mapError(() => ApplicationInfrastructureError.make({ interpreter, reason: `missing ${kind}` })),
-  )
+  // SAFETY: The exact-length guard above proves index zero exists.
+  return values[0] as A
 })
 
-const resolvePlan = Effect.fn("ApplicationInfrastructure.plan")(function* <App extends ApplicationIR>(
+const makeResolvePlan = Effect.fn("ApplicationInfrastructure.plan")
+
+const resolvePlan = makeResolvePlan(function* <App extends ApplicationIR>(
   interpreter: string,
   infrastructure: ApplicationInfrastructureIR<App>,
 ) {
-  const unsupported = Array.filter(infrastructure.resources, isUnsupportedApplicationResource)
+  const infrastructureResources = infrastructure.resources
+  const unsupported = Array.filter(infrastructureResources, isUnsupportedApplicationResource)
 
-  if (!same(unsupported.length, 0)) {
+  if (unsupported.length !== 0) {
     const labels = Array.map(unsupported, unsupportedResourceLabel)
     const resources = Array.join(labels, ", ")
-
-    return yield* ApplicationInfrastructureError.make({ interpreter, reason: `unsupported resources ${resources}` })
+    const reason = `unsupported resources ${resources}`
+    const error = ApplicationInfrastructureError.make({ interpreter, reason })
+    return yield* error
   }
 
   const runtimeResources = resourcesWithTag(infrastructure, "HttpRuntime")
   const databaseResources = resourcesWithTag(infrastructure, "SqliteStore")
-  const runtime = yield* only(interpreter, "HTTP runtime", runtimeResources)
-  const database = yield* only(interpreter, "SQLite store", databaseResources)
+  const runtimeEffect = only(interpreter, "HTTP runtime", runtimeResources)
+  const databaseEffect = only(interpreter, "SQLite store", databaseResources)
+  const runtime = yield* runtimeEffect
+  const database = yield* databaseEffect
   const endpoints = resourcesWithTag(infrastructure, "PublicEndpoint")
 
   if (endpoints.length > 1) {
-    return yield* ApplicationInfrastructureError.make({
-      interpreter,
-      reason: `expected at most one public endpoint, found ${endpoints.length}`,
-    })
+    const count = endpoints.length
+    const reason = `expected at most one public endpoint, found ${count}`
+    const error = ApplicationInfrastructureError.make({ interpreter, reason })
+    return yield* error
   }
 
-  const sqliteBindings = Array.filter(runtime.resource.bindings, isSqliteBinding)
-  const binding = Array.head(sqliteBindings)
-  const hasOneBinding = same(sqliteBindings.length, 1)
+  const runtimeResource = runtime.resource
+  const sqliteBindings = Array.filter(runtimeResource.bindings, isSqliteBinding)
+  const bindingReason = `${runtime.logicalId} must bind exactly once to ${database.logicalId}`
 
-  const targetsDatabase = pipe(
-    binding,
-    Option.map(({ target }) => same(target, database.resource)),
-    Option.getOrElse(Function.constant(false)),
-  )
+  if (sqliteBindings.length !== 1) {
+    const error = ApplicationInfrastructureError.make({ interpreter, reason: bindingReason })
+    return yield* error
+  }
 
-  const missingBinding = !hasOneBinding
-  const wrongTarget = !targetsDatabase
-  const invalidBinding = missingBinding || wrongTarget
+  // SAFETY: The exact-length guard above proves index zero exists.
+  const binding = sqliteBindings[0] as typeof sqliteBindings[number]
 
-  if (invalidBinding) {
-    return yield* ApplicationInfrastructureError.make({
-      interpreter,
-      reason: `${runtime.logicalId} must bind exactly once to ${database.logicalId}`,
-    })
+  if (binding.target !== database.resource) {
+    const error = ApplicationInfrastructureError.make({ interpreter, reason: bindingReason })
+    return yield* error
   }
 
   const endpoint = Array.head(endpoints)
 
-  const endpointTargetsRuntime = pipe(
-    endpoint,
-    Option.map(({ resource }) => same(resource.target, runtime.resource)),
-    Option.getOrElse(Function.constant(true)),
-  )
+  if (Option.isSome(endpoint)) {
+    const endpointResource = endpoint.value
 
-  if (!endpointTargetsRuntime) {
-    const logicalId = pipe(endpoint, Option.map(({ logicalId }) => logicalId), Option.getOrElse(Function.constant("public endpoint")))
-
-    return yield* ApplicationInfrastructureError.make({ interpreter, reason: `${logicalId} must target ${runtime.logicalId}` })
+    if (endpointResource.resource.target !== runtimeResource) {
+      const reason = `${endpointResource.logicalId} must target ${runtime.logicalId}`
+      const error = ApplicationInfrastructureError.make({ interpreter, reason })
+      return yield* error
+    }
   }
 
-  return new ApplicationInfrastructurePlan<App>({
+  const planInput = {
     name: infrastructure.name,
     application: infrastructure.application,
     runtime,
     database,
     endpoint,
-  })
+  }
+
+  return new ApplicationInfrastructurePlan<App>(planInput)
 })
 
-const publicationTag = <Tag extends InfrastructurePublication["_tag"]>(tag: Tag) => (
-  publication: InfrastructurePublication,
-): publication is Extract<InfrastructurePublication, { readonly _tag: Tag }> => same(publication._tag, tag)
+const publicationTag = <Tag extends InfrastructurePublication["_tag"]>(tag: Tag) => {
+  const hasTag = (
+    publication: InfrastructurePublication,
+  ): publication is Extract<InfrastructurePublication, { readonly _tag: Tag }> => {
+    const actualTag = publication._tag
+    return actualTag === tag
+  }
+
+  return hasTag
+}
 
 const findPublication = <Tag extends InfrastructurePublication["_tag"]>(
   runtimePublications: ReadonlyArray<InfrastructurePublication>,
   tag: Tag,
-) => Array.findFirst(runtimePublications, publicationTag(tag))
+) => {
+  const predicate = publicationTag(tag)
+  return Array.findFirst(runtimePublications, predicate)
+}
+
+type ResolvedPathOption = false | Readonly<{ path: `/${string}` }>
+
+const publicationPath = <A extends { readonly path: `/${string}` }>(
+  publication: Option.Option<A>,
+): ResolvedPathOption => {
+  if (Option.isNone(publication)) return false
+
+  const value = publication.value
+  return { path: value.path }
+}
+
+const uiHttpOption = (
+  publication: Option.Option<Extract<InfrastructurePublication, { readonly _tag: "UiPublication" }>>,
+): false | Readonly<{ path: `/${string}`; presentation: ApplicationUiPresentation }> => {
+  if (Option.isNone(publication)) return false
+
+  const value = publication.value
+  return { path: value.path, presentation: value.presentation }
+}
 
 const httpOptions = (runtime: HttpRuntime) => {
-  const rpcPublication = findPublication(runtime.publications, "RpcPublication")
-  const mcpPublication = findPublication(runtime.publications, "McpPublication")
-  const uiPublication = findPublication(runtime.publications, "UiPublication")
+  const runtimePublications = runtime.publications
+  const rpcPublication = findPublication(runtimePublications, "RpcPublication")
+  const mcpPublication = findPublication(runtimePublications, "McpPublication")
+  const uiPublication = findPublication(runtimePublications, "UiPublication")
+  const rpc = publicationPath(rpcPublication)
+  const mcp = publicationPath(mcpPublication)
+  const ui = uiHttpOption(uiPublication)
+  const options = { rpc, mcp, ui }
 
-  const rpc = pipe(
-    rpcPublication,
-    Option.match({ onNone: Function.constant(false as const), onSome: ({ path }) => ({ path }) }),
-  )
-
-  const mcp = pipe(
-    mcpPublication,
-    Option.match({ onNone: Function.constant(false as const), onSome: ({ path }) => ({ path }) }),
-  )
-
-  const ui = pipe(
-    uiPublication,
-    Option.match({
-      onNone: Function.constant(false as const),
-      onSome: ({ path, presentation }) => ({ path, presentation }),
-    }),
-  )
-
-  return new ApplicationInfrastructureHttpOptions({ rpc, mcp, ui })
+  return new ApplicationInfrastructureHttpOptions(options)
 }
 
 export const ApplicationInfrastructure = {
   define,
-  plan: Effect.fn("ApplicationInfrastructure.plan")(function* <App extends ApplicationIR>(
-    interpreter: string,
-    infrastructure: ApplicationInfrastructureIR<App>,
-  ) {
-    return yield* resolvePlan(interpreter, infrastructure)
-  }),
+  plan: resolvePlan,
   httpOptions,
 }

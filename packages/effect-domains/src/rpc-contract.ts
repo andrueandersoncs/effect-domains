@@ -2,22 +2,22 @@ import { Array, Data, type Layer, Option, Schema, Struct } from "effect"
 import { Rpc, type RpcGroup, type RpcMiddleware, RpcSchema } from "effect/unstable/rpc"
 
 // Inspect only middleware errors because their service implementations are contravariant.
-export type RpcProcedure = Rpc.Any & Pick<Rpc.AnyWithProps, "payloadSchema" | "successSchema" | "errorSchema"> & {
-  readonly middlewares: Iterable<Pick<RpcMiddleware.AnyServiceWithProps, "error">>
-}
+export type RpcProcedure = Rpc.Any & Pick<Rpc.AnyWithProps, "payloadSchema" | "successSchema" | "errorSchema"> & Readonly<{
+  middlewares: Iterable<Pick<RpcMiddleware.AnyServiceWithProps, "error">>
+}>
 
-export interface RpcBundle {
-  readonly group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<RpcProcedure>, "requests">
-  readonly handlers: Layer.Layer<never, any, any>
-}
+export type RpcBundle = Readonly<{
+  group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<RpcProcedure>, "requests">
+  handlers: Layer.Layer<never, any, any>
+}>
 
 class CompiledRpcBundle<
   Group extends RpcBundle["group"],
   Handlers extends RpcBundle["handlers"],
-> extends Data.Class<{
-  readonly group: Group
-  readonly handlers: Handlers
-}> {}
+> extends Data.Class<Readonly<{
+  group: Group
+  handlers: Handlers
+}>> {}
 
 // Build bundles here because the pair is a boundary value shared by resources, commands, and identity.
 const make = <Group extends RpcBundle["group"]>(group: Group) =>

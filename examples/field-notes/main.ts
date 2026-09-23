@@ -1,5 +1,5 @@
 import { Layer, pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { FieldNotesApplication } from "./application.ts"
 import { FieldNotesMigrations } from "./migrations.ts"
@@ -10,7 +10,7 @@ const services = Layer.mergeAll(FieldNoteEncryptionLive, identity)
 
 
 
-const program = ApplicationBun.run(FieldNotesApplication, {
+const program = ApplicationBun.runApplication(FieldNotesApplication, {
   database: { migrations: FieldNotesMigrations },
   services,
   ui: {

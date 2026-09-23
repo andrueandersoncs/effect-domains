@@ -1,10 +1,10 @@
 import { pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { ExpenseLedgerApplication } from "./application.ts"
 import { ExpenseLedgerMigrations } from "./migrations.ts"
 
 
-const program = ApplicationBun.run(ExpenseLedgerApplication, {
+const program = ApplicationBun.runApplication(ExpenseLedgerApplication, {
   database: { migrations: ExpenseLedgerMigrations },
   ui: {
     presentation: {

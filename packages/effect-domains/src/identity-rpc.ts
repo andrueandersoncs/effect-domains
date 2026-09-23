@@ -1,4 +1,4 @@
-import { Array, Effect, Option, Record, Schema, String, Struct, pipe } from "effect"
+import { Array, Effect, Option, Schema, String } from "effect"
 import { Headers } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Unauthenticated } from "./authorization.ts"
@@ -6,11 +6,10 @@ import { CredentialsSchema, CurrentSessionSchema, IdentityRuntime, IdentityUnava
 import { RpcBundle } from "./rpc-contract.ts"
 
 export const authenticateIdentity = Effect.fn("Identity.authenticate")(function* (headers: Headers.Headers) {
-  const token = pipe(
-    Headers.get(headers, "authorization"),
-    Option.flatMap(String.match(/^Bearer ([^\s]+)$/i)),
-    Option.flatMap(Array.get(1)),
-  )
+  const authorization = Headers.get(headers, "authorization")
+  const matchBearer = String.match(/^Bearer ([^\s]+)$/i)
+  const bearer = Option.flatMap(authorization, matchBearer)
+  const token = Option.flatMap(bearer, Array.get(1))
 
   if (Option.isNone(token)) return yield* Unauthenticated.make({})
 

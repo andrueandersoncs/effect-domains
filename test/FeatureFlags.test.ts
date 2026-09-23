@@ -43,7 +43,7 @@ const expectedInspection = [
 ]
 
 it("compiles nested feature flag declarations into inspectable application metadata", () => {
-  const inspection = ApplicationInspect.describe(application)
+  const inspection = Effect.runSync(ApplicationInspect.describe(application))
 
   expect(application.featureFlags).toEqual(expectedFlags)
   expect(inspection.featureFlags).toEqual(expectedInspection)

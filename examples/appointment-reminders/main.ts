@@ -1,7 +1,7 @@
 import { clusterRuntimeLayer, clusterWorkerLayer } from "@effect-domains/example-support/cluster-runtime"
 import { Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { AppointmentRemindersApplication } from "./application.ts"
 import { AppointmentReminderBackground } from "./background.ts"
@@ -22,7 +22,7 @@ const identity = ExampleIdentity.layer("appointment-reminders")
 const services = Layer.mergeAll(identity, execution)
 const background = clusterWorkerLayer(AppointmentReminderBackground)
 
-const program = ApplicationBun.run(AppointmentRemindersApplication, {
+const program = ApplicationBun.runApplication(AppointmentRemindersApplication, {
   database: { migrations: AppointmentReminderMigrations },
   services,
   background,

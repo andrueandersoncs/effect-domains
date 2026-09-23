@@ -28,10 +28,10 @@ interface ListDefinition<InputError, CodecError, CursorError> {
   readonly errors: ListErrors<InputError, CodecError, CursorError>
 }
 
-interface PreparedSqliteList {
-  readonly query: RepositorySelect
-  readonly pageSize: number
-}
+type PreparedSqliteList = Readonly<{
+  query: RepositorySelect
+  pageSize: number
+}>
 
 const StoredFilterSchema = Schema.Record(Schema.String, Schema.Unknown)
 
@@ -68,12 +68,14 @@ const make = <InputError, CodecError, CursorError>(
   const cursorEntry = ({ field }: RepositoryOrder) => [field, Schema.toEncoded(definition.storageField(field))] as const
   const cursorEntries = Array.map(definition.order, cursorEntry)
   const cursorFields = Record.fromEntries(cursorEntries)
-  const CanonicalFilterSchema = Schema.Struct(canonicalFilterFields).annotate({ parseOptions: { onExcessProperty: "error" } })
-  const CanonicalRangeSchema = Schema.Struct(canonicalRangeFields).annotate({ parseOptions: { onExcessProperty: "error" } })
+  const rejectExcess = { parseOptions: { onExcessProperty: "error" as const } }
+  const CanonicalFilterSchema = Schema.Struct(canonicalFilterFields).annotate(rejectExcess)
+  const CanonicalRangeSchema = Schema.Struct(canonicalRangeFields).annotate(rejectExcess)
   const StorageFilterSchema = Schema.Struct(storageFilterFields)
   const StorageRangeSchema = Schema.Struct(storageRangeFields)
   const CursorAfterSchema = Schema.Struct(cursorFields)
-  const MaximumLimitSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: definition.maximum }))
+  const limitBounds = Schema.isBetween({ minimum: 1, maximum: definition.maximum })
+  const MaximumLimitSchema = Schema.Int.check(limitBounds)
 
   const InputSchema = Schema.Struct({
     filter: Schema.optionalKey(CanonicalFilterSchema),

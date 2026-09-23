@@ -201,7 +201,7 @@ const supportCasesTest = Effect.gen(function* () {
 
   expect(distinctAuditCount).toBe(4)
 
-  const inspection = ApplicationInspect.describe(SupportCasesApplication)
+  const inspection = Effect.runSync(ApplicationInspect.describe(SupportCasesApplication))
 
   const auditOperation = (operation: typeof inspection.operations[number]) =>
     operation.name.startsWith("support_case_audits.")

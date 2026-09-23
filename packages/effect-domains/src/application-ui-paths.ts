@@ -1,28 +1,13 @@
-import { Data, Equivalence } from "effect"
-
-
-
-class ApplicationUiPaths extends Data.Class<{
-  readonly document: `/${string}`
-  readonly javascript: `/${string}`
-  readonly stylesheet: `/${string}`
-  readonly api: `/${string}`
-  readonly call: `/${string}`
-}> {}
-
 export const applicationUiPaths = (path: `/${string}`) => {
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const nestedPath = (name: string) => (Equivalence.strictEqual<string>()(path, "/") ? `/${name}` : `${path}/${name}`) as `/${string}`
-  const javascript = nestedPath("client.js")
-  const stylesheet = nestedPath("style.css")
-  const api = nestedPath("api")
-  const call = nestedPath("api/call")
+  const root = path === "/"
+  const prefix = root ? "" : path
 
-  return new ApplicationUiPaths({
+  // SAFETY: Every generated value preserves the path type because `path` starts with a slash.
+  return Object.freeze({
     document: path,
-    javascript,
-    stylesheet,
-    api,
-    call,
+    javascript: `${prefix}/client.js` as `/${string}`,
+    stylesheet: `${prefix}/style.css` as `/${string}`,
+    api: `${prefix}/api` as `/${string}`,
+    call: `${prefix}/api/call` as `/${string}`,
   })
 }

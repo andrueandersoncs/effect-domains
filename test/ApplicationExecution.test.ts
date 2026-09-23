@@ -7,7 +7,7 @@ const source = `
   import { Context, Effect, Layer } from "effect"
   import { SqlClient } from "effect/unstable/sql"
   import { Application } from "effect-domains/application"
-  import { ApplicationBun } from "effect-domains/application-bun"
+  import * as ApplicationBun from "effect-domains/application-bun"
   import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
   class PrivateSql extends Context.Service()("test/PrivateSql") {}
   process.argv = [process.execPath, "execution-isolation", "worker"]
@@ -23,7 +23,7 @@ const source = `
     const executionTables = yield* execution\`SELECT name FROM sqlite_master WHERE name LIKE '%_marker'\`
     console.log(JSON.stringify({ applicationTables, executionTables }))
   })
-  const program = ApplicationBun.run(app, {
+  const program = ApplicationBun.runApplication(app, {
     database: { filename: process.env.APPLICATION_DB, migrations: [] },
     services,
     initialize,

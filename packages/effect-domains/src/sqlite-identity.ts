@@ -1,13 +1,13 @@
 import { createHash, randomBytes } from "node:crypto"
 import { Clock, Config, DateTime, Duration, Effect, Function, Layer, Option, Redacted, Schema, Semaphore, Struct, pipe } from "effect"
-import { SqlClient, SqlError, SqlSchema } from "effect/unstable/sql"
+import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { Unauthenticated } from "./authorization.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { identifier } from "./domain.ts"
 import { CredentialsSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema, SubjectSchema } from "./identity.ts"
 import { authenticateIdentity } from "./identity-rpc.ts"
-import { sqliteMigrationStore, SqliteMigrations } from "./sqlite-migrations.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
+import { sqliteMigrationStore, SqliteMigrations } from "./sqlite-migrations.ts"
 import { Table } from "./table.ts"
 
 const StoredSubjectSchema = Schema.fromJsonString(SubjectSchema)
@@ -88,7 +88,8 @@ interface SqliteIdentityOptions extends Partial<SqliteIdentityOptionalOptions> {
 const unavailable = () => IdentityUnavailable.make({})
 const unauthenticated = () => Unauthenticated.make({})
 
-const database = <A, E, R>(effect: Effect.Effect<A, E, R>) => pipe(effect, Effect.mapError(unavailable))
+const database = Effect.fn("SqliteIdentity.database")(<A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  pipe(effect, Effect.mapError(unavailable)))
 
 const tokenDigest = (token: string) => createHash("sha256").update(token).digest("hex")
 const newToken = () => Effect.try({ try: () => randomBytes(32).toString("base64url"), catch: unavailable })
@@ -142,7 +143,6 @@ const seedAccounts = Effect.fn("SqliteIdentity.seedAccounts")(function* (
       })}
       ON CONFLICT(username) DO NOTHING
     `)
-
   })
 
   yield* Effect.forEach(accounts, seed, { discard: true })
@@ -203,11 +203,12 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
       return { account, valid }
     })
 
-    const result = yield* pipe(attempt, passwordVerifications.withPermitsIfAvailable(1), Effect.flatMap(Effect.fromOption(unavailable)))
+    const resultOption = yield* passwordVerifications.withPermitsIfAvailable(1)(attempt)
+    const result = yield* Effect.fromOption(resultOption, unavailable)
 
     if (!result.valid) return yield* unauthenticated()
 
-    const account = yield* pipe(result.account, Effect.fromOption(unauthenticated))
+    const account = yield* Effect.fromOption(result.account, unauthenticated)
     const token = yield* newToken()
     const sessionId = yield* newSessionId()
     const digest = yield* Effect.try({ try: () => tokenDigest(token), catch: unavailable })
@@ -241,7 +242,7 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
 const passwordValue = (password: SqliteIdentityOptions["password"]) =>
   Config.isConfig(password) ? password : Config.succeed(password)
 
-const authenticator = Effect.fn("SqliteIdentity.authenticator")(function* () {
+const authenticator = Effect.gen(function* () {
   const runtime = yield* IdentityRuntime
 
   return AuthorizationRpc.Authenticator.of({
@@ -251,7 +252,6 @@ const authenticator = Effect.fn("SqliteIdentity.authenticator")(function* () {
       Effect.map(Struct.get("subject")),
     ),
   })
-
 })
 
 const layer = (options: SqliteIdentityOptions) => {
@@ -282,8 +282,7 @@ const layer = (options: SqliteIdentityOptions) => {
     Layer.provide(privateClient),
   )
 
-  const authentication = authenticator()
-  const authorization = Layer.effect(AuthorizationRpc.Authenticator, authentication)
+  const authorization = Layer.effect(AuthorizationRpc.Authenticator, authenticator)
 
   return pipe(
     authorization,

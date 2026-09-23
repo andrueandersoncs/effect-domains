@@ -47,7 +47,8 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript"
+    "lint:file-lines": "bun run scripts/check-file-lines.ts",
+    "lint": "bun run lint:file-lines && better-typescript"
   },
   "dependencies": {
     "@effect-domains/application-ui": "workspace:*",

@@ -1,20 +1,53 @@
-import { Array, Context, Effect, Equivalence, flow, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
+import { Array, Context, Effect, flow, Option, Record, Schema } from "effect"
 import type { ApplicationIR } from "./application.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { EntitlementRequirementSchema, EntitlementRequirementsSchema, type SubjectPolicy } from "./authorization.ts"
 import { Command, type CommandLive } from "./command.ts"
 import { CreationInspectionSchema } from "./resource-creation.ts"
 import { Policy } from "./policy.ts"
-import { ReadModel, ReadModelDescription, type CompiledReadModel } from "./read-model.ts"
+import { ReadModel, ReadModelDescription } from "./read-model.ts"
 import type { Resource } from "./resource.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 import { Table, TableSnapshot } from "./table.ts"
+type CommandInspectionInput = Readonly<Pick<CommandLive["spec"], "policy" | "dependencies">>
+
+type InspectableCommand = Readonly<{
+  spec: CommandInspectionInput & Readonly<{ name: string }>
+}>
+
+type InspectableResource = Readonly<Pick<
+  Resource,
+  | "name"
+  | "schema"
+  | "storage"
+  | "table"
+  | "authorization"
+  | "version"
+  | "transitions"
+  | "contracts"
+  | "operations"
+  | "creation"
+  | "list"
+>>
+
+type InspectableApplication = Readonly<{
+  name: string
+  commands: ReadonlyArray<InspectableCommand>
+  group: Readonly<{ requests: ApplicationIR["group"]["requests"] }>
+  featureFlags: ReadonlyArray<Readonly<{
+    name: string
+    default: boolean
+    description?: string
+  }>>
+  resources: ReadonlyArray<InspectableResource>
+}>
+
 
 
 const schemaDocument = flow(Schema.toCodecJson, Schema.toJsonSchemaDocument)
 const PhysicalTableJsonSchema = Schema.toCodecJson(TableSnapshot)
 const PhysicalTableSchema = Schema.toEncoded(PhysicalTableJsonSchema)
-const encodePhysicalTable = Schema.encodeSync(PhysicalTableJsonSchema)
+const encodePhysicalTable = Schema.encodeEffect(PhysicalTableJsonSchema)
 
 const StorageSchema = Schema.Struct({
   schema: Schema.Unknown,
@@ -24,7 +57,6 @@ const StorageSchema = Schema.Struct({
   stored: Schema.Unknown,
 })
 
-interface Storage extends Schema.Schema.Type<typeof StorageSchema> {}
 
 const OperationNamesSchema = Schema.Array(Schema.String)
 const PolicyRulesSchema = Schema.Record(Schema.String, Schema.String)
@@ -51,7 +83,6 @@ const ResourceInspectionSchema = Schema.Struct({
   storage: StorageSchema,
 })
 
-interface ResourceInspection extends Schema.Schema.Type<typeof ResourceInspectionSchema> {}
 
 const SubjectPolicyInspectionSchema = Schema.Struct({ subject: Schema.Unknown, rule: Schema.String, require: Schema.Array(EntitlementRequirementSchema) })
 
@@ -70,7 +101,6 @@ const OperationsSchema = Schema.Array(OperationInspectionSchema)
 const ResourcesSchema = Schema.Array(ResourceInspectionSchema)
 const CommandsSchema = Schema.Struct({ local: OperationNamesSchema, remote: OperationNamesSchema })
 
-interface Commands extends Schema.Schema.Type<typeof CommandsSchema> {}
 
 const ApplicationInspectionSchema = Schema.Struct({
   application: Schema.String,
@@ -80,13 +110,22 @@ const ApplicationInspectionSchema = Schema.Struct({
   resources: ResourcesSchema,
 })
 
-interface ApplicationInspection extends Schema.Schema.Type<typeof ApplicationInspectionSchema> {}
 
+const renderPolicies = (
+  rules: Readonly<Partial<Record<string, Policy>>>,
+) => {
+  const rendered: Record<string, string> = {}
 
-const renderPolicies = (rules: Readonly<Partial<Record<string, Policy>>>) => pipe(rules, Record.map(Option.fromNullishOr), Record.getSomes, Record.map(Policy.render))
+  for (const name in rules) {
+    const policy = rules[name]
+    if (policy !== undefined) rendered[name] = Policy.render(policy)
+  }
 
-const inspectAuthorization = (authorization: Resource["authorization"]) => {
-  if (!Predicate.isTagged(authorization, "Policy")) return authorization
+  return rendered
+}
+
+const inspectAuthorization = (authorization: InspectableResource["authorization"]) => {
+  if (authorization._tag !== "Policy") return authorization
 
   const subject = schemaDocument(authorization.subject)
   const scope = Policy.render(authorization.scope)
@@ -95,28 +134,22 @@ const inspectAuthorization = (authorization: Resource["authorization"]) => {
   return PolicyInspectionSchema.make({ subject, scope, allow, require: authorization.require })
 }
 
-const resource = (definition: Resource) => {
+const inspectResource = Effect.fn("ApplicationInspect.resource")(function* (definition: InspectableResource) {
   const schema = schemaDocument(definition.schema)
   const storageSchema = schemaDocument(definition.storage)
-  const physical = pipe(Table.snapshot(definition.table), encodePhysicalTable)
+  const snapshot = Table.snapshot(definition.table)
+  const physical = yield* encodePhysicalTable(snapshot)
   const insert = schemaDocument(definition.table.insertSchema)
   const row = schemaDocument(definition.table.rowSchema)
   const stored = schemaDocument(definition.table.storageSchema)
   const storage = StorageSchema.make({ schema: storageSchema, physical, insert, row, stored })
   const authorization = inspectAuthorization(definition.authorization)
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const version = Option.fromNullishOr(definition.version) as Option.Option<unknown>
-  const hasContract = (operation: Resource["operations"][number]) => Record.has(definition.contracts, operation)
+  const version = definition.version
+  const transitions = definition.transitions
+  const versionFields = version == null ? {} : { version }
+  const transitionFields = transitions == null ? {} : { transitions: transitions.inspection }
+  const hasContract = (operation: InspectableResource["operations"][number]) => Record.has(definition.contracts, operation)
   const operations = Array.filter(definition.operations, hasContract)
-
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const transitions = pipe(
-    Option.fromNullishOr(definition.transitions),
-    Option.map(Struct.get("inspection")),
-  ) as Option.Option<unknown>
-
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const details = Record.getSomes({ version, transitions }) as Partial<Pick<ResourceInspection, "version" | "transitions">>
 
   return ResourceInspectionSchema.make({
     name: definition.name,
@@ -124,11 +157,12 @@ const resource = (definition: Resource) => {
     schema,
     creation: definition.creation,
     list: definition.list,
-    ...details,
+    ...versionFields,
+    ...transitionFields,
     authorization,
     storage,
   })
-}
+})
 
 class InspectionError extends Schema.TaggedError<InspectionError>()("ApplicationInspectionError", {
   reason: Schema.String,
@@ -141,94 +175,96 @@ const inspectSubjectPolicy = (policy: SubjectPolicy) => {
   return SubjectPolicyInspectionSchema.make({ subject, rule, require: policy.require })
 }
 
+
+const inspectViews = (dependencies: CommandInspectionInput["dependencies"]) => {
+  const resolved = Command.dependencies(dependencies ?? [])
+
+  return Array.map(resolved.readModels, (readModel) => {
+    switch (readModel._tag) {
+      case "ReadModelSpec":
+        return ReadModel.describe(readModel)
+      case "CompiledReadModel":
+        return readModel.description
+    }
+  })
+}
+
 const inspectOperation = Effect.fn("ApplicationInspect.operation")(function* (
   procedure: RpcProcedure,
-  command: Option.Option<CommandLive>,
+  command: CommandInspectionInput | undefined,
 ) {
   const compiled = compileUnaryRpc(procedure)
-
   const contract = yield* Effect.fromOption(
     compiled,
-    () => InspectionError.make({ reason: `Application inspection supports only unary RPC procedures: ${procedure._tag}` }),
+    () => InspectionError.make({
+      reason: `Application inspection supports only unary RPC procedures: ${procedure._tag}`,
+    }),
   )
-
   const input = schemaDocument(contract.payloadSchema)
   const output = schemaDocument(contract.successSchema)
   const error = schemaDocument(contract.errorSchema)
-  const nativePolicy = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
-  const declaredPolicy = pipe(command, Option.flatMap(({ spec }) => Option.fromNullishOr(spec.policy)))
-  const policy = Option.orElse(declaredPolicy, Function.constant(nativePolicy))
-  const subjectPolicy = Option.map(policy, inspectSubjectPolicy)
-
-  const description = pipe(
-    Match.type<ReturnType<typeof Command.dependencies>["readModels"][number]>(),
-    Match.tagsExhaustive({
-      ReadModelSpec: ReadModel.describe,
-      CompiledReadModel: Struct.get<CompiledReadModel, "description">("description"),
-    }),
-  )
-
-  const views = pipe(
-    command,
-    Option.map(({ spec }) => Command.dependencies(spec.dependencies ?? [])),
-    Option.map(({ readModels }) => Array.map(readModels, description)),
-  )
+  const nativePolicyOption = Context.getOption(procedure.annotations, AuthorizationRpc.policy)
+  const nativePolicy = Option.getOrUndefined(nativePolicyOption)
+  const policy = command?.policy ?? nativePolicy
+  const subjectPolicyFields = policy === undefined
+    ? {}
+    : { subjectPolicy: inspectSubjectPolicy(policy) }
+  const viewFields = command === undefined
+    ? {}
+    : { views: inspectViews(command.dependencies) }
 
   return OperationInspectionSchema.make({
-    name: contract._tag, input, output, error,
-    ...Option.match(subjectPolicy, { onNone: () => ({}), onSome: (subjectPolicy) => ({ subjectPolicy }) }),
-    ...Option.match(views, { onNone: () => ({}), onSome: (views) => ({ views }) }),
+    name: contract._tag,
+    input,
+    output,
+    error,
+    ...subjectPolicyFields,
+    ...viewFields,
   })
 })
 
-const operation = (commands: Readonly<Record<string, CommandLive>>) =>
-  (procedure: RpcProcedure) => {
-    const command = Record.get(commands, procedure._tag)
-
-    return pipe(inspectOperation(procedure, command), Effect.runSync)
-  }
-
-
-
-const describe = (
-  application: ApplicationIR,
+// Inspection is a lossless projection of bounded, compile-time application metadata.
+// Its output contract requires every operation, resource, and feature flag.
+const describe = Effect.fn("ApplicationInspect.describe")(function* (
+  application: InspectableApplication,
   selected: Option.Option<string> = Option.none(),
   localCommands: ReadonlyArray<string> = ["serve", "inspect"],
-) => {
-  const commandEntries = Array.map(
-    application.commands,
-    (command) => [command.spec.name, command] as const,
-  )
+) {
+  const commandIndex = new Map<string, CommandInspectionInput>()
 
-  const commandIndex = Record.fromEntries(commandEntries)
+  for (const command of application.commands) {
+    commandIndex.set(command.spec.name, command.spec)
+  }
 
-  const operations = pipe(
-    application.group.requests.values(),
-    Array.fromIterable,
-    Array.map(operation(commandIndex)),
-  )
+  const selectedName = Option.getOrUndefined(selected)
+  const operations: OperationInspection[] = []
+  const remote: string[] = []
 
-  const matchingOperations = Option.match(selected, {
-    onNone: Function.constant(operations),
-    onSome: (name) => {
-      const named = (entry: OperationInspection) => Equivalence.strictEqual<string>()(entry.name, name)
+  for (const procedure of application.group.requests.values()) {
+    const command = commandIndex.get(procedure._tag)
+    const inspected = yield* inspectOperation(procedure, command)
 
-      return Array.filter(operations, named)
-    },
-  })
+    remote.push(inspected.name)
 
-  const remote = Array.map(operations, Struct.get("name"))
+    if (selectedName === undefined || inspected.name === selectedName) {
+      operations.push(inspected)
+    }
+  }
+
   const commands = CommandsSchema.make({ local: localCommands, remote })
-  const featureFlags = Array.map(application.featureFlags, (flag) => FeatureFlagInspectionSchema.make(flag))
-  const resources = Array.map(application.resources, resource)
+  const featureFlags = Array.map(
+    application.featureFlags,
+    (flag) => FeatureFlagInspectionSchema.make(flag),
+  )
+  const resources = yield* Effect.forEach(application.resources, inspectResource, { concurrency: 1 })
 
   return ApplicationInspectionSchema.make({
     application: application.name,
     featureFlags,
     commands,
-    operations: matchingOperations,
+    operations,
     resources,
   })
-}
+})
 
 export const ApplicationInspect = { describe }

@@ -8,6 +8,23 @@ type TransitionDeclaration<Status extends string = string> = Readonly<{
 
 type TransitionDeclarations<Status extends string = string> = Readonly<Record<string, TransitionDeclaration<Status>>>
 
+const TransitionErrorFields = {
+  key: Schema.String,
+  action: Schema.String,
+  actual: Schema.String,
+  message: Schema.String,
+}
+
+type TransitionError = Schema.Schema.Type<
+  ReturnType<typeof Schema.TaggedError<Readonly<{
+    readonly _tag: string
+    readonly key: string
+    readonly action: string
+    readonly actual: string
+    readonly message: string
+  }>>>
+>
+
 /** The structural transition intent consumed by the Resource compiler. */
 export interface TransitionMachine {
   readonly name: string
@@ -27,13 +44,6 @@ class TransitionDefinitionError extends Schema.TaggedError<TransitionDefinitionE
   override get message() {
     return `Invalid transitions for ${this.name}: ${this.reason}`
   }
-}
-
-const TransitionErrorFields = {
-  key: Schema.String,
-  action: Schema.String,
-  actual: Schema.String,
-  message: Schema.String,
 }
 
 const definitionFailure = (name: string, reason: string) =>
@@ -70,9 +80,13 @@ const freezeDeclaration = <Status extends string>(declaration: TransitionDeclara
   return Object.freeze({ from, to: declaration.to })
 }
 
-const arrayValues = (values: unknown) => Array.isArray(values) ? Option.some(values) : Option.none<ReadonlyArray<unknown>>()
+const arrayValues = (values: unknown) => {
+  if (Array.isArray(values)) return Option.some(values)
+  return Option.none<ReadonlyArray<unknown>>()
+}
 const allStrings = (values: ReadonlyArray<unknown>) => Array.every(values, Predicate.isString)
-const stringValues = flow(arrayValues, Option.filter(Array.isReadonlyArrayNonEmpty), Option.exists(allStrings))
+const nonEmptyArrayValues = flow(arrayValues, Option.filter(Array.isReadonlyArrayNonEmpty))
+const stringValues = flow(nonEmptyArrayValues, Option.exists(allStrings))
 
 const statusValues = (status: Schema.Schema<string>) => {
   const document = Schema.toJsonSchemaDocument(status)
@@ -100,7 +114,7 @@ const make = <
   if (Option.isNone(literals)) {
     const invalidStatus = definitionFailure(input.name, "status must be a non-empty string literal schema")
 
-    Effect.runSync(invalidStatus)
+    Effect.runSync(Effect.orDie(invalidStatus))
   }
 
   const isStatus = Schema.is(input.status)

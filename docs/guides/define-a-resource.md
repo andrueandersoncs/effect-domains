@@ -122,12 +122,12 @@ import { ApplicationBun } from "effect-domains/application-bun"
 import { Library } from "./application.ts"
 import { LibraryMigrations } from "./migrations.ts"
 
-pipe(ApplicationBun.run(Library, {
+pipe(ApplicationBun.runApplication(Library, {
   database: { migrations: LibraryMigrations },
 }), ApplicationBun.runMain)
 ```
 
-`ApplicationBun.run` supplies the `serve` command and generated CLI; `ApplicationBun.runMain` runs its Effect. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
+`ApplicationBun.runApplication` supplies the `serve` command and generated CLI; `ApplicationBun.runMain` runs its Effect. Without an explicit `filename`, this app reads `LIBRARY_DB` and otherwise uses `data/library.sqlite`.
 
 ## 4. Run and exercise the resource
 
@@ -168,4 +168,4 @@ Before using this pattern for private data, [restrict access](/guides/authorizat
 - [`Resource.define` and `Resource.compile`](../../packages/effect-domains/src/resource.ts) separate declarative capability/creation syntax from table, repository, RPC, and handler derivation.
 - [`Application.define` and `Application.compile`](../../packages/effect-domains/src/application.ts) separate explicit parts from the authoritative `ApplicationIR`; compilation returns a typed Effect, executed explicitly by the application module before runtimes and adapters consume the IR.
 - [`SqliteMigrations.initial`](../../packages/effect-domains/src/sqlite-migrations.ts) is for a fresh table/index artifact. Import frozen artifacts with `SqliteMigrations.history(...)`.
-- [`ApplicationBun.run`](../../packages/effect-domains/src/application-bun.ts) creates the command Effect that hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.
+- [`ApplicationBun.runApplication`](../../packages/effect-domains/src/application-bun.ts) creates the command Effect that hosts RPC at `/rpc/v1`, exposes the client CLI, defaults `PORT` to 3000, and derives the database environment prefix from the application name.

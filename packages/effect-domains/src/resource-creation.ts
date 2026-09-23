@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, Option, Record, Schema, Struct, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Option, Record, Schema, Struct } from "effect"
 import { Value } from "./value.ts"
 import type { StructValue } from "./domain.ts"
 
@@ -18,9 +18,10 @@ const isGeneration = Equivalence.strictEqual<"uuidV7" | "now" | "one">()
 
 type ReadValue = (input: StructValue, subject: StructValue) => Effect.Effect<unknown, never, Value>
 
-class FieldCompilation extends Data.Class<{ readonly inputSchema: Schema.Constraint; readonly evaluate: ReadValue }> {}
-
-const equals = Equivalence.strictEqual<unknown>()
+class FieldCompilation extends Data.Class<Readonly<{
+  inputSchema: Schema.Constraint
+  evaluate: ReadValue
+}>> {}
 
 export const CreationInspectionSchema = Schema.Struct({
   defaults: Schema.Unknown,
@@ -30,7 +31,7 @@ export const CreationInspectionSchema = Schema.Struct({
 
 export interface CreationInspection extends Schema.Schema.Type<typeof CreationInspectionSchema> {}
 
-const compile = function* <D, E>(
+const compile = Effect.fn("Creation.compile")(function* <D, E>(
   fields: Schema.Struct.Fields,
   defaults: StructValue,
   generated: Readonly<Record<string, "uuidV7" | "now" | "one">>,
@@ -41,22 +42,38 @@ const compile = function* <D, E>(
 ) {
   const declarations = [defaults, generated, bindings]
   const names = Array.flatMap(declarations, Record.keys)
+  const isUnknownField = (name: string) => !Record.has(fields, name)
+  const unknownImplicitIdentifier = Option.filter(implicitIdentifier, isUnknownField)
+
+  if (Option.isSome(unknownImplicitIdentifier)) {
+    const failure = definitionFailure(`declares unknown implicit identifier field ${unknownImplicitIdentifier.value}`)
+
+    return yield* Effect.fail(failure)
+  }
 
   yield* Effect.forEach(names, (name) => {
-    const implicit = Option.contains(implicitIdentifier, name)
-    const present = Record.has(fields, name)
-    const canonical = !implicit
-    const known = present && canonical
-    const occurrences = Array.filter(declarations, (declaration) => Record.has(declaration, name))
-    const exclusive = equals(occurrences.length, 1)
-    const valid = known && exclusive
+    if (!Record.has(fields, name)) {
+      const failure = definitionFailure(`declares unknown create field ${name}`)
 
-    return valid ? Effect.void : pipe(definitionFailure(`declares unknown or multiply configured create field ${name}`), Effect.fail)
+      return Effect.fail(failure)
+    }
+
+    if (Option.contains(implicitIdentifier, name)) {
+      const failure = definitionFailure(`explicitly configures implicit identifier field ${name}`)
+
+      return Effect.fail(failure)
+    }
+
+    const occurrences = Array.filter(declarations, (declaration) => Record.has(declaration, name))
+    const valid = Equivalence.strictEqual<number>()(occurrences.length, 1)
+    const failure = definitionFailure(`multiply configures create field ${name}`)
+
+    return valid ? Effect.void : Effect.fail(failure)
   }, { discard: true })
 
   const defaultSources = Record.map(defaults, (value) => Source.Default({ value }))
 
-  const generations = Option.match(implicitIdentifier, {
+  const generations: Readonly<Record<string, "uuidV7" | "now" | "one">> = Option.match(implicitIdentifier, {
     onNone: () => generated,
     onSome: (name) => Record.set(generated, name, "uuidV7" as const),
   })
@@ -106,27 +123,37 @@ const compile = function* <D, E>(
 
     const read = (input: StructValue, subject: StructValue): Effect.Effect<unknown, E, Value> => {
       const supplied = Record.has(input, name)
-      const protectedField = equals(compiled.inputSchema, ForbiddenFieldSchema)
-      const label = Source.$is("Generated")(source) ? "generated" : "subject-bound"
+      const generatedField = Source.$is("Generated")(source)
+      const subjectField = Source.$is("Subject")(source)
+      const protectedField = generatedField || subjectField
+      const label = generatedField ? "generated" : "subject-bound"
       const override = protectedField && supplied
+      const failure = inputFailure(`create input must not provide ${label} field ${name}`)
 
-      return override ? pipe(inputFailure(`create input must not provide ${label} field ${name}`), Effect.fail) : compiled.evaluate(input, subject)
+      return override ? Effect.fail(failure) : compiled.evaluate(input, subject)
     }
 
     return new Data.Class({ inputSchema: compiled.inputSchema, read })
   })
 
-  const materialize = (input: StructValue, subject: StructValue) => pipe(
-    Record.toEntries(plan),
-    Effect.forEach(([name, field]) => pipe(field.read(input, subject), Effect.map((value) => [name, value] as const))),
-    Effect.map(Record.fromEntries),
-  )
+  const materialize = Effect.fn("Creation.materialize")(function* (input: StructValue, subject: StructValue) {
+    const entries = Record.toEntries(plan)
+
+    const materializeField = Effect.fn("Creation.materializeField")(function* ([name, field]) {
+      const value = yield* field.read(input, subject)
+
+      return [name, value] as const
+    })
+    const values = yield* Effect.forEach(entries, materializeField)
+
+    return Record.fromEntries(values)
+  })
 
   const inputFields = Record.map(plan, Struct.get("inputSchema"))
   const fromSubject = Record.map(bindings, ({ field }) => `subject.${field}`)
   const inspection = CreationInspectionSchema.make({ defaults, generated: generations, fromSubject })
 
   return new Data.Class({ inputFields, materialize, inspection })
-}
+})
 
-export const Creation = { compile: Effect.fn("Creation.compile")(compile) }
+export const Creation = { compile }

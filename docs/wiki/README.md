@@ -34,10 +34,12 @@ The 2026-09-22 semantic hardening made compiler and feature-flag definition fail
 
 The 2026-09-22 deterministic lint remediation completes the repository-wide `better-typescript` and TypeScript backlog after the native 0.4.25 executable fix. It also records the current test-fixture rule scope and a temporary safety-comment-rule limitation rather than presenting those exclusions as behavioral proof. ([Verification record](validation-strategy.md#2026-09-22-deterministic-lint-backlog-remediation))
 
+The framework package enforces a 500-line ceiling across `packages/effect-domains/src/**/*.ts` before deterministic lint. Formerly oversized resource, read-model, table, authorization, telemetry, and migration modules now expose the same public package contracts through small facades over cohesive implementation modules; package semantic lint can again partition and analyze the complete source set. ([Verification record](validation-strategy.md#2026-09-23-framework-source-line-limit))
+
 Infrastructure is now a second explicit compiler boundary after `ApplicationIR`. Provider-neutral resource and binding syntax compiles to an inspectable dependency/capability graph with canonical stable logical IDs, exact writer/backup requirements, and collision-free expanded runtime publications. The same typed `InfrastructureIR` drives in-memory or persistent local Bun execution, real Node artifact/runtime smoke coverage, and process-scoped Railway/Fly plans; unsupported multi-writer and Railway backup schedules, Cloudflare's incompatible transaction model, and local production Alchemy state are rejected before deployment. No cloud stack was applied, so provider credentials, supplied remote state, rollout behavior, and production restore remain unverified. ([Implemented contract](research-agenda.md#implemented-contract); [runtime reference](../reference/runtime.md#infrastructure-and-deployment); [verification](validation-strategy.md#2026-09-16-provider-neutral-infrastructure-and-alchemy-backends))
 
 
-The current browser cutover makes the generated Application UI an interpreter of `ApplicationIR`. `ApplicationBun.run(..., { ui })` mounts it at `/` by default; inspection drives operation forms, resource lists, declared filters, and cursor paging, while display-only presentation remains external. All thirteen example browser state machines and their Foldkit/RPC support modules have been removed. ([Current contract](../reference/runtime.md#generated-application-ui); [adapter](../../packages/effect-domains/src/application-ui.ts); [verification record](validation-strategy.md#2026-09-15-applicationir-browser-interpreter-cutover))
+The current browser cutover makes the generated Application UI an interpreter of `ApplicationIR`. `ApplicationBun.runApplication(..., { ui })` mounts it at `/` by default; inspection drives operation forms, resource lists, declared filters, and cursor paging, while display-only presentation remains external. All thirteen example browser state machines and their Foldkit/RPC support modules have been removed. ([Current contract](../reference/runtime.md#generated-application-ui); [adapter](../../packages/effect-domains/src/application-ui.ts); [verification record](validation-strategy.md#2026-09-15-applicationir-browser-interpreter-cutover))
 
 The earlier 2026-09-14 [native Cluster completion](validation-strategy.md#2026-09-14-native-cluster-completion-and-synchronization-slices) closed the durable integration gaps without a framework workflow/actor DSL. Exact-pinned native layers support local, colocated HTTP runner, and client-only modes behind one example-support boundary; report acceptance uses an application-owned outbox, recoverable suspension, explicit cancellation, immutable artifact reconciliation, and topology guards. Live two-runner verification split shards and completed an approval workflow after owner failure. Field Notes separately proves typed SQL EventLog replica replay/conflict policy while keeping that policy out of canonical Resource metadata. The result is bounded to colocated SQLite processes and one event/projection policy.
 
@@ -88,6 +90,8 @@ bun run build
 ```
 
 `bun run check` runs manifest formatting, workspace and root lint, independent TypeScript checks, the integration suite, and deterministic dependency/boundary checks. Live semantic review uses the API key from `.env`:
+
+The `effect-domains` workspace lint first runs `lint:file-lines`; any framework source file above 500 physical lines fails before Better TypeScript analysis.
 
 ```bash
 bun run check

@@ -18,10 +18,10 @@ type ApplicationPart = Data.TaggedEnum<{
 
 class ApplicationSpec<
   Parts extends ReadonlyArray<ApplicationPart> = ReadonlyArray<ApplicationPart>,
-> extends Data.Class<{
-  readonly name: string
-  readonly parts: Parts
-}> {}
+> extends Data.Class<Readonly<{
+  name: string
+  parts: Parts
+}>> {}
 
 const ApplicationParts = Data.taggedEnum<ApplicationPart>()
 
@@ -66,12 +66,12 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   }
 }
 
-class CompiledPart extends Data.Class<{
-  readonly bundles: ReadonlyArray<RpcBundle>
-  readonly resources: ReadonlyArray<CompiledResource>
-  readonly commands: ReadonlyArray<CommandLive>
-  readonly featureFlags: ReadonlyArray<FeatureFlag>
-}> {}
+class CompiledPart extends Data.Class<Readonly<{
+  bundles: ReadonlyArray<RpcBundle>
+  resources: ReadonlyArray<CompiledResource>
+  commands: ReadonlyArray<CommandLive>
+  featureFlags: ReadonlyArray<FeatureFlag>
+}>> {}
 
 const noBundles: ReadonlyArray<RpcBundle> = Object.freeze([])
 const noResources: ReadonlyArray<CompiledResource> = Object.freeze([])
@@ -112,27 +112,35 @@ type BundleRequirements<Bundle> = Layer.Services<BundleHandlers<Bundle>>
 
 type PartUnion<Spec extends ApplicationSpec> = Spec["parts"][number]
 
+type ApplicationBundleFor<
+  Spec extends ApplicationSpec,
+  Depth extends ApplicationDepth,
+> = PartBundle<PartUnion<Spec>, Depth>
+
+type ApplicationRpcsFor<
+  Spec extends ApplicationSpec,
+  Depth extends ApplicationDepth,
+> = BundleRpcs<ApplicationBundleFor<Spec, Depth>>
+
 type ApplicationIRFor<
   Spec extends ApplicationSpec,
   Depth extends ApplicationDepth = 5,
 > = Omit<ApplicationIR, "group" | "handlers"> & Readonly<{
-  group: RpcGroup.RpcGroup<
-    BundleRpcs<PartBundle<PartUnion<Spec>, Depth>>
-  >
+  group: RpcGroup.RpcGroup<ApplicationRpcsFor<Spec, Depth>>
   handlers: Layer.Layer<
-    Rpc.ToHandler<BundleRpcs<PartBundle<PartUnion<Spec>, Depth>>>,
-    BundleError<PartBundle<PartUnion<Spec>, Depth>>,
-    BundleRequirements<PartBundle<PartUnion<Spec>, Depth>>
+    Rpc.ToHandler<ApplicationRpcsFor<Spec, Depth>>,
+    BundleError<ApplicationBundleFor<Spec, Depth>>,
+    BundleRequirements<ApplicationBundleFor<Spec, Depth>>
   >
 }>
 
-export interface ApplicationIR extends RpcBundle {
-  readonly name: string
-  readonly resources: ReadonlyArray<CompiledResource>
-  readonly commands: ReadonlyArray<CommandLive>
-  readonly featureFlags: ReadonlyArray<FeatureFlag>
-  readonly tables: ReadonlyArray<Table>
-}
+export type ApplicationIR = RpcBundle & Readonly<{
+  name: string
+  resources: ReadonlyArray<CompiledResource>
+  commands: ReadonlyArray<CommandLive>
+  featureFlags: ReadonlyArray<FeatureFlag>
+  tables: ReadonlyArray<Table>
+}>
 
 
 const containsTable = Array.containsWith(Equivalence.strictEqual<Table>())
@@ -160,8 +168,8 @@ const validateApplication = Effect.fn("Application.validate")(function* (
           reason: `Resource table ${table.name} references unregistered table ${target.name}; use the registered resource's table`,
         })
       }
-    }))
-  }))
+    }), { discard: true })
+  }), { discard: true })
 
   const snapshots = Array.map(tables, Table.snapshot)
 
@@ -181,8 +189,8 @@ const validateApplication = Effect.fn("Application.validate")(function* (
           reason: `Command ${command.spec.name} reads unregistered table ${dependency.name}; use the registered resource definition`,
         })
       }
-    }))
-  }))
+    }), { discard: true })
+  }), { discard: true })
 
   yield* Effect.reduce(procedures, HashSet.empty<string>, Effect.fn("Application.validateOperation")(function* (names, procedure) {
     if (HashSet.has(names, procedure._tag)) {
@@ -190,7 +198,7 @@ const validateApplication = Effect.fn("Application.validate")(function* (
     }
 
     if (RpcSchema.isStreamSchema(procedure.successSchema)) {
-      return yield* ApplicationDefinitionError.make({ reason: `Application commands must be unary: ${procedure._tag}` })
+      return yield* ApplicationDefinitionError.make({ reason: `Application operations must be unary: ${procedure._tag}` })
     }
 
     return HashSet.add(names, procedure._tag)
@@ -254,12 +262,10 @@ const compileApplicationEffect = Effect.fn("Application.compile")(function* (
   const resources = Array.flatMap(parts, Struct.get("resources"))
   const commands = Array.flatMap(parts, Struct.get("commands"))
   const featureFlagDeclarations = Array.flatMap(parts, Struct.get("featureFlags"))
-
   const featureFlags = yield* pipe(
     FeatureFlags.compile(featureFlagDeclarations),
     Effect.mapError(({ reason }) => ApplicationDefinitionError.make({ reason })),
   )
-
   const groups = Array.map(bundles, Struct.get("group"))
 
   const validation = yield* pipe(
@@ -291,6 +297,7 @@ function compileApplication(definition: ApplicationSpec): Effect.Effect<Applicat
   return compileApplicationEffect(definition)
 }
 
+
 const prepareApplication = (
   application: ApplicationIR,
   store: (typeof SchemaStore)["Service"],
@@ -307,5 +314,5 @@ export const Part = {
 export const Application = {
   define,
   compile: compileApplication,
-  prepare: Effect.fn("Application.prepare")(prepareApplication),
+  prepare: prepareApplication,
 }

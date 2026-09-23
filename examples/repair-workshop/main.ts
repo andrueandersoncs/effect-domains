@@ -1,10 +1,10 @@
 import { pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { RepairWorkshopApplication } from "./application.ts"
 import { RepairWorkshopMigrations } from "./migrations.ts"
 
 
-const program = ApplicationBun.run(RepairWorkshopApplication, {
+const program = ApplicationBun.runApplication(RepairWorkshopApplication, {
   database: { migrations: RepairWorkshopMigrations },
   ui: {
     presentation: {

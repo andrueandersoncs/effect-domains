@@ -4,7 +4,7 @@ description: Bun runner options, environment variables, generated commands, HTTP
 
 # Runtime and clients
 
-This reference covers `ApplicationBun.run` and the provider-neutral `ApplicationBun.runInfrastructure` path in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
+This reference covers `ApplicationBun.runApplication` and the provider-neutral `ApplicationBun.runInfrastructure` path in the current Bun workspace. The [first-run tutorial](/getting-started) shows a complete invocation; [define a resource](/guides/define-a-resource) covers application setup.
 
 ## Application composition
 
@@ -68,11 +68,11 @@ The memory layer resets on process restart. Persistent, remote, targeted, schedu
 
 ## Bun runner
 
-Import `ApplicationBun` from `effect-domains/application-bun`. Use `ApplicationBun.run(application, options)` when the entrypoint intentionally owns runtime publications and migration configuration. Use `ApplicationBun.runInfrastructure(infrastructure, options)` when an `InfrastructureIR` is authoritative: it derives the application, migration history, RPC path, MCP path, UI path, and UI presentation from that graph. Both return the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
+Import `ApplicationBun` from `effect-domains/application-bun`. Use `ApplicationBun.runApplication(application, options)` when the entrypoint intentionally owns runtime publications and migration configuration. Use `ApplicationBun.runInfrastructure(infrastructure, options)` when an `InfrastructureIR` is authoritative: it derives the application, migration history, RPC path, MCP path, UI path, and UI presentation from that graph. Both return the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
 
 `runInfrastructure` accepts local runtime concerns without restating deployment intent: an optional database filename for a persistent store, services, initialization, background layers, native routes, and telemetry. It derives persistent storage from the normal `<PREFIX>_DB` configuration and uses `:memory:` for an ephemeral store; supplying a filename for an ephemeral declaration fails before command execution. It does not accept RPC, MCP, UI, or UI-asset overrides.
 
-`ApplicationBun.run` accepts:
+`ApplicationBun.runApplication` accepts:
 
 | Option | Contract |
 | --- | --- |
@@ -204,7 +204,7 @@ The checked-in examples are [`alchemy.railway.ts`](../../examples/reading-list/a
 
 ## OpenTelemetry
 
-`ApplicationBun.run` can install one scoped OTLP runtime for traces, metrics, and logs. It covers `serve`, remote CLI, inspection, initialization, background layers, and `worker`. The generated UI uses one persistent browser runtime and forwards selected signals through a same-origin gateway. Canonical schemas and operation contracts contain no telemetry annotations.
+`ApplicationBun.runApplication` can install one scoped OTLP runtime for traces, metrics, and logs. It covers `serve`, remote CLI, inspection, initialization, background layers, and `worker`. The generated UI uses one persistent browser runtime and forwards selected signals through a same-origin gateway. Canonical schemas and operation contracts contain no telemetry annotations.
 
 No endpoint means no runtime-owned exporter or browser gateway traffic. Independently supplied tracer, metric, and logger services remain usable. `telemetry: false` disables the exporter, automatic safe HTTP/RPC observation, browser gateway, and runtime metrics.
 
@@ -382,7 +382,7 @@ Protected tools require bearer credentials on every call. Tool discovery exposes
 
 ### Generated Application UI
 
-`ApplicationBun.run(application, { ui: true })` mounts the shared UI at `/`. The object form accepts `{ path?, presentation?, allowedOrigins? }`; `path` defaults to `/`. The runtime loads prebuilt `@effect-domains/application-ui` JavaScript and CSS and passes the compiled `ApplicationIR` inspection to the browser. It does not compile assets at startup.
+`ApplicationBun.runApplication(application, { ui: true })` mounts the shared UI at `/`. The object form accepts `{ path?, presentation?, allowedOrigins? }`; `path` defaults to `/`. The runtime loads prebuilt `@effect-domains/application-ui` JavaScript and CSS and passes the compiled `ApplicationIR` inspection to the browser. It does not compile assets at startup, and it rejects either prebuilt asset above 4 MiB before decoding the file.
 
 The UI mechanically derives operation forms, resource navigation, resource lists, declared equality filters, cursor paging, and complete-JSON input from inspection. It invokes the same in-process RPC handlers as MCP, preserving middleware, service-dependent codecs, declared failures, and request-local authorization. Resource-specific browser reducers and transport clients are not part of an application.
 
@@ -390,7 +390,7 @@ The UI mechanically derives operation forms, resource navigation, resource lists
 
 Protected operations use the bearer field. Tokens remain in memory and are never written to local or session storage. A successful `identity.login` operation places its returned token in that field; `identity.logout` clears it. The UI does not bypass authentication or infer permissions.
 
-`allowedOrigins` lists exact origins accepted by the UI's call endpoint when using a non-loopback host. It is an origin check, not CORS configuration, authentication policy, or a permission grant. Loopback hosts are trusted by default.
+`allowedOrigins` lists exact origins accepted by the UI's call endpoint when using a non-loopback host. It is an origin check, not CORS configuration, authentication policy, or a permission grant. Loopback hosts are trusted by default. Call envelopes must use `application/json` and fit within 64 KiB.
 
 Applications may still add native HTTP `routes` for behavior that is not a mechanical representation of an operation contract, such as downloading a generated artifact. They do not need authored browser startup, RPC, paging, form, session, or static-serving modules.
 

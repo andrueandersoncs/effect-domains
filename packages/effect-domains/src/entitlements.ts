@@ -182,10 +182,18 @@ class EntitlementSource<
 
 export class EntitlementRequired extends Schema.TaggedError<EntitlementRequired>()("EntitlementRequired", { entitlement: Schema.String }) {}
 export class EntitlementUnavailable extends Schema.TaggedError<EntitlementUnavailable>()("EntitlementUnavailable", {}) {}
-class EntitlementDefinitionError extends Schema.TaggedError<EntitlementDefinitionError>()("EntitlementDefinitionError", { reason: Schema.String }) {}
+export class EntitlementDefinitionError extends Schema.TaggedError<EntitlementDefinitionError>()("EntitlementDefinitionError", { reason: Schema.String }) {}
 
 
-const noEntitlement = Effect.succeed(false)
+type HasRequest = Readonly<{
+  name: string
+  key: string
+  subject: StructValue
+}>
+
+type Has = (request: HasRequest) => Effect.Effect<boolean, EntitlementUnavailable>
+
+const noEntitlement: Effect.Effect<boolean> = Effect.succeed(false)
 const unavailable = () => EntitlementUnavailable.make({})
 const invalidDefinition = (reason: string) => EntitlementDefinitionError.make({ reason })
 
@@ -216,21 +224,23 @@ const nameOccursMoreThanOnce = (names: ReadonlyArray<string>) => (name: string) 
   return matching.length > 1
 }
 
-const failureForName = (name: string) => {
+const failureForName = Effect.fn("Entitlements.failureForName")((name: string) => {
   const reason = isEmptyName(name) ? "entitlement name must not be empty" : `duplicate entitlement name ${name}`
   const failure = invalidDefinition(reason)
 
   return Effect.fail(failure)
-}
+})
 
-const validation = (definitions: ReadonlyArray<AnyEntitlementSource>) => {
-  const names = Array.map(definitions, Struct.get("name"))
+const validation = Effect.fn("Entitlements.validation")((definitions: ReadonlyArray<AnyEntitlementSource>): Effect.Effect<void, EntitlementDefinitionError> => {
+  const names = Array.map(definitions, (definition) => definition.name)
   const missing = Array.findFirst(names, isEmptyName)
   const duplicate = Array.findFirst(names, nameOccursMoreThanOnce(names))
-  const problem: Option.Option<string> = Option.orElse(missing, Function.constant(duplicate))
 
-  return pipe(problem, Option.match({ onNone: Function.constant(Effect.void), onSome: failureForName }))
-}
+  if (Option.isSome(missing)) return failureForName(missing.value)
+  if (Option.isSome(duplicate)) return failureForName(duplicate.value)
+
+  return Effect.void
+})
 
 
 
@@ -245,73 +255,72 @@ const resolverEntry = (definition: AnyEntitlementSource) => [
 const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource>>(
   definitions: Definitions,
 ): Layer.Layer<Entitlements, never, SqlClient.SqlClient> => {
-  const definitionsAreValid = validation(definitions)
-
-  Effect.runSync(definitionsAreValid)
+  Effect.runSync(validation(definitions))
 
   const entries = Array.map(definitions, resolverEntry)
   const resolvers = HashMap.fromIterable(entries)
 
-  const service = Effect.gen(function* () {
+  const service: Effect.Effect<Entitlements["Service"], never, SqlClient.SqlClient> = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
-    const has = Effect.fn("Entitlements.fromTables.has")(function* (request: Parameters<Entitlements["Service"]["has"]>[0]) {
+    const has: Has = Effect.fn("Entitlements.fromTables.has")(function* (request: HasRequest) {
       const found = HashMap.get(resolvers, request.name)
 
-      return yield* pipe(found, Option.match({
-        onNone: Function.constant(noEntitlement),
-        onSome: Effect.fn("Entitlements.fromTables.resolve")(function* (definition) {
-          const subject = yield* pipe(
-            Schema.decodeUnknownEffect(definition.subject)(request.subject),
-            Effect.mapError(unavailable),
-          )
+      if (Option.isNone(found)) return false
 
+      const definition = found.value
+      // SAFETY: Entitlement definitions accept canonical application schemas, whose decoding services are provided when the table is compiled.
+      const subjectSchema = definition.subject as unknown as Schema.ConstraintDecoder<unknown, never>
+      const subject = yield* pipe(
+        Schema.decodeUnknownOption(subjectSchema)(request.subject),
+        Effect.fromOption(unavailable),
+      )
+
+      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+      const scopeEntries = Record.toEntries(definition.scope) as
+        ReadonlyArray<readonly [string, string]>
+
+      const filterEntries = Array.map(
+        scopeEntries,
+        ([field, subjectField]) => [
+          field,
           // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-          const scopeEntries = Record.toEntries(definition.scope) as
-            ReadonlyArray<readonly [string, string]>
+          (subject as StructValue)[subjectField],
+        ] as const,
+      )
 
-          const filterEntries = Array.map(
-            scopeEntries,
-            ([field, subjectField]) => [
-              field,
-              // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-              (subject as StructValue)[subjectField],
-            ] as const,
-          )
+      const filterPredicates = Array.map(filterEntries, equality(sql))
+      const keyPredicate = equality(sql)([definition.key, request.key])
+      const predicates = [keyPredicate, ...filterPredicates]
 
-          const filterPredicates = Array.map(filterEntries, equality(sql))
-          const keyPredicate = equality(sql)([definition.key, request.key])
-          const predicates = [keyPredicate, ...filterPredicates]
+      const rows = yield* pipe(
+        sql<StructValue>`
+          SELECT * FROM ${sql(definition.table.name)}
+          WHERE ${sql.and(predicates)}
+          LIMIT 1
+        `,
+        Effect.mapError(unavailable),
+      )
 
-          const rows = yield* pipe(
-            sql<StructValue>`
-              SELECT * FROM ${sql(definition.table.name)}
-              WHERE ${sql.and(predicates)}
-              LIMIT 1
-            `,
-            Effect.mapError(unavailable),
-          )
+      const row = Array.get(rows, 0)
 
-          const row = Array.get(rows, 0)
+      if (Option.isNone(row)) return false
 
-          if (Option.isNone(row)) return !Option.isNone(row)
+      // SAFETY: Compiled table storage schemas have no unresolved decoding services at repository runtime.
+      const storageSchema = definition.table.storageSchema as unknown as Schema.ConstraintDecoder<unknown, never>
+      const decoded = yield* pipe(
+        Schema.decodeUnknownOption(storageSchema)(row.value),
+        Option.flatMap(Schema.decodeUnknownOption(GrantRowSchema)),
+        Effect.fromOption(unavailable),
+      )
 
-          const decoded = yield* pipe(
-            Schema.decodeUnknownEffect(definition.table.storageSchema)(row.value),
-            Effect.flatMap(Schema.decodeUnknownEffect(GrantRowSchema)),
-            Effect.mapError(unavailable),
-          )
+      const milliseconds = yield* Clock.currentTimeMillis
+      const now = yield* pipe(DateTime.make(milliseconds), Effect.fromOption(unavailable))
 
-          const milliseconds = yield* Clock.currentTimeMillis
-          const now = yield* pipe(DateTime.make(milliseconds), Effect.fromOption(unavailable))
-
-          return evaluateGrant(definition.grant, decoded, now)
-        }),
-      }))
+      return evaluateGrant(definition.grant, decoded, now)
     })
 
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    return Entitlements.of({ has: has as Entitlements["Service"]["has"] })
+    return Entitlements.of({ has })
   })
 
   return Layer.effect(Entitlements, service)
@@ -325,13 +334,9 @@ const fromTable = <
   fromTables([definition])
 
 export class Entitlements extends Context.Service<Entitlements, {
-  readonly has: (request: Readonly<{
-    name: string
-    key: string
-    subject: StructValue
-  }>) => Effect.Effect<boolean, EntitlementUnavailable>
+  readonly has: Has
 }>()("@effect-domains/Entitlements") {
-  static readonly require = Effect.fn("Entitlements.require")(function* (request: Parameters<Entitlements["Service"]["has"]>[0]) {
+  static readonly require: (request: HasRequest) => Effect.Effect<void, EntitlementUnavailable | EntitlementRequired> = Effect.fn("Entitlements.require")(function* (request) {
     const service = yield* Effect.serviceOption(Entitlements)
 
     if (Option.isNone(service)) return yield* EntitlementUnavailable.make({})

@@ -1,4 +1,4 @@
-import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, Tuple, flow, pipe } from "effect"
+import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, flow, pipe } from "effect"
 
 /** Retain original AST evidence because canonical and physical interpretations are different. */
 export type ScalarF<A> = Data.TaggedEnum<{
@@ -43,7 +43,11 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
 
       return Nodes.Suspend({ ast, value })
     }),
-    Match.tag("Union", (ast) => pipe(ast, Struct.get("types"), (members) => Nodes.Union({ ast, members }))),
+    Match.tag("Union", (ast) => {
+      const members = ast.types
+
+      return Nodes.Union({ ast, members })
+    }),
     Match.tag("Arrays", (ast) => {
       const single = Equivalence.strictEqual<number>()(ast.rest.length, 1)
       const homogeneous = Array.isReadonlyArrayEmpty(ast.elements) && single
@@ -52,7 +56,8 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
 
       if (!supported) return Nodes.Unsupported({ ast })
 
-      const value = pipe(Array.head(ast.rest), Option.getOrThrow)
+      const first = Array.head(ast.rest)
+      const value = Option.getOrThrow(first)
 
       return Nodes.Collection({ ast, value })
     }),
@@ -69,8 +74,10 @@ const fold = <A>(mode: "canonical" | "storage", algebra: (layer: ScalarF<A>) => 
 
     const next = HashSet.add(seen, ast)
     const layer = project(ast, storage)
+    const visitNext = visit(next)
+    const transformed = transformLayer(layer, visitNext)
 
-    return pipe(transformLayer(layer, visit(next)), algebra)
+    return algebra(transformed)
   }
 
   return pipe(HashSet.empty<SchemaAST.AST>(), visit)
@@ -94,12 +101,12 @@ export const scalarChecks = (ast: SchemaAST.AST) => Array.flatMap(ast.checks ?? 
 export type FieldCategory = "string" | "number" | "boolean"
 
 /** Canonical scalar evidence shared by authorization, persistence, and read models. */
-export class FieldIR extends Data.Class<{
-  readonly category: Option.Option<FieldCategory>
-  readonly nullable: boolean
-  readonly collection: boolean
-  readonly transformsStoredNull: boolean
-}> {}
+export class FieldIR extends Data.Class<Readonly<{
+  category: Option.Option<FieldCategory>
+  nullable: boolean
+  collection: boolean
+  transformsStoredNull: boolean
+}>> {}
 
 const emptyCategory = Option.none<FieldCategory>()
 
@@ -117,13 +124,17 @@ const optionalString = pipe(Option.some<FieldCategory>("string"), describe, Opti
 const optionalNumber = pipe(Option.some<FieldCategory>("number"), describe, Option.some)
 const optionalBoolean = pipe(Option.some<FieldCategory>("boolean"), describe, Option.some)
 
+const finiteNumber = (ast: SchemaAST.Number) => {
+  const checks = scalarChecks(ast)
 
-const finiteNumber = (ast: SchemaAST.Number) => pipe(scalarChecks(ast), Array.some((check) => {
-  const id = ownValue(check.annotations?.representation, "id")
+  return Array.some(checks, (check) => {
+    const id = ownValue(check.annotations?.representation, "id")
+    const isFinite = Equivalence.strictEqual<unknown>()(id, "effect/schema/isFinite")
+    const isInteger = Equivalence.strictEqual<unknown>()(id, "effect/schema/isInt")
 
-  return Equivalence.strictEqual<unknown>()(id, "effect/schema/isFinite")
-    || Equivalence.strictEqual<unknown>()(id, "effect/schema/isInt")
-}))
+    return isFinite || isInteger
+  })
+}
 
 export const describeLiteral = (value: unknown) => pipe(
   Match.value(value),
@@ -148,29 +159,33 @@ const combineDescriptions = (
   descriptions: ReadonlyArray<Option.Option<FieldIR>>,
 ) => {
   const merge = (left: FieldIR, right: FieldIR) => {
+    const same = sameCategory(left.category, right.category)
     const scalar = !right.collection
-    const compatible = sameCategory(left.category, right.category)
-    const unsupported = !scalar
-    const incompatible = !compatible
+    const compatible = scalar && same
 
-    if (unsupported) return Option.none<FieldIR>()
+    if (!compatible) return Option.none<FieldIR>()
 
-    const category = Option.orElse(left.category, Function.constant(right.category))
+    const category = Option.orElse(left.category, () => right.category)
 
-    const combined = pipe(describe(
+    const combined = describe(
       category,
       left.nullable || right.nullable,
       left.collection,
       left.transformsStoredNull || right.transformsStoredNull,
-    ), Option.some)
+    )
 
-    return compatible ? combined : Option.none<FieldIR>()
+    return Option.some(combined)
   }
 
   const reduce = (
     state: Option.Option<FieldIR>,
     next: Option.Option<FieldIR>,
-  ) => pipe(Option.all([state, next] as const), Option.flatMap(Function.tupled(merge)))
+  ) => {
+    const pair = Option.all([state, next] as const)
+    const mergePair = Function.tupled(merge)
+
+    return Option.flatMap(pair, mergePair)
+  }
 
   const initial = Option.some(neutralDescription)
 
@@ -179,6 +194,14 @@ const combineDescriptions = (
 
 const asCollection = (field: FieldIR) =>
   new FieldIR({ ...field, collection: true })
+
+const describeEnumEntry = (entry: readonly [string, string | number]) => describeLiteral(entry[1])
+
+const describeEnum = flow(
+  Struct.get<SchemaAST.Enum, "enums">("enums"),
+  Array.map(describeEnumEntry),
+  combineDescriptions,
+)
 
 const canonicalAlgebra = (
   layer: ScalarF<Option.Option<FieldIR>>,
@@ -193,14 +216,7 @@ const canonicalAlgebra = (
     Match.tag("Boolean", Function.constant(optionalBoolean)),
     Match.tag("Null", Function.constant(optionalNull)),
     Match.tag("Literal", flow(Struct.get<SchemaAST.Literal, "literal">("literal"), describeLiteral)),
-    Match.tag(
-      "Enum",
-      flow(
-        Struct.get<SchemaAST.Enum, "enums">("enums"),
-        Array.map(flow(Tuple.get<readonly [string, string | number], 1>(1), describeLiteral)),
-        combineDescriptions,
-      ),
-    ),
+    Match.tag("Enum", describeEnum),
     Match.orElse(Option.none<FieldIR>),
   )
 
@@ -210,11 +226,11 @@ const canonicalAlgebra = (
     Encoding: Option.none<FieldIR>,
     Suspend: ({ value }) => value,
     Union: ({ members }) => combineDescriptions(members),
-    Collection: ({ value }) => pipe(
-      value,
-      Option.filter(Predicate.not(Struct.get("collection"))),
-      Option.map(asCollection),
-    ),
+    Collection: ({ value }) => {
+      const scalar = Option.filter(value, (field) => !field.collection)
+
+      return Option.map(scalar, asCollection)
+    },
   }))
 }
 

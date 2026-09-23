@@ -98,6 +98,6 @@ Most examples use this layout:
 | `sqlite.ts` | `Command` specifications, implementations, and authored SQL where needed |
 | `application.ts` | `Application.define` parts and the compiled `ApplicationIR` |
 | `migrations.ts` | Ordered `SqliteMigrations.history(...)` imports of frozen artifacts |
-| `main.ts` | `ApplicationBun.run` runtime service wiring and admin opt-in |
+| `main.ts` | `ApplicationBun.runApplication` runtime service wiring and admin opt-in |
 
 For shared command options, see [runtime and clients](/reference/runtime). For dated verification and its limits, see the [validation record](/wiki/validation-strategy).

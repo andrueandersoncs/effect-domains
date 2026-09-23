@@ -86,10 +86,9 @@ const makeRpcCli = <
 
         yield* Stream.run(output, stdout)
       }, Effect.scoped, Effect.catch(Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
-        const userMessage = yield* pipe(
-          Schema.encodeUnknownEffect(errorSchema)(cause),
-          Effect.catch(() => pipe(causeMessage(cause), Effect.succeed)),
-        )
+        const encodedError = Schema.encodeUnknownEffect(errorSchema)(cause)
+        const fallbackMessage = () => Effect.succeed(causeMessage(cause))
+        const userMessage = yield* pipe(encodedError, Effect.catch(fallbackMessage))
 
         return yield* CliError.UserError.make({ cause, userMessage })
       })))

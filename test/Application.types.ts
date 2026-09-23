@@ -6,7 +6,7 @@ import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 import { Application, Part } from "effect-domains/application"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false
@@ -44,7 +44,7 @@ const nestedParts = [Part.application(emptyDefinition), Part.application(NotesDe
 const nestedDefinition = Application.define({ name: "nested-notes", parts: nestedParts })
 const nestedNotes = Effect.runSync(Application.compile(nestedDefinition))
 
-const missing = ApplicationBun.run(nestedNotes, {
+const missing = ApplicationBun.runApplication(nestedNotes, {
   database: { migrations: [] },
 })
 
@@ -61,12 +61,12 @@ const storedTextParts = [Part.native({ group: storedTextGroup, handlers: Layer.e
 const storedTextDefinition = Application.define({ name: "stored-text", parts: storedTextParts })
 const storedTextApplication = Effect.runSync(Application.compile(storedTextDefinition))
 
-const storedTextCli = ApplicationBun.run(storedTextApplication, {
+const storedTextCli = ApplicationBun.runApplication(storedTextApplication, {
   database: { migrations: [] },
   services: storedPrefix,
 })
 
-const complete = ApplicationBun.run(nestedNotes, {
+const complete = ApplicationBun.runApplication(nestedNotes, {
   database: { migrations: [] },
   services: storedPrefix,
 })
@@ -99,7 +99,7 @@ const route = Effect.gen(function* () {
 const routes = HttpRouter.add("GET", "/probe", route)
 const services = pipe(Layer.effectDiscard(executionOutput), Layer.provideMerge(execution))
 
-const nativeRuntime = ApplicationBun.run(emptyApplication, {
+const nativeRuntime = ApplicationBun.runApplication(emptyApplication, {
   database: { migrations: [] },
   services,
   initialize: executionOutput,
@@ -123,11 +123,11 @@ const middlewareParts = [Part.native({ group: middlewareGroup, handlers: Layer.e
 const middlewareDefinition = Application.define({ name: "middleware-requirement", parts: middlewareParts })
 const middlewareApplication = Effect.runSync(Application.compile(middlewareDefinition))
 
-const middlewareRuntime = ApplicationBun.run(middlewareApplication, {
+const middlewareRuntime = ApplicationBun.runApplication(middlewareApplication, {
   database: { migrations: [] },
 })
 
-const minimal = ApplicationBun.run(emptyApplication, {
+const minimal = ApplicationBun.runApplication(emptyApplication, {
   database: { migrations: [] },
   ui: true,
 })

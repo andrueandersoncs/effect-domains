@@ -1,6 +1,6 @@
 import { Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { ReportExportsApplication } from "./application.ts"
 import { ReportExportExecutionStoreLive } from "./executions.ts"
@@ -30,7 +30,7 @@ const services = Layer.mergeAll(
 
 const initialize = seedReportExportSubscriptions()
 
-const program = ApplicationBun.run(ReportExportsApplication, {
+const program = ApplicationBun.runApplication(ReportExportsApplication, {
   database: { migrations: ReportExportMigrations },
   services,
   initialize,

@@ -33,7 +33,7 @@ export const Catalog = Application.compile(Application.define({
 
 An application definition contains explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` flattens nested resources and rejects duplicate tables or RPC names. `Resource.compile(Books)` derives the UUIDv7 key, SQL columns, and selected `books.*` RPCs; `Resource.table(Books)` and `Resource.repository(Books)` expose the typed local products.
 
-`ApplicationBun.run(application, options)` returns the application Effect; execute it with the re-exported `ApplicationBun.runMain` boundary. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
+`ApplicationBun.runApplication(application, options)` returns the application Effect; execute it with the re-exported `ApplicationBun.runMain` boundary. Import reviewed artifact JSONs in order and decode them as an Effect. `filename`, `services`, and `initialize` are optional:
 
 ```ts
 import { Effect, pipe } from "effect"
@@ -43,7 +43,7 @@ import initial from "./migrations/001_initial.json" with { type: "json" }
 
 const program = Effect.gen(function* () {
   const migrations = yield* SqliteMigrations.decodeHistory([initial])
-  yield* ApplicationBun.run(Catalog, {
+  yield* ApplicationBun.runApplication(Catalog, {
     database: { migrations },
     admin: true,
   })
@@ -170,7 +170,7 @@ See the [explicit authoring walkthrough](examples/README.md#review-schema-change
 
 ## Native execution composition
 
-Compose native workflow/entity execution layers in `ApplicationBun.run`'s `services`, provide the execution database with `SqliteBunRuntime.privateClient({ application, purpose: "execution" })`, and register workers through `background`. There is no `execution` option. The version-sensitive [`cluster-runtime`](packages/example-support/src/cluster-runtime.ts) boundary selects local, colocated HTTP runner, or client-only execution and prevents client-only servers from registering workers. The private client rejects the application database file or inode before native execution initializes. Application and execution transactions remain separate; report acceptance bridges them with an application-owned outbox and deterministic at-least-once dispatch rather than a cross-database transaction. See the [runtime reference](docs/reference/runtime.md#durable-execution), [report export runbook](examples/report-exports/README.md), and [appointment reminder runbook](examples/appointment-reminders/README.md).
+Compose native workflow/entity execution layers in `ApplicationBun.runApplication`'s `services`, provide the execution database with `SqliteBunRuntime.privateClient({ application, purpose: "execution" })`, and register workers through `background`. There is no `execution` option. The version-sensitive [`cluster-runtime`](packages/example-support/src/cluster-runtime.ts) boundary selects local, colocated HTTP runner, or client-only execution and prevents client-only servers from registering workers. The private client uses `<APPLICATION>_EXECUTION_DB` by default or `:memory:` in the worker-only example. Application persistence continues to use `ApplicationBun`'s normal database option.
 
 ## Run the reservation application
 

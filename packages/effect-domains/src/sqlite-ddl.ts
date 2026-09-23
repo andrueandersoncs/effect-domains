@@ -1,4 +1,4 @@
-import { Array, Equivalence, Function, Match, Option, Predicate, Schema, pipe } from "effect"
+import { Array, Function, Match, Option, Predicate, Schema, pipe } from "effect"
 import type { TableCheck, TableField, TableForeignKey, TableIndex, TableSnapshot, TableUnique } from "./table.ts"
 
 export const quoteIdentifier = (identifier: string) =>
@@ -40,7 +40,8 @@ const renderCheck = (field: TableField) => (check: TableCheck) => {
 
   return pipe(Match.value(check), Match.tagsExhaustive({
     OneOf: ({ values }) => {
-      const literals = pipe(values, Array.map(quoteLiteral), Array.join(", "))
+      const quotedValues = Array.map(values, quoteLiteral)
+      const literals = Array.join(quotedValues, ", ")
 
       return `CHECK (${column} IN (${literals}))`
     },
@@ -105,7 +106,7 @@ const renderTableColumn = (identifier: string) => (field: TableField) => {
 }
 
 const primaryKeyFor = (identifier: string) => (field: TableField) =>
-  Equivalence.strictEqual<string>()(field.name, identifier)
+  field.name === identifier
 
 export const renderCreateTable = (table: TableSnapshot) => {
   const columns = Array.map(table.fields, renderTableColumn(table.identifier))

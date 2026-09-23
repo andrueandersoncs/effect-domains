@@ -25,9 +25,6 @@ class FeatureFlagDefinitionError extends Schema.TaggedError<FeatureFlagDefinitio
   }
 }
 
-
-
-
 const define = <const Name extends string>(
   definition: FeatureFlag<Name>,
 ): FeatureFlag<Name> => pipe(
@@ -45,11 +42,7 @@ const define = <const Name extends string>(
   }),
 )
 
-const duplicateName = (names: ReadonlyArray<string>) => (name: string) => {
-  const matches = Array.filter(names, (candidate) => Equivalence.strictEqual<string>()(candidate, name))
-
-  return matches.length > 1
-}
+const flagsEqual = Equivalence.strictEqual<FeatureFlag>()
 
 const isBlankFlagName = (name: string) => {
   const trimmed = name.trim()
@@ -61,8 +54,14 @@ const validate = Effect.fn("FeatureFlags.validate")(function* (
   flags: ReadonlyArray<FeatureFlag>,
 ) {
   const names = Array.map(flags, Struct.get("name"))
+  const nameCounts = new Map<string, number>()
+
+  for (const name of names) {
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1)
+  }
+
   const empty = Array.findFirst(names, isBlankFlagName)
-  const duplicate = Array.findFirst(names, duplicateName(names))
+  const duplicate = Array.findFirst(names, (name) => (nameCounts.get(name) ?? 0) > 1)
   const problem = Option.orElse(empty, Function.constant(duplicate))
 
   if (Option.isSome(problem)) {
@@ -74,25 +73,25 @@ const validate = Effect.fn("FeatureFlags.validate")(function* (
   }
 })
 
-const compileFlags = (
+const compileFlags = Effect.fn("FeatureFlags.compile")((
   declarations: ReadonlyArray<FeatureFlag>,
 ) => {
   const flags = Object.freeze([...declarations])
 
   return pipe(validate(flags), Effect.as(flags))
-}
+})
 
 const unavailableFor = (flag: FeatureFlag) => () =>
   FeatureFlagUnavailable.make({ name: flag.name })
 
-const requireRegistered = (
+const requireRegistered = Effect.fn("FeatureFlags.requireRegistered")((
   registered: ReadonlyArray<FeatureFlag>,
   flag: FeatureFlag,
 ) => pipe(
-  Array.findFirst(registered, (candidate) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag)),
+  Array.findFirst(registered, (candidate) => flagsEqual(candidate, flag)),
   Effect.fromOption,
   Effect.mapError(unavailableFor(flag)),
-)
+))
 
 const stateFor = (flag: FeatureFlag) => (
   current: HashMap.HashMap<string, boolean>,
@@ -108,20 +107,16 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
 ): Layer.Layer<FeatureFlags, FeatureFlagDefinitionError> => {
   const make = Effect.gen(function* () {
     const flags = yield* compileFlags(declarations)
+    const registered = new Set(flags)
+    const overrideCounts = new Map<FeatureFlag, number>()
 
-    const overrideMatches = (flag: FeatureFlag) =>
-      ([candidate]: FeatureFlagOverrides<Flags>[number]) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag)
-
-    const isRegistered = (flag: FeatureFlag) => Array.some(flags, (candidate) => Equivalence.strictEqual<FeatureFlag>()(candidate, flag))
-    const unknownOverride = Array.findFirst(overrides, ([flag]) => !isRegistered(flag))
-
-    const overrideOccursMoreThanOnce = ([flag]: FeatureFlagOverrides<Flags>[number]) => {
-      const matches = Array.filter(overrides, overrideMatches(flag))
-
-      return matches.length > 1
+    for (const [flag] of overrides) {
+      overrideCounts.set(flag, (overrideCounts.get(flag) ?? 0) + 1)
     }
 
-    const duplicateOverride = Array.findFirst(overrides, overrideOccursMoreThanOnce)
+    const overrideByFlag = new Map(overrides)
+    const unknownOverride = Array.findFirst(overrides, ([flag]) => !registered.has(flag))
+    const duplicateOverride = Array.findFirst(overrides, ([flag]) => (overrideCounts.get(flag) ?? 0) > 1)
 
     if (Option.isSome(unknownOverride)) {
       const [flag] = unknownOverride.value
@@ -140,12 +135,7 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
     }
 
     const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
-      const override = Array.findFirst(overrides, overrideMatches(flag))
-
-      const enabled = Option.match(override, {
-        onNone: () => flag.default,
-        onSome: ([, enabled]) => enabled,
-      })
+      const enabled = overrideByFlag.get(flag) ?? flag.default
 
       return [flag.name, enabled]
     }
@@ -191,8 +181,8 @@ export class FeatureFlags extends Context.Service<FeatureFlags, {
   readonly toggle: (flag: FeatureFlag) => Effect.Effect<boolean, FeatureFlagUnavailable>
 }>()("@effect-domains/FeatureFlags") {
   static readonly define = define
-  static readonly compile = compileFlags
   static readonly layerMemory = layerMemory
+  static readonly compile = compileFlags
 
   static readonly isEnabled = Effect.fn("FeatureFlags.isEnabled")(function* (flag: FeatureFlag) {
     const featureFlags = yield* FeatureFlags

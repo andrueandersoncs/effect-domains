@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Schema, String as EffectString, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Schema, pipe } from "effect"
 import { applicationUiPaths } from "./application-ui-paths.ts"
 import type { ApplicationIR } from "./application.ts"
 
@@ -51,11 +51,11 @@ class InfrastructureResourceIR extends Data.Class<{
   readonly capabilities: ReadonlyArray<InfrastructureCapability>
 }> {}
 
-type InfrastructureIRFields = {
-  readonly name: string
-  readonly resources: ReadonlyArray<InfrastructureResourceIR>
-  readonly capabilities: ReadonlyArray<InfrastructureCapability>
-}
+type InfrastructureIRFields = Readonly<{
+  name: string
+  resources: ReadonlyArray<InfrastructureResourceIR>
+  capabilities: ReadonlyArray<InfrastructureCapability>
+}>
 
 export class InfrastructureIR extends Data.Class<InfrastructureIRFields> {}
 
@@ -127,14 +127,15 @@ const bindingTarget = (binding: InfrastructureBinding): InfrastructureResource =
 const dependencies = (resource: InfrastructureResource): ReadonlyArray<InfrastructureResource> => {
   const resourceBindings = bindings(resource)
   const bound = Array.map(resourceBindings, bindingTarget)
+  const boundDependencies = Function.constant(bound)
   const noDependencies = Function.constant<ReadonlyArray<InfrastructureResource>>([])
 
   return pipe(
     Match.value(resource),
     Match.tagsExhaustive({
-      HttpRuntime: Function.constant(bound),
-      BackgroundRuntime: Function.constant(bound),
-      ScheduledRuntime: Function.constant(bound),
+      HttpRuntime: boundDependencies,
+      BackgroundRuntime: boundDependencies,
+      ScheduledRuntime: boundDependencies,
       SqliteStore: noDependencies,
       DurableFilesystem: noDependencies,
       ObjectStore: noDependencies,
@@ -273,29 +274,26 @@ const validateId = Effect.fn("Infrastructure.validateId")(function* (
   id: string,
 ) {
   const trimmed = id.trim()
-  const empty = EffectString.isEmpty(trimmed)
-  const padded = trimmed !== id
-  const duplicate = HashSet.has(seen, id)
-  const emptyReason = Option.some("Infrastructure resource IDs must not be empty")
-  const paddedReason = Option.some(`Infrastructure resource ID ${id} must not contain leading or trailing whitespace`)
-  const duplicateReason = Option.some(`Duplicate infrastructure resource ID ${id}`)
-  const noReason = Option.none<string>()
 
-  const reason = pipe(
-    Match.value({ empty, padded, duplicate }),
-    Match.when({ empty: true }, Function.constant(emptyReason)),
-    Match.when({ padded: true }, Function.constant(paddedReason)),
-    Match.when({ duplicate: true }, Function.constant(duplicateReason)),
-    Match.orElse(Function.constant(noReason)),
-  )
+  if (trimmed.length === 0) {
+    return yield* InfrastructureDefinitionError.make({
+      reason: "Infrastructure resource IDs must not be empty",
+    })
+  }
 
-  const updated = HashSet.add(seen, id)
-  const updatedEffect = Effect.succeed(updated)
+  if (trimmed !== id) {
+    return yield* InfrastructureDefinitionError.make({
+      reason: `Infrastructure resource ID ${id} must not contain leading or trailing whitespace`,
+    })
+  }
 
-  return yield* Option.match(reason, {
-    onNone: Function.constant(updatedEffect),
-    onSome: (reason) => InfrastructureDefinitionError.make({ reason }),
-  })
+  if (HashSet.has(seen, id)) {
+    return yield* InfrastructureDefinitionError.make({
+      reason: `Duplicate infrastructure resource ID ${id}`,
+    })
+  }
+
+  return HashSet.add(seen, id)
 })
 
 class PublicationAccumulator extends Data.Class<{
@@ -331,7 +329,7 @@ const validatePublication = (
   const occupiedPaths = publicationPaths(publication)
   const collision = Array.findFirst(occupiedPaths, (path) => HashSet.has(state.paths, path))
 
-  if (Option.isSome(collision)) {
+  if (collision._tag === "Some") {
     return yield* InfrastructureDefinitionError.make({
       reason: `Infrastructure runtime ${runtime.id} declares publication path ${collision.value} more than once`,
     })
@@ -355,72 +353,68 @@ const validatePublications = Effect.fn("Infrastructure.validatePublications")(fu
   yield* Effect.reduce(resourcePublications, initialState, validatePublication(resource))
 })
 
-
 const validateResourceDependencies = (
   resources: ReadonlyArray<InfrastructureResource>,
 ) => Effect.fn("Infrastructure.validateDependencies")(function* (resource: InfrastructureResource) {
   const resourceDependencies = dependencies(resource)
-
-  yield* Effect.forEach(resourceDependencies, Effect.fn("Infrastructure.validateDependency")(function* (dependency) {
+  const validateDependency = Effect.fn("Infrastructure.validateDependency")(function* (
+    dependency: InfrastructureResource,
+  ) {
     if (!containsResource(resources, dependency)) {
       return yield* InfrastructureDefinitionError.make({
         reason: `Infrastructure resource ${resource.id} references unregistered resource ${dependency.id}; use the registered descriptor`,
       })
     }
-  }), { discard: true })
+  })
+
+  yield* Effect.forEach(resourceDependencies, validateDependency, { discard: true })
 })
 
 const validateCycle: (
   resource: InfrastructureResource,
   visiting: HashSet.HashSet<string>,
   visited: HashSet.HashSet<string>,
-) => Effect.Effect<HashSet.HashSet<string>, InfrastructureDefinitionError> = Effect.fn("Infrastructure.validateCycle")(function* (
-  resource,
-  visiting,
-  visited,
-) {
-  if (HashSet.has(visited, resource.id)) return visited
+) => Effect.Effect<HashSet.HashSet<string>, InfrastructureDefinitionError> = Effect.fn("Infrastructure.validateCycle")(
+  function* (resource, visiting, visited) {
+    if (HashSet.has(visited, resource.id)) return visited
 
-  if (HashSet.has(visiting, resource.id)) {
-    return yield* InfrastructureDefinitionError.make({ reason: `Infrastructure dependency cycle includes ${resource.id}` })
-  }
+    if (HashSet.has(visiting, resource.id)) {
+      return yield* InfrastructureDefinitionError.make({
+        reason: `Infrastructure dependency cycle includes ${resource.id}`,
+      })
+    }
 
+    const nextVisiting = HashSet.add(visiting, resource.id)
+    const resourceDependencies = dependencies(resource)
 
-  const nextVisiting = HashSet.add(visiting, resource.id)
-  const resourceDependencies = dependencies(resource)
+    const nextVisited = yield* Effect.reduce(
+      resourceDependencies,
+      () => visited,
+      Effect.fn("Infrastructure.validateCycleDependency")(function* (state, dependency) {
+        return yield* validateCycle(dependency, nextVisiting, state)
+      }),
+    )
 
-  const nextVisited = yield* Effect.reduce(
-    resourceDependencies,
-    () => visited,
-    Effect.fn("Infrastructure.validateCycleDependency")(function* (state, dependency) {
-      return yield* validateCycle(dependency, nextVisiting, state)
-    }),
-  )
-
-  return HashSet.add(nextVisited, resource.id)
-})
+    return HashSet.add(nextVisited, resource.id)
+  },
+)
 
 const validateDefinition = Effect.fn("Infrastructure.validate")(function* (
   definition: InfrastructureDefinition,
 ) {
   const name = definition.name.trim()
-  const empty = EffectString.isEmpty(name)
-  const padded = name !== definition.name
-  const emptyReason = Option.some("Infrastructure name must not be empty")
-  const paddedReason = Option.some("Infrastructure name must not contain leading or trailing whitespace")
-  const noReason = Option.none<string>()
 
-  const reason = pipe(
-    Match.value({ empty, padded }),
-    Match.when({ empty: true }, Function.constant(emptyReason)),
-    Match.when({ padded: true }, Function.constant(paddedReason)),
-    Match.orElse(Function.constant(noReason)),
-  )
+  if (name.length === 0) {
+    return yield* InfrastructureDefinitionError.make({
+      reason: "Infrastructure name must not be empty",
+    })
+  }
 
-  yield* Option.match(reason, {
-    onNone: Function.constant(Effect.void),
-    onSome: (reason) => InfrastructureDefinitionError.make({ reason }),
-  })
+  if (name !== definition.name) {
+    return yield* InfrastructureDefinitionError.make({
+      reason: "Infrastructure name must not contain leading or trailing whitespace",
+    })
+  }
 
   const ids = Array.map(definition.parts, ({ id }) => id)
 

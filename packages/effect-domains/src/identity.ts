@@ -24,11 +24,11 @@ export const CurrentSessionSchema = Schema.Struct({
   subject: SubjectSchema,
 })
 
-interface AuthenticatedIdentity {
-  readonly sessionId: string
-  readonly expiresAt: DateTime.Utc
-  readonly subject: typeof SubjectSchema.Type
-}
+type AuthenticatedIdentity = Readonly<{
+  sessionId: string
+  expiresAt: DateTime.Utc
+  subject: typeof SubjectSchema.Type
+}>
 
 export class IdentityRuntime extends Context.Service<IdentityRuntime, {
   readonly login: (

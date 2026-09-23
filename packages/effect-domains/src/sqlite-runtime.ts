@@ -27,7 +27,7 @@ class PrivateDatabaseConflict extends Schema.TaggedError<PrivateDatabaseConflict
 ) {}
 
 const makeRepositoryError = (resource: string) => RepositoryError.make({ resource })
-const repositoryFailure = Function.flow(makeRepositoryError, Effect.fail)
+const repositoryFailure = (resource: string) => Effect.fail(makeRepositoryError(resource))
 
 const unknownEquals = Equivalence.strictEqual<unknown>()
 const emptyGuard = Record.empty<string, unknown>()
@@ -240,14 +240,14 @@ const migrationStore = (
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
 ) => (sql: SqlClient.SqlClient) => sqliteMigrationStore(sql, options.migrations)
 
-const enableForeignKeys = (context: Context.Context<SqlClient.SqlClient>) => {
+const enableForeignKeys = Effect.fn("SqliteRuntime.enableForeignKeys")((context: Context.Context<SqlClient.SqlClient>) => {
   const sql = Context.get(context, SqlClient.SqlClient)
 
   return pipe(
     sql`PRAGMA foreign_keys = ON`,
     Effect.asVoid,
   )
-}
+})
 
 
 const relativeParents = HashMap.make([".", true], ["", true])
@@ -319,8 +319,12 @@ const assertDistinctDatabases = Effect.fn("SqliteRuntime.assertDistinctDatabases
 
 export const environmentPrefix = (name: string) => name.toUpperCase().replaceAll(/[^A-Z0-9]/g, "_")
 
-const privateDatabaseEnvironment = (application: string) => (purpose: string) =>
-  `${environmentPrefix(application)}_${environmentPrefix(purpose)}_DB`
+const privateDatabaseEnvironment = (application: string) => (purpose: string) => {
+  const applicationPrefix = environmentPrefix(application)
+  const purposePrefix = environmentPrefix(purpose)
+
+  return `${applicationPrefix}_${purposePrefix}_DB`
+}
 
 const privateDatabaseConfig = (application: string) => (purpose: string) =>
   pipe(

@@ -1,8 +1,6 @@
 import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import type { StructValue } from "./domain.ts"
 
-
-
 export type Scalar = string | number | boolean | null
 
 const ScalarSchema = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean, Schema.Null])
@@ -61,7 +59,7 @@ const transformLayer = <A, B>(layer: PolicyF<A>, child: (value: A) => B): Policy
 }
 
 const fold = <A>(algebra: Algebra<A>) => {
-  const interpret = (policy: Policy) => pipe(transformLayer<Policy, A>(policy, interpret), algebra)
+  const interpret = (policy: Policy): A => pipe(transformLayer<Policy, A>(policy, interpret), algebra)
 
   return interpret
 }
@@ -77,14 +75,13 @@ const constant = (value: boolean) => ConstantSchema.make({ value })
 const all = (...children: ReadonlyArray<Policy>) => AllPolicySchema.make({ children })
 const any = (...children: ReadonlyArray<Policy>) => AnyPolicySchema.make({ children })
 
-export const policyFailure = Effect.fn("Policy.failure")(function* (reason: string) {
-  return yield* pipe(PolicyEvaluationError.make({ reason }), Effect.fail)
-})
+export const policyFailure = (reason: string): Effect.Effect<never, PolicyEvaluationError> =>
+  Effect.fail(PolicyEvaluationError.make({ reason }))
 
 const isScalar = Schema.is(ScalarSchema)
 const isScalarCollection = Schema.is(ScalarCollectionSchema)
 
-const valueFrom = (record: Option.Option<StructValue>, source: string, field: string) =>
+const valueFrom = (record: Option.Option<StructValue>, source: string, field: string): Effect.Effect<unknown, PolicyEvaluationError> =>
   pipe(
     record,
     Option.match({
@@ -100,7 +97,7 @@ const valueFrom = (record: Option.Option<StructValue>, source: string, field: st
     }),
   )
 
-const resolve = (operand: Operand, environment: PolicyEnvironment) =>
+const resolve = (operand: Operand, environment: PolicyEnvironment): Effect.Effect<unknown, PolicyEvaluationError> =>
   pipe(
     Match.value(operand),
     Match.tagsExhaustive({
@@ -115,31 +112,38 @@ const resolve = (operand: Operand, environment: PolicyEnvironment) =>
     }),
   )
 
-const resolveAs = <Value>(operand: Operand, environment: PolicyEnvironment, decode: (value: unknown) => Effect.Effect<Value, PolicyEvaluationError>) =>
-  pipe(resolve(operand, environment), Effect.flatMap(decode))
+const resolveAs = <Value>(
+  operand: Operand,
+  environment: PolicyEnvironment,
+  decode: (value: unknown) => Effect.Effect<Value, PolicyEvaluationError>,
+): Effect.Effect<Value, PolicyEvaluationError> => pipe(resolve(operand, environment), Effect.flatMap(decode))
 
-const scalar = (value: unknown) => isScalar(value) ? Effect.succeed(value) : policyFailure("policy operand must resolve to a finite scalar")
-const collection = (value: unknown) => isScalarCollection(value) ? Effect.succeed(value) : policyFailure("policy collection must resolve to finite scalar values")
+const scalar = (value: unknown): Effect.Effect<Scalar, PolicyEvaluationError> =>
+  isScalar(value) ? Effect.succeed(value) : policyFailure("policy operand must resolve to a finite scalar")
 
-export const resolveScalarLiteralOrSubject = Effect.fn("Policy.resolveScalarLiteralOrSubject")(function* (
+const collection = (value: unknown): Effect.Effect<ReadonlyArray<Scalar>, PolicyEvaluationError> =>
+  isScalarCollection(value) ? Effect.succeed(value) : policyFailure("policy collection must resolve to finite scalar values")
+
+export const resolveScalarLiteralOrSubject = (
   operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
   environment: PolicyEnvironment,
-) {
-  return yield* resolveAs(operand, environment, scalar)
-})
+): Effect.Effect<Scalar, PolicyEvaluationError> => resolveAs(operand, environment, scalar)
 
-export const resolveScalarCollectionLiteralOrSubject = Effect.fn("Policy.resolveScalarCollectionLiteralOrSubject")(function* (
+export const resolveScalarCollectionLiteralOrSubject = (
   operand: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>,
   environment: PolicyEnvironment,
-) {
-  return yield* resolveAs(operand, environment, collection)
-})
+): Effect.Effect<ReadonlyArray<Scalar>, PolicyEvaluationError> => resolveAs(operand, environment, collection)
 
-export const resolveScalarOperand = Effect.fn("Policy.resolveScalarOperand")(function* (operand: Operand, environment: PolicyEnvironment) {
-  return yield* resolveAs(operand, environment, scalar)
-})
+export const resolveScalarOperand = (
+  operand: Operand,
+  environment: PolicyEnvironment,
+): Effect.Effect<Scalar, PolicyEvaluationError> => resolveAs(operand, environment, scalar)
 
-const collectionOperand = (operand: Operand, environment: PolicyEnvironment) => resolveAs(operand, environment, collection)
+const collectionOperand = (
+  operand: Operand,
+  environment: PolicyEnvironment,
+): Effect.Effect<ReadonlyArray<Scalar>, PolicyEvaluationError> => resolveAs(operand, environment, collection)
+
 const scalarEquals = Equivalence.strictEqual<Scalar>()
 const containsScalar = Array.containsWith(scalarEquals)
 
@@ -147,25 +151,23 @@ const evaluateLayer: Algebra<Evaluator> = (layer) =>
   pipe(
     Match.value(layer),
     Match.tagsExhaustive({
-      Constant: ({ value }) => pipe(Effect.succeed(value), Function.constant),
-      Equal: ({ left, right }) => Effect.fn("Policy.equal")(function* (environment: PolicyEnvironment) {
+      Constant: ({ value }): Evaluator => () => Effect.succeed(value),
+      Equal: ({ left, right }) => (environment: PolicyEnvironment) => Effect.gen(function* () {
         const leftValue = yield* resolveScalarOperand(left, environment)
         const rightValue = yield* resolveScalarOperand(right, environment)
 
         return scalarEquals(leftValue, rightValue)
       }),
-      Includes: ({ collection, value }) => Effect.fn("Policy.includes")(function* (environment: PolicyEnvironment) {
+      Includes: ({ collection, value }) => (environment: PolicyEnvironment) => Effect.gen(function* () {
         const values = yield* collectionOperand(collection, environment)
         const member = yield* resolveScalarOperand(value, environment)
 
         return containsScalar(values, member)
       }),
-      All: ({ children }) => Effect.fn("Policy.all")(function* (environment: PolicyEnvironment) {
-        return yield* Effect.reduce(children, Function.constant(true), (allowed, child) => allowed ? child(environment) : Effect.succeed(false))
-      }),
-      Any: ({ children }) => Effect.fn("Policy.any")(function* (environment: PolicyEnvironment) {
-        return yield* Effect.reduce(children, Function.constant(false), (allowed, child) => allowed ? Effect.succeed(true) : child(environment))
-      }),
+      All: ({ children }) => (environment: PolicyEnvironment) =>
+        Effect.reduce(children, () => true, (allowed, child) => allowed ? child(environment) : Effect.succeed(false)),
+      Any: ({ children }) => (environment: PolicyEnvironment) =>
+        Effect.reduce(children, () => false, (allowed, child) => allowed ? Effect.succeed(true) : child(environment)),
     }),
   )
 
@@ -227,7 +229,12 @@ const snapshotLayer: Algebra<Policy> = (layer) => pipe(
   Match.tagsExhaustive({
     Constant: ({ value }) => ConstantSchema.make({ value }),
     Equal: ({ left, right }) => EqualSchema.make({ left: freezeOperand(left), right: freezeOperand(right) }),
-    Includes: ({ collection, value }) => IncludesSchema.make({ collection: freezeOperand(collection), value: freezeOperand(value) }),
+    Includes: ({ collection, value }) => {
+      const frozenCollection = freezeOperand(collection)
+      const frozenValue = freezeOperand(value)
+
+      return IncludesSchema.make({ collection: frozenCollection, value: frozenValue })
+    },
     All: ({ children }) => AllPolicySchema.make({ children: Object.freeze(children) }),
     Any: ({ children }) => AnyPolicySchema.make({ children: Object.freeze(children) }),
   }),

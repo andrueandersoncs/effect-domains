@@ -6,10 +6,10 @@ import type { StructValue } from "./domain.ts"
 
 
 
-export class RepositoryOrder extends Data.Class<{
-  readonly field: string
-  readonly direction: "asc" | "desc"
-}> {}
+export class RepositoryOrder extends Data.Class<Readonly<{
+  field: string
+  direction: "asc" | "desc"
+}>> {}
 
 /**
  * Physical, already encoded values. This is a privileged storage boundary.
@@ -18,18 +18,18 @@ export class RepositoryOrder extends Data.Class<{
  * `after` carries the physical values of every `order` field from the last row
  * of the previous page; the store continues strictly after that row (keyset).
  */
-export class RepositorySelect extends Data.Class<{
-  readonly filter: StructValue
-  readonly range: Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>
-  readonly order: ReadonlyArray<RepositoryOrder>
-  readonly after: Option.Option<StructValue>
-  readonly limit: number
-}> {}
+export class RepositorySelect extends Data.Class<Readonly<{
+  filter: StructValue
+  range: Readonly<Record<string, Readonly<Partial<{ from: unknown; to: unknown }>>>>
+  order: ReadonlyArray<RepositoryOrder>
+  after: Option.Option<StructValue>
+  limit: number
+}>> {}
 
-export class RepositoryAccess extends Data.Class<{
-  readonly policy: Policy
-  readonly subject: StructValue
-}> {}
+export class RepositoryAccess extends Data.Class<Readonly<{
+  policy: Policy
+  subject: StructValue
+}>> {}
 
 
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()(

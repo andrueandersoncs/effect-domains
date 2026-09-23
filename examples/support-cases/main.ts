@@ -1,6 +1,6 @@
 import { pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { SupportCasesApplication } from "./application.ts"
 import { SupportCasesMigrations } from "./migrations.ts"
 
@@ -57,7 +57,7 @@ const ui = {
   },
 }
 
-const program = ApplicationBun.run(SupportCasesApplication, {
+const program = ApplicationBun.runApplication(SupportCasesApplication, {
   database: { migrations: SupportCasesMigrations },
   services,
   ui,

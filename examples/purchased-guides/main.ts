@@ -1,6 +1,6 @@
 import { Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { PurchasedGuidesApplication } from "./application.ts"
 import { PurchasedGuideEntitlements, seedPurchasedGuides } from "./entitlements.ts"
 import { PurchasedGuidesMigrations } from "./migrations.ts"
@@ -11,7 +11,7 @@ const services = Layer.mergeAll(identity, PurchasedGuideEntitlements)
 
 const initialize = seedPurchasedGuides()
 
-const program = ApplicationBun.run(PurchasedGuidesApplication, {
+const program = ApplicationBun.runApplication(PurchasedGuidesApplication, {
   database: { migrations: PurchasedGuidesMigrations },
   services,
   initialize,

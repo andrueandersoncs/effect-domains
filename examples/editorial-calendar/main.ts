@@ -1,10 +1,10 @@
 import { pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { EditorialCalendarApplication } from "./application.ts"
 import { EditorialCalendarMigrations } from "./migrations.ts"
 
 
-const program = ApplicationBun.run(EditorialCalendarApplication, {
+const program = ApplicationBun.runApplication(EditorialCalendarApplication, {
   database: { migrations: EditorialCalendarMigrations },
   ui: {
     presentation: {

@@ -53,16 +53,17 @@ type Tagged = Readonly<Record<"_tag", string>>
 
 
 
+type ReadModelDependency = ReadModelSpec | CompiledReadModel
+
 type CommandDependency =
   | ResourceSpec
   | CompiledResource
-  | ReadModelSpec
-  | CompiledReadModel
+  | ReadModelDependency
   | Table
 
 class CommandDependencySet extends Data.Class<{
   readonly tables: ReadonlyArray<Table>
-  readonly readModels: ReadonlyArray<ReadModelSpec | CompiledReadModel>
+  readonly readModels: ReadonlyArray<ReadModelDependency>
 }> {}
 
 const dependencyTable = pipe(
@@ -88,15 +89,10 @@ const dependenciesFrom: (dependency: CommandDependency) => ReadonlyArray<Table> 
   }),
 )
 
-const readModelTags: ReadonlyArray<CommandDependency["_tag"]> = [
-  "ReadModelSpec",
-  "CompiledReadModel",
-]
-
 const isReadModel = (
   dependency: CommandDependency,
-): dependency is ReadModelSpec | CompiledReadModel =>
-  Array.contains(readModelTags, dependency._tag)
+): dependency is ReadModelDependency =>
+  dependency._tag === "ReadModelSpec" || dependency._tag === "CompiledReadModel"
 
 const dependencySet = (
   dependencies: ReadonlyArray<CommandDependency>,
@@ -185,7 +181,7 @@ const inTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 // Only a lone declared failure passes through because interruptions and defects are never part of the contract.
 const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.Cause<unknown>) => {
-  const single = Equivalence.strictEqual<number>()(cause.reasons.length, 1)
+  const single = cause.reasons.length === 1
 
   const declared = (reason: Cause.Reason<unknown>) => Cause.isFailReason(reason) && isDeclared(reason.error)
     ? Option.some(reason.error)
@@ -201,61 +197,63 @@ const isMiddlewareFailure = Schema.is(AuthorizationRpc.errorSchema)
 const alwaysUndeclared = Function.constant(false)
 
 
+type CheckedCommandImplementation<Spec extends CommandSpecBoundary, Implementation> = Implementation & NoInfer<
+  Handler<
+    Spec extends { readonly payload: infer Payload extends Schema.Constraint } ? Payload : void,
+    Spec["success"],
+    Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
+    HandlerFailure<Implementation>,
+    HandlerRequirements<Implementation>
+  >
+    & ([HandlerFailure<Implementation> extends infer Failure
+      ? Failure extends Tagged
+        ? Failure extends
+          | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+            ? Errors["Type"]
+            : never)
+          | Spec["unavailable"]["Type"]
+          | SqlError.SqlError
+          | Schema.SchemaError
+          | RepositoryError
+          | ResourceNotFound
+          | UniqueViolation
+          | VersionConflict
+          | Cause.NoSuchElementError
+          | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+          ? never
+          : Failure
+        : never
+      : never] extends [never]
+      ? unknown
+      : Readonly<{ undeclaredFailure:
+        HandlerFailure<Implementation> extends infer Failure
+          ? Failure extends Tagged
+            ? Failure extends
+              | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+                ? Errors["Type"]
+                : never)
+              | Spec["unavailable"]["Type"]
+              | SqlError.SqlError
+              | Schema.SchemaError
+              | RepositoryError
+              | ResourceNotFound
+              | UniqueViolation
+              | VersionConflict
+              | Cause.NoSuchElementError
+              | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+              ? never
+              : Failure
+            : never
+          : never
+      }>)
+>
+
 const compileCommand = <
   const Spec extends CommandSpecBoundary,
   const Implementation = never,
 >(
   definition: Spec,
-  implementation: Implementation & NoInfer<
-    Handler<
-      Spec extends { readonly payload: infer Payload extends Schema.Constraint } ? Payload : void,
-      Spec["success"],
-      Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
-      HandlerFailure<Implementation>,
-      HandlerRequirements<Implementation>
-    >
-      & ([HandlerFailure<Implementation> extends infer Failure
-        ? Failure extends Tagged
-          ? Failure extends
-            | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
-              ? Errors["Type"]
-              : never)
-            | Spec["unavailable"]["Type"]
-            | SqlError.SqlError
-            | Schema.SchemaError
-            | RepositoryError
-            | ResourceNotFound
-            | UniqueViolation
-            | VersionConflict
-            | Cause.NoSuchElementError
-            | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
-            ? never
-            : Failure
-          : never
-        : never] extends [never]
-        ? unknown
-        : Readonly<{ undeclaredFailure:
-          HandlerFailure<Implementation> extends infer Failure
-            ? Failure extends Tagged
-              ? Failure extends
-                | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
-                  ? Errors["Type"]
-                  : never)
-                | Spec["unavailable"]["Type"]
-                | SqlError.SqlError
-                | Schema.SchemaError
-                | RepositoryError
-                | ResourceNotFound
-                | UniqueViolation
-                | VersionConflict
-                | Cause.NoSuchElementError
-                | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
-                ? never
-                : Failure
-              : never
-            : never
-        }>)
-  >,
+  implementation: CheckedCommandImplementation<Spec, Implementation>,
 ) => {
   type Payload = Spec extends { readonly payload: infer Value extends Schema.Constraint } ? Value : undefined
   type Success = Spec["success"]
@@ -321,29 +319,31 @@ const compileCommand = <
     ),
   })
 
-  const run = transactional ? flow(invoke, inTransaction) : invoke
+  const effectFromInput = transactional ? flow(invoke, inTransaction) : invoke
   const unavailable = () => definition.unavailable.make({})
   const fallback = Effect.failSync(unavailable)
   const isContractFailure = Schema.is(errorSchema)
   const isAuthorizationFailure = Option.match(policy, { onNone: Function.constant(alwaysUndeclared), onSome: Function.constant(isMiddlewareFailure) })
   const isDeclared = (value: unknown) => isContractFailure(value) || isAuthorizationFailure(value)
 
+  const undeclaredFailureEffect = () => pipe(
+    Effect.logError("Command failed with an undeclared error"),
+    Effect.annotateLogs({
+      "error.type": "undeclared",
+      "operation.name": definition.name,
+    }),
+    Effect.andThen(fallback),
+  )
+
   const translate = (cause: Cause.Cause<unknown>) => pipe(
     declaredFailure(isDeclared, cause),
     Option.match({
-      onNone: () => pipe(
-        Effect.logError("Command failed with an undeclared error"),
-        Effect.annotateLogs({
-          "error.type": "undeclared",
-          "operation.name": definition.name,
-        }),
-        Effect.andThen(fallback),
-      ),
+      onNone: undeclaredFailureEffect,
       onSome: Effect.fail,
     }),
   )
 
-  const handler = flow(run, Effect.catchCause(translate), Effect.withSpan(definition.name))
+  const handler = flow(effectFromInput, Effect.catchCause(translate), Effect.withSpan(definition.name))
 
   return {
     spec: definition,

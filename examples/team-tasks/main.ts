@@ -1,5 +1,5 @@
 import { pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import { TeamTasksApplication } from "./application.ts"
 import { TeamTasksMigrations } from "./migrations.ts"
@@ -7,7 +7,7 @@ import { TeamTasksMigrations } from "./migrations.ts"
 
 const services = ExampleIdentity.layer("team-tasks")
 
-const program = ApplicationBun.run(TeamTasksApplication, {
+const program = ApplicationBun.runApplication(TeamTasksApplication, {
   database: { migrations: TeamTasksMigrations },
   services,
   ui: {
