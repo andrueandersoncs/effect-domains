@@ -1,4 +1,4 @@
-import { Layer, pipe } from "effect"
+import { Effect, Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import * as ApplicationBun from "effect-domains/application-bun"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
@@ -56,4 +56,4 @@ const program = ApplicationBun.runApplication(ReportExportsApplication, {
   },
 })
 
-pipe(program, ApplicationBun.runMain)
+pipe(program, ApplicationBun.runMain, Effect.runSync)

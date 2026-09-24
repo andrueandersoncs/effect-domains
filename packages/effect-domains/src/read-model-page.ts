@@ -242,10 +242,8 @@ const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
     input: ViewListRequest<View, Filter, Range>,
   ) {
     const sql = yield* SqlClient.SqlClient
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const requestedFilter = (input.filter ?? Record.empty()) as RepositorySelect["filter"]
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const requestedRange = (input.range ?? Record.empty()) as RepositorySelect["range"]
+    const requestedFilter: RepositorySelect["filter"] = input.filter ?? Record.empty()
+    const requestedRange: RepositorySelect["range"] = input.range ?? Record.empty()
     const requestedLimit = Option.fromNullishOr(input.limit)
     const requestedCursor = Option.fromNullishOr(input.cursor)
 
@@ -286,10 +284,7 @@ const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
     success: successSchema,
     errors: ReadModelInputError,
     dependencies: frozenDependencies,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    handler: execute as (
-      input: ViewListRequest<View, Filter, Range>
-    ) => Effect.Effect<typeof successSchema.Type, Effect.Error<ReturnType<typeof execute>>, HandlerRequirements>,
+    handler: execute,
   })
 }
 

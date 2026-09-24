@@ -50,18 +50,30 @@ const isBlankFlagName = (name: string) => {
   return Equivalence.strictEqual<string>()(trimmed, "")
 }
 
+const incrementCount = (
+  counts: HashMap.HashMap<string, number>,
+  name: string,
+) => {
+  const count = pipe(HashMap.get(counts, name), Option.getOrElse(Function.constant(0)))
+
+  return HashMap.set(counts, name, count + 1)
+}
+
+const noNameCounts = HashMap.empty<string, number>()
+
 const validate = Effect.fn("FeatureFlags.validate")(function* (
   flags: ReadonlyArray<FeatureFlag>,
 ) {
   const names = Array.map(flags, Struct.get("name"))
-  const nameCounts = new Map<string, number>()
-
-  for (const name of names) {
-    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1)
-  }
-
+  const nameCounts = Array.reduce(names, noNameCounts, incrementCount)
   const empty = Array.findFirst(names, isBlankFlagName)
-  const duplicate = Array.findFirst(names, (name) => (nameCounts.get(name) ?? 0) > 1)
+
+  const duplicateName = (name: string) => pipe(
+    HashMap.get(nameCounts, name),
+    Option.exists((count) => count > 1),
+  )
+
+  const duplicate = Array.findFirst(names, duplicateName)
   const problem = Option.orElse(empty, Function.constant(duplicate))
 
   if (Option.isSome(problem)) {
@@ -73,25 +85,31 @@ const validate = Effect.fn("FeatureFlags.validate")(function* (
   }
 })
 
-const compileFlags = Effect.fn("FeatureFlags.compile")((
+const compileFlags = Effect.fn("FeatureFlags.compile")(function* (
   declarations: ReadonlyArray<FeatureFlag>,
-) => {
+) {
   const flags = Object.freeze([...declarations])
 
-  return pipe(validate(flags), Effect.as(flags))
+  yield* validate(flags)
+
+  return flags
 })
 
 const unavailableFor = (flag: FeatureFlag) => () =>
   FeatureFlagUnavailable.make({ name: flag.name })
 
-const requireRegistered = Effect.fn("FeatureFlags.requireRegistered")((
+const requireRegistered = Effect.fn("FeatureFlags.requireRegistered")(function* (
   registered: ReadonlyArray<FeatureFlag>,
   flag: FeatureFlag,
-) => pipe(
-  Array.findFirst(registered, (candidate) => flagsEqual(candidate, flag)),
-  Effect.fromOption,
-  Effect.mapError(unavailableFor(flag)),
-))
+) {
+  const available = Array.findFirst(registered, (candidate) => flagsEqual(candidate, flag))
+
+  return yield* pipe(
+    available,
+    Effect.fromOption,
+    Effect.mapError(unavailableFor(flag)),
+  )
+})
 
 const stateFor = (flag: FeatureFlag) => (
   current: HashMap.HashMap<string, boolean>,
@@ -107,16 +125,26 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
 ): Layer.Layer<FeatureFlags, FeatureFlagDefinitionError> => {
   const make = Effect.gen(function* () {
     const flags = yield* compileFlags(declarations)
-    const registered = new Set(flags)
-    const overrideCounts = new Map<FeatureFlag, number>()
+    const overrideNames = Array.map(overrides, ([flag]) => flag.name)
 
-    for (const [flag] of overrides) {
-      overrideCounts.set(flag, (overrideCounts.get(flag) ?? 0) + 1)
-    }
+    const overrideCounts = Array.reduce(
+      overrideNames,
+      noNameCounts,
+      incrementCount,
+    )
 
-    const overrideByFlag = new Map(overrides)
-    const unknownOverride = Array.findFirst(overrides, ([flag]) => !registered.has(flag))
-    const duplicateOverride = Array.findFirst(overrides, ([flag]) => (overrideCounts.get(flag) ?? 0) > 1)
+    const overrideEntry = ([flag, enabled]: FeatureFlagOverrides<Flags>[number]) => [flag.name, enabled] as const
+    const overrideByName = pipe(overrides, Array.map(overrideEntry), HashMap.fromIterable)
+
+    const unknownOverride = Array.findFirst(
+      overrides,
+      ([flag]) => !Array.containsWith(flagsEqual)(flags, flag),
+    )
+
+    const duplicateOverride = Array.findFirst(overrides, ([flag]) => pipe(
+      HashMap.get(overrideCounts, flag.name),
+      Option.exists((count) => count > 1),
+    ))
 
     if (Option.isSome(unknownOverride)) {
       const [flag] = unknownOverride.value
@@ -135,7 +163,10 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
     }
 
     const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
-      const enabled = overrideByFlag.get(flag) ?? flag.default
+      const enabled = pipe(
+        HashMap.get(overrideByName, flag.name),
+        Option.getOrElse(Function.constant(flag.default)),
+      )
 
       return [flag.name, enabled]
     }

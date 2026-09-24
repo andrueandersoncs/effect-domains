@@ -2,7 +2,7 @@ import { Array, Effect, Layer, Option, Schema, SchemaAST, Stream, pipe } from "e
 
 import * as Stdio from "effect/Stdio"
 import { CliError, Command, Flag } from "effect/unstable/cli"
-import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc"
+import { RpcClient, RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc, type RpcProcedure } from "./rpc-contract.ts"
 
@@ -27,6 +27,8 @@ const makeInputJsonFlag = () => {
   return Flag.optional(describedFlag)
 }
 
+
+
 const makeRpcCli = <
   App extends ApplicationIR,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
@@ -38,11 +40,9 @@ const makeRpcCli = <
     protocol: Layer.Layer<RpcClient.Protocol, ProtocolError, ProtocolRequirements>
     subcommands: Subcommands
   }>,
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 ) => pipe(
   Effect.gen(function* () {
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const procedures = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.values()
+    const procedures = options.application.group.requests.values()
 
     const subcommands = yield* Effect.forEach(procedures, Effect.fn("RpcCli.compileProcedure")(function* (procedure) {
       const compiled = compileUnaryRpc(procedure)
@@ -71,14 +71,9 @@ const makeRpcCli = <
           onSome: Schema.decodeUnknownEffect(inputJsonSchema),
         })
 
-        const client = yield* RpcClient.make(
-          // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-          options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>,
-          { flatten: true },
-        )
-
-        // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-        const success = yield* (client as (tag: string, payload: unknown) => Effect.Effect<unknown, unknown, unknown>)(contract._tag, payload)
+        const contractGroup = RpcGroup.make(contract)
+        const client = yield* RpcClient.make(contractGroup, { flatten: true })
+        const success = yield* client(contract._tag, payload)
         const encoded = yield* Schema.encodeUnknownEffect(outputSchema)(success)
         const stdio = yield* Stdio.Stdio
         const output = Stream.make(`${encoded}\n`)
@@ -87,7 +82,11 @@ const makeRpcCli = <
         yield* Stream.run(output, stdout)
       }, Effect.scoped, Effect.catch(Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
         const encodedError = Schema.encodeUnknownEffect(errorSchema)(cause)
-        const fallbackMessage = () => Effect.succeed(causeMessage(cause))
+
+        const fallbackMessage = Effect.fn("RpcCli.fallbackMessage")(function* () {
+          return causeMessage(cause)
+        })
+
         const userMessage = yield* pipe(encodedError, Effect.catch(fallbackMessage))
 
         return yield* CliError.UserError.make({ cause, userMessage })
@@ -100,8 +99,7 @@ const makeRpcCli = <
     }))
 
     const verifyNoSubcommandCollision = Effect.fn("RpcCli.verifyNoSubcommandCollision")(function* (command: Subcommands[number]) {
-      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-      const collision = (options.application.group as App["group"] & RpcGroup.RpcGroup<Rpc.AnyWithProps>).requests.has(command.name)
+      const collision = options.application.group.requests.has(command.name)
 
       if (collision) {
         return yield* RpcCliDefinitionError.make({
@@ -119,17 +117,6 @@ const makeRpcCli = <
     return Array.isArrayNonEmpty(commands) ? Command.withSubcommands(root, commands) : root
   }),
   Effect.runSync,
-) as Command.Command<
-  string,
-  {},
-  {},
-  CliError.UserError | Command.Error<Subcommands[number]> | ProtocolError,
-  | Rpc.MiddlewareClient<RpcGroup.Rpcs<App["group"]>>
-  | Rpc.ServicesClient<RpcGroup.Rpcs<App["group"]>>
-  | Rpc.ServicesServer<RpcGroup.Rpcs<App["group"]>>
-  | Stdio.Stdio
-  | Command.Services<Subcommands[number]>
-  | ProtocolRequirements
->
+)
 
 export const RpcCli = { make: makeRpcCli }

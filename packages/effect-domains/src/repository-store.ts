@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Option, Schema } from "effect"
 import { Policy } from "./policy.ts"
-import type { Table } from "./table.ts"
+import type { Table } from "./table-relations.ts"
 import type { StructValue } from "./domain.ts"
 
 

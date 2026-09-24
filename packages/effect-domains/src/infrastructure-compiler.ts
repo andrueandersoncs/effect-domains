@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Schema, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Schema, pipe } from "effect"
 import { applicationUiPaths } from "./application-ui-paths.ts"
 import type { ApplicationIR } from "./application.ts"
 
@@ -274,23 +274,28 @@ const validateId = Effect.fn("Infrastructure.validateId")(function* (
   id: string,
 ) {
   const trimmed = id.trim()
+  const empty = Equivalence.strictEqual()(trimmed.length, 0)
+  const padded = !Equivalence.strictEqual()(trimmed, id)
+  const duplicate = HashSet.has(seen, id)
 
-  if (trimmed.length === 0) {
-    return yield* InfrastructureDefinitionError.make({
-      reason: "Infrastructure resource IDs must not be empty",
-    })
+  if (empty) {
+    const error = InfrastructureDefinitionError.make({ reason: "Infrastructure resource IDs must not be empty" })
+
+    return yield* Effect.fail(error)
   }
 
-  if (trimmed !== id) {
-    return yield* InfrastructureDefinitionError.make({
+  if (padded) {
+    const error = InfrastructureDefinitionError.make({
       reason: `Infrastructure resource ID ${id} must not contain leading or trailing whitespace`,
     })
+
+    return yield* Effect.fail(error)
   }
 
-  if (HashSet.has(seen, id)) {
-    return yield* InfrastructureDefinitionError.make({
-      reason: `Duplicate infrastructure resource ID ${id}`,
-    })
+  if (duplicate) {
+    const error = InfrastructureDefinitionError.make({ reason: `Duplicate infrastructure resource ID ${id}` })
+
+    return yield* Effect.fail(error)
   }
 
   return HashSet.add(seen, id)
@@ -329,7 +334,7 @@ const validatePublication = (
   const occupiedPaths = publicationPaths(publication)
   const collision = Array.findFirst(occupiedPaths, (path) => HashSet.has(state.paths, path))
 
-  if (collision._tag === "Some") {
+  if (Option.isSome(collision)) {
     return yield* InfrastructureDefinitionError.make({
       reason: `Infrastructure runtime ${runtime.id} declares publication path ${collision.value} more than once`,
     })
@@ -357,6 +362,7 @@ const validateResourceDependencies = (
   resources: ReadonlyArray<InfrastructureResource>,
 ) => Effect.fn("Infrastructure.validateDependencies")(function* (resource: InfrastructureResource) {
   const resourceDependencies = dependencies(resource)
+
   const validateDependency = Effect.fn("Infrastructure.validateDependency")(function* (
     dependency: InfrastructureResource,
   ) {
@@ -404,13 +410,13 @@ const validateDefinition = Effect.fn("Infrastructure.validate")(function* (
 ) {
   const name = definition.name.trim()
 
-  if (name.length === 0) {
+  if (Equivalence.strictEqual()(name.length, 0)) {
     return yield* InfrastructureDefinitionError.make({
       reason: "Infrastructure name must not be empty",
     })
   }
 
-  if (name !== definition.name) {
+  if (!Equivalence.strictEqual()(name, definition.name)) {
     return yield* InfrastructureDefinitionError.make({
       reason: "Infrastructure name must not contain leading or trailing whitespace",
     })

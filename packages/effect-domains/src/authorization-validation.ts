@@ -26,9 +26,9 @@ import {
 const describeFields = (schema: StructSchema): FieldDescriptions =>
   Record.map(schema.fields, SchemaField.compile)
 
-const fieldFor = (fields: FieldDescriptions, field: string) => pipe(Record.get(fields, field), Option.flatten)
+const findFieldDescription = (fields: FieldDescriptions, field: string) => pipe(Record.get(fields, field), Option.flatten)
 
-const sameFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) => {
+const compatibleFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) => {
   const unrestricted = Option.isNone(left) || Option.isNone(right)
   const same = Option.makeEquivalence(equals)(left, right)
 
@@ -50,7 +50,7 @@ const describeReference = (operand: Exclude<Operand, { readonly _tag: "Literal" 
 
   const fieldSchema = equals(phase, "subject") ? fields.subject : fields.resource
 
-  return pipe(fieldFor(fieldSchema, operand.field), Option.match({
+  return pipe(findFieldDescription(fieldSchema, operand.field), Option.match({
     onNone: () => failure(`${phase}.${operand.field} must be a known finite scalar or scalar collection field`),
     onSome: Effect.succeed,
   }))
@@ -86,7 +86,7 @@ const checkPair = Effect.fn("Authorization.checkPair")(function* (
   const validOperands = collectionMatches && scalarValue
 
   if (!validOperands) return yield* failure(inclusion ? `${label} includes requires a scalar collection and scalar value` : `${label} equality operands must be scalar`)
-  if (!sameFieldCategory(leftDescription.category, rightDescription.category)) return yield* failure(`${label} ${inclusion ? "includes" : "equality"} operands must have the same scalar type`)
+  if (!compatibleFieldCategory(leftDescription.category, rightDescription.category)) return yield* failure(`${label} ${inclusion ? "includes" : "equality"} operands must have the same scalar type`)
 })
 
 const checkPolicy = (policy: PolicySyntax, fields: PolicyFields, allowed: HashSet.HashSet<PolicyPhase>, label: string) => {
@@ -121,11 +121,10 @@ const snapshotEntitlement = ({ name, key }: EntitlementRequirement) => {
   return Object.freeze({ name, key: frozenKey })
 }
 
-const snapshotEntitlements = (requirements: ReadonlyArray<EntitlementRequirement>) => {
-  const snapshots = Array.map(requirements, snapshotEntitlement)
-
-  return Object.freeze(snapshots)
-}
+const snapshotEntitlements = flow(
+  Array.map(snapshotEntitlement),
+  Object.freeze,
+)
 
 const scalarOperandValue = (operand: Operand, environment: PolicyEnvironment) => pipe(
   Match.value(operand),
@@ -193,7 +192,10 @@ const foreignSubjectPolicy: ResolvedPolicyEffect = failure("subject policy subje
 const resolvedPolicy = (
   expression: PolicySyntax,
   require: ReadonlyArray<EntitlementRequirement>,
-): ResolvedPolicyEffect => Effect.succeed(new ResolvedPolicy({ expression, require }))
+): ResolvedPolicyEffect => pipe(
+  new ResolvedPolicy({ expression, require }),
+  Effect.succeed,
+)
 
 const resolveSubjectPolicy = (subject: StructSchema, policy: SubjectPolicy): ResolvedPolicyEffect => {
   const registered = isRegisteredSubjectPolicy(policy)
@@ -258,10 +260,8 @@ export {
   RegisteredSubjectPolicy,
   checkPolicy,
   describeFields,
-  fieldFor,
   normalizePolicyDefinition,
   requirementsFor,
-  sameFieldCategory,
   snapshotEntitlements,
   subjectEntitlement,
   validateEntitlements,

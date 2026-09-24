@@ -1,5 +1,6 @@
 import { ApplicationUiAssetFiles } from "@effect-domains/application-ui/assets"
 import { Effect, Schema } from "effect"
+import { ApplicationUiAssets } from "./application-ui.ts"
 
 export class ApplicationUiAssetsError extends Schema.TaggedError<ApplicationUiAssetsError>()(
   "ApplicationBunUiAssetsError",
@@ -35,6 +36,7 @@ const readApplicationUiAsset = Effect.fn("ApplicationBun.readApplicationUiAsset"
 export const readApplicationUiAssets = Effect.fn("ApplicationBun.readApplicationUiAssets")(function* () {
   const javascript = readApplicationUiAsset(ApplicationUiAssetFiles.javascript)
   const stylesheet = readApplicationUiAsset(ApplicationUiAssetFiles.stylesheet)
+  const assets = yield* Effect.all({ javascript, stylesheet }, { concurrency: "unbounded" })
 
-  return yield* Effect.all({ javascript, stylesheet }, { concurrency: "unbounded" })
+  return ApplicationUiAssets.make(assets)
 })

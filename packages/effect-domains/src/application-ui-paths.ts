@@ -1,13 +1,18 @@
-export const applicationUiPaths = (path: `/${string}`) => {
-  const root = path === "/"
-  const prefix = root ? "" : path
+import { Equivalence } from "effect"
 
-  // SAFETY: Every generated value preserves the path type because `path` starts with a slash.
+export const applicationUiPaths = (path: `/${string}`) => {
+  const root = Equivalence.strictEqual()(path, "/")
+  const prefix = root ? "" : path
+  const javascript: `/${string}` = `${prefix}/client.js`
+  const stylesheet: `/${string}` = `${prefix}/style.css`
+  const api: `/${string}` = `${prefix}/api`
+  const call: `/${string}` = `${prefix}/api/call`
+
   return Object.freeze({
     document: path,
-    javascript: `${prefix}/client.js` as `/${string}`,
-    stylesheet: `${prefix}/style.css` as `/${string}`,
-    api: `${prefix}/api` as `/${string}`,
-    call: `${prefix}/api/call` as `/${string}`,
+    javascript,
+    stylesheet,
+    api,
+    call,
   })
 }

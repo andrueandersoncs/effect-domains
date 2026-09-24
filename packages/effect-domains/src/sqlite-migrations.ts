@@ -1,7 +1,9 @@
-import { Array, Effect, Option, pipe, Predicate, Record, Schema } from "effect"
+import { Array, Effect, Equivalence, Function, Option, pipe, Predicate, Record, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "./migrations.ts"
-import { Table, TableSnapshot } from "./table.ts"
+import { Table } from "./table.ts"
+import { TableSnapshot } from "./table-snapshot-model.ts"
+import type { Table as TableDefinition } from "./table-relations.ts"
 
 import {
   applyMigration,
@@ -38,10 +40,9 @@ import {
   validateSnapshot,
 } from "./sqlite-migration-model.ts"
 
-export { SqliteMigration } from "./sqlite-migration-model.ts"
 
 
-const same = <Value>(left: Value, right: Value): boolean => Object.is(left, right)
+const same = Equivalence.strictEqual<unknown>()
 
 const applyStatement = <A, E, R>(statement: Effect.Effect<A, E, R>) =>
   pipe(statement, Effect.asVoid)
@@ -52,7 +53,7 @@ const make = (input: Readonly<{
   steps: ReadonlyArray<SqliteMigrationStep>
 }>) => pipe(SqliteMigration.make(input), validateMigration, Effect.map(freeze), Effect.runSync)
 
-const initial = (options: Readonly<{ id: string; tables: ReadonlyArray<Table> }>) => {
+const initial = (options: Readonly<{ id: string; tables: ReadonlyArray<TableDefinition> }>) => {
   const to = snapshotFromTable(options.tables)
   const createTable = (table: TableSnapshot) => SqliteCreateTable.make({ table: table.name })
   const tables = Array.map(to.tables, createTable)
@@ -72,8 +73,7 @@ const initial = (options: Readonly<{ id: string; tables: ReadonlyArray<Table> }>
 const legacyArtifact = (artifact: unknown) =>
   Predicate.isObject(artifact) && Record.has(artifact, "from")
 
-const decodeHistory = (raw: unknown) =>
-  Effect.gen(function* () {
+export const decodeHistory = Effect.fn("SqliteMigrations.decodeHistory")(function* (raw: unknown) {
     const legacy = Array.isArray(raw) && Array.some(raw, legacyArtifact)
 
     if (legacy) return yield* migrationFailure("SQLite migration artifacts must use version 2")
@@ -81,14 +81,16 @@ const decodeHistory = (raw: unknown) =>
     const historySchema = Schema.Array(SqliteMigration)
     const decodeCurrent = Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw)
     const decodeLegacy = Schema.decodeUnknownEffect(historySchema)(raw)
+    const onCurrentDecodeFailure = Function.constant(decodeLegacy)
+
     const migrations = yield* pipe(
       decodeCurrent,
-      Effect.catch(() => decodeLegacy),
+      Effect.catch(onCurrentDecodeFailure),
       Effect.mapError(asMigrationFailure("invalid SQLite migration history")),
     )
 
     return yield* validateHistory(migrations)
-  })
+})
 
 const histories = (...artifacts: ReadonlyArray<unknown>) =>
   pipe(artifacts, decodeHistory, Effect.runSync)
@@ -112,12 +114,13 @@ export const SqliteMigrations = {
   initial,
   snapshot: snapshotFromTable,
   history: histories,
-  decodeHistory,
+  decodeHistory: Effect.fn("SqliteMigrations.decodeHistory")(function* (raw: unknown) {
+    return yield* decodeHistory(raw)
+  }),
 }
 
 export const sqliteMigrationStore = (sql: SqlClient.SqlClient, migrations: ReadonlyArray<SqliteMigration>) => SchemaStore.of({
-  prepare: (tables) =>
-    Effect.gen(function* () {
+  prepare: Effect.fn("SqliteMigrations.prepare")(function* (tables) {
       const target = schemaSnapshot(tables)
 
       yield* applyStatement(sql`PRAGMA foreign_keys = ON`)
@@ -180,8 +183,5 @@ export const sqliteMigrationStore = (sql: SqlClient.SqlClient, migrations: Reado
       )
 
       yield* verifyDatabase(sql, target)
-    }).pipe(
-      Effect.mapError(asMigrationFailure("could not prepare SQLite migrations")),
-      Effect.provideService(SqlClient.SqlClient, sql),
-    ),
+  }, Effect.mapError(asMigrationFailure("could not prepare SQLite migrations")), Effect.provideService(SqlClient.SqlClient, sql)),
 })

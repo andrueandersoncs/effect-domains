@@ -1,10 +1,7 @@
-import { Array, Data, Effect, Equivalence, Option, Record, Schema, Struct } from "effect"
-import { Value } from "./value.ts"
+import { Array, Clock, Data, DateTime, Effect, Equivalence, Option, Random, Record, Schema, Struct, pipe } from "effect"
 import type { StructValue } from "./domain.ts"
-
-
-
 /** Compile sources together because input acceptance and runtime values must agree. */
+
 type Source = Data.TaggedEnum<{
   Input: {}
   Default: { readonly value: unknown }
@@ -16,7 +13,33 @@ const Source = Data.taggedEnum<Source>()
 const ForbiddenFieldSchema = Schema.optionalKey(Schema.Never)
 const isGeneration = Equivalence.strictEqual<"uuidV7" | "now" | "one">()
 
-type ReadValue = (input: StructValue, subject: StructValue) => Effect.Effect<unknown, never, Value>
+const byteAt = (bytes: ReadonlyArray<number>, index: number) => pipe(bytes, Array.get(index), Option.getOrThrow)
+
+const hexadecimalByte = (byte: number) => byte.toString(16).padStart(2, "0")
+
+const uuidV7 = Effect.fn("Creation.uuidV7")(function* () {
+  const byteIndexes = Array.range(0, 9)
+  const values = yield* Effect.forEach(byteIndexes, () => Random.nextIntBetween(0, 255))
+  const timestamp = (yield* Clock.currentTimeMillis).toString(16).padStart(12, "0")
+  const timestampHigh = timestamp.substring(0, 8)
+  const timestampLow = timestamp.substring(8, 12)
+  const firstByte = byteAt(values, 0)
+  const randomAHigh = firstByte & 0x0f
+  const randomAByte = byteAt(values, 1)
+  const randomALow = hexadecimalByte(randomAByte)
+  const variantSource = byteAt(values, 2)
+  const variantByte = (variantSource & 0x3f) | 0x80
+  const variant = hexadecimalByte(variantByte)
+  const fourthByte = byteAt(values, 3)
+  const fourth = hexadecimalByte(fourthByte)
+  const randomBBytes = Array.drop(values, 3)
+  const hexadecimalRandomBBytes = Array.map(randomBBytes, hexadecimalByte)
+  const randomB = Array.join(hexadecimalRandomBBytes, "")
+
+  return `${timestampHigh}-${timestampLow}-7${randomAHigh.toString(16)}${randomALow}-${variant}${fourth}-${randomB.substring(2)}`
+})
+
+type ReadValue = (input: StructValue, subject: StructValue) => Effect.Effect<unknown>
 
 class FieldCompilation extends Data.Class<Readonly<{
   inputSchema: Schema.Constraint
@@ -112,16 +135,14 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
         const evaluate = Effect.fn("Creation.generated")(function* () {
           if (isGeneration(token, "one")) return 1
 
-          const values = yield* Value
-
-          return yield* (isGeneration(token, "uuidV7") ? values.uuidV7() : values.now())
+          return yield* (isGeneration(token, "uuidV7") ? uuidV7() : DateTime.now)
         })
 
         return new FieldCompilation({ inputSchema: ForbiddenFieldSchema, evaluate })
       },
     })
 
-    const read = (input: StructValue, subject: StructValue): Effect.Effect<unknown, E, Value> => {
+    const read = (input: StructValue, subject: StructValue): Effect.Effect<unknown, E> => {
       const supplied = Record.has(input, name)
       const generatedField = Source.$is("Generated")(source)
       const subjectField = Source.$is("Subject")(source)
@@ -144,6 +165,7 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
 
       return [name, value] as const
     })
+
     const values = yield* Effect.forEach(entries, materializeField)
 
     return Record.fromEntries(values)

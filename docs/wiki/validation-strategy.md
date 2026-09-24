@@ -32,18 +32,18 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ### 2026-09-23: Framework source line limit
 
-The private `effect-domains` package now rejects every `src/**/*.ts` file above 500 physical lines before Better TypeScript runs. The largest resource, read-model, table, authorization, telemetry, and SQLite migration modules were split by model, validation, compilation, runtime, projection, transport, and database responsibility while their package exports remain unchanged. Public facade files are explicitly exempt from the deterministic no-reexport rule because they are the package contract over private implementation modules; the extracted generic resource compiler files retain narrow duplicate-shape exclusions for aliases that preserve exact public inference. ([Package scripts](../../packages/effect-domains/package.json); [line check](../../packages/effect-domains/scripts/check-file-lines.ts); [resource facade](../../packages/effect-domains/src/resource.ts); [table facade](../../packages/effect-domains/src/table.ts))
+The private `effect-domains` package now rejects every `src/**/*.ts` file above 500 physical lines before Better TypeScript runs. The largest resource, read-model, table, authorization, telemetry, and SQLite migration modules remain split by model, validation, compilation, runtime, projection, transport, and database responsibility. The package contracts now use explicit owning modules and named model subpaths rather than lint-exempt re-export facades. ([Package scripts](../../packages/effect-domains/package.json); [line check](../../packages/effect-domains/scripts/check-file-lines.ts); [lint configuration](../../better-typescript.json))
 
-- The 500-line check covers **68 framework source files** and passes; the largest is 494 lines.
-- Package TypeScript and deterministic Better TypeScript lint pass.
-- Focused table, read-model, authorization, telemetry, migration, and resource verification passes **71 tests in 10 files**.
-- Package semantic lint analyzes the complete source set. Concrete findings were refactored; source/rule-specific semantic exclusions record reviewed non-actionable findings so probabilistic reclassification cannot turn the same accepted design back into a violation. Reviews remain advisory and therefore keep the command's exit status nonzero.
+- The 500-line check covers **77 framework source files** and passes.
+- Package TypeScript and deterministic Better TypeScript lint pass with an empty root `commands` list: no file, rule, test, assertion, facade, or semantic exclusions remain.
+- Focused application compilation/execution, generated UI, CLI, MCP, authorization, identity, and SQLite migration verification passes **46 tests in 8 files**.
+- Native Bun entrypoints are Effect operations through the process boundary; every example explicitly executes that boundary with `Effect.runSync`, and a live Reservations `--help` invocation exits successfully.
 
-### 2026-09-22: Semantic lint remediation
+### 2026-09-23: Exclusion-free lint remediation
 
-The complete framework source set was reviewed against Better TypeScript's semantic rules. Runtime setup now normalizes HTTP feature state before layer construction; application inspection performs schema encoding in Effect and traverses canonical metadata once; infrastructure resolution uses shallow explicit branches; telemetry, authorization, resource, migration, table, and RPC helpers separate their named decisions from orchestration and retain explicit Effect requirements.
+The framework removed every deterministic and semantic exclusion from `better-typescript.json`. Deterministic remediation replaced re-export facades with explicit owners, added justified assertion invariants, removed raw value aliases, preserved unary RPC middleware in MCP dispatch, and made optional inspection fields structurally absent instead of present with `undefined`. Table models are separated by physical field, scalar, relation, snapshot, and check ownership; relation and telemetry validation live with their sole consumers. Generated resource identifiers and timestamps now use Effect's native `Random` and `Clock` services instead of a package-specific runtime-values service. Public authorization, table, and migration models use explicit package subpaths rather than broad facades.
 
-Semantic evaluation is probabilistic: unchanged files moved across the `0.7` violation boundary between consecutive runs. `better-typescript.json` therefore records source-and-rule-specific semantic exclusions only after review. These are not global rule relaxations: every exception names one source file and one rule, deterministic Better TypeScript remains unchanged, and unexcluded semantic rules still run over every framework source file.
+Semantic evaluation remains probabilistic and file-wide: it supplies a rule classification and probability but no location or source evidence. The exclusion-free package scan reported **0 violation classifications** across all 77 source files. Review classifications remain visible output rather than configuration suppressions; they are not represented as deterministic proof.
 
 ### 2026-09-22: Deterministic lint backlog remediation
 

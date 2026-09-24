@@ -1,4 +1,4 @@
-import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, flow, pipe } from "effect"
+import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, Tuple, flow, pipe } from "effect"
 
 /** Retain original AST evidence because canonical and physical interpretations are different. */
 export type ScalarF<A> = Data.TaggedEnum<{
@@ -28,6 +28,8 @@ const transformLayer = <A, B>(layer: ScalarF<A>, f: (child: A) => B): ScalarF<B>
   Match.exhaustive,
 )
 
+const unionNode = (ast: SchemaAST.Union) => Nodes.Union({ ast, members: ast.types })
+
 const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> => {
   const encoded = storage && ast.encoding
 
@@ -43,11 +45,7 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
 
       return Nodes.Suspend({ ast, value })
     }),
-    Match.tag("Union", (ast) => {
-      const members = ast.types
-
-      return Nodes.Union({ ast, members })
-    }),
+    Match.tag("Union", unionNode),
     Match.tag("Arrays", (ast) => {
       const single = Equivalence.strictEqual<number>()(ast.rest.length, 1)
       const homogeneous = Array.isReadonlyArrayEmpty(ast.elements) && single
@@ -195,7 +193,11 @@ const combineDescriptions = (
 const asCollection = (field: FieldIR) =>
   new FieldIR({ ...field, collection: true })
 
-const describeEnumEntry = (entry: readonly [string, string | number]) => describeLiteral(entry[1])
+const describeEnumEntry = (entry: readonly [string, string | number]) => pipe(
+  entry,
+  Tuple.get(1),
+  describeLiteral,
+)
 
 const describeEnum = flow(
   Struct.get<SchemaAST.Enum, "enums">("enums"),

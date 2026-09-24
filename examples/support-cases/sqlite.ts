@@ -95,7 +95,7 @@ const supportCaseDetail = SqlSchema.findOneOption({
           FROM (
             SELECT * FROM ${sql(supportCaseEventsTable.name)}
             WHERE ${sql("caseId")} = support_case.${sql("id")}
-            ORDER BY ${sql("occurredAt")}, ${sql("id")}
+            ORDER BY ${sql("occurredAt")}, rowid
           ) event
         ), '[]') AS ${sql("events")}
       FROM ${sql(supportCasesTable.name)} support_case

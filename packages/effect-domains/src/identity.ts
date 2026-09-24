@@ -1,5 +1,5 @@
 import { Context, type DateTime, type Effect, Schema } from "effect"
-import type { Unauthenticated } from "./authorization.ts"
+import type { Unauthenticated } from "./authorization-model.ts"
 
 const UsernameSchema = Schema.NonEmptyString.check(Schema.isMaxLength(320))
 const PasswordSchema = Schema.NonEmptyString.check(Schema.isMaxLength(1024))
@@ -13,16 +13,22 @@ export const CredentialsSchema = Schema.Struct({
   password: Schema.Redacted(PasswordSchema),
 })
 
+interface Credentials extends Schema.Schema.Type<typeof CredentialsSchema> {}
+
 export const IssuedSessionSchema = Schema.Struct({
   token: Schema.Redacted(Schema.String),
   expiresAt: Schema.DateTimeUtc,
   subject: SubjectSchema,
 })
 
+interface IssuedSession extends Schema.Schema.Type<typeof IssuedSessionSchema> {}
+
 export const CurrentSessionSchema = Schema.Struct({
   expiresAt: Schema.DateTimeUtc,
   subject: SubjectSchema,
 })
+
+interface CurrentSession extends Schema.Schema.Type<typeof CurrentSessionSchema> {}
 
 type AuthenticatedIdentity = Readonly<{
   sessionId: string

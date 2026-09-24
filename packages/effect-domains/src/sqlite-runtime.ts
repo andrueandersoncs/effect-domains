@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import { Array, Config, Context, DateTime, Effect, Equivalence, FileSystem, Function, HashMap, Layer, Option, Predicate, Record, Ref, Schema, Struct, pipe } from "effect"
+import { Array, Config, Context, Effect, Equivalence, FileSystem, flow, Function, HashMap, Layer, Option, Predicate, Record, Ref, Schema, Struct, pipe } from "effect"
 import { SqlClient, SqlError } from "effect/unstable/sql"
 
 import {
@@ -13,10 +13,10 @@ import {
 import { PolicySql } from "./policy-sql.ts"
 import { Policy, PolicyEnvironment } from "./policy.ts"
 import { SchemaStore } from "./migrations.ts"
-import { sqliteMigrationStore, type SqliteMigration } from "./sqlite-migrations.ts"
-import type { Table } from "./table.ts"
+import { sqliteMigrationStore } from "./sqlite-migrations.ts"
+import type { SqliteMigration } from "./sqlite-migration-model.ts"
+import type { Table } from "./table-relations.ts"
 import { SqliteList } from "./sqlite-list.ts"
-import { Value } from "./value.ts"
 import type { StructValue } from "./domain.ts"
 
 
@@ -27,7 +27,7 @@ class PrivateDatabaseConflict extends Schema.TaggedError<PrivateDatabaseConflict
 ) {}
 
 const makeRepositoryError = (resource: string) => RepositoryError.make({ resource })
-const repositoryFailure = (resource: string) => Effect.fail(makeRepositoryError(resource))
+const repositoryFailure = flow(makeRepositoryError, Effect.fail)
 
 const unknownEquals = Equivalence.strictEqual<unknown>()
 const emptyGuard = Record.empty<string, unknown>()
@@ -41,8 +41,9 @@ const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [s
 
 
 
-const transactionFailure = () =>
-  repositoryFailure("transaction")
+const transactionFailure = Effect.fn("SqliteRuntime.transactionFailure")(function* (_cause: SqlError.SqlError) {
+  return yield* repositoryFailure("transaction")
+})
 
 
 const errorMessage = (value: unknown) => {
@@ -54,8 +55,7 @@ const errorMessage = (value: unknown) => {
   if (!hasMessage) return Option.none<string>()
 
   return pipe(
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    Option.fromNullishOr((value as StructValue).message),
+    Record.get(value, "message"),
     Option.filter(Predicate.isString),
   )
 }
@@ -80,15 +80,17 @@ const uniqueConstraint = (table: Table, cause: SqlError.SqlError) => {
   return Option.some(violation)
 }
 
-const persistenceFailure = (table: Table) => (
+const persistenceFailure = (table: Table) => Effect.fn("SqliteRuntime.persistenceFailure")(function* (
   cause: SqlError.SqlError,
-): Effect.Effect<never, RepositoryError | UniqueViolation> => pipe(
-  uniqueConstraint(table, cause),
-  Option.match({
-    onNone: () => repositoryFailure(table.name),
-    onSome: Effect.fail,
-  }),
-)
+) {
+  return yield* pipe(
+    uniqueConstraint(table, cause),
+    Option.match({
+      onNone: () => repositoryFailure(table.name),
+      onSome: Effect.fail,
+    }),
+  )
+})
 
 
 const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClient: SqlClient.SqlClient) {
@@ -140,10 +142,9 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
       )
     }),
     insert: Effect.fn("RepositoryStore.insert")(function* (table, value) {
-      // SAFETY: Repository insert values are StructValue because the repository contract accepts schema-derived object rows.
       const rows = yield* pipe(
         sqlClient<StructValue>`
-          INSERT INTO ${sqlClient(table.name)} ${sqlClient.insert(value as StructValue)}
+          INSERT INTO ${sqlClient(table.name)} ${sqlClient.insert(value)}
           RETURNING *
         `,
         Effect.catchIf(SqlError.isSqlError, persistenceFailure(table)),
@@ -164,11 +165,10 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
       const guards = Array.map(guardEntries, whereFragment(sqlClient))
       const conditions = [policy, sqlClient`${sqlClient(table.identifier)} = ${key}`, ...guards]
 
-      // SAFETY: Repository update values are StructValue because the repository contract accepts schema-derived object rows.
       const rows = yield* pipe(
         sqlClient<StructValue>`
           UPDATE ${sqlClient(table.name)}
-          SET ${sqlClient.update(value as StructValue, [table.identifier])}
+          SET ${sqlClient.update(value, [table.identifier])}
           WHERE ${sqlClient.and(conditions)}
           RETURNING *
         `,
@@ -200,50 +200,15 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
   })
 })
 
-const byteAt = (bytes: ReadonlyArray<number>, index: number) => pipe(
-  Array.get(bytes, index),
-  Option.getOrThrow,
-)
-
-const hexadecimalByte = (byte: number) => byte.toString(16).padStart(2, "0")
-
-const uuidV7 = () => {
-  const randomBytes = new Uint8Array(10)
-  const bytes = crypto.getRandomValues(randomBytes)
-  const values = Array.fromIterable(bytes)
-  const timestamp = Date.now().toString(16).padStart(12, "0")
-  const timestampHigh = timestamp.substring(0, 8)
-  const timestampLow = timestamp.substring(8, 12)
-  const firstByte = byteAt(values, 0)
-  const randomAHigh = firstByte & 0x0f
-  const randomAByte = byteAt(values, 1)
-  const randomALow = hexadecimalByte(randomAByte)
-  const variantSource = byteAt(values, 2)
-  const variantByte = (variantSource & 0x3f) | 0x80
-  const variant = hexadecimalByte(variantByte)
-  const fourthByte = byteAt(values, 3)
-  const fourth = hexadecimalByte(fourthByte)
-  const randomBBytes = Array.drop(values, 3)
-  const randomB = pipe(randomBBytes, Array.map(hexadecimalByte), Array.join(""))
-
-  return `${timestampHigh}-${timestampLow}-7${randomAHigh.toString(16)}${randomALow}-${variant}${fourth}-${randomB.substring(2)}`
-}
-
-const runtimeValues = Value.of({
-  uuidV7: () => Effect.sync(uuidV7),
-  now: () => DateTime.now,
-})
-
-const values = Layer.succeed(Value, runtimeValues)
 
 const migrationStore = (
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
 ) => (sql: SqlClient.SqlClient) => sqliteMigrationStore(sql, options.migrations)
 
-const enableForeignKeys = Effect.fn("SqliteRuntime.enableForeignKeys")((context: Context.Context<SqlClient.SqlClient>) => {
+const enableForeignKeys = Effect.fn("SqliteRuntime.enableForeignKeys")(function* (context: Context.Context<SqlClient.SqlClient>) {
   const sql = Context.get(context, SqlClient.SqlClient)
 
-  return pipe(
+  yield* pipe(
     sql`PRAGMA foreign_keys = ON`,
     Effect.asVoid,
   )
@@ -252,8 +217,8 @@ const enableForeignKeys = Effect.fn("SqliteRuntime.enableForeignKeys")((context:
 
 const relativeParents = HashMap.make([".", true], ["", true])
 
-const ensureParentDirectory = (filename: string) =>
-  Effect.sync(() => {
+const ensureParentDirectory = Effect.fn("SqliteRuntime.ensureParentDirectory")(function* (filename: string) {
+  yield* Effect.sync(() => {
     const memory = Equivalence.strictEqual<string>()(filename, ":memory:")
 
     if (memory) return
@@ -265,8 +230,12 @@ const ensureParentDirectory = (filename: string) =>
 
     mkdirSync(directory, { recursive: true })
   })
+})
 
 const DatabaseFileSchema = Schema.Struct({ name: Schema.String, file: Schema.String })
+
+interface DatabaseFile extends Schema.Schema.Type<typeof DatabaseFileSchema> {}
+
 const DatabaseFilesSchema = Schema.Array(DatabaseFileSchema)
 
 const mainDatabaseFile = Effect.fn("SqliteRuntime.mainDatabaseFile")(function* (sql: SqlClient.SqlClient) {
@@ -382,7 +351,7 @@ const sqlClient = (clientLayer: SqliteClientLayer) => (
     const migrationStoreEffect = Effect.map(SqlClient.SqlClient, migrationStore(options))
     const repositoryLayer = Layer.effect(RepositoryStore, repositoryStore)
     const schemaStoreLayer = Layer.effect(SchemaStore, migrationStoreEffect)
-    const stores = Layer.mergeAll(repositoryLayer, schemaStoreLayer, values)
+    const stores = Layer.mergeAll(repositoryLayer, schemaStoreLayer)
 
     const database = pipe(
       clientLayer(filename),
@@ -397,5 +366,4 @@ const sqlClient = (clientLayer: SqliteClientLayer) => (
 export const sqliteRuntime = (clientLayer: SqliteClientLayer) => ({
   privateClient: privateClient(clientLayer),
   sqlClient: sqlClient(clientLayer),
-  values,
 })

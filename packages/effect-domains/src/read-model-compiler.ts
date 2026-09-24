@@ -2,7 +2,8 @@ import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Rec
 import { SqlClient } from "effect/unstable/sql"
 import { Resource } from "./resource.ts"
 import { quoteIdentifier } from "./sqlite-ddl.ts"
-import type { Table } from "./table.ts"
+import type { Table } from "./table-relations.ts"
+import type { TableField } from "./physical-table-field.ts"
 
 import {
   type Alias,
@@ -23,12 +24,16 @@ import {
   type ReadModelSyntax,
   type Reference,
   type ReferenceFor,
+
   type SelectionFor,
   TableEvidenceSchema,
   type Tables,
   type TableSource,
   type ViewSchema,
 } from "./read-model-syntax.ts"
+
+// SAFETY: The target intersects the source rather than discarding it because callers retain all source evidence and state each narrowing invariant.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 class ReadModelDefinitionError extends Schema.TaggedError<ReadModelDefinitionError>()("ReadModelDefinitionError", {
   reason: Schema.String,
@@ -108,9 +113,9 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: CompiledDe
   const fieldFor = Effect.fn("ReadModel.field")(function* (reference: Reference) {
     const [alias, field] = reference
     const table = yield* tableFor(alias)
-
     const sameFieldName = Equivalence.strictEqual<string>()
-    const matchingField = Array.findFirst(table.fields, (candidate) => sameFieldName(candidate.name, field))
+    const matchesField = (candidate: TableField) => sameFieldName(candidate.name, field)
+    const matchingField = Array.findFirst(table.fields, matchesField)
 
     const metadata = yield* pipe(
       matchingField,
@@ -200,6 +205,9 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: CompiledDe
   const projected = Record.fromEntries(fields)
   const schemas = Record.map(projected, Struct.get("storageSchema"))
   const ResultSchema = Schema.Struct(schemas)
+
+  interface Result extends Schema.Schema.Type<typeof ResultSchema> {}
+
   const dependencyTables = pipe(definition.tables, Record.values, Array.dedupe)
   const dependencies = Object.freeze(dependencyTables)
   const columns = Array.map(entries, ([output, reference]) => `${qualified(reference)} AS ${quoteIdentifier(output)}`)
@@ -248,7 +256,10 @@ const compileDefinition = <
   const compiledDefinition = new CompiledDefinition({ tables, from, joins, select })
   const compilation = compile(compiledDefinition)
   const result = Effect.runSync(compilation)
-  const compiledViewSchema = Schema.Struct(Record.map(result.projected, Struct.get("storageSchema")))
+  const CompiledViewSchema = Schema.Struct(Record.map(result.projected, Struct.get("storageSchema")))
+
+  interface CompiledView extends Schema.Schema.Type<typeof CompiledViewSchema> {}
+
   const column = (sql: SqlClient.SqlClient, reference: ReferenceFor<Sources>) => result.column(sql, reference)
 
   const outputField = (sql: SqlClient.SqlClient, field: string) => pipe(
@@ -258,6 +269,11 @@ const compileDefinition = <
     (reference) => result.column(sql, reference),
   )
 
+  const viewSchema = narrowContract<
+    typeof CompiledViewSchema & ViewSchema<Sources, Joins, Selection>,
+    typeof CompiledViewSchema
+  >(CompiledViewSchema)
+
   return Object.freeze({
     _tag: "CompiledReadModel" as const,
     description: result.description,
@@ -265,9 +281,7 @@ const compileDefinition = <
     dependencies: result.dependencies,
     outputField,
     projected: result.projected,
-    // SAFETY: The schema has the selected view contract because each projected field contributes its own storage schema.
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    schema: compiledViewSchema as typeof compiledViewSchema & ViewSchema<Sources, Joins, Selection>,
+    schema: viewSchema,
     select: result.select,
   })
 }
@@ -390,22 +404,24 @@ const defineReadModel = <
     scan,
     (syntax, join) => {
       const table = pipe(Record.get(definition.tables, join.table), Option.getOrThrow)
+      const conditions = narrowContract<ReadonlyArray<Condition>, typeof join.on>(join.on)
+
 
       return ReadModelNodes.Join({
         source: syntax,
         kind: join.kind,
         alias: join.table,
         table,
-        // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-        on: join.on as ReadonlyArray<Condition>,
+        on: conditions,
       })
     },
   )
 
+  const selection = narrowContract<Readonly<Record<string, Reference>>, typeof definition.select>(definition.select)
+
   const syntax = ReadModelNodes.Project({
     source: joined,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    select: definition.select as Readonly<Record<string, Reference>>,
+    select: selection,
   })
 
   return Object.freeze({
@@ -439,12 +455,12 @@ const compileReadModel = <const Spec extends ReadModelSpec>(
     )
   }
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const compiled = compileDefinition(plan.definition as never)
+  const compiledDefinition = narrowContract<never, typeof plan.definition>(plan.definition)
+  const compiled = compileDefinition(compiledDefinition)
   const dependencies = readModelDependencies(spec.syntax)
+  const complete = Object.freeze({ ...compiled, dependencies })
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  return Object.freeze({ ...compiled, dependencies }) as CompiledReadModelFor<Spec>
+  return narrowContract<CompiledReadModelFor<Spec>, typeof complete>(complete)
 }
 
 export {

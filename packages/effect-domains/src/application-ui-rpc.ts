@@ -29,6 +29,12 @@ const maximumUiOperations = 1_000
 const internalResponse = Effect.succeed(applicationUiInternalResponse)
 const recoverResponseEncodingFailure = Function.constant(internalResponse)
 
+// SAFETY: The group can be narrowed because Application compilation rejects every streaming operation.
+const asUnaryGroup = (group: ApplicationIR["group"]) => group as RpcGroup.RpcGroup<UnaryRpc>
+
+// SAFETY: The procedure can be narrowed because callers invoke this only after compileUnaryRpc returns a unary contract.
+const asUnaryProcedure = (procedure: RpcProcedure) => procedure as UnaryRpc
+
 
 const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocations")(function* (
   application: ApplicationIR,
@@ -40,8 +46,8 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
     })
   }
 
-  // SAFETY: The group is unary because Application compilation rejects streaming operations.
-  const inProcess = yield* inProcessClient(application.group as RpcGroup.RpcGroup<UnaryRpc>)
+  const unaryGroup = asUnaryGroup(application.group)
+  const inProcess = yield* inProcessClient(unaryGroup)
   const { client, withHandlerContext } = inProcess
 
   const compileOperation = Effect.fn("ApplicationUi.compileOperation")(function* (procedure: RpcProcedure) {
@@ -52,13 +58,19 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
     })
 
     const contract = yield* Effect.fromOption(compiled, failUnavailableOperation)
-    const resultSchema = Schema.Struct({ result: contract.successSchema })
-    const errorSchema = Schema.Struct({ error: contract.errorSchema })
+    const OperationResultSchema = Schema.Struct({ result: contract.successSchema })
+
+    interface OperationResult extends Schema.Schema.Type<typeof OperationResultSchema> {}
+
+    const OperationErrorEnvelopeSchema = Schema.Struct({ error: contract.errorSchema })
+
+    interface OperationErrorEnvelope extends Schema.Schema.Type<typeof OperationErrorEnvelopeSchema> {}
+
     const decode = Schema.decodeUnknownEffect(contract.payloadSchema)
-    const encodeResult = Schema.encodeUnknownEffect(resultSchema)
-    const encodeError = Schema.encodeUnknownEffect(errorSchema)
-    // SAFETY: The handler context is valid because `contract` was compiled from this procedure.
-    const withCodecContext = withHandlerContext(procedure as UnaryRpc)
+    const encodeResult = Schema.encodeUnknownEffect(OperationResultSchema)
+    const encodeError = Schema.encodeUnknownEffect(OperationErrorEnvelopeSchema)
+    const unaryProcedure = asUnaryProcedure(procedure)
+    const withCodecContext = withHandlerContext(unaryProcedure)
 
     const invoke = Effect.fn("ApplicationUi.invoke")(function* (
       input: unknown,
@@ -98,8 +110,8 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
       })
 
       const response = Effect.matchEffect(call, {
-        onFailure: (error) => respondToDeclaredFailure(error),
-        onSuccess: (result) => respondToDeclaredSuccess(result),
+        onFailure: respondToDeclaredFailure,
+        onSuccess: respondToDeclaredSuccess,
       })
 
       return yield* Effect.catchTags(response, {
@@ -108,11 +120,11 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
       })
     })
 
-    const execute = Effect.fn("ApplicationUi.execute")(function* (input, request) {
+    const execute: Invocation = Effect.fn("ApplicationUi.execute")(function* (input, request) {
       const response = invoke(input, request)
 
       return yield* Effect.catchCause(response, recoverResponseEncodingFailure)
-    }) as Invocation
+    })
 
     return [contract._tag, execute] as const
   })

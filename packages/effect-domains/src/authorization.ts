@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { StructSchema } from "./domain.ts"
-import type { Table } from "./table.ts"
+import type { Table } from "./table-relations.ts"
 
 import {
   type AuthorizationAction,
@@ -20,21 +20,6 @@ import {
   validateSqlStorage,
   validateSubjectBindings,
 } from "./authorization-runtime.ts"
-
-export {
-  type AuthorizationAction,
-  type AuthorizationDefinition,
-  type AuthorizationRuntime,
-  AuthorizationSubject,
-  AuthorizationValues,
-  EntitlementRequirementSchema,
-  EntitlementRequirementsSchema,
-  Forbidden,
-  type PolicyAuthorization,
-  type SubjectOperand,
-  type SubjectPolicy,
-  Unauthenticated,
-} from "./authorization-model.ts"
 
 export const Authorization = {
   public: publicAuthorization,

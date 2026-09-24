@@ -1,6 +1,7 @@
 import { Array, Data, Effect, Equivalence, Function, type Layer, Option, Predicate, Record, Ref, Struct, pipe } from "effect"
 import type { RepositoryStore } from "./repository-store.ts"
 import { Table } from "./table.ts"
+import type { Table as TableDefinition } from "./table-relations.ts"
 import type { StructSchema } from "./domain.ts"
 import type { TransitionMachine } from "./transitions.ts"
 import { compileResourceValue } from "./resource-compiler.ts"
@@ -58,16 +59,15 @@ const resourceRuntimeFor = <Spec extends ResourceSpec>(resource: Resource) =>
   // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   resource as ResourceRuntime<Spec>
 
-function getOrCompileResourceFromSpec<const Spec extends ResourceSpec>(
+const valueFromSpec = <const Spec extends ResourceSpec>(
   spec: Spec,
-): ResourceRuntime<Spec> {
+): ResourceRuntime<Spec> => {
 
   const matchesSpec = (entry: CompiledResourceCacheEntry) => sameResourceSpec(entry.spec, spec)
   const resources = pipe(Ref.get(compiledResources), Effect.runSync)
   const cached = Array.findFirst(resources, matchesSpec)
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  if (Option.isSome(cached)) return cached.value.resource as ResourceRuntime<Spec>
+  if (Option.isSome(cached)) return resourceRuntimeFor<Spec>(cached.value.resource)
 
   const operationEntries = Array.map(spec.capabilities, operationEntry)
 
@@ -91,7 +91,7 @@ function getOrCompileResourceFromSpec<const Spec extends ResourceSpec>(
           return Struct.assign(foreignKey, { references })
         }
 
-        const target = getOrCompileResourceFromSpec(references.resource)
+        const target = valueFromSpec(references.resource)
 
         const reference = Table.reference(
           target.table,
@@ -178,17 +178,16 @@ type RepositoryFor<Spec extends ResourceSpec> =
   >
 
 export type ResourceTable<Spec extends ResourceSpec> =
-  string extends Spec["name"] ? Table
-    : ResourceRuntime<Spec> extends { readonly table: infer ResourceTable extends Table }
+  string extends Spec["name"] ? TableDefinition
+    : ResourceRuntime<Spec> extends { readonly table: infer ResourceTable extends TableDefinition }
       ? ResourceTable
-      : Table
+      : TableDefinition
 
-const valueFromSpec = <const Spec extends ResourceSpec>(spec: Spec): ResourceRuntime<Spec> =>
-  getOrCompileResourceFromSpec(spec)
 
 const repository = <const Spec extends ResourceSpec>(spec: Spec) => {
   // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const runtime = getOrCompileResourceFromSpec(spec) as { readonly repository: RepositoryFor<Spec> }
+  const runtime = valueFromSpec(spec) as { readonly repository: RepositoryFor<Spec> }
+
   return Struct.assign(runtime.repository, {
     find: runtime.repository.find,
     ensure: runtime.repository.ensure,
@@ -196,7 +195,7 @@ const repository = <const Spec extends ResourceSpec>(spec: Spec) => {
 }
 
 const table = <const Spec extends ResourceSpec>(spec: Spec) => {
-  const runtime = getOrCompileResourceFromSpec(spec)
+  const runtime = valueFromSpec(spec)
 
   // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
   return runtime.table as ResourceTable<Spec>
@@ -220,7 +219,6 @@ const reference = <
 }
 
 export {
-  getOrCompileResourceFromSpec,
   reference,
   repository,
   table,

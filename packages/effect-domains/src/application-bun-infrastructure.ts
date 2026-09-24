@@ -1,10 +1,10 @@
-import { Data, Effect, Layer, Schema } from "effect"
+import { Data, Effect, Equivalence, Function, Layer, Option, Schema } from "effect"
 import type { ApplicationIR } from "./application.ts"
 import { runApplication, type RunErrors, type RunRequirements } from "./application-bun-runtime.ts"
 import { ApplicationInfrastructure, type ApplicationInfrastructureError } from "./application-infrastructure.ts"
 import type { ApplicationHttpOptions, Initialization, RuntimeLayer } from "./application-runtime.ts"
 import type { ApplicationInfrastructureIR } from "./infrastructure-compiler.ts"
-import type { SqliteMigration } from "./sqlite-migrations.ts"
+import type { SqliteMigration } from "./sqlite-migration-model.ts"
 
 class InfrastructureDatabaseOptions extends Data.Class<Readonly<{
   migrations: ReadonlyArray<SqliteMigration>
@@ -48,7 +48,7 @@ type InfrastructureRunEffect<
   RunRequirements<App, Services, Initialize, Background, Routes>
 >
 
-const runInfrastructureEffect = Effect.fn("ApplicationBun.runInfrastructure")(function* <
+export const runInfrastructure = Effect.fn("ApplicationBun.runInfrastructure")(function* <
   App extends ApplicationIR,
   Services extends RuntimeLayer = Layer.Layer<never, never, never>,
   Initialize extends Initialization = Effect.Effect<void>,
@@ -60,9 +60,14 @@ const runInfrastructureEffect = Effect.fn("ApplicationBun.runInfrastructure")(fu
 ) {
   const plan = yield* ApplicationInfrastructure.plan("ApplicationBun", infrastructure)
   const http = ApplicationInfrastructure.httpOptions(plan.runtime.resource)
-  const configuredFilename = options.database?.filename
-  const ephemeral = plan.database.resource.durability === "ephemeral"
-  const invalidEphemeralFilename = ephemeral && configuredFilename !== undefined
+  const configuredFilename = Option.fromNullishOr(options.database?.filename)
+
+  const ephemeral = Equivalence.strictEqual<typeof plan.database.resource.durability>()(
+    plan.database.resource.durability,
+    "ephemeral",
+  )
+
+  const invalidEphemeralFilename = ephemeral && Option.isSome(configuredFilename)
 
   if (invalidEphemeralFilename) {
     return yield* InfrastructureDatabaseConfigurationError.make({
@@ -77,14 +82,15 @@ const runInfrastructureEffect = Effect.fn("ApplicationBun.runInfrastructure")(fu
     })
     : new InfrastructureDatabaseOptions({ migrations: plan.database.resource.migrations })
 
-  const database = configuredFilename === undefined
-    ? defaultDatabase
-    : new InfrastructureFileDatabaseOptions({
+  const database = Option.match(configuredFilename, {
+    onNone: Function.constant(defaultDatabase),
+    onSome: (filename) => new InfrastructureFileDatabaseOptions({
       migrations: plan.database.resource.migrations,
-      filename: configuredFilename,
-    })
+      filename,
+    }),
+  })
 
-  // SAFETY: Planning and run channels are derived from this infrastructure and these options.
+  // SAFETY: Planning and run channels match because both derive from this infrastructure and these options.
   return yield* runApplication(plan.application, {
     ...options,
     ...http,
@@ -92,28 +98,3 @@ const runInfrastructureEffect = Effect.fn("ApplicationBun.runInfrastructure")(fu
   }) as InfrastructureRunEffect<App, Services, Initialize, Background, Routes>
 })
 
-interface RunInfrastructure {
-  <App extends ApplicationIR>(
-    infrastructure: ApplicationInfrastructureIR<App>,
-  ): InfrastructureRunEffect<
-    App,
-    Layer.Layer<never, never, never>,
-    Effect.Effect<void>,
-    Layer.Layer<never, never, never>,
-    Layer.Layer<never, never, never>
-  >
-
-  <
-    App extends ApplicationIR,
-    Services extends RuntimeLayer = Layer.Layer<never, never, never>,
-    Initialize extends Initialization = Effect.Effect<void>,
-    Background extends RuntimeLayer = Layer.Layer<never, never, never>,
-    Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
-  >(
-    infrastructure: ApplicationInfrastructureIR<App>,
-    options: InfrastructureRunOptions<Services, Initialize, Background, Routes>,
-  ): InfrastructureRunEffect<App, Services, Initialize, Background, Routes>
-}
-
-// SAFETY: The overloads expose the generic channels already preserved by runInfrastructureEffect.
-export const runInfrastructure = runInfrastructureEffect as RunInfrastructure

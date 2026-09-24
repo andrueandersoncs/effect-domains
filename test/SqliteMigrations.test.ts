@@ -1,13 +1,16 @@
 import { Authorization } from "effect-domains/authorization"
 import { expect, it } from "@effect/vitest"
 import { Array, Effect, Equivalence, Function, Option, pipe, Result, Schema } from "effect"
-import { Table, TableField, TableSnapshot } from "effect-domains/table"
+import { Table } from "effect-domains/table"
+import { TableField } from "effect-domains/physical-table-field"
+import { TableSnapshot } from "effect-domains/table-snapshot-model"
 import { renderCreateTable } from "effect-domains/sqlite-ddl"
 import { SqlClient } from "effect/unstable/sql"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
-import { sqliteMigrationStore, SqliteMigrations, SqliteMigration } from "effect-domains/sqlite-migrations"
+import { sqliteMigrationStore, SqliteMigrations } from "effect-domains/sqlite-migrations"
+import { SqliteMigration } from "effect-domains/sqlite-migration-model"
 
 const empty = SqliteMigrations.snapshot([])
 const sqliteClient = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })

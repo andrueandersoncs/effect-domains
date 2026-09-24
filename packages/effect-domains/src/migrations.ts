@@ -1,5 +1,5 @@
 import { Context, Effect, Schema } from "effect"
-import type { TableSnapshot } from "./table.ts"
+import type { TableSnapshot } from "./table-snapshot-model.ts"
 
 
 export class MigrationError extends Schema.TaggedError<MigrationError>()(

@@ -1,11 +1,23 @@
 import { Data, Effect, Equivalence, flow, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import type { Rpc } from "effect/unstable/rpc"
 import { RepositoryAccess, RepositoryError, RepositoryStore, ResourceNotFound, UniqueViolation, VersionConflict } from "./repository-store.ts"
-import type { Table, TableField, TableFieldName } from "./table.ts"
+import type { TableField } from "./physical-table-field.ts"
+import type { Table, TableFieldName } from "./table-relations.ts"
 import type { CreationInspection } from "./resource-creation.ts"
 import type { RpcBundle } from "./rpc-contract.ts"
 import { DomainIdentifier, PageLimitSchema, type StructSchema, type StructValue } from "./domain.ts"
-import { Authorization, type AuthorizationAction, type AuthorizationDefinition, type AuthorizationRuntime, Forbidden, Unauthenticated, type PolicyAuthorization, type SubjectOperand } from "./authorization.ts"
+import { Authorization } from "./authorization.ts"
+
+import {
+  type AuthorizationAction,
+  type AuthorizationDefinition,
+  type AuthorizationRuntime,
+  Forbidden,
+  Unauthenticated,
+  type PolicyAuthorization,
+  type SubjectOperand,
+} from "./authorization-model.ts"
+
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import type { TransitionMachine } from "./transitions.ts"
 
@@ -204,8 +216,7 @@ function capabilityCreate(
 
 const capabilities = <
   const Values extends ReadonlyArray<ResourceCapability>,
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
->(...values: Values) => Object.freeze([...values]) as Values
+>(...values: Values) => Object.freeze(values)
 
 const crud = () => {
   const get = capabilityGet()
@@ -233,10 +244,8 @@ type ExpectedVersion<Version extends string | undefined> = Version extends strin
 type ResourceChanges<S extends StructSchema, Key extends string, Version extends string | undefined> =
   Partial<Omit<S["Type"], Key | Extract<Version, string>>>
 
-type TransitionField<Transition> = Transition extends { readonly field: infer Field extends string } ? Field : never
-
 type TransitionChanges<S extends StructSchema, Key extends string, Version extends string | undefined, Transition> =
-  Partial<Omit<S["Type"], Key | Extract<Version, string> | TransitionField<Transition>>>
+  Partial<Omit<S["Type"], Key | Extract<Version, string> | Extract<Transition, { readonly field: string }>["field"]>>
 
 type RangeInput<S extends StructSchema, Policy extends ListPolicy<S>> = Policy["range"] extends ReadonlyArray<infer Field>
   ? Partial<{ readonly [Key in Extract<Field, keyof S["Type"]>]: Readonly<Partial<{ from: S["Type"][Key]; to: S["Type"][Key] }>> }>
@@ -266,6 +275,8 @@ const CreateOperationSchema = Schema.Struct({
   publish: Schema.optionalKey(Schema.Literal(false)),
 })
 
+interface CreateOperation extends Schema.Schema.Type<typeof CreateOperationSchema> {}
+
 const OptionalOperationSchema = Schema.optionalKey(Schema.Boolean)
 const OptionalListOperationSchema = Schema.optionalKey(Schema.Union([Schema.Boolean, ListOperationSchema]))
 const OptionalCreateOperationSchema = Schema.optionalKey(Schema.Union([Schema.Boolean, CreateOperationSchema]))
@@ -288,9 +299,9 @@ type CompatibleStorage<Canonical extends StructSchema, Storage extends StructSch
 const ResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, UniqueViolation, Unauthenticated, Forbidden, EntitlementRequired, EntitlementUnavailable])
 const PublicResourceErrorSchema = Schema.Union([RepositoryError, ResourceNotFound, UniqueViolation])
 
-type ResourceErrors<Auth> = Auth extends typeof Authorization.public ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema
-
-type DeclaredResourceError<Auth> = Schema.Schema.Type<ResourceErrors<Auth>> | VersionConflict
+type DeclaredResourceError<Auth> = Schema.Schema.Type<
+  Auth extends typeof Authorization.public ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema
+> | VersionConflict
 
 /** Public resources never fail with identity errors; policy resources keep them. */
 type AuthorizedError<Auth, Error> = unknown extends Error
@@ -304,9 +315,8 @@ class ResourceDefinitionError extends Schema.TaggedError<ResourceDefinitionError
   { resource: Schema.String, reason: Schema.String },
 ) {}
 
-const invalidInput = (resource: string, _reason: string) => {
-  return RepositoryError.make({ resource })
-}
+const invalidInput = (resource: string, _reason: string) =>
+  RepositoryError.make({ resource })
 
 const equals = Equivalence.strictEqual<unknown>()
 const absentAuthorizationValue = Option.none<StructValue>()
@@ -435,7 +445,6 @@ export {
   type ResourceChanges,
   ResourceDefinitionError,
   ResourceErrorSchema,
-  type ResourceErrors,
   type ResourceListRequest,
   type ResourceOperation,
   type ResourceOperations,

@@ -1,6 +1,6 @@
 import { Array, Effect, Schema, pipe } from "effect"
 import type { StructSchema } from "./domain.ts"
-import { Policy, PolicyEnvironment, type Operand, type Scalar } from "./policy.ts"
+import { NextFieldSchema, Policy, PolicyEnvironment, RowFieldSchema, type Operand, type Scalar, SubjectFieldSchema } from "./policy.ts"
 
 import {
   all,
@@ -37,14 +37,15 @@ import {
   snapshotEntitlements,
   validateEntitlements,
 } from "./authorization-validation.ts"
+
 import { absentPolicyRow, constructPolicy, subjectPhases } from "./authorization-runtime.ts"
 
 const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   schemas: Readonly<{ readonly resource: Resource; readonly subject: Subject }>,
 ) => {
-  const subject = policyFields<Subject, "SubjectField", "subject">(schemas.subject, "SubjectField")
-  const row = policyFields<Resource, "RowField", "row">(schemas.resource, "RowField")
-  const next = policyFields<Resource, "NextField", "next">(schemas.resource, "NextField")
+  const subject = policyFields<"subject">()(schemas.subject, "SubjectField", SubjectFieldSchema.make)
+  const row = policyFields<"row">()(schemas.resource, "RowField", RowFieldSchema.make)
+  const next = policyFields<"next">()(schemas.resource, "NextField", NextFieldSchema.make)
 
   const sameAs = <Field extends FieldName<Resource> & FieldName<Subject>>(
     field: Field & (FieldValue<Resource, Field> extends Scalar
@@ -101,8 +102,8 @@ const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
 }
 
 const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
-  const subjectFields = describeFields(subject)
-  const fields = new PolicyFields({ resource: {}, subject: subjectFields })
+  const subjectDescriptions = describeFields(subject)
+  const fields = new PolicyFields({ resource: {}, subject: subjectDescriptions })
   const isSubject = Schema.is(subject)
 
   const policy = <const Requirements extends ReadonlyArray<TypedEntitlement<"subject">> = readonly []>(
@@ -136,6 +137,7 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
         row: absentPolicyRow,
         next: absentPolicyRow,
       })
+
       const allowed = yield* pipe(
         evaluate(environment),
         Effect.catchTag("PolicyEvaluationError", forbidden),
@@ -152,8 +154,10 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
       definitionError("subject policy registration does not match its definition"),
       Effect.die,
     )
+
     const registration = (candidate: SubjectPolicy<Subject>) =>
       equals(candidate, registered) ? require : invalidRegistration
+
     const registered = Object.freeze({
       subject,
       expression: snapshot,
@@ -165,7 +169,7 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
   }
 
   return {
-    subject: policyFields<Subject, "SubjectField", "subject">(subject, "SubjectField"),
+    subject: policyFields<"subject">()(subject, "SubjectField", SubjectFieldSchema.make),
     eq,
     includes: membership,
     all,

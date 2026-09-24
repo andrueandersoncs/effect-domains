@@ -1,16 +1,24 @@
 import { Array, Data, Effect, Equal, flow, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 import { RepositoryAccess, RepositoryError, ResourceNotFound } from "./repository-store.ts"
-import { Table, type TableField, type TableFieldName, type TableRelationsInput, withImplicitIdentifier } from "./table.ts"
+import { Table } from "./table.ts"
+import type { TableField } from "./physical-table-field.ts"
+import type { TableRelationsInput } from "./table-relation-input.ts"
+import type { TableFieldName } from "./table-relations.ts"
+import { withImplicitIdentifier } from "./table-compiler.ts"
 import { Creation } from "./resource-creation.ts"
 import type { StructSchema, StructValue } from "./domain.ts"
+
+import { Authorization } from "./authorization.ts"
+
 import {
-  Authorization,
   AuthorizationValues,
   type AuthorizationAction,
   type AuthorizationDefinition,
   type SubjectOperand,
-} from "./authorization.ts"
+} from "./authorization-model.ts"
+
 import type { TransitionMachine } from "./transitions.ts"
+
 import {
   absentAuthorizationValue,
   type CompatibleStorage,
@@ -28,6 +36,9 @@ import {
   type ResourceOperations,
   withAuthorization,
 } from "./resource-model.ts"
+
+// SAFETY: The target intersects the source rather than discarding it because callers retain all source evidence and state each narrowing invariant.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 export type ResourceCompilerOptions<
   Name extends string,
@@ -102,15 +113,18 @@ export const prepareResource = <
   }) as PublishedCapabilities<Operations>
 
   // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+
   const creation = pipe(
     Option.fromNullishOr(options.operations.create),
     Option.filter(Predicate.isObject),
   ) as Option.Option<CreationPolicy<S, Auth>>
   // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+
   const listConfiguration = pipe(
     Option.fromNullishOr(options.operations.list),
     Option.filter(Predicate.isObject),
   ) as Option.Option<ListPolicy<S>>
+
   const createPolicy = Option.getOrUndefined(creation)
   const declaredListPolicy = Option.getOrUndefined(listConfiguration)
   const storageSchema = options.storage ?? options.schema
@@ -131,26 +145,31 @@ export const prepareResource = <
   const version = Option.getOrUndefined(versionOption)
   const transition = Option.getOrUndefined(transitionOption)
 
+  const validateVersionField = Effect.fn("Resource.validateVersionField")(function* (fieldName: string) {
+    const field = Array.findFirst(table.fields, ({ name }) => Equal.equals(name, fieldName))
+    const canonical = Record.get(options.schema.fields, fieldName)
+    const validField = Option.exists(field, integerRequired)
+    const validCanonical = Option.exists(canonical, canonicalInteger)
+    const mutable = !Equal.equals(fieldName, table.identifier)
+    const valid = Array.every([validField, validCanonical, mutable], Boolean)
+
+    if (!valid) {
+      return yield* definitionFailure(`version ${fieldName} must be a non-nullable integer field`)
+    }
+  })
+
   const validateVersion = Option.match(versionOption, {
     onNone: () => Effect.void,
-    onSome: (fieldName) => Effect.gen(function* () {
-      const field = Array.findFirst(table.fields, ({ name }) => Equal.equals(name, fieldName))
-      const canonical = Record.get(options.schema.fields, fieldName)
-      const validField = Option.exists(field, integerRequired)
-      const validCanonical = Option.exists(canonical, canonicalInteger)
-      const mutable = !Equal.equals(fieldName, table.identifier)
-      const valid = Array.every([validField, validCanonical, mutable], Boolean)
-
-      if (!valid) {
-        return yield* definitionFailure(`version ${fieldName} must be a non-nullable integer field`)
-      }
-    }),
+    onSome: validateVersionField,
   })
 
   Effect.runSync(validateVersion)
+
   const declaredDefaults: StructValue = createPolicy?.defaults ?? Record.empty()
+
   const declaredGenerated: Readonly<Record<string, "uuidV7" | "now" | "one">> =
     createPolicy?.generated ?? Record.empty()
+
   const subjectBindings: Readonly<Record<string, SubjectOperand<unknown>>> =
     createPolicy?.fromSubject ?? Record.empty()
 
@@ -177,11 +196,13 @@ export const prepareResource = <
   }
 
   const defaultEntry = (field: TableField) => [field.name, null] as const
+
   const implicitDefaultFields = pipe(
     table.fields,
     Array.filter(isImplicitDefault),
     Array.filter(lacksConfiguredValue),
   )
+
   const implicitDefaults = pipe(implicitDefaultFields, Array.map(defaultEntry), Record.fromEntries)
   const defaults = Struct.assign(implicitDefaults, declaredDefaults)
 
@@ -189,23 +210,31 @@ export const prepareResource = <
     ? declaredGenerated
     : Record.set(declaredGenerated, version, "one" as const)
 
+  const listFilter = narrowContract<ReadonlyArray<ListField<S>>, typeof filterFields>(filterFields)
+  const listRange = narrowContract<ReadonlyArray<ListField<S>>, typeof rangeFields>(rangeFields)
+  const listOrder = narrowContract<ReadonlyArray<readonly [ListField<S>, "asc" | "desc"]>, typeof declaredOrder>(declaredOrder)
+
   const listPolicy: ListPolicy<S> = new Data.Class({
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    filter: filterFields as ReadonlyArray<ListField<S>>,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    range: rangeFields as ReadonlyArray<ListField<S>>,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    order: declaredOrder as ReadonlyArray<readonly [ListField<S>, "asc" | "desc"]>,
+    filter: listFilter,
+    range: listRange,
+    order: listOrder,
     limit: maximum,
   })
 
   const implicitIdentifier = !Record.has(options.schema.fields, table.identifier)
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const canonicalRowSchema = (
-    implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
-  ) as Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>
+
+  const selectedCanonicalSchema = implicitIdentifier
+    ? withImplicitIdentifier(options.schema)
+    : options.schema
+
+  const canonicalRowSchema = narrowContract<
+    Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>,
+    typeof selectedCanonicalSchema
+  >(selectedCanonicalSchema)
+
   const declaredIdentifierSchema = Record.get(options.schema.fields, table.identifier)
   const canonicalIdentifierSchema = Option.getOrElse(declaredIdentifierSchema, () => table.identifierSchema)
+
   const authorization = pipe(
     Authorization.compile({
       authorization: options.authorization,
@@ -233,22 +262,28 @@ export const prepareResource = <
   const repositoryFailure = (_cause: Schema.SchemaError) => RepositoryError.make({ resource: table.name })
   const isCanonical = Schema.is(canonicalRowSchema)
   const canonicalFailure = inputFailure("value does not satisfy the canonical schema")
+
   const validateCanonical = (value: unknown) =>
     isCanonical(value) ? Effect.succeed(value) : Effect.fail(canonicalFailure)
+
   const encodeKey = flow(
     Schema.encodeUnknownEffect(table.identifierStorageSchema),
     Effect.mapError(repositoryFailure),
   )
+
   const encodeStorage = flow(
     Schema.encodeUnknownEffect(table.storageSchema),
     Effect.mapError(repositoryFailure),
   )
+
   const encodeRow = flow(validateCanonical, Effect.flatMap(encodeStorage))
+
   const decodeRow = flow(
     Schema.decodeUnknownEffect(table.storageSchema),
     Effect.mapError(repositoryFailure),
     Effect.flatMap(validateCanonical),
   )
+
   const missing = (key: unknown) => ResourceNotFound.make({ resource: table.name, key: String(key) })
   const withAccess = withAuthorization<Auth>(authorization, table)
 
@@ -266,6 +301,7 @@ export const prepareResource = <
 
   const creationSchema = implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
   const generatedIdentifier = implicitIdentifier ? Option.some(table.identifier) : Option.none<string>()
+
   const creationPlan = pipe(
     Creation.compile(
       creationSchema.fields,

@@ -1,13 +1,17 @@
-import { Array, Effect, Function, Option, Predicate, Record, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, Function, Option, Predicate, Record, Struct, pipe } from "effect"
 import { RepositoryAccess, RepositoryOrder, RepositorySelect, RepositoryStore, VersionConflict } from "./repository-store.ts"
-import { type TableFieldName, type TableRelationsInput } from "./table.ts"
+import type { TableRelationsInput } from "./table-relation-input.ts"
+import type { TableFieldName } from "./table-relations.ts"
 import { PageLimitSchema, type StructSchema, type StructValue } from "./domain.ts"
-import { type AuthorizationAction, type AuthorizationDefinition } from "./authorization.ts"
+import type { AuthorizationAction, AuthorizationDefinition } from "./authorization-model.ts"
 import type { TransitionMachine } from "./transitions.ts"
 import { type ResourceOperations, type CompatibleStorage, type CreationFrom, type ListFrom, type ListPolicy, invalidInput, type ResourceListRequest, Replacement, decodeVersion, noChanges, noVersion, isUniqueViolation, type ResourceDraft, type ExpectedVersion, type ResourceChanges, type TransitionChanges } from "./resource-model.ts"
 import { prepareResource } from "./resource-compiler-prepare.ts"
 import { compileResourceContracts } from "./resource-contracts.ts"
 import { SqliteList } from "./sqlite-list.ts"
+
+// SAFETY: Resource preparation proves these intersections because all narrowed values derive from the same compiled schema.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 const compileResourceValue = <
   const Name extends string,
@@ -26,7 +30,6 @@ const compileResourceValue = <
   type Creation = CreationFrom<Operations>
   type List = Extract<ListFrom<Operations>, ListPolicy<S>>
   type CanonicalTable = ReturnType<typeof import("./table.ts").Table.make<Name, S>>
-  type CanonicalRow = CanonicalTable["rowSchema"]["Type"]
   type CanonicalKey = CanonicalTable["identifier"]
   type CanonicalId = CanonicalTable["identifierSchema"]["Type"]
 
@@ -59,8 +62,13 @@ const compileResourceValue = <
     declaredOrder,
   } = prepareResource(options)
 
-  const repositoryFailure = (cause: unknown) =>
-    invalidInput(table.name, `repository codec failure: ${String(cause)}`)
+  const noCurrent = Option.none<StructValue>()
+
+  const repositoryFailure = (cause: unknown) => {
+    const causeText = String(cause)
+
+    return invalidInput(table.name, `repository codec failure: ${causeText}`)
+  }
 
   const createAuthorized = Effect.fn("Repository.create")(function* (
     store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceDraft<S, Creation, Version>,
@@ -69,7 +77,7 @@ const compileResourceValue = <
     const encoded = yield* encodeRow(complete)
     const next = Option.some(complete)
 
-    yield* authorize("create", permission.subject, Option.none(), next)
+    yield* authorize("create", permission.subject, noCurrent, next)
 
     const stored = yield* store.insert(table, encoded)
 
@@ -96,7 +104,7 @@ const compileResourceValue = <
     const encoded = yield* encodeKey(key)
     const stored = yield* selectKey(store, permission, encoded)
 
-    if (Option.isNone(stored)) return Option.none<CanonicalRow>()
+    if (Option.isNone(stored)) return Option.none<CanonicalTable["rowSchema"]["Type"]>()
 
     return yield* pipe(readable(permission.subject, stored.value), Effect.map(Option.some))
   })
@@ -137,10 +145,9 @@ const compileResourceValue = <
     if (Option.isNone(stored)) return yield* missing(key)
 
     const current = yield* decodeRow(stored.value)
-    const candidate = action === "patch" ? Struct.assign(current, changes) : changes
+    const candidate = Equivalence.strictEqual()(action, "patch") ? Struct.assign(current, changes) : changes
     const versionField = Option.fromNullishOr(version)
     const versioned = versionReplacement(current, candidate, versionField, expectedVersion)
-
     const encodedExpected = yield* encodeRow(versioned.expected)
     const encoded = yield* encodeRow(versioned.next)
 
@@ -216,13 +223,18 @@ const compileResourceValue = <
     if (!removed) return yield* missing(key)
   })
 
-  // SAFETY: Table columns are compiled from this resource's declared list fields.
-  const storageField = (field: string) =>
-    table.columns[field as keyof typeof table.columns].storageSchema
-  const identifierColumn = table.columns[table.identifier as keyof typeof table.columns]
+  const storageField = (field: string) => {
+    const columnName = narrowContract<keyof typeof table.columns, typeof field>(field)
+
+    return pipe(Record.get(table.columns, columnName), Option.map(Struct.get("storageSchema")), Option.getOrThrow)
+  }
+
+  const identifierColumnName = narrowContract<keyof typeof table.columns, typeof table.identifier>(table.identifier)
+  const identifierColumn = pipe(Record.get(table.columns, identifierColumnName), Option.getOrThrow)
   const storedIdentifier = storageSchema.fields[table.identifier]
-  const sameIdentifier = implicitIdentifier || canonicalIdentifierSchema === storedIdentifier
-  const orderableIdentifier = "orderable" in identifierColumn && identifierColumn.orderable === true && sameIdentifier
+  const sameIdentifier = implicitIdentifier || Equivalence.strictEqual()(canonicalIdentifierSchema, storedIdentifier)
+  const orderableColumn = "orderable" in identifierColumn && Equivalence.strictEqual()(identifierColumn.orderable, true)
+  const orderableIdentifier = orderableColumn && sameIdentifier
   const invalidOrdering = !orderableIdentifier
   const supportsList = Boolean(options.operations.list)
   const unsupportedList = supportsList && invalidOrdering
@@ -237,7 +249,7 @@ const compileResourceValue = <
   const configuredOrder = Array.map(declaredOrder, makeOrder)
 
   const isIdentifierOrder = (entry: RepositoryOrder) =>
-    entry.field === table.identifier
+    Equivalence.strictEqual()(entry.field, table.identifier)
 
   const includesIdentifier = Array.some(configuredOrder, isIdentifierOrder)
   const order = includesIdentifier ? configuredOrder : Array.append(configuredOrder, identifierOrder)
@@ -286,8 +298,10 @@ const compileResourceValue = <
   ) {
     if (!orderableIdentifier) return yield* inputFailure("list identifier must preserve canonical ordering in storage")
 
-    const requestedFilter = (input.filter ?? Record.empty()) as RepositorySelect["filter"]
-    const requestedRange = (input.range ?? Record.empty()) as RepositorySelect["range"]
+    const filterInput = input.filter ?? Record.empty()
+    const rangeInput = input.range ?? Record.empty()
+    const requestedFilter = narrowContract<RepositorySelect["filter"], typeof filterInput>(filterInput)
+    const requestedRange = narrowContract<RepositorySelect["range"], typeof rangeInput>(rangeInput)
     const requestedLimit = Option.fromNullishOr(input.limit)
     const requestedCursor = Option.fromNullishOr(input.cursor)
 
@@ -305,7 +319,12 @@ const compileResourceValue = <
     return yield* listPlan.page(prepared, rows, decodeListRows)
   })
 
-  const noTransitionChanges = Struct.assign(noChanges, noChanges) as TransitionChanges<S, CanonicalKey, Version, Transition>
+  const transitionDefaults = Struct.assign(noChanges, noChanges)
+
+  const noTransitionChanges = narrowContract<
+    TransitionChanges<S, CanonicalKey, Version, Transition>,
+    typeof transitionDefaults
+  >(transitionDefaults)
 
   const transitionAuthorized = Effect.fn("Repository.transition")(function* (
     store: RepositoryStore["Service"],
@@ -321,7 +340,8 @@ const compileResourceValue = <
     const changesTransition = Record.has(changes, transition.field)
     const versionField = Option.fromNullishOr(version)
     const changesVersion = Option.exists(versionField, (field) => Record.has(changes, field))
-    const immutableChanges = changesIdentifier || changesTransition || changesVersion
+    const changesIdentifierOrTransition = changesIdentifier || changesTransition
+    const immutableChanges = changesIdentifierOrTransition || changesVersion
 
     if (immutableChanges) return yield* inputFailure("transition changes contain an immutable field")
 
@@ -340,7 +360,8 @@ const compileResourceValue = <
     const keyText = String(key)
     const source = pipe(Record.get(current, transition.field), Option.getOrThrow)
     const sourceActual = String(source)
-    const to = yield* transition.guard(action as never, keyText, sourceActual)
+    const transitionAction = narrowContract<never, typeof action>(action)
+    const to = yield* transition.guard(transitionAction, keyText, sourceActual)
     const encodedCurrent = yield* encodeRow(current)
     const encodedStatus = pipe(Record.get(encodedCurrent, transition.field), Option.getOrThrow)
     const statusGuard = Record.singleton(transition.field, encodedStatus)
@@ -348,7 +369,6 @@ const compileResourceValue = <
     const statusChange = Record.singleton(transition.field, to)
     const candidate = Struct.assign(withChanges, statusChange)
     const versioned = versionReplacement(current, candidate, versionField, expectedVersionValue)
-
     const encodedExpected = yield* encodeRow(versioned.expected)
     const encoded = yield* encodeRow(versioned.next)
 
@@ -369,6 +389,7 @@ const compileResourceValue = <
 
     if (Option.isSome(versionField)) {
       const expectedValue = Option.getOrThrow(expectedVersionValue)
+
       return yield* VersionConflict.make({ resource: table.name, key: String(key), expectedVersion: expectedValue })
     }
 
@@ -394,12 +415,12 @@ const compileResourceValue = <
   const transitionRepository = withAccess("transition", transitionAuthorized)
 
   const ensureCreateAuthorized = Effect.fn("Repository.ensureCreate")(function* (
-    store: RepositoryStore["Service"], permission: RepositoryAccess, row: CanonicalRow,
+    store: RepositoryStore["Service"], permission: RepositoryAccess, row: CanonicalTable["rowSchema"]["Type"],
   ) {
     const encoded = yield* encodeRow(row)
     const next = Option.some(row)
 
-    yield* authorize("create", permission.subject, Option.none(), next)
+    yield* authorize("create", permission.subject, noCurrent, next)
 
     const stored = yield* store.insert(table, encoded)
 
@@ -408,8 +429,9 @@ const compileResourceValue = <
 
   const ensureCreate = withAccess("create", ensureCreateAuthorized)
 
-  const ensure = Effect.fn("Repository.ensure")(function* (row: CanonicalRow & StructValue) {
-    const key = row[table.identifier as CanonicalKey] as CanonicalId
+  const ensure = Effect.fn("Repository.ensure")(function* (row: CanonicalTable["rowSchema"]["Type"] & StructValue) {
+    const keyValue = pipe(Record.get(row, table.identifier), Option.getOrThrow)
+    const key = narrowContract<CanonicalId, typeof keyValue>(keyValue)
     const found = yield* find(key)
 
     if (Option.isSome(found)) return found.value

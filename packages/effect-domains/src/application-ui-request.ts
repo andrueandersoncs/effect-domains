@@ -3,6 +3,9 @@ import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http
 import { applicationUiFailureResponse, applicationUiInternalResponse } from "./application-ui-response.ts"
 
 const CallSchema = Schema.Struct({ operation: Schema.String, input: Schema.Json })
+
+interface Call extends Schema.Schema.Type<typeof CallSchema> {}
+
 const maximumCallBytes = FileSystem.KiB(64)
 const loopbackHosts = HashSet.make("localhost", "127.0.0.1", "[::1]")
 

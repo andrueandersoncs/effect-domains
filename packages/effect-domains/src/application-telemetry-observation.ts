@@ -1,108 +1,9 @@
-import { Cause, Clock, Config, ConfigProvider, Duration, Effect, Equivalence, Exit, Function, Layer, Metric, Option, Predicate, Record, References, Schema, Struct, Tracer, pipe } from "effect"
+import { Cause, Clock, Effect, Equivalence, Exit, Function, Layer, Metric, Option, Predicate, Record, References, Struct, Tracer, pipe } from "effect"
 import { HttpServerRequest, type HttpServerResponse } from "effect/unstable/http"
 import * as HttpTraceContext from "effect/unstable/http/HttpTraceContext"
-import { OtlpSerialization } from "effect/unstable/observability"
-import { equalsProtocol, IngestPathSchema, PositiveFiniteSchema, PositiveIntegerSchema, ProtocolSchema, SampleRateSchema, type Signal, type TelemetryOptions, type TelemetryProtocol } from "./application-telemetry-config.ts"
 
-const protocol = Effect.fn("ApplicationTelemetry.protocol")((
-  signal: Signal,
-  provider: ConfigProvider.ConfigProvider,
-) => {
-  const signalConfig = Config.schema(ProtocolSchema, `OTEL_EXPORTER_OTLP_${signal}_PROTOCOL`)
-  const optionalSignalConfig = Config.option(signalConfig)
-  const selectConfig = Option.match({
-    onNone: () => Config.schema(ProtocolSchema, "OTEL_EXPORTER_OTLP_PROTOCOL"),
-    onSome: Effect.succeed,
-  })
-  const configured = Effect.flatMap(optionalSignalConfig, selectConfig)
-
-  return Effect.provideService(configured, ConfigProvider.ConfigProvider, provider)
-})
-
-const serialization = (signal: Signal, provider: ConfigProvider.ConfigProvider) => {
-  const configured = protocol(signal, provider)
-
-  const selectLayer = (value: TelemetryProtocol) => equalsProtocol(value, "http/protobuf")
-    ? OtlpSerialization.layerProtobuf
-    : OtlpSerialization.layerJson
-
-  const selected = Effect.map(configured, selectLayer)
-
-  return Layer.unwrap(selected)
-}
-
-const noValidation = Function.constant(Effect.void)
-const invalidDuration = Function.constant(Number.NaN)
-
-const validateValue = Effect.fn("ApplicationTelemetry.validateValue")(<S extends Schema.Top>(
-  schema: S,
-  value: Option.Option<unknown>,
-) => Option.match(value, {
-  onNone: noValidation,
-  onSome: (value) => pipe(
-    Schema.decodeUnknownEffect(schema)(value),
-    Effect.mapError((error) => new Config.ConfigError(error)),
-    Effect.asVoid,
-  ),
-}))
-
-const validateOptional = Effect.fn("ApplicationTelemetry.validateOptional")(<S extends Schema.Top>(
-  schema: S,
-  value: unknown,
-) => {
-  const optional = Option.fromNullishOr(value)
-
-  return validateValue(schema, optional)
-})
-
-const validateDuration = Effect.fn("ApplicationTelemetry.validateDuration")((
-  value: Option.Option<Duration.Input>,
-) => Option.match(value, {
-  onNone: noValidation,
-  onSome: (duration) => pipe(
-    Effect.try({
-      try: () => Duration.toMillis(duration),
-      catch: invalidDuration,
-    }),
-    Effect.flatMap((millis) => {
-      const measured = Option.some(millis)
-
-      return validateValue(PositiveFiniteSchema, measured)
-    }),
-  ),
-}))
-
-const validateOptions = Effect.fn("ApplicationTelemetry.validateOptions")(function* (options: TelemetryOptions) {
-  const traces = Predicate.isObject(options.traces) ? options.traces : null
-  const metrics = Predicate.isObject(options.metrics) ? options.metrics : null
-  const logs = Predicate.isObject(options.logs) ? options.logs : null
-  const browser = Predicate.isObject(options.browser) ? options.browser : null
-
-  yield* validateOptional(Schema.URLFromString, options.endpoint)
-  yield* validateOptional(Schema.URLFromString, traces?.endpoint)
-  yield* validateOptional(Schema.URLFromString, metrics?.endpoint)
-  yield* validateOptional(Schema.URLFromString, logs?.endpoint)
-  yield* validateOptional(Schema.NonEmptyString, options.resource?.serviceName)
-  yield* validateOptional(Schema.NonEmptyString, options.resource?.serviceVersion)
-  yield* validateOptional(SampleRateSchema, traces?.sampleRate)
-  yield* validateOptional(SampleRateSchema, browser?.sampleRate)
-  yield* validateOptional(PositiveIntegerSchema, traces?.maxBatchSize)
-  yield* validateOptional(PositiveIntegerSchema, logs?.maxBatchSize)
-  yield* validateOptional(PositiveIntegerSchema, browser?.maxRequestBytes)
-  yield* validateOptional(PositiveIntegerSchema, browser?.requestsPerMinute)
-  yield* validateOptional(IngestPathSchema, browser?.ingestPath)
-
-  for (const duration of [
-    traces?.exportInterval,
-    traces?.shutdownTimeout,
-    metrics?.exportInterval,
-    metrics?.shutdownTimeout,
-    logs?.exportInterval,
-    logs?.shutdownTimeout,
-  ]) {
-    yield* validateDuration(Option.fromNullishOr(duration))
-  }
-})
+// SAFETY: The target intersects the source rather than discarding it because callers retain all source evidence and state each narrowing invariant.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 const durationBoundaries = Metric.boundariesFromIterable([
   0.005,
@@ -137,12 +38,10 @@ const sampledByValue = (rate: number, value: number) => value < rate
 
 const randomSample = (rate: number, crypto: Pick<Crypto, "getRandomValues">) => {
   const disabled = rate <= 0
-
-  if (disabled) return false
-
   const complete = rate >= 1
+  const boundaryRate = disabled || complete
 
-  if (complete) return true
+  if (boundaryRate) return complete
 
   const value = new Uint32Array(1)
 
@@ -221,9 +120,8 @@ const observedSpan = (
       return endSpan
     }
 
-    // SAFETY: The property belongs to the proxied Span because this trap only forwards accesses made through that Span.
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const value = target[property as keyof Tracer.Span]
+    const spanProperty = narrowContract<keyof Tracer.Span, typeof property>(property)
+    const value = target[spanProperty]
 
     return Predicate.isFunction(value) ? value.bind(target) : value
   }
@@ -293,9 +191,11 @@ const httpMiddleware = Effect.fn("ApplicationTelemetry.httpMiddleware")(function
     const scheme = forwardedHttps ? "https" : "http"
     const { method } = request
 
-    const annotateStatus = Effect.fn("ApplicationTelemetry.annotateStatus")((
+    const annotateStatus = Effect.fn("ApplicationTelemetry.annotateStatus")(function* (
       response: HttpServerResponse.HttpServerResponse,
-    ) => Effect.annotateCurrentSpan("http.response.status_code", response.status))
+    ) {
+      yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
+    })
 
     const traceContext = HttpTraceContext.fromHeaders(request.headers)
     const parent = Option.getOrUndefined(traceContext)
@@ -342,7 +242,5 @@ const httpMiddleware = Effect.fn("ApplicationTelemetry.httpMiddleware")(function
 
 export {
   httpMiddleware,
-  serialization,
-  validateOptions,
   withTelemetryTracer,
 }

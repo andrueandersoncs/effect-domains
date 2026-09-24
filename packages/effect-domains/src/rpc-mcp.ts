@@ -6,7 +6,7 @@ import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { inProcessClient, type UnaryRpc } from "./rpc-in-process.ts"
 
-export class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
+class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
   "RpcMcpDefinitionError",
   { procedure: Schema.String, reason: Schema.String },
 ) {}
@@ -27,20 +27,19 @@ const errorResult = (text: string) => McpSchema.CallToolResult.make({
   content: [{ type: "text", text }],
 })
 
-const failInternally = Function.constant(Effect.succeed(internalFailure))
+const internalFailureEffect = Effect.succeed(internalFailure)
+const failInternally = Function.constant(internalFailureEffect)
 const emptyHeaders = Function.constant(Headers.empty)
 
 const decodeToolJsonSchema = Schema.decodeUnknownEffect(McpSchema.ToolJsonSchema)
+
 const toolSchema = (schema: Schema.Constraint) => pipe(
   Effect.try(() => Tool.getJsonSchemaFromSchema(schema)),
   Effect.flatMap(decodeToolJsonSchema),
 )
 
-const register = Effect.fn("RpcMcp.register")(function*<Rpcs extends UnaryRpc>(group: RpcGroup.RpcGroup<Rpcs>) {
+const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["group"]) {
   const registry = yield* McpServer.McpServer
-  const { client, withHandlerContext } = yield* inProcessClient(
-    group as unknown as RpcGroup.RpcGroup<UnaryRpc>,
-  )
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
@@ -53,6 +52,10 @@ const register = Effect.fn("RpcMcp.register")(function*<Rpcs extends UnaryRpc>(g
         reason: "only unary RPC procedures are supported",
       }),
     )
+
+    // SAFETY: The cast is valid because compileUnaryRpc rejected streaming success schemas for this original procedure.
+    const contractGroup = RpcGroup.make(procedure as UnaryRpc)
+    const { client, withHandlerContext } = yield* inProcessClient(contractGroup)
 
     if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract._tag)) {
       return yield* RpcMcpDefinitionError.make({
@@ -70,14 +73,16 @@ const register = Effect.fn("RpcMcp.register")(function*<Rpcs extends UnaryRpc>(g
     interface Output extends Schema.Schema.Type<typeof OutputSchema> {}
 
     const ErrorSchema = Schema.fromJsonString(contract.errorSchema)
+
     const definitionError = (cause: unknown) => RpcMcpDefinitionError.make({
       procedure: contract._tag,
       reason: String(cause),
     })
+
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
     const tool = McpSchema.Tool.make({ name: contract._tag, inputSchema, outputSchema })
-    const withCodecContext = withHandlerContext(procedure)
+    const withCodecContext = withHandlerContext(contract)
 
     const toolResultFromArguments = Effect.fn("RpcMcp.execute")(function* (
       arguments_: unknown,
@@ -101,9 +106,8 @@ const register = Effect.fn("RpcMcp.register")(function*<Rpcs extends UnaryRpc>(g
       )
 
       const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
-      const invocation = withCodecContext(
-        client(contract._tag, payload.input, { headers }),
-      )
+      const invokeClient = (input: Input["input"]) => client(contract._tag, input, { headers })
+      const invocation = invokeClient(payload.input)
 
       return yield* pipe(
         invocation,
@@ -121,21 +125,24 @@ const register = Effect.fn("RpcMcp.register")(function*<Rpcs extends UnaryRpc>(g
       )
     })
 
+    const handle = Effect.fn("RpcMcp.handle")(function* (payload: unknown) {
+      const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
+
+      const headers = Option.match(request, {
+        onNone: emptyHeaders,
+        onSome: Struct.get("headers"),
+      })
+
+      return yield* pipe(
+        toolResultFromArguments(payload, headers),
+        Effect.catchDefect(failInternally),
+      )
+    })
+
     yield* registry.addTool({
       tool,
       annotations: procedure.annotations,
-      handle: (payload) => Effect.gen(function* () {
-        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
-        const headers = Option.match(request, {
-          onNone: emptyHeaders,
-          onSome: Struct.get("headers"),
-        })
-
-        return yield* pipe(
-          toolResultFromArguments(payload, headers),
-          Effect.catchDefect(failInternally),
-        )
-      }),
+      handle,
     })
   }))
 })
@@ -144,7 +151,6 @@ export const layerHttp = <App extends ApplicationIR>(options: Readonly<{
   application: App
   path: `/${string}`
 }>) => {
-  type Rpcs = RpcGroup.Rpcs<App["group"]>
 
   const { application } = options
 
@@ -155,21 +161,13 @@ export const layerHttp = <App extends ApplicationIR>(options: Readonly<{
     protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26],
   })
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  const registration = register(application.group)
+
   return pipe(
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    register(application.group as unknown as RpcGroup.RpcGroup<Rpcs & UnaryRpc>),
+    registration,
     Layer.effectDiscard,
     Layer.provide(server),
-  ) as Layer.Layer<
-    never,
-    RpcMcpDefinitionError | Layer.Error<typeof server>,
-    | HttpRouter.HttpRouter
-    | Rpc.ToHandler<Rpcs>
-    | Rpc.Middleware<Rpcs>
-    | Rpc.MiddlewareClient<Rpcs>
-    | Rpc.ServicesServer<Rpcs>
-  >
+  )
 }
 
 export const RpcMcp = { layerHttp }

@@ -3,27 +3,38 @@ import { DomainIdentifier, type StructSchema, UuidV7Schema } from "./domain.ts"
 import { FieldIR, ScalarSchema, SchemaField, scalarChecks, type ScalarF } from "./schema-field.ts"
 
 import {
-  DefaultIdentifierField,
-  DefaultIdentifierFields,
-  failTableDefinition,
   GreaterThan,
   GreaterThanOrEqualTo,
   isOneOfCheck,
   LessThan,
   LessThanOrEqualTo,
-  NoGeneration,
-  numericScalar,
   OneOf,
   type TableCheck,
-  TableDefinitionError,
-  TableField,
-  unsupportedTableScalar,
-} from "./table-model.ts"
+} from "./table-check-model.ts"
 
-const ownValue = (value: unknown, key: PropertyKey): unknown =>
-  Predicate.isObject(value) && Object.prototype.hasOwnProperty.call(value, key)
-    ? Reflect.get(value, key)
-    : undefined
+import { TableDefinitionError } from "./physical-table-definition-error.ts"
+import { TableField } from "./physical-table-field.ts"
+import { isNumericTableScalar } from "./physical-table-scalar.ts"
+
+const DefaultIdentifierFields = Record.singleton("id", UuidV7Schema)
+const NoGeneration = Option.none<"uuidv7">()
+const GeneratedIdentifierGeneration = Option.some<"uuidv7">("uuidv7")
+
+const DefaultIdentifierField = TableField.make({
+  name: "id",
+  scalar: "string",
+  nullable: false,
+  generation: GeneratedIdentifierGeneration,
+  checks: [],
+})
+
+const unsupportedTableScalar = Effect.fn("Table.unsupportedScalar")(function* (table: string, field: string) {
+  return yield* TableDefinitionError.make({ table, reason: `field ${field} must encode to a supported scalar` })
+})
+
+
+const ownValue = (value: unknown, key: string | symbol) =>
+  Predicate.hasProperty(value, key) ? value[key] : undefined
 
 const representationId = (value: unknown) => ownValue(value, "id")
 const DateTimeUtcId = "effect/schema/DateTimeUtc"
@@ -150,47 +161,50 @@ const scalarAlgebra = (table: string, field: string) => (
     Match.orElse(() => unsupportedTableScalar(table, field)),
   )
 
+  const compileUnion = Effect.fn("TableCompiler.union")(function* (
+    { members: children }: Extract<ScalarF<Effect.Effect<ScalarCompilation, TableDefinitionError>>, { readonly _tag: "Union" }>,
+  ) {
+    const members = yield* Effect.all(children)
+    const hasScalar = (member: ScalarCompilation) => Option.isSome(member.scalar)
+    const physical = Array.filter(members, hasScalar)
+    const head = Array.head(physical)
+
+    if (Option.isNone(head)) return yield* unsupportedTableScalar(table, field)
+
+    const first = Option.getOrThrow(head)
+    const sameScalar = (member: ScalarCompilation) => Option.makeEquivalence(Equivalence.strictEqual<TableField["scalar"]>())(member.scalar, first.scalar)
+    const isNumeric = (member: ScalarCompilation) => Option.exists(member.scalar, isNumericTableScalar)
+    const uniform = Array.every(physical, sameScalar)
+    const numeric = Array.every(physical, isNumeric)
+    const supported = uniform || numeric
+
+    if (!supported) return yield* unsupportedTableScalar(table, field)
+
+    const nullable = Array.some(members, Struct.get("nullable"))
+    const orderable = Array.every(members, Struct.get("orderable"))
+    const single = Equivalence.strictEqual<number>()(physical.length, 1)
+    // Merge literal sets because alternative predicates cannot be conjoined in SQL.
+    const choices = (member: ScalarCompilation) => Array.findFirst(member.checks, isOneOfCheck)
+    const values = pipe(physical, Array.map(choices), Option.all)
+
+    const unionChecks = single ? first.checks : pipe(values, Option.match({
+      onNone: () => [],
+      onSome: (sets) => [OneOf.make({ values: Array.flatMap(sets, Struct.get("values")) })],
+    }))
+
+    const scalar = uniform ? first.scalar : Option.some("number" as const)
+    const storageCodec = single ? first.storageCodec : Option.none<Schema.Constraint>()
+
+    return new ScalarCompilation({ scalar, nullable, checks: [...checks, ...unionChecks], orderable, storageCodec })
+  })
+
   return pipe(Match.value(layer), Match.tagsExhaustive({
     Leaf: ({ ast }) => leaf(ast),
     Unsupported: () => unsupportedTableScalar(table, field),
     Collection: () => unsupportedTableScalar(table, field),
     Encoding: ({ value }) => pipe(value, Effect.map((encoded) => new ScalarCompilation({ ...encoded, orderable: false }))),
     Suspend: ({ value }) => pipe(value, Effect.map((inner) => new ScalarCompilation({ ...inner, checks: [...checks, ...inner.checks] }))),
-    Union: ({ members: children }: Extract<ScalarF<Effect.Effect<ScalarCompilation, TableDefinitionError>>, { readonly _tag: "Union" }>) =>
-      Effect.gen(function* () {
-        const members = yield* Effect.all(children)
-        const hasScalar = (member: ScalarCompilation) => Option.isSome(member.scalar)
-        const physical = Array.filter(members, hasScalar)
-        const head = Array.head(physical)
-
-        if (Option.isNone(head)) return yield* unsupportedTableScalar(table, field)
-
-        const first = Option.getOrThrow(head)
-        const sameScalar = (member: ScalarCompilation) => Option.makeEquivalence(Equivalence.strictEqual<TableField["scalar"]>())(member.scalar, first.scalar)
-        const isNumeric = (member: ScalarCompilation) => Option.exists(member.scalar, numericScalar)
-        const uniform = Array.every(physical, sameScalar)
-        const numeric = Array.every(physical, isNumeric)
-        const supported = uniform || numeric
-
-        if (!supported) return yield* unsupportedTableScalar(table, field)
-
-        const nullable = Array.some(members, Struct.get("nullable"))
-        const orderable = Array.every(members, Struct.get("orderable"))
-        const single = Equivalence.strictEqual<number>()(physical.length, 1)
-        // Merge literal sets because alternative predicates cannot be conjoined in SQL.
-        const choices = (member: ScalarCompilation) => Array.findFirst(member.checks, isOneOfCheck)
-        const values = pipe(physical, Array.map(choices), Option.all)
-
-        const unionChecks = single ? first.checks : pipe(values, Option.match({
-          onNone: () => [],
-          onSome: (sets) => [OneOf.make({ values: Array.flatMap(sets, Struct.get("values")) })],
-        }))
-
-        const scalar = uniform ? first.scalar : Option.some("number" as const)
-        const storageCodec = single ? first.storageCodec : Option.none<Schema.Constraint>()
-
-        return new ScalarCompilation({ scalar, nullable, checks: [...checks, ...unionChecks], orderable, storageCodec })
-      }),
+    Union: compileUnion,
   }))
 }
 
@@ -284,17 +298,17 @@ const hasIdentifier = (schema: Schema.Constraint) => {
 }
 
 const sourceField = <S extends StructSchema>(schema: S) => (name: string) =>
-  Option.fromNullishOr(schema.fields[name as Extract<keyof S["fields"], string>])
+  Record.get(schema.fields, name)
 
 const compileField = <S extends StructSchema>(table: string, schema: S) =>
   Effect.fn("Table.compileField")(function* (property: SchemaAST.PropertySignature) {
     const stringName = Predicate.isString(property.name)
 
-    if (!stringName) return yield* failTableDefinition(table, "field names must be strings")
+    if (!stringName) return yield* TableDefinitionError.make({ table, reason: "field names must be strings" })
 
     const optional = SchemaAST.isOptional(property.type)
 
-    if (optional) return yield* failTableDefinition(table, `field ${property.name} must be required`)
+    if (optional) return yield* TableDefinitionError.make({ table, reason: `field ${property.name} must be required` })
 
     const fieldOption = sourceField(schema)(property.name)
     const fieldSchema = Option.getOrThrow(fieldOption)
@@ -332,29 +346,30 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const encodedSchema = Schema.toEncoded(schema)
   const flat = SchemaAST.isObjects(encodedSchema.ast)
 
-  if (!flat) return yield* failTableDefinition(name, "schema must encode to a flat struct")
+  if (!flat) return yield* TableDefinitionError.make({ table: name, reason: "schema must encode to a flat struct" })
 
   const indexed = encodedSchema.ast.indexSignatures.length > 0
 
-  if (indexed) return yield* failTableDefinition(name, "schema must not contain index signatures")
+  if (indexed) return yield* TableDefinitionError.make({ table: name, reason: "schema must not contain index signatures" })
 
   const compiled = yield* Effect.forEach(
     encodedSchema.ast.propertySignatures,
     compileField(name, schema),
   )
+
   const identifiers = Array.filter(compiled, compiledIdentifier(schema))
   const multipleIdentifiers = Array.length(identifiers) > 1
 
-  if (multipleIdentifiers) return yield* failTableDefinition(name, "schema must contain at most one Domain.identifier field")
+  if (multipleIdentifiers) return yield* TableDefinitionError.make({ table: name, reason: "schema must contain at most one Domain.identifier field" })
 
   const identifier = Array.head(identifiers)
   const nullableIdentifier = pipe(identifier, Option.filter((value) => value.field.nullable))
 
   if (Option.isSome(nullableIdentifier)) {
-    return yield* failTableDefinition(
-      name,
-      `identifier field ${nullableIdentifier.value.field.name} must not encode to null`,
-    )
+    return yield* TableDefinitionError.make({
+      table: name,
+      reason: `identifier field ${nullableIdentifier.value.field.name} must not encode to null`,
+    })
   }
 
   const implicit = Option.isNone(identifier)
@@ -362,10 +377,10 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   const ambiguousId = implicit && hasId
 
   if (ambiguousId) {
-    return yield* failTableDefinition(
-      name,
-      "field id must use Domain.identifier when overriding the default UUIDv7 identifier",
-    )
+    return yield* TableDefinitionError.make({
+      table: name,
+      reason: "field id must use Domain.identifier when overriding the default UUIDv7 identifier",
+    })
   }
 
   const rowSchema = implicit ? withImplicitIdentifier(schema) : schema
@@ -390,7 +405,6 @@ const compileTable = Effect.fn("Table.compile")(function* <const Name extends st
   return {
     _tag: "Table" as const,
     name,
-    schema,
     rowSchema,
     identifier: key.field.name,
     identifierSchema,

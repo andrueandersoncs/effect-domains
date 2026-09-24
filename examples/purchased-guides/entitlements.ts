@@ -1,5 +1,5 @@
 import { Effect, pipe } from "effect"
-import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationSubject } from "effect-domains/authorization-model"
 import { Entitlements } from "effect-domains/entitlements"
 import { Resource } from "effect-domains/resource"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"

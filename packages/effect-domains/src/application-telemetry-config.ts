@@ -62,6 +62,8 @@ const BrowserTelemetrySignalsSchema = Schema.Struct({
   logs: Schema.Boolean,
 })
 
+interface BrowserTelemetrySignals extends Schema.Schema.Type<typeof BrowserTelemetrySignalsSchema> {}
+
 const BrowserTelemetryEndpointSchema = Schema.TemplateLiteral(["/", Schema.String])
 const OptionalBrowserSampleRateSchema = Schema.optionalKey(Schema.Number)
 
@@ -95,6 +97,7 @@ const HeadersRecordSchema = Config.Record(Schema.String, Schema.StringFromUriCom
 const normalizeExporter = (value: string) => value.trim().toLowerCase()
 
 const toMillisecondsString = flow(Duration.toMillis, String)
+
 const milliseconds = (duration: Option.Option<Duration.Input>) => pipe(
   duration,
   Option.map(toMillisecondsString),
@@ -105,8 +108,14 @@ const signalEndpoint = (base: string, signal: Signal) => {
   const url = new URL(base)
   const trailingSlash = url.pathname.endsWith("/")
   const separator = trailingSlash ? "" : "/"
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const name = signal.toLowerCase() as SignalName
+
+  const name = pipe(
+    Match.value(signal),
+    Match.when("TRACES", Function.constant("traces" as const)),
+    Match.when("METRICS", Function.constant("metrics" as const)),
+    Match.when("LOGS", Function.constant("logs" as const)),
+    Match.exhaustive,
+  )
 
   url.pathname += `${separator}v1/${name}`
 
@@ -120,10 +129,11 @@ const environment = (options: TelemetryOptions) => {
   const logs = Predicate.isObject(options.logs) ? options.logs : null
   const baseEndpoint = Option.fromUndefinedOr(options.endpoint)
 
-  const endpointFor = (signal: Signal) => {
-    const endpoint = Option.map(baseEndpoint, (base) => signalEndpoint(base, signal))
-    return Option.getOrUndefined(endpoint)
-  }
+  const endpointFor = (signal: Signal) => pipe(
+    baseEndpoint,
+    Option.map((base) => signalEndpoint(base, signal)),
+    Option.getOrUndefined,
+  )
 
   const tracesEndpoint = endpointFor("TRACES")
   const metricsEndpoint = endpointFor("METRICS")

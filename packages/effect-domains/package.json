@@ -13,6 +13,7 @@
     "./application-runtime": "./src/application-runtime.ts",
     "./application-telemetry": "./src/application-telemetry.ts",
     "./authorization": "./src/authorization.ts",
+    "./authorization-model": "./src/authorization-model.ts",
     "./authorization-rpc": "./src/authorization-rpc.ts",
     "./domain": "./src/domain.ts",
     "./entitlements": "./src/entitlements.ts",
@@ -38,9 +39,15 @@
     "./sqlite-ddl": "./src/sqlite-ddl.ts",
     "./read-model": "./src/read-model.ts",
     "./table": "./src/table.ts",
+    "./table-check-model": "./src/table-check-model.ts",
+    "./physical-table-definition-error": "./src/physical-table-definition-error.ts",
+    "./physical-table-field": "./src/physical-table-field.ts",
+    "./physical-table-relations": "./src/physical-table-relations.ts",
+    "./table-relation-input": "./src/table-relation-input.ts",
+    "./table-snapshot-model": "./src/table-snapshot-model.ts",
+    "./sqlite-migration-model": "./src/sqlite-migration-model.ts",
     "./schema-field": "./src/schema-field.ts",
-    "./transitions": "./src/transitions.ts",
-    "./value": "./src/value.ts"
+    "./transitions": "./src/transitions.ts"
   },
   "files": [
     "src"

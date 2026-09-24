@@ -5,8 +5,15 @@ import { InfrastructureCompiler, type InfrastructureIR } from "./infrastructure-
 
 const BindingInspectionSchema = Schema.Struct({ kind: Schema.String, target: Schema.String })
 
+interface BindingInspection extends Schema.Schema.Type<typeof BindingInspectionSchema> {}
+
 const RpcPublicationInspectionSchema = Schema.Struct({ kind: Schema.Literal("Rpc"), path: Schema.String })
+
+interface RpcPublicationInspection extends Schema.Schema.Type<typeof RpcPublicationInspectionSchema> {}
+
 const McpPublicationInspectionSchema = Schema.Struct({ kind: Schema.Literal("Mcp"), path: Schema.String })
+
+interface McpPublicationInspection extends Schema.Schema.Type<typeof McpPublicationInspectionSchema> {}
 
 const UiPublicationInspectionSchema = Schema.Struct({
   kind: Schema.Literal("Ui"),
@@ -14,17 +21,22 @@ const UiPublicationInspectionSchema = Schema.Struct({
   presentation: Schema.Unknown,
 })
 
-const ApplicationInspectionSchema = Schema.Struct({
+interface UiPublicationInspection extends Schema.Schema.Type<typeof UiPublicationInspectionSchema> {}
+
+const StringListSchema = Schema.Array(Schema.String)
+
+class ApplicationInspection extends Schema.Class<ApplicationInspection>("ApplicationInspection")({
   name: Schema.String,
-  operations: Schema.Array(Schema.String),
-  tables: Schema.Array(Schema.String),
-})
+  operations: StringListSchema,
+  tables: StringListSchema,
+}) {}
+
 
 const HttpRuntimeInspectionSchema = Schema.Struct({
   kind: Schema.Literal("HttpRuntime"),
   id: Schema.String,
   execution: Schema.String,
-  application: ApplicationInspectionSchema,
+  application: ApplicationInspection,
   bindings: Schema.Array(BindingInspectionSchema),
   publications: Schema.Array(Schema.Union([
     RpcPublicationInspectionSchema,
@@ -33,22 +45,28 @@ const HttpRuntimeInspectionSchema = Schema.Struct({
   ])),
 })
 
+interface HttpRuntimeInspection extends Schema.Schema.Type<typeof HttpRuntimeInspectionSchema> {}
+
 const BackgroundRuntimeInspectionSchema = Schema.Struct({
   kind: Schema.Literal("BackgroundRuntime"),
   id: Schema.String,
   execution: Schema.String,
-  application: ApplicationInspectionSchema,
+  application: ApplicationInspection,
   bindings: Schema.Array(BindingInspectionSchema),
 })
+
+interface BackgroundRuntimeInspection extends Schema.Schema.Type<typeof BackgroundRuntimeInspectionSchema> {}
 
 const ScheduledRuntimeInspectionSchema = Schema.Struct({
   kind: Schema.Literal("ScheduledRuntime"),
   id: Schema.String,
   execution: Schema.String,
   schedule: Schema.String,
-  application: ApplicationInspectionSchema,
+  application: ApplicationInspection,
   bindings: Schema.Array(BindingInspectionSchema),
 })
+
+interface ScheduledRuntimeInspection extends Schema.Schema.Type<typeof ScheduledRuntimeInspectionSchema> {}
 
 const SqliteStoreInspectionSchema = Schema.Struct({
   kind: Schema.Literal("SqliteStore"),
@@ -60,14 +78,23 @@ const SqliteStoreInspectionSchema = Schema.Struct({
   lifecycle: Schema.Unknown,
 })
 
+interface SqliteStoreInspection extends Schema.Schema.Type<typeof SqliteStoreInspectionSchema> {}
+
 const LifecycleResourceInspectionSchema = Schema.Struct({
   kind: Schema.String,
   id: Schema.String,
   lifecycle: Schema.Unknown,
 })
 
+interface LifecycleResourceInspection extends Schema.Schema.Type<typeof LifecycleResourceInspectionSchema> {}
+
 const QueueInspectionSchema = Schema.Struct({ kind: Schema.Literal("Queue"), id: Schema.String, delivery: Schema.String })
+
+interface QueueInspection extends Schema.Schema.Type<typeof QueueInspectionSchema> {}
+
 const ConfigurationInspectionSchema = Schema.Struct({ kind: Schema.String, id: Schema.String, configurationKey: Schema.String })
+
+interface ConfigurationInspection extends Schema.Schema.Type<typeof ConfigurationInspectionSchema> {}
 
 const VariableInspectionSchema = Schema.Struct({
   kind: Schema.Literal("Variable"),
@@ -76,8 +103,15 @@ const VariableInspectionSchema = Schema.Struct({
   defaultValue: Schema.optionalKey(Schema.String),
 })
 
+interface VariableInspection extends Schema.Schema.Type<typeof VariableInspectionSchema> {}
+
 const TargetInspectionSchema = Schema.Struct({ kind: Schema.String, id: Schema.String, target: Schema.String })
+
+interface TargetInspection extends Schema.Schema.Type<typeof TargetInspectionSchema> {}
+
 const DomainInspectionSchema = Schema.Struct({ kind: Schema.Literal("Domain"), id: Schema.String, name: Schema.String, target: Schema.String })
+
+interface DomainInspection extends Schema.Schema.Type<typeof DomainInspectionSchema> {}
 
 const ExtensionInspectionSchema = Schema.Struct({
   kind: Schema.Literal("Extension"),
@@ -87,6 +121,8 @@ const ExtensionInspectionSchema = Schema.Struct({
   configuration: Schema.Unknown,
 })
 
+interface ExtensionInspection extends Schema.Schema.Type<typeof ExtensionInspectionSchema> {}
+
 const CompiledResourceInspectionSchema = Schema.Struct({
   logicalId: Schema.String,
   dependencies: Schema.Array(Schema.String),
@@ -94,11 +130,15 @@ const CompiledResourceInspectionSchema = Schema.Struct({
   resource: Schema.Unknown,
 })
 
+interface CompiledResourceInspection extends Schema.Schema.Type<typeof CompiledResourceInspectionSchema> {}
+
 const InfrastructureInspectionSchema = Schema.Struct({
   name: Schema.String,
   capabilities: Schema.Array(Schema.String),
   resources: Schema.Array(CompiledResourceInspectionSchema),
 })
+
+interface InfrastructureInspection extends Schema.Schema.Type<typeof InfrastructureInspectionSchema> {}
 
 const binding = (value: InfrastructureBinding) => pipe(
   Match.value(value),
@@ -140,7 +180,7 @@ const application = (resource: Extract<InfrastructureResource, {
   const operations = pipe(requests, Array.fromIterable, Array.map(({ _tag }) => _tag), Array.sort(Order.String))
   const tables = pipe(resource.application.tables, Array.map(({ name }) => name), Array.sort(Order.String))
 
-  return ApplicationInspectionSchema.make({ name: resource.application.name, operations, tables })
+  return ApplicationInspection.make({ name: resource.application.name, operations, tables })
 }
 
 const inspectResource = (value: InfrastructureResource): unknown => pipe(

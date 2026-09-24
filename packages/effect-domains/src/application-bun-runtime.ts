@@ -1,5 +1,5 @@
 import { BunHttpServer, BunServices } from "@effect/platform-bun"
-import { Array, Config, Effect, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
+import { Array, Config, Effect, Function, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization } from "effect/unstable/rpc"
@@ -18,7 +18,7 @@ import { RpcCli } from "./rpc-cli.ts"
 import { RpcMcp } from "./rpc-mcp.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { environmentPrefix } from "./sqlite-runtime.ts"
-import { type SqliteMigration } from "./sqlite-migrations.ts"
+import type { SqliteMigration } from "./sqlite-migration-model.ts"
 import type { MigrationError } from "./migrations.ts"
 
 
@@ -85,6 +85,8 @@ export type RunErrors<
   | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background> | Layer.Error<Routes>
 
 
+
+
 const databaseFilename = (name: string, configured: Option.Option<string>) => {
   const environment = environmentPrefix(name)
 
@@ -99,7 +101,7 @@ const databaseFilename = (name: string, configured: Option.Option<string>) => {
 
 
 
-const withApplicationRuntime = Effect.fn("ApplicationBun.withApplicationRuntime")(function* <
+const withApplicationRuntime = <
   App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
@@ -111,17 +113,24 @@ const withApplicationRuntime = Effect.fn("ApplicationBun.withApplicationRuntime"
   application: App,
   options: RuntimeOptions<Services, Initialize, Background>,
   use: Effect.Effect<UseSuccess, UseError, UseRequirements>,
-) {
+) => {
   const configuredFilename = Option.fromNullishOr(options.database.filename)
-  const filename = yield* databaseFilename(application.name, configuredFilename)
-  const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
+  const filenameEffect = databaseFilename(application.name, configuredFilename)
 
-  return yield* ApplicationRuntime.use(application, database, {
-    services: options.services,
-    initialize: options.initialize,
-    background: options.background,
-  }, use)
-})
+  const run = Effect.flatMap(filenameEffect, (filename) => {
+    const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
+
+    const runtime = ApplicationRuntime.use(application, database, {
+      services: options.services,
+      initialize: options.initialize,
+      background: options.background,
+    }, use)
+
+    return runtime
+  })
+
+  return Effect.withSpan(run, "ApplicationBun.withApplicationRuntime")
+}
 
 const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   App extends ApplicationIR,
@@ -154,7 +163,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
     })
 
   const serverBase = pipe(servedRoutes, Layer.provide(httpServer))
-  const tracerDisabled = Layer.succeed(HttpMiddleware.TracerDisabledWhen, () => true)
+  const tracerDisabled = Layer.succeed(HttpMiddleware.TracerDisabledWhen, Function.constant(true))
   const tracedServer = pipe(serverBase, Layer.provide(tracerDisabled))
   const server = telemetryDisabled ? serverBase : tracedServer
   const serving = Layer.launch(server)
@@ -206,28 +215,34 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
   Initialize extends Initialization,
   Background extends RuntimeLayer,
   Routes extends RuntimeLayer,
->(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
+>(
+  application: App,
+  options: RunOptions<Services, Initialize, Background, Routes>,
+) {
   const environment = environmentPrefix(application.name)
   const rpcOptions = Predicate.isBoolean(options.rpc) ? undefined : options.rpc
   const rpcPath = rpcOptions?.path ?? "/rpc/v1"
   const defaultUrl = new URL(`http://127.0.0.1:3000${rpcPath}`)
 
   const makeProtocolLayer = Effect.fn("ApplicationBun.makeProtocolLayer")(function* () {
-    const urlConfig = pipe(
+
+    const url = yield* pipe(
       Config.schema(Schema.URLFromString, `${environment}_URL`),
       Config.withDefault(defaultUrl),
     )
-    const tokenConfig = pipe(Config.redacted(`${environment}_TOKEN`), Config.option)
-    const url = yield* urlConfig
-    const token = yield* tokenConfig
+
+    const token = yield* pipe(Config.redacted(`${environment}_TOKEN`), Config.option)
 
     return clientProtocolLayer(url, token)
   })
-  const protocol = Layer.unwrap(makeProtocolLayer())
+
+  const protocolEffect = makeProtocolLayer()
+  const protocol = Layer.unwrap(protocolEffect)
 
   const serveCommandHandler = Effect.fn("ApplicationBun.serveCommand")(function* () {
     return yield* serveApplication(application, options)
   })
+
   const serveCommand = Command.make("serve", {}, serveCommandHandler)
   const background = Option.fromNullishOr(options.background)
 
@@ -237,12 +252,15 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
   })
 
   const inspect = makeInspectCommand(application, localCommands)
+
   const workerHandler = Effect.fn("ApplicationBun.worker")(function* () {
     const lifetime = pipe(Effect.log(`Worker ready: ${application.name}`), Effect.andThen(Effect.never))
 
     return yield* pipe(withApplicationRuntime(application, options, lifetime), Effect.scoped)
   })
+
   const workerCommand = Command.make("worker", {}, workerHandler)
+
   const subcommands = Option.isSome(background)
     ? [serveCommand, workerCommand, inspect]
     : [serveCommand, inspect]
@@ -262,20 +280,20 @@ export const runApplication = Effect.fn("ApplicationBun.run")(function* <
   Initialize extends Initialization = Effect.Effect<void>,
   Background extends RuntimeLayer = Layer.Layer<never, never, never>,
   Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
->(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
+>(
+  application: App,
+  options: RunOptions<Services, Initialize, Background, Routes>,
+) {
   const telemetry = pipe(
     ApplicationTelemetry.layer(application, options.telemetry),
     Layer.provide(FetchHttpClient.layer),
   )
 
-  // SAFETY: The effect error and requirement channels match because runCli derives them from the same application and options types.
-  return yield* pipe(
+  const result = yield* pipe(
     runCli(application, options),
     Effect.provide(BunServices.layer),
     Effect.provide(telemetry),
-  ) as Effect.Effect<
-    void,
-    RunErrors<App, Services, Initialize, Background, Routes>,
-    RunRequirements<App, Services, Initialize, Background, Routes>
-  >
+  )
+
+  return result
 })

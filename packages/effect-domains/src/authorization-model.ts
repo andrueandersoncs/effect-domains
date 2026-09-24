@@ -1,7 +1,7 @@
 import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Option, Predicate, Record, Schema, SchemaAST, Struct, flow, pipe } from "effect"
 import type { StructSchema, StructValue } from "./domain.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
-import { OperandSchema, Policy, type Operand, type Policy as PolicySyntax, type Scalar, PolicyEvaluationError } from "./policy.ts"
+import { LiteralSchema, NextFieldSchema, OperandSchema, Policy, type Operand, type Policy as PolicySyntax, RowFieldSchema, type Scalar, SubjectFieldSchema, PolicyEvaluationError } from "./policy.ts"
 import type { FieldIR } from "./schema-field.ts"
 
 export class AuthorizationSubject extends Context.Service<AuthorizationSubject, StructValue>()("@effect-domains/AuthorizationSubject") {}
@@ -16,19 +16,19 @@ type PolicyPhase = "subject" | "row" | "next"
 
 declare const PolicyPhases: unique symbol
 
-type PolicyExpression<Phases extends PolicyPhase = PolicyPhase> = PolicySyntax & Readonly<Record<typeof PolicyPhases, readonly [never, Phases]>>
-type TypedOperand<Value, Phases extends PolicyPhase> = Operand & Readonly<Record<typeof PolicyPhases, readonly [Value, Phases]>>
+type PolicyExpression<Phases extends PolicyPhase = PolicyPhase> = PolicySyntax & Readonly<Partial<Record<typeof PolicyPhases, Phases>>>
+type TypedOperand<Value, Phases extends PolicyPhase> = Operand & Readonly<Partial<Record<typeof PolicyPhases, readonly [Value, Phases]>>>
 
 export type SubjectOperand<Value> = TypedOperand<Value, "subject"> & Readonly<{ readonly _tag: "SubjectField" }>
 
-type FieldReferences<S extends StructSchema, Tag extends Operand["_tag"], Phases extends PolicyPhase> = {
-  readonly [Key in FieldName<S>]: FieldValue<S, Key> extends Scalar | ReadonlyArray<Scalar> ? TypedOperand<FieldValue<S, Key>, Phases> & Readonly<{ readonly _tag: Tag }> : never
-}
+type FieldReferences<S extends StructSchema, Tag extends Operand["_tag"], Phases extends PolicyPhase> = Readonly<{
+  [Key in FieldName<S>]: TypedOperand<FieldValue<S, Key>, Phases> & Readonly<{ readonly _tag: Tag }>
+}>
 
-type OperandPhases<Value> = Value extends TypedOperand<unknown, PolicyPhase> ? Value[typeof PolicyPhases][1] : never
-type OperandValue<Value> = Value extends TypedOperand<unknown, PolicyPhase> ? Value[typeof PolicyPhases][0] : Value
+type OperandPhases<Value> = Value extends Readonly<Partial<Record<typeof PolicyPhases, readonly [unknown, infer Phase extends PolicyPhase]>>> ? Phase : never
+type OperandValue<Value> = Value extends Readonly<Partial<Record<typeof PolicyPhases, readonly [infer Operand, PolicyPhase]>>> ? Operand : Value
 type CollectionValue<Value> = OperandValue<Value> extends ReadonlyArray<infer Element> ? Element : never
-type ExpressionPhase<Expression> = Expression extends PolicyExpression ? Expression[typeof PolicyPhases][1] : never
+type ExpressionPhase<Expression> = Expression extends Readonly<Partial<Record<typeof PolicyPhases, infer Phase extends PolicyPhase>>> ? Phase : never
 type ScalarOperand = TypedOperand<Scalar, PolicyPhase> | Scalar
 type ScalarCollection = TypedOperand<ReadonlyArray<Scalar>, PolicyPhase> | ReadonlyArray<Scalar>
 type ScalarKind<Value> = Exclude<Value, null> extends string ? "string" : Exclude<Value, null> extends number ? "number" : Exclude<Value, null> extends boolean ? "boolean" : never
@@ -159,33 +159,47 @@ const isPublicAuthorization = Schema.is(PublicAuthorizationSchema)
 const isDenyAuthorization = Schema.is(DenyAuthorizationSchema)
 const isPolicyAuthorization = <Value>(value: Value): value is Value & PolicyAuthorization => Predicate.isTagged(value, "Policy")
 
-const literalOperand = <Value extends Scalar | ReadonlyArray<Scalar>>(value: Value) => {
-  const literal = Policy.literal(value)
+const literalOperand = <Value extends Scalar | ReadonlyArray<Scalar>>(
+  value: Value,
+): TypedOperand<Value, never> & Readonly<{ readonly _tag: "Literal" }> => LiteralSchema.make({ value })
 
-  // SAFETY: The phantom phase is type-only because literal operands do not read any policy environment phase.
-  return literal as typeof literal & Readonly<Record<typeof PolicyPhases, readonly [Value, never]>>
+const isOperand = Schema.is(OperandSchema)
+
+const operand = <Value extends Scalar>(value: TypedOperand<Value, PolicyPhase> | Value) =>
+  isOperand(value) ? value : literalOperand(value)
+
+const collectionOperand = <Value extends Scalar>(
+  value: TypedOperand<ReadonlyArray<Value>, PolicyPhase> | ReadonlyArray<Value>,
+) => isOperand(value) ? value : literalOperand(value)
+
+const expression = <Phases extends PolicyPhase>(policy: PolicySyntax): PolicyExpression<Phases> => policy
+
+const PolicyFieldRecordSchema = Schema.Record(Schema.String, OperandSchema)
+const decodePolicyFieldRecord = Schema.decodeUnknownOption(PolicyFieldRecordSchema)
+
+const policyFields = <Phases extends PolicyPhase>() => <
+  S extends StructSchema,
+  Tag extends "SubjectField" | "RowField" | "NextField",
+>(
+  schema: S,
+  tag: Tag,
+  construct: (input: Readonly<{ readonly field: string }>) => Operand & Readonly<{ readonly _tag: Tag }>,
+): FieldReferences<S, Tag, Phases> => {
+  const references = Record.map(schema.fields, (_, field) => construct({ field }))
+  const hasTag = (reference: Operand) => Predicate.isTagged(reference, tag)
+
+  const isFieldReference = (value: unknown): value is FieldReferences<S, Tag, Phases> => pipe(
+    value,
+    decodePolicyFieldRecord,
+    Option.map(Record.values),
+    Option.exists(Array.every(hasTag)),
+  )
+
+  const FieldReferencesSchema = Schema.declare(isFieldReference)
+  const decoded = Schema.decodeUnknownOption(FieldReferencesSchema)(references)
+
+  return Option.getOrThrow(decoded)
 }
-
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-const operand = <Value extends Scalar>(value: TypedOperand<Value, PolicyPhase> | Value) => {
-  if (Predicate.hasProperty(value, "_tag")) return value as TypedOperand<Value, PolicyPhase>
-  return literalOperand(value)
-}
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-const collectionOperand = <Value extends Scalar>(value: TypedOperand<ReadonlyArray<Value>, PolicyPhase> | ReadonlyArray<Value>) => {
-  if (Predicate.hasProperty(value, "_tag")) return value as TypedOperand<ReadonlyArray<Value>, PolicyPhase>
-  return literalOperand(value)
-}
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-const expression = <Phases extends PolicyPhase>(policy: PolicySyntax) => policy as PolicyExpression<Phases>
-
-const policyField = <Value, Tag extends "SubjectField" | "RowField" | "NextField", Phases extends PolicyPhase>(tag: Tag, field: string) =>
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  OperandSchema.make({ _tag: tag, field }) as TypedOperand<Value, Phases> & Readonly<{ readonly _tag: Tag }>
-
-const policyFields = <S extends StructSchema, Tag extends "SubjectField" | "RowField" | "NextField", Phases extends PolicyPhase>(schema: S, tag: Tag) =>
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  Record.map(schema.fields, (_, field) => policyField(tag, field)) as FieldReferences<S, Tag, Phases>
 
 const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => {
   const leftOperand = operand(left)

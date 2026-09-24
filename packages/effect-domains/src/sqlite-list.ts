@@ -40,6 +40,8 @@ const StoredRangeBoundsSchema = Schema.Struct({
   to: Schema.optionalKey(Schema.Unknown),
 })
 
+interface StoredRangeBounds extends Schema.Schema.Type<typeof StoredRangeBoundsSchema> {}
+
 const StoredRangeSchema = Schema.Record(Schema.String, StoredRangeBoundsSchema)
 const unknownEquals = Equivalence.strictEqual<unknown>()
 
@@ -68,12 +70,29 @@ const make = <InputError, CodecError, CursorError>(
   const cursorEntry = ({ field }: RepositoryOrder) => [field, Schema.toEncoded(definition.storageField(field))] as const
   const cursorEntries = Array.map(definition.order, cursorEntry)
   const cursorFields = Record.fromEntries(cursorEntries)
-  const rejectExcess = { parseOptions: { onExcessProperty: "error" as const } }
-  const CanonicalFilterSchema = Schema.Struct(canonicalFilterFields).annotate(rejectExcess)
-  const CanonicalRangeSchema = Schema.Struct(canonicalRangeFields).annotate(rejectExcess)
+
+  const CanonicalFilterSchema = Schema.Struct(canonicalFilterFields).annotate({
+    parseOptions: { onExcessProperty: "error" as const },
+  })
+
+  const CanonicalRangeSchema = Schema.Struct(canonicalRangeFields).annotate({
+    parseOptions: { onExcessProperty: "error" as const },
+  })
+
+  interface CanonicalRange extends Schema.Schema.Type<typeof CanonicalRangeSchema> {}
+
   const StorageFilterSchema = Schema.Struct(storageFilterFields)
+
+  interface StorageFilter extends Schema.Schema.Type<typeof StorageFilterSchema> {}
+
   const StorageRangeSchema = Schema.Struct(storageRangeFields)
+
+  interface StorageRange extends Schema.Schema.Type<typeof StorageRangeSchema> {}
+
   const CursorAfterSchema = Schema.Struct(cursorFields)
+
+  interface CursorAfter extends Schema.Schema.Type<typeof CursorAfterSchema> {}
+
   const limitBounds = Schema.isBetween({ minimum: 1, maximum: definition.maximum })
   const MaximumLimitSchema = Schema.Int.check(limitBounds)
 

@@ -1,4 +1,4 @@
-import { Array, Effect, flow, Function, HashMap, HashSet, Match, Option, pipe, Record, Schema, Struct } from "effect"
+import { Array, Effect, Equivalence, flow, Function, HashMap, HashSet, Match, Option, pipe, Record, Schema, Struct } from "effect"
 import { SqlClient, Statement } from "effect/unstable/sql"
 import { quoteIdentifier, renderColumn, renderCreateIndexes, renderCreateTable, renderIndex } from "./sqlite-ddl.ts"
 
@@ -25,14 +25,15 @@ import {
   snapshotTable,
 } from "./sqlite-migration-model.ts"
 
-import { TableSnapshot } from "./table.ts"
+import { TableSnapshot } from "./table-snapshot-model.ts"
 
-const same = <A>(self: A, that: A) => self === that
+const same = <A>(self: A, that: A) => Equivalence.strictEqual()(self, that)
 
 // Tokenize because SQL literal whitespace is semantically significant.
 const normalizedSql = (sql: string) => {
   const trimmed = sql.trim()
   const withoutTerminator = trimmed.replace(/;$/, "")
+
   const tokens = withoutTerminator.match(
     /'(?:''|[^'])*'|"(?:""|[^"])*"|[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^\s]/g,
   ) ?? []
@@ -262,9 +263,14 @@ const compileStep = (
       const tableOption = snapshotTable(target, create.table)
       const table = Option.getOrThrow(tableOption)
       const indexes = declaredIndexes(table)
-      const index = Option.getOrThrow(Array.findFirst(indexes, (candidate) => candidate.name === create.name))
+      const sameName = (candidate: (typeof indexes)[number]) => Equivalence.strictEqual()(candidate.name, create.name)
+      const indexOption = Array.findFirst(indexes, sameName)
+      const index = Option.getOrThrow(indexOption)
+      const renderTableIndex = renderIndex(create.table)
+      const renderedIndex = renderTableIndex(index)
+      const compileStatement = statement(sql)
 
-      return [statement(sql)(renderIndex(create.table)(index))]
+      return [compileStatement(renderedIndex)]
     },
     SqliteDropIndex: (drop) => {
       const name = quotedName(sql)

@@ -1,5 +1,5 @@
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
-import { Array, Data, Effect, Option, Predicate, Schema, Struct } from "effect"
+import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, Struct, pipe } from "effect"
 
 import type { ApplicationIR } from "./application.ts"
 import type { ApplicationInfrastructureIR, InfrastructureIR } from "./infrastructure-compiler.ts"
@@ -19,7 +19,7 @@ import {
   type WriterTopology,
 } from "./infrastructure.ts"
 
-import type { SqliteMigration } from "./sqlite-migrations.ts"
+import type { SqliteMigration } from "./sqlite-migration-model.ts"
 
 type EnabledOption<Configuration extends object> = boolean | Readonly<Partial<Configuration>>
 
@@ -92,31 +92,35 @@ const resolveEnabled = <Configuration extends object, A>(
   onTrue: () => A,
   onConfigured: (configuration: Configuration) => A,
 ): Option.Option<A> => {
-  if (Predicate.isBoolean(option)) {
-    if (!option) return Option.none()
+  if (!Predicate.isBoolean(option)) {
+    const configured = onConfigured(option)
 
-    const value = onTrue()
-    return Option.some(value)
+    return Option.some(configured)
   }
 
-  const value = onConfigured(option)
-  return Option.some(value)
+  if (!option) return Option.none()
+
+  const enabled = onTrue()
+
+  return Option.some(enabled)
 }
 
 const configuredPath = (
-  option: PathOption | undefined,
+  option: Option.Option<PathOption>,
   fallback: `/${string}`,
 ): Option.Option<`/${string}`> => {
-  if (option === undefined) return Option.none()
+  const resolvePath = (value: PathOption) => {
+    const onTrue = () => fallback
+    const onConfigured = (configuration: Exclude<PathOption, boolean>) => configuration.path ?? fallback
 
-  const onTrue = () => fallback
-  const onConfigured = (configuration: Exclude<PathOption, boolean>) => configuration.path ?? fallback
+    return resolveEnabled(value, onTrue, onConfigured)
+  }
 
-  return resolveEnabled(option, onTrue, onConfigured)
+  return Option.flatMap(option, resolvePath)
 }
 
 const pathPublications = (
-  option: PathOption | undefined,
+  option: Option.Option<PathOption>,
   fallback: `/${string}`,
   publish: (path: `/${string}`) => InfrastructurePublication,
 ): ReadonlyArray<InfrastructurePublication> => {
@@ -126,19 +130,16 @@ const pathPublications = (
   return Option.toArray(publication)
 }
 
-const enabledUi = (option: UiOption) => {
-  const onTrue = () => Infrastructure.ui()
-  const onConfigured = (configuration: Exclude<UiOption, boolean>) => Infrastructure.ui(configuration)
-
-  return resolveEnabled(option, onTrue, onConfigured)
-}
 
 const publications = (
   http: ApplicationInfrastructureDefinition<ApplicationIR>["http"],
 ): ReadonlyArray<InfrastructurePublication> => {
-  const rpc = pathPublications(http.rpc, "/rpc/v1", Infrastructure.rpc)
-  const mcp = pathPublications(http.mcp, "/mcp", Infrastructure.mcp)
+  const rpcOption = Option.fromNullishOr(http.rpc)
+  const mcpOption = Option.fromNullishOr(http.mcp)
+  const rpc = pathPublications(rpcOption, "/rpc/v1", Infrastructure.rpc)
+  const mcp = pathPublications(mcpOption, "/mcp", Infrastructure.mcp)
   const uiOption = Option.fromNullishOr(http.ui)
+  const enabledUi = (option: UiOption) => resolveEnabled(option, Infrastructure.ui, Infrastructure.ui)
   const uiPublication = Option.flatMap(uiOption, enabledUi)
   const ui = Option.toArray(uiPublication)
   const rpcAndMcp = Array.appendAll(rpc, mcp)
@@ -150,14 +151,13 @@ const publicEndpoint = (
   runtime: Parameters<typeof Infrastructure.publicEndpoint>[0]["target"],
   option: PublicOption,
 ) => {
-  const onTrue = () => {
-    const endpointInput = { id: "public", target: runtime }
-    return Infrastructure.publicEndpoint(endpointInput)
-  }
+  const publicEndpointInput = new Data.Class({ id: "public", target: runtime })
+  const defaultEndpoint = Infrastructure.publicEndpoint(publicEndpointInput)
+  const onTrue = Function.constant(defaultEndpoint)
 
   const onConfigured = (configuration: Exclude<PublicOption, boolean>) => {
     const id = configuration.id ?? "public"
-    const endpointInput = { id, target: runtime }
+    const endpointInput = new Data.Class({ id, target: runtime })
 
     return Infrastructure.publicEndpoint(endpointInput)
   }
@@ -168,37 +168,38 @@ const publicEndpoint = (
 const define = <App extends ApplicationIR>(
   definition: ApplicationInfrastructureDefinition<App>,
 ): ApplicationInfrastructureSpec<App> => {
-  const application = definition.application
-  const databaseDefinition = definition.database
-  const httpDefinition = definition.http
-  const lifecycle = databaseDefinition.lifecycle ?? Infrastructure.lifecycle()
-  const databaseId = databaseDefinition.id ?? "application"
-  const transactions = databaseDefinition.transactions ?? "interactive"
-  const durability = databaseDefinition.durability ?? "persistent"
-  const writerTopology = databaseDefinition.writerTopology ?? "single"
-  const databaseOptions = {
-    migrations: databaseDefinition.migrations,
+  const lifecycle = definition.database.lifecycle ?? Infrastructure.lifecycle()
+  const databaseId = definition.database.id ?? "application"
+  const transactions = definition.database.transactions ?? "interactive"
+  const durability = definition.database.durability ?? "persistent"
+  const writerTopology = definition.database.writerTopology ?? "single"
+
+  const databaseOptions = new Data.Class({
+    migrations: definition.database.migrations,
     transactions,
     durability,
     writerTopology,
     lifecycle,
-  }
+  })
+
   const database = Infrastructure.sqliteStore(databaseId, databaseOptions)
-  const readWriteInput = { target: database }
+  const readWriteInput = new Data.Class({ target: database })
   const readWrite = Infrastructure.readWrite(readWriteInput)
-  const additionalBindings = httpDefinition.bindings ?? []
+  const additionalBindings = definition.http.bindings ?? []
   const bindings = Array.prepend(additionalBindings, readWrite)
-  const runtimePublications = publications(httpDefinition)
-  const runtimeId = httpDefinition.id ?? "api"
-  const execution = httpDefinition.execution ?? "process"
-  const runtimeOptions = {
-    application,
+  const runtimePublications = publications(definition.http)
+  const runtimeId = definition.http.id ?? "api"
+  const execution = definition.http.execution ?? "process"
+
+  const runtimeOptions = new Data.Class({
+    application: definition.application,
     execution,
     bindings,
     publications: runtimePublications,
-  }
+  })
+
   const runtime = Infrastructure.httpRuntime(runtimeId, runtimeOptions)
-  const endpointOption = Option.fromNullishOr(httpDefinition.public)
+  const endpointOption = Option.fromNullishOr(definition.http.public)
   const resolveEndpoint = (option: PublicOption) => publicEndpoint(runtime, option)
   const endpoint = Option.flatMap(endpointOption, resolveEndpoint)
   const base: ReadonlyArray<InfrastructureResource> = [database, runtime]
@@ -207,15 +208,14 @@ const define = <App extends ApplicationIR>(
   const baseWithEndpoint = Array.appendAll(base, endpointResources)
   const parts = Array.appendAll(baseWithEndpoint, additionalParts)
   const specificationParts = Array.fromIterable(parts)
-  const specificationInput = {
-    name: application.name,
-    parts: specificationParts,
-    application,
-  }
-  const specification = new ApplicationInfrastructureSpecValue<App>(specificationInput)
-  const assignment = { application }
 
-  return Struct.assign(specification, assignment)
+  const specification = new ApplicationInfrastructureSpecValue<App>({
+    name: definition.application.name,
+    parts: specificationParts,
+    application: definition.application,
+  })
+
+  return Struct.assign(specification, { application: definition.application })
 }
 
 const resourceTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(tag: Tag) => {
@@ -223,10 +223,7 @@ const resourceTag = <Tag extends InfrastructureResourceIR["resource"]["_tag"]>(t
     candidate: InfrastructureResourceIR,
   ): candidate is InfrastructureResourceIR & {
     readonly resource: Extract<InfrastructureResourceIR["resource"], { readonly _tag: Tag }>
-  } => {
-    const resource = candidate.resource
-    return resource._tag === tag
-  }
+  } => Equivalence.strictEqual()(candidate.resource._tag, tag)
 
   return hasTag
 }
@@ -236,21 +233,18 @@ const resourcesWithTag = <Tag extends InfrastructureResourceIR["resource"]["_tag
   tag: Tag,
 ) => {
   const predicate = resourceTag(tag)
+
   return Array.filter(infrastructure.resources, predicate)
 }
 
-const isApplicationResource = (resource: InfrastructureResourceIR) => {
-  const tag = resource.resource._tag
-
-  switch (tag) {
-    case "HttpRuntime":
-    case "SqliteStore":
-    case "PublicEndpoint":
-      return true
-    default:
-      return false
-  }
-}
+const isApplicationResource = (resource: InfrastructureResourceIR) =>
+  pipe(
+    Match.value(resource.resource._tag),
+    Match.when("HttpRuntime", Function.constant(true)),
+    Match.when("SqliteStore", Function.constant(true)),
+    Match.when("PublicEndpoint", Function.constant(true)),
+    Match.orElse(Function.constant(false)),
+  )
 
 const unsupportedResourceLabel = ({ logicalId, resource }: InfrastructureResourceIR) => `${logicalId} (${resource._tag})`
 const isUnsupportedApplicationResource = (resource: InfrastructureResourceIR) => !isApplicationResource(resource)
@@ -258,7 +252,7 @@ const isUnsupportedApplicationResource = (resource: InfrastructureResourceIR) =>
 const isSqliteBinding = (
   binding: HttpRuntime["bindings"][number],
 ): binding is Extract<HttpRuntime["bindings"][number], { readonly _tag: "ReadWriteSqliteBinding" }> =>
-  binding._tag === "ReadWriteSqliteBinding"
+  Equivalence.strictEqual()(binding._tag, "ReadWriteSqliteBinding")
 
 const makeOnly = Effect.fn("ApplicationInfrastructure.only")
 
@@ -267,14 +261,16 @@ const only = makeOnly(function* <A>(
   kind: string,
   values: ReadonlyArray<A>,
 ) {
-  if (values.length !== 1) {
+  if (!Equivalence.strictEqual()(values.length, 1)) {
     const reason = `expected exactly one ${kind}, found ${values.length}`
     const error = ApplicationInfrastructureError.make({ interpreter, reason })
+
     return yield* error
   }
 
-  // SAFETY: The exact-length guard above proves index zero exists.
-  return values[0] as A
+  const head = Array.head(values)
+
+  return Option.getOrThrow(head)
 })
 
 const makeResolvePlan = Effect.fn("ApplicationInfrastructure.plan")
@@ -283,14 +279,14 @@ const resolvePlan = makeResolvePlan(function* <App extends ApplicationIR>(
   interpreter: string,
   infrastructure: ApplicationInfrastructureIR<App>,
 ) {
-  const infrastructureResources = infrastructure.resources
-  const unsupported = Array.filter(infrastructureResources, isUnsupportedApplicationResource)
+  const unsupported = Array.filter(infrastructure.resources, isUnsupportedApplicationResource)
 
-  if (unsupported.length !== 0) {
+  if (!Equivalence.strictEqual()(unsupported.length, 0)) {
     const labels = Array.map(unsupported, unsupportedResourceLabel)
     const resources = Array.join(labels, ", ")
     const reason = `unsupported resources ${resources}`
     const error = ApplicationInfrastructureError.make({ interpreter, reason })
+
     return yield* error
   }
 
@@ -303,59 +299,58 @@ const resolvePlan = makeResolvePlan(function* <App extends ApplicationIR>(
   const endpoints = resourcesWithTag(infrastructure, "PublicEndpoint")
 
   if (endpoints.length > 1) {
-    const count = endpoints.length
-    const reason = `expected at most one public endpoint, found ${count}`
+    const reason = `expected at most one public endpoint, found ${endpoints.length}`
     const error = ApplicationInfrastructureError.make({ interpreter, reason })
+
     return yield* error
   }
 
-  const runtimeResource = runtime.resource
-  const sqliteBindings = Array.filter(runtimeResource.bindings, isSqliteBinding)
+  const sqliteBindings = Array.filter(runtime.resource.bindings, isSqliteBinding)
   const bindingReason = `${runtime.logicalId} must bind exactly once to ${database.logicalId}`
 
-  if (sqliteBindings.length !== 1) {
+  if (!Equivalence.strictEqual()(sqliteBindings.length, 1)) {
     const error = ApplicationInfrastructureError.make({ interpreter, reason: bindingReason })
+
     return yield* error
   }
 
-  // SAFETY: The exact-length guard above proves index zero exists.
-  const binding = sqliteBindings[0] as typeof sqliteBindings[number]
+  const bindingOption = Array.head(sqliteBindings)
+  const binding = Option.getOrThrow(bindingOption)
 
-  if (binding.target !== database.resource) {
+  if (!Equivalence.strictEqual()(binding.target, database.resource)) {
     const error = ApplicationInfrastructureError.make({ interpreter, reason: bindingReason })
+
     return yield* error
   }
 
   const endpoint = Array.head(endpoints)
 
-  if (Option.isSome(endpoint)) {
-    const endpointResource = endpoint.value
+  const targetsAnotherRuntime = (value: (typeof endpoints)[number]) =>
+    !Equivalence.strictEqual()(value.resource.target, runtime.resource)
 
-    if (endpointResource.resource.target !== runtimeResource) {
-      const reason = `${endpointResource.logicalId} must target ${runtime.logicalId}`
-      const error = ApplicationInfrastructureError.make({ interpreter, reason })
-      return yield* error
-    }
+  const wrongTarget = Option.filter(endpoint, targetsAnotherRuntime)
+
+  if (Option.isSome(wrongTarget)) {
+    const reason = `${wrongTarget.value.logicalId} must target ${runtime.logicalId}`
+    const error = ApplicationInfrastructureError.make({ interpreter, reason })
+
+    return yield* error
   }
 
-  const planInput = {
+  return new ApplicationInfrastructurePlan<App>({
     name: infrastructure.name,
     application: infrastructure.application,
     runtime,
     database,
     endpoint,
-  }
-
-  return new ApplicationInfrastructurePlan<App>(planInput)
+  })
 })
 
 const publicationTag = <Tag extends InfrastructurePublication["_tag"]>(tag: Tag) => {
   const hasTag = (
     publication: InfrastructurePublication,
-  ): publication is Extract<InfrastructurePublication, { readonly _tag: Tag }> => {
-    const actualTag = publication._tag
-    return actualTag === tag
-  }
+  ): publication is Extract<InfrastructurePublication, { readonly _tag: Tag }> =>
+    Equivalence.strictEqual()(publication._tag, tag)
 
   return hasTag
 }
@@ -365,6 +360,7 @@ const findPublication = <Tag extends InfrastructurePublication["_tag"]>(
   tag: Tag,
 ) => {
   const predicate = publicationTag(tag)
+
   return Array.findFirst(runtimePublications, predicate)
 }
 
@@ -372,27 +368,22 @@ type ResolvedPathOption = false | Readonly<{ path: `/${string}` }>
 
 const publicationPath = <A extends { readonly path: `/${string}` }>(
   publication: Option.Option<A>,
-): ResolvedPathOption => {
-  if (Option.isNone(publication)) return false
-
-  const value = publication.value
-  return { path: value.path }
-}
+): ResolvedPathOption => Option.match(publication, {
+  onNone: Function.constant(false),
+  onSome: (value) => new Data.Class({ path: value.path }),
+})
 
 const uiHttpOption = (
   publication: Option.Option<Extract<InfrastructurePublication, { readonly _tag: "UiPublication" }>>,
-): false | Readonly<{ path: `/${string}`; presentation: ApplicationUiPresentation }> => {
-  if (Option.isNone(publication)) return false
-
-  const value = publication.value
-  return { path: value.path, presentation: value.presentation }
-}
+): false | Readonly<{ path: `/${string}`; presentation: ApplicationUiPresentation }> => Option.match(publication, {
+  onNone: Function.constant(false),
+  onSome: (value) => new Data.Class({ path: value.path, presentation: value.presentation }),
+})
 
 const httpOptions = (runtime: HttpRuntime) => {
-  const runtimePublications = runtime.publications
-  const rpcPublication = findPublication(runtimePublications, "RpcPublication")
-  const mcpPublication = findPublication(runtimePublications, "McpPublication")
-  const uiPublication = findPublication(runtimePublications, "UiPublication")
+  const rpcPublication = findPublication(runtime.publications, "RpcPublication")
+  const mcpPublication = findPublication(runtime.publications, "McpPublication")
+  const uiPublication = findPublication(runtime.publications, "UiPublication")
   const rpc = publicationPath(rpcPublication)
   const mcp = publicationPath(mcpPublication)
   const ui = uiHttpOption(uiPublication)

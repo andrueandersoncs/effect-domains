@@ -1,4 +1,4 @@
-import { pipe } from "effect"
+import { Effect, pipe } from "effect"
 import * as ApplicationBun from "effect-domains/application-bun"
 import { ReadingListInfrastructureIR } from "./infrastructure.ts"
 
@@ -11,4 +11,4 @@ const program = ApplicationBun.runInfrastructure(ReadingListInfrastructureIR, {
   },
 })
 
-pipe(program, ApplicationBun.runMain)
+pipe(program, ApplicationBun.runMain, Effect.runSync)

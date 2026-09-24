@@ -1,8 +1,128 @@
-import { Array, ConfigProvider, Effect, Function, Layer, Metric, Option, Predicate, Record, References, Tracer, pipe } from "effect"
-import { OtlpLogger, OtlpMetrics, OtlpTracer } from "effect/unstable/observability"
+import { Array, Config, ConfigProvider, Duration, Effect, Function, Layer, Metric, Option, Predicate, Record, References, Schema, Tracer, pipe } from "effect"
+import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
 import type { ApplicationIR } from "./application.ts"
-import { equalsFalse, environment, type OtlpTransport, signalTransport, type TelemetryOptions } from "./application-telemetry-config.ts"
-import { serialization, validateOptions, withTelemetryTracer } from "./application-telemetry-observation.ts"
+import { equalsFalse, equalsProtocol, environment, IngestPathSchema, type OtlpTransport, PositiveFiniteSchema, PositiveIntegerSchema, ProtocolSchema, SampleRateSchema, type Signal, signalTransport, type TelemetryOptions, type TelemetryProtocol } from "./application-telemetry-config.ts"
+import { withTelemetryTracer } from "./application-telemetry-observation.ts"
+import { TelemetryOptionsError, telemetryOptionsError } from "./telemetry-options-error.ts"
+
+const validateValue = Effect.fn("ApplicationTelemetry.validateValue")(function* <S extends Schema.Top>(
+  schema: S,
+  value: Option.Option<unknown>,
+) {
+  if (Option.isNone(value)) return
+
+  yield* pipe(
+    Schema.decodeUnknownEffect(schema)(value.value),
+    Effect.mapError(telemetryOptionsError),
+    Effect.asVoid,
+  )
+})
+
+const validateOptional = Effect.fn("ApplicationTelemetry.validateOptional")(function* <S extends Schema.Top>(
+  schema: S,
+  value: unknown,
+) {
+  const optional = Option.fromNullishOr(value)
+
+  return yield* validateValue(schema, optional)
+})
+
+const invalidDuration = () => TelemetryOptionsError.make({ reason: "telemetry duration must be a valid Duration.Input" })
+
+const validateDuration = Effect.fn("ApplicationTelemetry.validateDuration")(function* (
+  optional: Option.Option<Duration.Input>,
+) {
+  if (Option.isNone(optional)) return
+
+  const parsed = Duration.fromInput(optional.value)
+  const duration = yield* Effect.fromOption(parsed, invalidDuration)
+  const millis = Duration.toMillis(duration)
+  const measured = Option.some(millis)
+
+  yield* validateValue(PositiveFiniteSchema, measured)
+})
+
+const validateDurationInput = Effect.fn("ApplicationTelemetry.validateDurationInput")(function* (
+  value: unknown,
+) {
+  const optional = Option.fromNullishOr(value)
+
+  yield* validateDuration(optional)
+})
+
+const validateOptionValues = Effect.fn("ApplicationTelemetry.validateOptionValues")(function* <S extends Schema.Top>(
+  schema: S,
+  values: ReadonlyArray<unknown>,
+) {
+  const validate = (value: unknown) => validateOptional(schema, value)
+
+  yield* Effect.forEach(values, validate, { concurrency: 1, discard: true })
+})
+
+const validateOptions = Effect.fn("ApplicationTelemetry.validateOptions")(function* (options: TelemetryOptions) {
+  const traces = Predicate.isObject(options.traces) ? options.traces : null
+  const metrics = Predicate.isObject(options.metrics) ? options.metrics : null
+  const logs = Predicate.isObject(options.logs) ? options.logs : null
+  const browser = Predicate.isObject(options.browser) ? options.browser : null
+  const endpoints = [options.endpoint, traces?.endpoint, metrics?.endpoint, logs?.endpoint]
+  const resourceNames = [options.resource?.serviceName, options.resource?.serviceVersion]
+  const sampleRates = [traces?.sampleRate, browser?.sampleRate]
+
+  const positiveIntegers = [
+    traces?.maxBatchSize,
+    logs?.maxBatchSize,
+    browser?.maxRequestBytes,
+    browser?.requestsPerMinute,
+  ]
+
+  const ingestPaths = [browser?.ingestPath]
+
+  const durations = [
+    traces?.exportInterval,
+    traces?.shutdownTimeout,
+    metrics?.exportInterval,
+    metrics?.shutdownTimeout,
+    logs?.exportInterval,
+    logs?.shutdownTimeout,
+  ]
+
+  yield* validateOptionValues(Schema.URLFromString, endpoints)
+  yield* validateOptionValues(Schema.NonEmptyString, resourceNames)
+  yield* validateOptionValues(SampleRateSchema, sampleRates)
+  yield* validateOptionValues(PositiveIntegerSchema, positiveIntegers)
+  yield* validateOptionValues(IngestPathSchema, ingestPaths)
+
+  yield* Effect.forEach(durations, validateDurationInput, { concurrency: 1, discard: true })
+})
+
+const protocol = Effect.fn("ApplicationTelemetry.protocol")(function* (
+  signal: Signal,
+  provider: ConfigProvider.ConfigProvider,
+) {
+  const signalConfig = Config.schema(ProtocolSchema, `OTEL_EXPORTER_OTLP_${signal}_PROTOCOL`)
+  const optionalSignalConfig = Config.option(signalConfig)
+
+  const selectConfig = Option.match({
+    onNone: () => Config.schema(ProtocolSchema, "OTEL_EXPORTER_OTLP_PROTOCOL"),
+    onSome: Effect.succeed,
+  })
+
+  const configured = Effect.flatMap(optionalSignalConfig, selectConfig)
+
+  return yield* Effect.provideService(configured, ConfigProvider.ConfigProvider, provider)
+})
+
+const serialization = (signal: Signal, provider: ConfigProvider.ConfigProvider) => {
+  const configured = protocol(signal, provider)
+
+  const selectLayer = (value: TelemetryProtocol) => equalsProtocol(value, "http/protobuf")
+    ? OtlpSerialization.layerProtobuf
+    : OtlpSerialization.layerJson
+
+  const selected = Effect.map(configured, selectLayer)
+
+  return Layer.unwrap(selected)
+}
 
 const exporterLayer = Effect.fn("ApplicationTelemetry.exporterLayer")(function* (
   application: ApplicationIR,
@@ -81,17 +201,20 @@ const exporterLayer = Effect.fn("ApplicationTelemetry.exporterLayer")(function* 
   )
 
   const runtimeMetrics = Option.isNone(activeMetrics) ? Layer.empty : Metric.enableRuntimeMetricsLayer
+  const minimumLogLevelOption = Option.fromNullishOr(logs?.minimumLevel)
 
   const minimumLogLevel = Option.match(
-    Option.fromNullishOr(logs?.minimumLevel),
+    minimumLogLevelOption,
     {
       onNone: Function.constant(Layer.empty),
       onSome: Layer.succeed(References.MinimumLogLevel),
     },
   )
 
+  const minimumTraceLevelOption = Option.fromNullishOr(traces?.minimumLevel)
+
   const minimumTraceLevel = Option.match(
-    Option.fromNullishOr(traces?.minimumLevel),
+    minimumTraceLevelOption,
     {
       onNone: Function.constant(Layer.empty),
       onSome: Layer.succeed(Tracer.MinimumTraceLevel),

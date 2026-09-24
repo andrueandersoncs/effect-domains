@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { Clock, Config, DateTime, Duration, Effect, Function, Layer, Option, Redacted, Schema, Semaphore, Struct, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
-import { Unauthenticated } from "./authorization.ts"
+import { Unauthenticated } from "./authorization-model.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { identifier } from "./domain.ts"
 import { CredentialsSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema, SubjectSchema } from "./identity.ts"
@@ -19,6 +19,8 @@ const AccountsSchema = Schema.Struct({
   disabled: Schema.Boolean,
 })
 
+interface Accounts extends Schema.Schema.Type<typeof AccountsSchema> {}
+
 const Accounts = Table.make({
   name: "identity_accounts",
   schema: AccountsSchema,
@@ -31,6 +33,8 @@ const SessionsSchema = Schema.Struct({
   expires_at: Schema.Int,
   revoked_at: Schema.NullOr(Schema.Int),
 })
+
+interface Sessions extends Schema.Schema.Type<typeof SessionsSchema> {}
 
 const AccountsUsernameReference = Table.reference(Accounts, [Accounts.identifier])
 
@@ -61,13 +65,19 @@ const AccountRowSchema = Schema.Struct({
   subject_json: StoredSubjectSchema,
 })
 
+interface AccountRow extends Schema.Schema.Type<typeof AccountRowSchema> {}
+
 const SessionRowSchema = Schema.Struct({
   id: Schema.String,
   expires_at: Schema.Int,
   subject_json: StoredSubjectSchema,
 })
 
+interface SessionRow extends Schema.Schema.Type<typeof SessionRowSchema> {}
+
 const SessionLookupSchema = Schema.Struct({ digest: Schema.String, now: Schema.Int })
+
+interface SessionLookup extends Schema.Schema.Type<typeof SessionLookupSchema> {}
 
 interface IdentityAccount {
   readonly username: string
@@ -88,29 +98,37 @@ interface SqliteIdentityOptions extends Partial<SqliteIdentityOptionalOptions> {
 const unavailable = () => IdentityUnavailable.make({})
 const unauthenticated = () => Unauthenticated.make({})
 
-const database = Effect.fn("SqliteIdentity.database")(<A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  pipe(effect, Effect.mapError(unavailable)))
-
-const tokenDigest = (token: string) => createHash("sha256").update(token).digest("hex")
-const newToken = () => Effect.try({ try: () => randomBytes(32).toString("base64url"), catch: unavailable })
-const newSessionId = () => Effect.try({ try: () => randomBytes(16).toString("hex"), catch: unavailable })
-
-const hashPassword = (password: Redacted.Redacted<string>) => Effect.tryPromise({
-  try: () => {
-    const value = Redacted.value(password)
-
-    return Bun.password.hash(value, { algorithm: "argon2id", memoryCost: 65536, timeCost: 2 })
-  },
-  catch: unavailable,
+const database = Effect.fn("SqliteIdentity.database")(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
+  return yield* pipe(effect, Effect.mapError(unavailable))
 })
 
-const verifyPassword = (password: Redacted.Redacted<string>, hash: string) => Effect.tryPromise({
-  try: () => {
-    const value = Redacted.value(password)
+const tokenDigest = (token: string) => createHash("sha256").update(token).digest("hex")
+const newToken = Effect.try({ try: () => randomBytes(32).toString("base64url"), catch: unavailable })
+const newSessionId = Effect.try({ try: () => randomBytes(16).toString("hex"), catch: unavailable })
 
-    return Bun.password.verify(value, hash)
-  },
-  catch: unavailable,
+const hashPassword = Effect.fn("SqliteIdentity.hashPassword")(function* (password: Redacted.Redacted<string>) {
+  return yield* Effect.tryPromise({
+    try: () => {
+      const value = Redacted.value(password)
+
+      return Bun.password.hash(value, { algorithm: "argon2id", memoryCost: 65536, timeCost: 2 })
+    },
+    catch: unavailable,
+  })
+})
+
+const verifyPassword = Effect.fn("SqliteIdentity.verifyPassword")(function* (
+  password: Redacted.Redacted<string>,
+  hash: string,
+) {
+  return yield* Effect.tryPromise({
+    try: () => {
+      const value = Redacted.value(password)
+
+      return Bun.password.verify(value, hash)
+    },
+    catch: unavailable,
+  })
 })
 
 const prepare = Effect.fn("SqliteIdentity.prepare")(function* (sql: SqlClient.SqlClient) {
@@ -159,7 +177,7 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
   yield* prepare(sql)
   yield* seedAccounts(sql, accounts, password)
 
-  const dummyPassword = yield* pipe(newToken(), Effect.map(Redacted.make))
+  const dummyPassword = yield* pipe(newToken, Effect.map(Redacted.make))
   const dummyHash = yield* hashPassword(dummyPassword)
   const passwordVerifications = yield* Semaphore.make(2)
 
@@ -209,8 +227,8 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     if (!result.valid) return yield* unauthenticated()
 
     const account = yield* Effect.fromOption(result.account, unauthenticated)
-    const token = yield* newToken()
-    const sessionId = yield* newSessionId()
+    const token = yield* newToken
+    const sessionId = yield* newSessionId
     const digest = yield* Effect.try({ try: () => tokenDigest(token), catch: unavailable })
     const nowMillis = yield* clock.currentTimeMillis
     const now = yield* pipe(DateTime.make(nowMillis), Effect.fromOption(unavailable))
@@ -245,13 +263,15 @@ const passwordValue = (password: SqliteIdentityOptions["password"]) =>
 const authenticator = Effect.gen(function* () {
   const runtime = yield* IdentityRuntime
 
-  return AuthorizationRpc.Authenticator.of({
-    authenticate: (headers) => pipe(
+  const authenticate = Effect.fn("SqliteIdentity.authenticateRequest")(function* (headers) {
+    return yield* pipe(
       authenticateIdentity(headers),
       Effect.provideService(IdentityRuntime, runtime),
       Effect.map(Struct.get("subject")),
-    ),
+    )
   })
+
+  return AuthorizationRpc.Authenticator.of({ authenticate })
 })
 
 const layer = (options: SqliteIdentityOptions) => {

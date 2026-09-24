@@ -1,7 +1,7 @@
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
 import { Array, Data, Option, Struct } from "effect"
 import type { ApplicationIR } from "./application.ts"
-import type { SqliteMigration } from "./sqlite-migrations.ts"
+import type { SqliteMigration } from "./sqlite-migration-model.ts"
 
 export type TransactionSemantics = "batch" | "interactive"
 export type RuntimeExecution = "process" | "request"

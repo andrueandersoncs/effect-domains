@@ -7,7 +7,7 @@ export type RpcProcedure = Rpc.Any & Pick<Rpc.AnyWithProps, "payloadSchema" | "s
 }>
 
 export type RpcBundle = Readonly<{
-  group: RpcGroup.Any & Pick<RpcGroup.RpcGroup<RpcProcedure>, "requests">
+  group: RpcGroup.Any & Readonly<{ requests: RpcGroup.RpcGroup<RpcProcedure>["requests"] }>
   handlers: Layer.Layer<never, any, any>
 }>
 

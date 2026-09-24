@@ -1,10 +1,3 @@
-import type { Resource as ResourceDefinition } from "./resource-model.ts"
-
-export type Resource = ResourceDefinition
-
-export type { ResourceSpec } from "./resource-definition.ts"
-export type { ResourceRuntime, ResourceTable } from "./resource-runtime.ts"
-
 import {
   capabilities,
   capabilityCreate,

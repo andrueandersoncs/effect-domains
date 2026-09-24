@@ -1,4 +1,4 @@
-import { pipe } from "effect"
+import { Effect, pipe } from "effect"
 import * as ApplicationBun from "effect-domains/application-bun"
 import { ExpenseLedgerApplication } from "./application.ts"
 import { ExpenseLedgerMigrations } from "./migrations.ts"
@@ -14,4 +14,4 @@ const program = ApplicationBun.runApplication(ExpenseLedgerApplication, {
   },
 })
 
-pipe(program, ApplicationBun.runMain)
+pipe(program, ApplicationBun.runMain, Effect.runSync)

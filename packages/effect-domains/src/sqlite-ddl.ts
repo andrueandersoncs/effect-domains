@@ -1,5 +1,8 @@
-import { Array, Function, Match, Option, Predicate, Schema, pipe } from "effect"
-import type { TableCheck, TableField, TableForeignKey, TableIndex, TableSnapshot, TableUnique } from "./table.ts"
+import { Array, Equivalence, Function, Match, Option, Predicate, Schema, pipe } from "effect"
+import type { TableCheck } from "./table-check-model.ts"
+import type { TableField } from "./physical-table-field.ts"
+import type { TableForeignKey, TableIndex, TableUnique } from "./physical-table-relations.ts"
+import type { TableSnapshot } from "./table-snapshot-model.ts"
 
 export const quoteIdentifier = (identifier: string) =>
   `"${identifier.replaceAll('"', '""')}"`
@@ -106,7 +109,7 @@ const renderTableColumn = (identifier: string) => (field: TableField) => {
 }
 
 const primaryKeyFor = (identifier: string) => (field: TableField) =>
-  field.name === identifier
+  Equivalence.strictEqual()(field.name, identifier)
 
 export const renderCreateTable = (table: TableSnapshot) => {
   const columns = Array.map(table.fields, renderTableColumn(table.identifier))

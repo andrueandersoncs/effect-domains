@@ -1,5 +1,5 @@
 import { DateTime, Schema, pipe } from "effect"
-import { Forbidden } from "effect-domains/authorization"
+import { Forbidden } from "effect-domains/authorization-model"
 import { SafeIntSchema } from "effect-domains/domain"
 import { EntitlementRequired, EntitlementUnavailable } from "effect-domains/entitlements"
 

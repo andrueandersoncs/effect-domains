@@ -1,8 +1,10 @@
 import { Array, Function, Match, Option, Record, Schema, pipe } from "effect"
-import type { TableFieldName, TableRelationsInput } from "./table.ts"
+import type { TableRelationsInput } from "./table-relation-input.ts"
+import type { TableFieldName } from "./table-relations.ts"
 import type { StructSchema } from "./domain.ts"
-import type { AuthorizationDefinition } from "./authorization.ts"
+import type { AuthorizationDefinition } from "./authorization-model.ts"
 import type { TransitionMachine } from "./transitions.ts"
+
 import type {
   CreationSources,
   ListPolicy,
@@ -23,11 +25,9 @@ export const CreationSourceSchema = Schema.Union([
   }),
 ])
 
-type CreationSource = Schema.Schema.Type<typeof CreationSourceSchema>
-
 type SourceKeys<
   Sources,
-  Tag extends CreationSource["_tag"],
+  Tag extends Schema.Schema.Type<typeof CreationSourceSchema>["_tag"],
 > = {
   readonly [Key in keyof Sources]-?:
     Extract<NonNullable<Sources[Key]>, { readonly _tag: Tag }> extends never ? never : Key
@@ -106,7 +106,7 @@ const creationOperation = (
   capability: Extract<ResourceCapability, { readonly _tag: "Create" }>,
 ) => {
   const sources = capability.sources ?? {}
-  const entries: ReadonlyArray<readonly [string, CreationSource]> = Record.toEntries(sources)
+  const entries: ReadonlyArray<readonly [string, Schema.Schema.Type<typeof CreationSourceSchema>]> = Record.toEntries(sources)
 
   const operation = Array.reduce(entries, emptyCreationOperation, (state, [field, source]) =>
     pipe(

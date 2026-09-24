@@ -1,6 +1,8 @@
 import { Array, Effect, Equivalence, flow, Function, HashSet, Match, Option, Order, pipe, Predicate, Record, Schema, Struct } from "effect"
 import { MigrationError } from "./migrations.ts"
-import { Table, TableField, TableSnapshot } from "./table.ts"
+import { Table } from "./table.ts"
+import { TableField } from "./physical-table-field.ts"
+import { TableSnapshot } from "./table-snapshot-model.ts"
 
 const SchemaVersion = 1
 const LedgerTable = "_effect_schema_migrations"
@@ -273,7 +275,8 @@ const validateCreateIndex = (migration: SqliteMigration) =>
 
 const validateStep = (previous: SqliteSchemaSnapshot, migration: SqliteMigration) =>
   Effect.fn("SqliteMigrations.validateStep")(function* (step: SqliteMigrationStep) {
-    yield* Match.value(step).pipe(
+    yield* pipe(
+      Match.value(step),
       Match.tagsExhaustive({
         SqliteCreateTable: (create) => tableFor(migration.to, create.table, "create table"),
         SqliteRebuildTable: validateRebuild(previous, migration.to),

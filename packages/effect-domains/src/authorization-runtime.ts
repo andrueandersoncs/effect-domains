@@ -1,9 +1,9 @@
-import { Array, Data, Effect, Function, HashSet, Match, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
 import type { StructSchema, StructValue } from "./domain.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { OperandSchema, Policy, PolicyEnvironment, type Operand, type Policy as PolicySyntax } from "./policy.ts"
 import { FieldIR, SchemaField } from "./schema-field.ts"
-import type { Table } from "./table.ts"
+import type { Table } from "./table-relations.ts"
 
 import {
   actions,
@@ -23,6 +23,7 @@ import {
   equals,
   type EntitlementMap,
   type EntitlementRequirement,
+  EntitlementRequirementSchema,
   type EntitlementRequirements,
   failure,
   falsePolicy,
@@ -61,11 +62,16 @@ import {
 
 const subjectPhases = HashSet.fromIterable<PolicyPhase>(["subject"])
 const absentPolicyRow = Option.none<StructValue>()
+const PolicyRuleRecordSchema = Schema.Record(Schema.String, Policy.Schema)
+const EntitlementMapSchema = Schema.Record(Schema.String, Schema.Array(EntitlementRequirementSchema))
 
-const fieldFor = (fields: FieldDescriptions, field: string): Option.Option<FieldIR> =>
+const decodePolicyRuleRecord = Schema.decodeUnknownOption(PolicyRuleRecordSchema)
+const decodeEntitlementMap = Schema.decodeUnknownOption(EntitlementMapSchema)
+
+const lookupFieldDescription = (fields: FieldDescriptions, field: string) =>
   pipe(Record.get(fields, field), Option.flatten)
 
-const sameFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]): boolean =>
+const matchesFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) =>
   Option.match(left, {
     onNone: () => Option.isNone(right),
     onSome: (category) => Option.exists(right, equals(category)),
@@ -136,7 +142,7 @@ const makeSubject = (
   const subjectRules = Record.filter(rules, (_, action) => subjectOnly(policies[action] as PolicySyntax))
   const unrestricted = Policy.evaluate(truePolicy)
 
-  return (action: AuthorizationAction) => Effect.gen(function* () {
+  const subjectForAction = Effect.fn("Authorization.subject")(function* (action: AuthorizationAction) {
     if (!Record.has(rules, action)) return yield* forbidden()
 
     const supplied = yield* Effect.serviceOption(AuthorizationSubject)
@@ -156,46 +162,51 @@ const makeSubject = (
 
     return subject
   })
+
+  return subjectForAction
 }
 
 const makeCheck = (
   rules: Readonly<Record<string, ReturnType<typeof Policy.evaluate>>>,
   scopeCheck: ReturnType<typeof makeScopeCheck>,
   requirements: EntitlementRequirements,
-): AuthorizationRuntime["check"] =>
-  (action: AuthorizationAction, subject: StructValue, values: AuthorizationValues) => Effect.gen(function* () {
-    const [, current, candidate] = actionRequirements(action)
-    const missingCurrent = current && Option.isNone(values.row)
-    const missingCandidate = candidate && Option.isNone(values.next)
-    const missingValue = missingCurrent || missingCandidate
+) => Effect.fn("Authorization.check")(function* (
+  action: AuthorizationAction,
+  subject: StructValue,
+  values: AuthorizationValues,
+) {
+  const [, current, candidate] = actionRequirements(action)
+  const missingCurrent = current && Option.isNone(values.row)
+  const missingCandidate = candidate && Option.isNone(values.next)
+  const missingValue = missingCurrent || missingCandidate
 
-    if (missingValue) return yield* forbidden()
+  if (missingValue) return yield* forbidden()
 
-    const evaluate = yield* pipe(Record.get(rules, action), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
+  const evaluate = yield* pipe(Record.get(rules, action), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
 
-    yield* scopeCheck(subject, values.row, values.next)
-    yield* scopeCheck(subject, values.next, values.next)
+  yield* scopeCheck(subject, values.row, values.next)
+  yield* scopeCheck(subject, values.next, values.next)
 
-    const environment = new PolicyEnvironment({ subject, ...values })
-    const allowed = yield* evaluate(environment)
+  const environment = new PolicyEnvironment({ subject, ...values })
+  const allowed = yield* evaluate(environment)
 
-    if (!allowed) return yield* forbidden()
+  if (!allowed) return yield* forbidden()
 
-    const required = requirementsFor(requirements, action)
+  const required = requirementsFor(requirements, action)
 
-    if (!candidate) return yield* checkEntitlements(required, environment)
+  if (!candidate) return yield* checkEntitlements(required, environment)
 
-    const readable = yield* pipe(Record.get(rules, "read"), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
-    const readEnvironment = new PolicyEnvironment({ subject, row: values.next, next: values.next })
-    const visible = yield* readable(readEnvironment)
+  const readable = yield* pipe(Record.get(rules, "read"), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
+  const readEnvironment = new PolicyEnvironment({ subject, row: values.next, next: values.next })
+  const visible = yield* readable(readEnvironment)
 
-    if (!visible) return yield* forbidden()
+  if (!visible) return yield* forbidden()
 
-    const readRequired = requirementsFor(requirements, "read")
+  const readRequired = requirementsFor(requirements, "read")
 
-    yield* checkEntitlements(required, environment)
-    yield* checkEntitlements(readRequired, readEnvironment)
-  })
+  yield* checkEntitlements(required, environment)
+  yield* checkEntitlements(readRequired, readEnvironment)
+})
 
 const constructPolicy = <Resource extends StructSchema, Subject extends StructSchema>(
   resource: Resource,
@@ -226,32 +237,61 @@ const constructPolicy = <Resource extends StructSchema, Subject extends StructSc
     },
   }))
 
+  const validateRequirements = Effect.fn("Authorization.validateRequirements")(function* (action: AuthorizationAction) {
+    const required = requirementsFor(source.require ?? emptyEntitlementRequirements, action)
+    const missingPolicy = pipe(policyFor(source, action), Option.isNone)
+    const missingGrant = required.length > 0 && missingPolicy
+
+    if (missingGrant) return yield* failure(`require.${action} needs an allow.${action} policy`)
+
+    const [phases] = actionRequirements(action)
+
+    yield* validateEntitlements(required, fields, phases)
+  })
+
   const validation = Effect.gen(function* () {
     yield* checkPolicy(source.scope, fields, scopePhases, "scope")
     yield* Effect.forEach(actions, validateAction, { discard: true })
-
-    yield* Effect.forEach(actions, (action) => Effect.gen(function* () {
-      const required = requirementsFor(source.require ?? emptyEntitlementRequirements, action)
-      const missingPolicy = pipe(policyFor(source, action), Option.isNone)
-      const missingGrant = required.length > 0 && missingPolicy
-
-      if (missingGrant) return yield* failure(`require.${action} needs an allow.${action} policy`)
-
-      const [phases] = actionRequirements(action)
-
-      yield* validateEntitlements(required, fields, phases)
-    }), { discard: true })
+    yield* Effect.forEach(actions, validateRequirements, { discard: true })
   })
 
   Effect.runSync(validation)
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const mappedAllow = Record.map(source.allow as Readonly<Record<string, PolicySyntax>>, Policy.snapshot)
+  const allowRecord = pipe(source.allow, decodePolicyRuleRecord, Option.getOrThrow)
+  const allowEntries = Record.toEntries(allowRecord)
+
+  const snapshotPolicyEntry = ([action, policy]: (typeof allowEntries)[number]) => {
+    const snapshot = Policy.snapshot(policy)
+
+    return [action, snapshot] as const
+  }
+
+  const mappedAllow = pipe(allowEntries, Array.map(snapshotPolicyEntry), Record.fromEntries)
   const allow = Object.freeze(mappedAllow)
   const scope = Policy.snapshot(source.scope)
   const snapshotEntries = (entries: EntitlementMap[string]) => snapshotEntitlements(entries ?? emptyEntitlements)
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding entitlement declaration.
-  const required = pipe(source.require ?? emptyEntitlementRequirements, (requirements) => Record.map(requirements as EntitlementMap, snapshotEntries), Object.freeze)
+
+  const requirementRecord = pipe(
+    source.require ?? emptyEntitlementRequirements,
+    decodeEntitlementMap,
+    Option.getOrThrow,
+  )
+
+  const requirementEntries = Record.toEntries(requirementRecord)
+
+  const snapshotRequirementEntry = ([action, entries]: (typeof requirementEntries)[number]) => {
+    const snapshot = snapshotEntries(entries)
+
+    return [action, snapshot] as const
+  }
+
+  const required = pipe(
+    requirementEntries,
+    Array.map(snapshotRequirementEntry),
+    Record.fromEntries,
+    Object.freeze,
+  )
+
   const descriptor = PolicyAuthorizationSchema.make({ resource, subject, scope, allow, require: required })
   const value = Struct.assign(descriptor, { resource, subject })
   const snapshot = Object.freeze(value)
@@ -294,7 +334,7 @@ const compiledPolicy = Effect.fn("Authorization.compiledPolicy")(function* (auth
 })
 
 const subjectBindingCompatible = (destination: FieldIR, source: FieldIR) => {
-  const category = sameFieldCategory(destination.category, source.category)
+  const category = matchesFieldCategory(destination.category, source.category)
   const collection = equals(destination.collection, source.collection)
   const required = !source.nullable
   const nullable = destination.nullable || required
@@ -309,8 +349,8 @@ const isSubjectOperand = (value: unknown): value is Extract<Operand, { readonly 
 const validateSubjectBinding = Effect.fn("Authorization.validateSubjectBinding")(function* (fields: PolicyFields, target: string, binding: unknown) {
   if (!isSubjectOperand(binding)) return yield* failure(`create subject binding ${target} must reference a subject field`)
 
-  const destination = fieldFor(fields.resource, target)
-  const source = fieldFor(fields.subject, binding.field)
+  const destination = lookupFieldDescription(fields.resource, target)
+  const source = lookupFieldDescription(fields.subject, binding.field)
 
   const [destinationDescription, sourceDescription] = yield* pipe(
     Option.all([destination, source] as const),
@@ -335,13 +375,17 @@ const validateSubjectBindings = Effect.fn("Authorization.validateSubjectBindings
 
 const hasIdentityEncoding = (schema: Schema.Constraint) => {
   const encoding = Option.fromNullishOr(schema.ast.encoding)
-  if (Option.isSome(encoding)) return false
-  const encoded = Schema.toEncoded(schema)
-  return equals(encoded.ast, schema.ast)
+  const encodedSchema = Schema.toEncoded(schema)
+
+  return Option.isNone(encoding) && equals(encodedSchema.ast, schema.ast)
 }
 
-const tableField = (table: Table, name: string) =>
-  Array.findFirst(table.fields, (field) => field.name === name)
+const tableField = (table: Table, name: string) => {
+  const nameEquals = Equivalence.strictEqual<string>()
+  const sameName = (field: Table["fields"][number]) => nameEquals(field.name, name)
+
+  return Array.findFirst(table.fields, sameName)
+}
 
 const CompatibleSqlScalarSchema = Schema.Union([
   Schema.Tuple([Schema.Literal("string"), Schema.Literal("string")]),
@@ -373,7 +417,7 @@ const validateSqlReference = (resource: StructSchema, storage: StructSchema, tab
     )
 
     const description = yield* pipe(
-      fieldFor(fields, reference.field),
+      lookupFieldDescription(fields, reference.field),
       Effect.fromOption,
       Effect.mapError(() => definitionError(`SQL policy references unknown row.${reference.field}`)),
     )
@@ -416,12 +460,13 @@ const denyAccess: AuthorizationRuntime = {
 
 const publicAccessEffect: Effect.Effect<AuthorizationRuntime, never, never> = Effect.succeed(publicAccess)
 const denyAccessEffect: Effect.Effect<AuthorizationRuntime, never, never> = Effect.succeed(denyAccess)
-const compileStandalonePolicy = (policy: PolicyAuthorization): Effect.Effect<AuthorizationRuntime, AuthorizationDefinitionError, never> =>
+
+const compileStandalonePolicy = (policy: PolicyAuthorization) =>
   compiledPolicy(policy, policy.resource)
 
 const standalone = (
   authorization: AuthorizationDefinition,
-): Effect.Effect<AuthorizationRuntime, AuthorizationDefinitionError, never> => pipe(
+) => pipe(
   Match.value(authorization),
   Match.when(isPublicAuthorization, Function.constant(publicAccessEffect)),
   Match.when(isDenyAuthorization, Function.constant(denyAccessEffect)),

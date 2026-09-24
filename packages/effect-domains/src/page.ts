@@ -20,6 +20,8 @@ const CursorInputSchema = Schema.Struct({
   cursor: Schema.optionalKey(Schema.String),
 })
 
+interface CursorInput extends Schema.Schema.Type<typeof CursorInputSchema> {}
+
 // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 const empty = <Value>() => UnknownPageSchema.make({
   items: [],

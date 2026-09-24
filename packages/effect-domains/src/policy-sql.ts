@@ -1,10 +1,10 @@
-import { Array, Data, Effect, Equivalence, Function, Match, Predicate, flow, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, flow, pipe } from "effect"
 import { SqlClient, Statement } from "effect/unstable/sql"
 
 import {
   Policy,
   policyFailure,
-  resolveScalarCollectionLiteralOrSubject,
+  resolveScalarCollectionsLiteralOrSubjects,
   resolveScalarLiteralOrSubject,
   type Operand,
   type PolicyEnvironment,
@@ -14,7 +14,11 @@ import {
 } from "./policy.ts"
 
 type Binder = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) => Effect.Effect<Statement.Fragment, PolicyEvaluationError>
-type ScalarKind = Exclude<Expression["kind"], "row">
+
+const ScalarKindSchema = Schema.Literals(["boolean", "null", "number", "string"])
+const isScalarKind = Schema.is(ScalarKindSchema)
+
+type ScalarKind = typeof ScalarKindSchema.Type
 
 class Expression extends Data.Class<{
   readonly fragment: Statement.Fragment
@@ -87,21 +91,41 @@ const rowScalarEquality = (sql: SqlClient.SqlClient, row: Statement.Fragment, sc
   nativeFragment(sql`${typeMatches(sql, row, kind)} AND ${row} IS ${scalar}`)
 
 const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
-  if (left.kind === "row") {
-    if (right.kind === "row") return rowEquality(sql, left, right)
-    return rowScalarEquality(sql, left.fragment, right.fragment, right.kind)
-  }
+  const leftKind = Option.liftPredicate(left.kind, isScalarKind)
+  const rightKind = Option.liftPredicate(right.kind, isScalarKind)
 
-  if (right.kind === "row") return rowScalarEquality(sql, right.fragment, left.fragment, left.kind)
-  if (!scalarKindEquals(left.kind, right.kind)) return falseExpression(sql)
-
-  return nativeFragment(sql`${left.fragment} IS ${right.fragment}`)
+  return pipe(
+    Match.value(leftKind),
+    Match.tagsExhaustive({
+      None: () => pipe(
+        Match.value(rightKind),
+        Match.tagsExhaustive({
+          None: () => rowEquality(sql, left, right),
+          Some: ({ value }) => rowScalarEquality(sql, left.fragment, right.fragment, value),
+        }),
+      ),
+      Some: ({ value: leftScalarKind }) => pipe(
+        Match.value(rightKind),
+        Match.tagsExhaustive({
+          None: () => rowScalarEquality(sql, right.fragment, left.fragment, leftScalarKind),
+          Some: ({ value: rightScalarKind }) =>
+            scalarKindEquals(leftScalarKind, rightScalarKind)
+              ? nativeFragment(sql`${left.fragment} IS ${right.fragment}`)
+              : falseExpression(sql),
+        }),
+      ),
+    }),
+  )
 }
 
 const scalarExpressionFor = (sql: SqlClient.SqlClient) => (value: Scalar) => makeScalarExpression(sql, value)
 
-const scalarOperand = Effect.fn("PolicySql.scalarOperand")((sql: SqlClient.SqlClient, environment: PolicyEnvironment, operand: Operand) =>
-  pipe(
+const scalarOperand = Effect.fn("PolicySql.scalarOperand")(function* (
+  sql: SqlClient.SqlClient,
+  environment: PolicyEnvironment,
+  operand: Operand,
+) {
+  return yield* pipe(
     Match.value(operand),
     Match.tagsExhaustive({
       Literal: (literal) => pipe(resolveScalarLiteralOrSubject(literal, environment), Effect.map(scalarExpressionFor(sql))),
@@ -109,18 +133,23 @@ const scalarOperand = Effect.fn("PolicySql.scalarOperand")((sql: SqlClient.SqlCl
       RowField: ({ field }) => pipe(makeRowExpression(sql, field), Effect.succeed),
       NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
     }),
-  ))
+  )
+})
 
-const collectionValues = Effect.fn("PolicySql.collectionValues")((environment: PolicyEnvironment, operand: Operand) =>
-  pipe(
+const collectionValues = Effect.fn("PolicySql.collectionValues")(function* (
+  environment: PolicyEnvironment,
+  operand: Operand,
+) {
+  return yield* pipe(
     Match.value(operand),
     Match.tagsExhaustive({
-      Literal: (literal) => resolveScalarCollectionLiteralOrSubject(literal, environment),
-      SubjectField: (subject) => resolveScalarCollectionLiteralOrSubject(subject, environment),
+      Literal: (literal) => resolveScalarCollectionsLiteralOrSubjects(literal, environment),
+      SubjectField: (subject) => resolveScalarCollectionsLiteralOrSubjects(subject, environment),
       RowField: () => policyFailure("policy collection must resolve to finite scalar values"),
       NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
     }),
-  ))
+  )
+})
 
 const bindConstant = ({ value }: Extract<PolicyF<Binder>, { readonly _tag: "Constant" }>): Binder =>
   flow(value ? trueExpression : falseExpression, Effect.succeed)

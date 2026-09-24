@@ -6,7 +6,7 @@ import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 import { Application, Part } from "effect-domains/application"
 import { ApplicationUi } from "effect-domains/application-ui"
-import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationSubject } from "effect-domains/authorization-model"
 import { AuthorizationRpc } from "effect-domains/authorization-rpc"
 import { ApplicationInspect } from "effect-domains/application-inspect"
 

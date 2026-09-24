@@ -80,10 +80,11 @@ const freezeDeclaration = <Status extends string>(declaration: TransitionDeclara
   return Object.freeze({ from, to: declaration.to })
 }
 
-const arrayValues = (values: unknown) => {
-  if (Array.isArray(values)) return Option.some(values)
-  return Option.none<ReadonlyArray<unknown>>()
-}
+const arrayValues = (values: unknown) =>
+  Array.isArray(values)
+    ? Option.some(values)
+    : Option.none<ReadonlyArray<unknown>>()
+
 const allStrings = (values: ReadonlyArray<unknown>) => Array.every(values, Predicate.isString)
 const nonEmptyArrayValues = flow(arrayValues, Option.filter(Array.isReadonlyArrayNonEmpty))
 const stringValues = flow(nonEmptyArrayValues, Option.exists(allStrings))
@@ -107,14 +108,15 @@ const make = <
 >(input: Readonly<{ name: Name; field: Field; status: Status; transitions: Declarations }>) => {
   type Action = Extract<keyof Declarations, string>
   type Target<A extends Action> = Declarations[A]["to"]
-  type Applied<Row, A extends Action> = Omit<Row, Field> & Readonly<Record<Field, Target<A>>>
+  type Applied<Row, A extends Action> = Row & Readonly<Record<Field, Target<A>>>
 
   const literals = statusValues(input.status)
 
   if (Option.isNone(literals)) {
     const invalidStatus = definitionFailure(input.name, "status must be a non-empty string literal schema")
+    const fatalInvalidStatus = Effect.orDie(invalidStatus)
 
-    Effect.runSync(Effect.orDie(invalidStatus))
+    Effect.runSync(fatalInvalidStatus)
   }
 
   const isStatus = Schema.is(input.status)
@@ -133,38 +135,33 @@ const make = <
   }>>()(tag, TransitionErrorFields)
 
   const frozenTransitions = Record.map(input.transitions, freezeDeclaration)
-  // SAFETY: The frozen map retains Declarations because Record.map preserves every key while freezing changes only mutability.
-  const transitions = Object.freeze(frozenTransitions) as Declarations
-  // SAFETY: Every returned key is an Action because transitions has the exact Declarations key set.
-  const actions = Record.keys(transitions) as Array<Action>
-  // SAFETY: The literals enumerate every Action because actions was derived from the exact Declarations key set.
-  const ActionsSchema = Schema.Literals(actions) as Schema.Literals<ReadonlyArray<Action>>
+  const assignedTransitions = Struct.assign(input.transitions, frozenTransitions)
+  const transitions = Object.freeze(assignedTransitions)
+  const actions = Struct.keys(transitions)
+  const ActionsSchema = Schema.Literals(actions)
 
   const invalid = (action: string, key: string, actual: string) =>
     ErrorSchema.make({ key, action, actual, message: `${input.name} ${key} cannot ${action} while ${actual}` })
 
   const allows = (actual: string) => (entry: TransitionDeclaration<Status["Type"]>) =>
-    // SAFETY: The status has the declared status type because callers pass the value read from the typed transition field.
-    Array.contains(entry.from, actual as Status["Type"])
+    isStatus(actual) && Array.contains(entry.from, actual)
 
-  const guard = <A extends Action>(action: A, key: string, actual: string): Effect.Effect<Target<A>, Schema.Schema.Type<typeof ErrorSchema>> => {
-    const declaration = Record.get(transitions, action)
-    const applicable = pipe(declaration, Option.filter(allows(actual)))
+  const guard = <A extends Action>(action: A, key: string, actual: string) => {
+    const declaration = transitions[action]
+    const permitted = allows(actual)(declaration)
     const failure = invalid(action, key, actual)
 
-    return pipe(
-      applicable,
-      Option.match({
-        onNone: () => Effect.fail(failure),
-        // SAFETY: The target belongs to action A because entry was selected from transitions by that action key.
-        onSome: (entry) => Effect.succeed(entry.to as Target<A>),
-      }),
-    )
+    return permitted
+      ? Effect.succeed(declaration.to)
+      : Effect.fail(failure)
   }
 
   const applyTo = <Row extends Readonly<Record<Field, Status["Type"]>>, A extends Action>(row: Row) =>
-    // SAFETY: The result is Applied<Row, A> because Struct.assign updates exactly the declared transition field with Target<A>.
-    (to: Target<A>) => Struct.assign(row, { [input.field]: to }) as Applied<Row, A>
+    (to: Target<A>) => {
+      const update = Record.fromEntries([[input.field, to] as const])
+
+      return Struct.assign(row, update)
+    }
 
   const apply = <A extends Action>(action: A, key: string) =>
     <Row extends Readonly<Record<Field, Status["Type"]>>>(row: Row) =>

@@ -1,8 +1,10 @@
 import { Array, Data, Match, Record, Schema, Struct, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { PageLimitSchema } from "./domain.ts"
-import type { ResourceSpec, ResourceTable } from "./resource.ts"
-import { TableField, type Table } from "./table.ts"
+import type { ResourceSpec } from "./resource-definition.ts"
+import type { ResourceTable } from "./resource-runtime.ts"
+import { TableField } from "./physical-table-field.ts"
+import type { Table } from "./table-relations.ts"
 
 const NameSchema = Schema.NonEmptyString.check(Schema.isPattern(/\S/))
 const ReferenceSchema = Schema.Tuple([NameSchema, NameSchema])
@@ -42,11 +44,15 @@ const ColumnEvidenceSchema = Schema.Struct({
   transformsStoredNull: Schema.Boolean,
 })
 
+interface ColumnEvidence extends Schema.Schema.Type<typeof ColumnEvidenceSchema> {}
+
 const TableEvidenceSchema = Schema.Struct({
   name: NameSchema,
   fields: Schema.Array(TableField),
   columns: Schema.Record(Schema.String, ColumnEvidenceSchema),
 })
+
+interface TableEvidence extends Schema.Schema.Type<typeof TableEvidenceSchema> {}
 
 
 const DefinitionSchema = Schema.Struct({
@@ -200,6 +206,7 @@ type JoinFor<Sources extends Tables> = {
 }
 
 type SelectionFor<Sources extends Tables> = Readonly<Record<string, ReferenceFor<Sources>>>
+
 type LeftAlias<Joins> = Joins extends ReadonlyArray<infer Entry>
   ? Entry extends { readonly kind: "left"; readonly table: infer Key }
     ? Key

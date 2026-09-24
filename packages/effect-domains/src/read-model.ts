@@ -1,10 +1,3 @@
-export {
-  type CompiledReadModel,
-  ReadModelDescription,
-  type ReadModelSpec,
-  ReadModelSyntaxSchema,
-} from "./read-model-syntax.ts"
-
 import {
   foldReadModel,
   ReadModelDescription,

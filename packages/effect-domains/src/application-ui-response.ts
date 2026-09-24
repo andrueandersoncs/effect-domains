@@ -12,8 +12,8 @@ const ErrorEnvelopeSchema = Schema.Struct({
   error: Schema.Struct({ message: Schema.String }),
 })
 
-const ApplicationUiSuccessBodySchema = Schema.Json
-const ApplicationUiDeclaredErrorBodySchema = Schema.Json
+interface ErrorEnvelope extends Schema.Schema.Type<typeof ErrorEnvelopeSchema> {}
+
 
 const response = Effect.fn("ApplicationUi.response")(function* (
   status: number,
@@ -23,13 +23,13 @@ const response = Effect.fn("ApplicationUi.response")(function* (
 })
 
 export const applicationUiSuccessResponse = Effect.fn("ApplicationUi.successResponse")(function* (
-  body: typeof ApplicationUiSuccessBodySchema.Type,
+  body: Schema.Json,
 ) {
   return yield* response(200, body)
 })
 
 export const applicationUiDeclaredErrorResponse = Effect.fn("ApplicationUi.declaredErrorResponse")(function* (
-  body: typeof ApplicationUiDeclaredErrorBodySchema.Type,
+  body: Schema.Json,
 ) {
   return yield* response(422, body)
 })

@@ -3,7 +3,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { Config, Cron, DateTime, Effect, Equivalence, Layer, Schedule, pipe } from "effect"
 import { replaceFileAtomically } from "@effect-domains/example-support/files"
 import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
-import { AuthorizationSubject } from "effect-domains/authorization"
+import { AuthorizationSubject } from "effect-domains/authorization-model"
 import { Resource } from "effect-domains/resource"
 
 import {

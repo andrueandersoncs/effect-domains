@@ -1,13 +1,15 @@
 import { Array, Cause, Data, Effect, Equivalence, Function, Layer, Match, Option, Record, Schema, Struct, flow, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import type { SqlError } from "effect/unstable/sql"
-import { AuthorizationSubject, type SubjectPolicy } from "./authorization.ts"
+import { AuthorizationSubject, type SubjectPolicy } from "./authorization-model.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { RepositoryError, RepositoryStore, ResourceNotFound, UniqueViolation, VersionConflict } from "./repository-store.ts"
 import { RpcBundle, type RpcProcedure } from "./rpc-contract.ts"
-import { Resource, type ResourceSpec, type Resource as CompiledResource } from "./resource.ts"
-import type { CompiledReadModel, ReadModelSpec } from "./read-model.ts"
-import type { Table } from "./table.ts"
+import { Resource } from "./resource.ts"
+import type { ResourceSpec } from "./resource-definition.ts"
+import type { Resource as CompiledResource } from "./resource-model.ts"
+import type { CompiledReadModel, ReadModelSpec } from "./read-model-syntax.ts"
+import type { Table } from "./table-relations.ts"
 
 type Codec<SchemaType extends Schema.Constraint | undefined> = SchemaType extends Schema.Constraint
   ? Schema.toCodecJson<SchemaType>
@@ -21,18 +23,9 @@ type Handler<Payload, Success extends Schema.Constraint, Policy, Failure, Requir
   ? (input: PayloadType<Payload>, subject: SubjectType<Policy>) => Effect.Effect<Success["Type"], Failure, Requirements>
   : (input: PayloadType<Payload>) => Effect.Effect<Success["Type"], Failure, Requirements>
 
-type ProtectedHandler<Payload, Success extends Schema.Constraint, Policy, Failure, Requirements> =
-  (input: PayloadType<Payload>, subject: SubjectType<Policy>) => Effect.Effect<Success["Type"], Failure, Requirements>
-
-type UnprotectedHandler<Payload, Success extends Schema.Constraint, Failure, Requirements> =
-  (input: PayloadType<Payload>) => Effect.Effect<Success["Type"], Failure, Requirements>
-
-type HandlerResult<Implementation> =
+type HandlerRequirements<Implementation> = Effect.Services<
   Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never
-
-type HandlerFailure<Implementation> = Effect.Error<HandlerResult<Implementation>>
-type HandlerRequirements<Implementation> = Effect.Services<HandlerResult<Implementation>>
-
+>
 
 type Procedure<Name extends string, Payload extends Schema.Constraint | undefined, Success extends Schema.Constraint, Error extends Schema.Constraint, Policy> = Rpc.Rpc<
   Name,
@@ -42,7 +35,6 @@ type Procedure<Name extends string, Payload extends Schema.Constraint | undefine
   Policy extends SubjectPolicy ? typeof AuthorizationRpc : never
 >
 
-
 /** The empty-field error class that replaces every failure the contract does not declare. */
 interface UnavailableConstructor<Error extends Schema.Constraint> {
   readonly make: (fields: Record<string, never>) => Error["Type"]
@@ -50,20 +42,19 @@ interface UnavailableConstructor<Error extends Schema.Constraint> {
 
 type Tagged = Readonly<Record<"_tag", string>>
 
-
-
-
-type ReadModelDependency = ReadModelSpec | CompiledReadModel
+// SAFETY: The target intersects the source rather than discarding it because callers retain all source evidence and state each narrowing invariant.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 type CommandDependency =
   | ResourceSpec
   | CompiledResource
-  | ReadModelDependency
+  | ReadModelSpec
+  | CompiledReadModel
   | Table
 
 class CommandDependencySet extends Data.Class<{
   readonly tables: ReadonlyArray<Table>
-  readonly readModels: ReadonlyArray<ReadModelDependency>
+  readonly readModels: ReadonlyArray<ReadModelSpec | CompiledReadModel>
 }> {}
 
 const dependencyTable = pipe(
@@ -91,8 +82,8 @@ const dependenciesFrom: (dependency: CommandDependency) => ReadonlyArray<Table> 
 
 const isReadModel = (
   dependency: CommandDependency,
-): dependency is ReadModelDependency =>
-  dependency._tag === "ReadModelSpec" || dependency._tag === "CompiledReadModel"
+): dependency is ReadModelSpec | CompiledReadModel =>
+  Equivalence.strictEqual()(dependency._tag, "ReadModelSpec") || Equivalence.strictEqual()(dependency._tag, "CompiledReadModel")
 
 const dependencySet = (
   dependencies: ReadonlyArray<CommandDependency>,
@@ -113,7 +104,6 @@ const dependencySet = (
     readModels: frozenReadModels,
   })
 }
-
 
 type CommandSpecBoundary = Readonly<{
   name: string
@@ -144,7 +134,7 @@ type CommandSpec<
   & (Policy extends SubjectPolicy ? Readonly<{ policy: Policy }> : unknown)
   & (Transaction extends boolean ? Readonly<{ transaction: Transaction }> : unknown)
 
-
+// SAFETY: The frozen definition preserves the requested generic contract because every field is constrained by CommandSpec.
 const defineCommand = <
   const Name extends string,
   const Payload extends Schema.Constraint | undefined = undefined,
@@ -155,17 +145,7 @@ const defineCommand = <
   const Transaction extends boolean | undefined = undefined,
 >(
   definition: CommandSpecBoundary & CommandSpec<Name, Payload, Success, Errors, Unavailable, Policy, Transaction>,
-// SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-) => Object.freeze({ ...definition }) as CommandSpec<
-  Name,
-  Payload,
-  Success,
-  Errors,
-  Unavailable,
-  Policy,
-  Transaction
->
-
+) => Object.freeze({ ...definition }) as CommandSpec<Name, Payload, Success, Errors, Unavailable, Policy, Transaction>
 
 /** A command specification paired with its translated Effect implementation. */
 export interface CommandLive<Contract extends RpcProcedure = RpcProcedure> {
@@ -174,14 +154,12 @@ export interface CommandLive<Contract extends RpcProcedure = RpcProcedure> {
   readonly handler: (input: never) => Effect.Effect<unknown, unknown, unknown>
 }
 
-
-
 const inTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   pipe(RepositoryStore, Effect.flatMap((store) => store.transaction(effect)))
 
 // Only a lone declared failure passes through because interruptions and defects are never part of the contract.
 const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.Cause<unknown>) => {
-  const single = cause.reasons.length === 1
+  const single = Equivalence.strictEqual()(cause.reasons.length, 1)
 
   const declared = (reason: Cause.Reason<unknown>) => Cause.isFailReason(reason) && isDeclared(reason.error)
     ? Option.some(reason.error)
@@ -196,64 +174,65 @@ const declaredFailure = (isDeclared: (value: unknown) => boolean, cause: Cause.C
 const isMiddlewareFailure = Schema.is(AuthorizationRpc.errorSchema)
 const alwaysUndeclared = Function.constant(false)
 
-
-type CheckedCommandImplementation<Spec extends CommandSpecBoundary, Implementation> = Implementation & NoInfer<
-  Handler<
-    Spec extends { readonly payload: infer Payload extends Schema.Constraint } ? Payload : void,
-    Spec["success"],
-    Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
-    HandlerFailure<Implementation>,
-    HandlerRequirements<Implementation>
-  >
-    & ([HandlerFailure<Implementation> extends infer Failure
-      ? Failure extends Tagged
-        ? Failure extends
-          | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
-            ? Errors["Type"]
-            : never)
-          | Spec["unavailable"]["Type"]
-          | SqlError.SqlError
-          | Schema.SchemaError
-          | RepositoryError
-          | ResourceNotFound
-          | UniqueViolation
-          | VersionConflict
-          | Cause.NoSuchElementError
-          | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
-          ? never
-          : Failure
-        : never
-      : never] extends [never]
-      ? unknown
-      : Readonly<{ undeclaredFailure:
-        HandlerFailure<Implementation> extends infer Failure
-          ? Failure extends Tagged
-            ? Failure extends
-              | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
-                ? Errors["Type"]
-                : never)
-              | Spec["unavailable"]["Type"]
-              | SqlError.SqlError
-              | Schema.SchemaError
-              | RepositoryError
-              | ResourceNotFound
-              | UniqueViolation
-              | VersionConflict
-              | Cause.NoSuchElementError
-              | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
-              ? never
-              : Failure
-            : never
-          : never
-      }>)
->
+// SAFETY: Concatenating const string generics preserves their template-literal result because neither operand is widened.
+const prefixedCommandName = <Prefix extends string, Name extends string>(prefix: Prefix, name: Name) =>
+  `${prefix}${name}` as `${Prefix}${Name}`
 
 const compileCommand = <
   const Spec extends CommandSpecBoundary,
   const Implementation = never,
 >(
   definition: Spec,
-  implementation: CheckedCommandImplementation<Spec, Implementation>,
+  implementation: Implementation & NoInfer<
+    Handler<
+      Spec extends { readonly payload: infer Payload extends Schema.Constraint } ? Payload : void,
+      Spec["success"],
+      Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
+      Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
+      HandlerRequirements<Implementation>
+    >
+      & ([Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never> extends infer Failure
+        ? Failure extends Tagged
+          ? Failure extends
+            | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+              ? Errors["Type"]
+              : never)
+            | Spec["unavailable"]["Type"]
+            | SqlError.SqlError
+            | Schema.SchemaError
+            | RepositoryError
+            | ResourceNotFound
+            | UniqueViolation
+            | VersionConflict
+            | Cause.NoSuchElementError
+            | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+            ? never
+            : Failure
+          : never
+        : never] extends [never]
+        ? unknown
+        : Readonly<{ undeclaredFailure:
+          Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never> extends infer Failure
+            ? Failure extends Tagged
+              ? Failure extends
+                | (Spec extends { readonly errors: infer Errors extends Schema.Constraint }
+                  ? Errors["Type"]
+                  : never)
+                | Spec["unavailable"]["Type"]
+                | SqlError.SqlError
+                | Schema.SchemaError
+                | RepositoryError
+                | ResourceNotFound
+                | UniqueViolation
+                | VersionConflict
+                | Cause.NoSuchElementError
+                | Schema.Schema.Type<typeof AuthorizationRpc.errorSchema>
+                ? never
+                : Failure
+              : never
+            : never
+        }>)
+  >,
 ) => {
   type Payload = Spec extends { readonly payload: infer Value extends Schema.Constraint } ? Value : undefined
   type Success = Spec["success"]
@@ -279,12 +258,12 @@ const compileCommand = <
   const successJsonSchema = Schema.toCodecJson(definition.success)
   const declaredErrors = Option.fromNullishOr(definition.errors)
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const errorSchema = Option.match(declaredErrors, {
+  const uncheckedErrorSchema = Option.match(declaredErrors, {
     onNone: () => definition.unavailable,
     onSome: (errors) => Schema.Union([errors, definition.unavailable]),
-  }) as ErrorSchema
+  })
 
+  const errorSchema = narrowContract<ErrorSchema, typeof uncheckedErrorSchema>(uncheckedErrorSchema)
   const errorJsonSchema = Schema.toCodecJson(errorSchema)
   const contract = Rpc.make(definition.name, { payload: payloadJsonSchema, success: successJsonSchema, error: errorJsonSchema })
   const policy = Option.fromNullishOr(definition.policy)
@@ -297,25 +276,36 @@ const compileCommand = <
   const transaction = Option.fromNullishOr(definition.transaction)
   const transactional = Option.getOrElse(transaction, Function.constant(false))
 
-  const invoke = (input: PayloadType<Payload>) => Option.match(policy, {
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    onNone: () => (implementation as UnprotectedHandler<
-      Payload,
-      Success,
-      HandlerFailure<Implementation>,
+  const invokeUnprotected = narrowContract<
+    (input: PayloadType<Payload>) => Effect.Effect<
+      Success["Type"],
+      Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
       HandlerRequirements<Implementation>
-    >)(input),
+    >,
+    typeof implementation
+  >(implementation)
+
+  const invokeProtected = narrowContract<
+    (
+      input: PayloadType<Payload>,
+      subject: SubjectType<Policy>
+    ) => Effect.Effect<
+      Success["Type"],
+      Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
+      HandlerRequirements<Implementation>
+    >,
+    typeof implementation
+  >(implementation)
+
+  const invoke = (input: PayloadType<Payload>) => Option.match(policy, {
+    onNone: () => invokeUnprotected(input),
     onSome: () => pipe(
       AuthorizationSubject,
-      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-      Effect.flatMap((subject) => (implementation as ProtectedHandler<
-        Payload,
-        Success,
-        Policy,
-        HandlerFailure<Implementation>,
-        HandlerRequirements<Implementation>
-      // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-      >)(input, subject as SubjectType<Policy>)),
+      Effect.flatMap((subject) => {
+        const decodedSubject = narrowContract<SubjectType<Policy>, typeof subject>(subject)
+
+        return invokeProtected(input, decodedSubject)
+      }),
     ),
   })
 
@@ -347,15 +337,19 @@ const compileCommand = <
 
   return {
     spec: definition,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    rpc: rpc as Procedure<Spec["name"], Payload, Success, ErrorSchema, Policy>,
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    handler: handler as (input: PayloadType<Payload>) => Effect.Effect<
-      Success["Type"],
-      Failure,
-      Exclude<HandlerRequirements<Implementation>, AuthorizationSubject>
-        | (Transaction extends true ? RepositoryStore : never)
-    >,
+    rpc: narrowContract<
+      Procedure<Spec["name"], Payload, Success, ErrorSchema, Policy>,
+      typeof rpc
+    >(rpc),
+    handler: narrowContract<
+      (input: PayloadType<Payload>) => Effect.Effect<
+        Success["Type"],
+        Failure,
+        Exclude<HandlerRequirements<Implementation>, AuthorizationSubject>
+          | (Transaction extends true ? RepositoryStore : never)
+      >,
+      typeof handler
+    >(handler),
   } satisfies CommandLive
 }
 
@@ -393,17 +387,19 @@ const defineFamily = <
     Policy,
     Transaction
   > => {
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const name = `${prefix}${definition.name}` as `${Prefix}${Name}`
+    const name = prefixedCommandName(prefix, definition.name)
 
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    return Object.freeze({
+    const compiled = Object.freeze({
       ...definition,
       name,
       unavailable,
       policy,
       transaction,
-    }) as CommandSpec<`${Prefix}${Name}`, Payload, Success, Errors, Unavailable, Policy, Transaction>
+    })
+
+    type FamilyCommand = CommandSpec<`${Prefix}${Name}`, Payload, Success, Errors, Unavailable, Policy, Transaction>
+
+    return narrowContract<FamilyCommand, typeof compiled>(compiled)
   }
 
   return { define }
@@ -429,7 +425,6 @@ const family = <
   return { ...base, authorized, transactional }
 }
 
-
 type CommandContract<Commands extends ReadonlyArray<CommandLive>> =
   Commands[number]["rpc"]
 
@@ -438,8 +433,6 @@ type CommandRequirements<Commands extends ReadonlyArray<CommandLive>> =
     Effect.Services<ReturnType<Commands[number]["handler"]>>,
     AuthorizationSubject
   >
-
-
 
 export interface AnyCommandBundle extends RpcBundle {
   readonly commands: ReadonlyArray<CommandLive>
@@ -462,17 +455,21 @@ const bundle = <const Commands extends ReadonlyArray<CommandLive>>(
 ): CommandBundle<Commands> => {
   type Contract = CommandContract<Commands>
   type Requirements = CommandRequirements<Commands>
+  type ContractHandler = RpcGroup.HandlerFrom<Contract, Contract["_tag"]>
+  type ContractHandlerLayer = Layer.Layer<Rpc.ToHandler<Contract>, never, Requirements>
 
   const rpcs: ReadonlyArray<Contract> = Array.map(commands, Struct.get("rpc"))
   const group = RpcGroup.make(...rpcs)
 
-  const install = (command: CommandLive<Contract>) =>
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    group.toLayerHandler(command.rpc._tag, command.handler as RpcGroup.HandlerFrom<Contract, Contract["_tag"]>)
+  const install = (command: CommandLive<Contract>) => {
+    const handler = narrowContract<ContractHandler, typeof command.handler>(command.handler)
+
+    return group.toLayerHandler(command.rpc._tag, handler)
+  }
 
   const layers = Array.map(commands, install)
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-  const handlers = Layer.mergeAll(Layer.empty, ...layers) as Layer.Layer<Rpc.ToHandler<Contract>, never, Requirements>
+  const merged = Layer.mergeAll(Layer.empty, ...layers)
+  const handlers = narrowContract<ContractHandlerLayer, typeof merged>(merged)
   const frozenCommands = Object.freeze(commands)
   const rpcBundle = RpcBundle.make(group)(handlers)
 

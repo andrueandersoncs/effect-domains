@@ -1,7 +1,7 @@
 import { Array, Effect, Option, Schema, String } from "effect"
 import { Headers } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
-import { Unauthenticated } from "./authorization.ts"
+import { Unauthenticated } from "./authorization-model.ts"
 import { CredentialsSchema, CurrentSessionSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema } from "./identity.ts"
 import { RpcBundle } from "./rpc-contract.ts"
 

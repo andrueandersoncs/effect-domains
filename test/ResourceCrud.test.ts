@@ -1,12 +1,13 @@
-import { Authorization, AuthorizationSubject } from "effect-domains/authorization"
+import { Authorization } from "effect-domains/authorization"
+import { AuthorizationSubject } from "effect-domains/authorization-model"
 import { expect, it } from "@effect/vitest"
-import { Array, Data, DateTime, Effect, Option, Ref, Result, Schema, Struct, pipe } from "effect"
+import { Array, Data, DateTime, Effect, Option, Random, Result, Schema, Struct, pipe } from "effect"
+import { TestClock } from "effect/testing"
 import { identifier } from "effect-domains/domain"
 import { Resource } from "effect-domains/resource"
 import { Transitions } from "effect-domains/transitions"
 import { Application, Part } from "effect-domains/application"
 import { ApplicationInspect } from "effect-domains/application-inspect"
-import { Value } from "effect-domains/value"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { SqlClient } from "effect/unstable/sql"
 import { prepareTables } from "./prepare-tables.ts"
@@ -573,36 +574,26 @@ it.effect("creation plans evaluate runtime generators per call and default only 
   Effect.gen(function* () {
     yield* prepareTables([generatedRecordsTable])
 
-    const counter = yield* Ref.make(0)
-    const at = yield* pipe(DateTime.make("2026-09-10T00:00:00.000Z"), Effect.fromOption)
+    const timestamp = Date.parse("2026-09-10T00:00:00.000Z")
+    const at = yield* pipe(DateTime.make(timestamp), Effect.fromOption)
 
-    const values = Value.of({
-      uuidV7: Effect.fn("Test.uuidV7")(function* () {
-        const value = yield* Ref.updateAndGet(counter, (value) => value + 1)
+    yield* TestClock.setTime(timestamp)
 
-        return `generated-${value}`
-      }),
-      now: Effect.fn("Test.now")(function* () { return at }),
-    })
+    const first = yield* GeneratedRecordsRepository.create({})
+    const second = yield* GeneratedRecordsRepository.create({ summary: "authored" })
 
-    const create = (input: Parameters<typeof GeneratedRecordsRepository.create>[0]) =>
-      pipe(GeneratedRecordsRepository.create(input), Effect.provideService(Value, values))
+    expect(first.at).toEqual(at)
+    expect(first.summary).toBe(null)
+    expect(first.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(second.at).toEqual(at)
+    expect(second.summary).toBe("authored")
+    expect(second.id).not.toBe(first.id)
 
-    const first = yield* create({})
-    const second = yield* create({ summary: "authored" })
+    const override = yield* pipe(GeneratedRecordsRepository.create(first), Effect.result)
 
-    expect(first).toEqual({ id: "generated-1", at, summary: null })
-    expect(second).toEqual({ id: "generated-2", at, summary: "authored" })
-
-    const override = yield* pipe(create(first), Effect.result)
-    const rejected = Result.isFailure(override)
-
-    expect(rejected).toBe(true)
-
-    const calls = yield* Ref.get(counter)
-
-    expect(calls).toBe(2)
+    expect(Result.isFailure(override)).toBe(true)
   }),
+  Random.withSeed("generated-records"),
   Effect.provide(sqlite),
 ))
 

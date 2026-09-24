@@ -1,22 +1,23 @@
-import { Array, Effect, Equivalence, Function, HashMap, HashSet, Option, Record, Schema, String, Struct, pipe } from "effect"
+import { Array, Effect, Equivalence, flow, Function, HashMap, HashSet, Option, Record, Schema, String, Struct, pipe } from "effect"
 import type { StructSchema, StructValue } from "./domain.ts"
 
+import type { TableCheck } from "./table-check-model.ts"
+import { TableField } from "./physical-table-field.ts"
+
 import {
-  failTableDefinition,
-  isOneOfCheck,
-  numericScalar,
-  type TableCheck,
-  TableField,
   TableForeignKey,
   TableForeignKeyReference,
   TableIndex,
   TableRelations,
-  type TableRelationsInput,
-  type TableReference,
-  TableSnapshot,
   TableUnique,
-  validateLocalRelations,
-} from "./table-model.ts"
+} from "./physical-table-relations.ts"
+
+import { isNumericTableScalar } from "./physical-table-scalar.ts"
+import type { TableReference, TableRelationsInput } from "./table-relation-input.ts"
+
+import { TableSnapshot } from "./table-snapshot-model.ts"
+
+import { TableDefinitionError } from "./physical-table-definition-error.ts"
 
 import {
   compileTable,
@@ -25,6 +26,10 @@ import {
   type RowSchema,
   type TableColumn,
 } from "./table-compiler.ts"
+
+
+// SAFETY: The target intersects the source rather than discarding it because callers retain all source evidence and state each narrowing invariant.
+const narrowContract = <Target, Source>(value: Source) => value as Source & Target
 
 type TableColumns<Fields extends Schema.Struct.Fields> = Readonly<{
   [K in Extract<keyof Fields, string>]: TableColumn
@@ -46,7 +51,6 @@ export interface Table<
 > extends Readonly<Partial<{ relations: TableRelations }>> {
   readonly _tag: "Table"
   readonly name: Name
-  readonly schema: StructSchema
   readonly rowSchema: Row
   readonly insertSchema: Insert
   readonly storageSchema: Storage
@@ -67,6 +71,93 @@ const constraintName = (table: string, fields: ReadonlyArray<string>, suffix: st
 
   return `${table}_${joined}_${suffix}`
 }
+
+type RelationConstraint = TableUnique | TableForeignKey | TableIndex
+
+
+const validateConstraintFields = Effect.fn("Table.validateConstraintFields")(function* (
+  table: string,
+  name: string,
+  fields: ReadonlyArray<string>,
+  available: HashSet.HashSet<string>,
+) {
+  const trimmedName = name.trim()
+  const emptyName = Equivalence.strictEqual<number>()(trimmedName.length, 0)
+  const emptyFields = Array.isReadonlyArrayEmpty(fields)
+
+  if (emptyName) return yield* TableDefinitionError.make({ table: table, reason: "relation constraint name must not be empty" })
+  if (emptyFields) return yield* TableDefinitionError.make({ table: table, reason: `relation constraint ${name} must declare fields` })
+
+  return yield* Effect.reduce(
+    fields,
+    HashSet.empty<string>,
+    Effect.fn("Table.validateConstraintField")(function* (seen, field) {
+      const known = HashSet.has(available, field)
+      const duplicate = HashSet.has(seen, field)
+
+      if (!known) return yield* TableDefinitionError.make({ table: table, reason: `relation constraint ${name} declares unknown field ${field}` })
+      if (duplicate) return yield* TableDefinitionError.make({ table: table, reason: `relation constraint ${name} declares duplicate field ${field}` })
+
+      return HashSet.add(seen, field)
+    }),
+  )
+})
+
+const validateConstraint = (table: string, available: HashSet.HashSet<string>) =>
+  Effect.fn("Table.validateConstraint")(function* (names: HashSet.HashSet<string>, constraint: RelationConstraint) {
+    const duplicate = HashSet.has(names, constraint.name)
+
+    if (duplicate) return yield* TableDefinitionError.make({ table: table, reason: `duplicate relation constraint name ${constraint.name}` })
+
+    yield* validateConstraintFields(table, constraint.name, constraint.fields, available)
+
+    return HashSet.add(names, constraint.name)
+  })
+
+const validateForeignKeyReference = (table: string) =>
+  Effect.fn("Table.validateForeignKeyReference")(function* (foreignKey: TableForeignKey) {
+    const referencedTable = foreignKey.references.table.trim()
+    const emptyTable = Equivalence.strictEqual<number>()(referencedTable.length, 0)
+
+    if (emptyTable) {
+      return yield* TableDefinitionError.make({ table: table, reason: `foreign key constraint ${foreignKey.name} references an empty table` })
+    }
+
+    const referenceNames = HashSet.fromIterable(foreignKey.references.fields)
+
+    yield* validateConstraintFields(table, foreignKey.name, foreignKey.references.fields, referenceNames)
+  })
+
+
+const validateReservedIndex = (table: string) =>
+  Effect.fn("Table.validateReservedIndex")(function* (index: TableIndex) {
+    const reservedPrefix = index.name.toLowerCase().startsWith("sqlite_")
+
+    if (reservedPrefix) {
+      return yield* TableDefinitionError.make({ table: table, reason: `index constraint ${index.name} uses the reserved sqlite_ prefix` })
+    }
+  })
+
+const validateLocalRelations = Effect.fn("Table.validateLocalRelations")(function* (
+  table: string,
+  fields: ReadonlyArray<TableField>,
+  relations: Option.Option<TableRelations>,
+) {
+  if (Option.isNone(relations)) return
+
+  const fieldNames = Array.map(fields, Struct.get("name"))
+  const available = HashSet.fromIterable(fieldNames)
+  const unique = relations.value.unique ?? []
+  const foreignKeys = relations.value.foreignKeys ?? []
+  const indexes = relations.value.indexes ?? []
+  const localConstraints = Array.appendAll(unique, foreignKeys)
+  const constraints: ReadonlyArray<RelationConstraint> = Array.appendAll(localConstraints, indexes)
+
+  yield* Effect.reduce(constraints, HashSet.empty<string>, validateConstraint(table, available))
+  yield* Effect.forEach(relations.value.foreignKeys ?? [], validateForeignKeyReference(table))
+  yield* Effect.forEach(relations.value.indexes ?? [], validateReservedIndex(table))
+})
+
 
 const cloneRelations = <Fields extends string>(table: string, relations: TableRelationsInput<Fields>) => {
   const unique = pipe(
@@ -114,21 +205,23 @@ const cloneRelations = <Fields extends string>(table: string, relations: TableRe
   return TableRelations.make(Record.getSomes({ unique, foreignKeys, indexes }))
 }
 
-const foreignKeyTarget = (foreignKey: { readonly references: TableReference }) => foreignKey.references.table
 
 const tablesEqual = Equivalence.strictEqual<Table>()
 
 const make = <const Name extends string, const S extends StructSchema>(
   options: Readonly<{ name: Name; schema: S }> & Readonly<Partial<{ relations: TableRelationsInput<TableFieldName<S>> }>>,
 ): Table<Name, RowSchema<S>, InsertSchema<S>, StoredRowSchema<RowSchema<S>>, [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>, IdentifierSchema<S>, IdentifierStorageSchema<IdentifierSchema<S>>, TableColumns<RowSchema<S>["fields"]>> => {
-  const result = Effect.runSync(compileTable(options.name, options.schema))
+  const compilation = compileTable(options.name, options.schema)
+  const result = Effect.runSync(compilation)
   const relations = Option.fromNullishOr(options.relations)
+  const noRelationTargets: ReadonlyArray<Table> = Array.empty()
+  const withoutRelationTargets = Function.constant(noRelationTargets)
 
   const relationTargets: ReadonlyArray<Table> = Option.match(relations, {
-    onNone: Array.empty,
+    onNone: withoutRelationTargets,
     onSome: (value) => pipe(
       value.foreignKeys ?? [],
-      Array.map(foreignKeyTarget),
+      Array.map((foreignKey) => foreignKey.references.table),
       Array.dedupeWith(tablesEqual),
     ),
   })
@@ -148,28 +241,46 @@ const make = <const Name extends string, const S extends StructSchema>(
 
   type Result = Table<Name, RowSchema<S>, InsertSchema<S>, StoredRowSchema<RowSchema<S>>, [IdentifierName<S>] extends [never] ? "id" : IdentifierName<S>, IdentifierSchema<S>, IdentifierStorageSchema<IdentifierSchema<S>>, TableColumns<RowSchema<S>["fields"]>>
 
-  // SAFETY: compileTable selects the conditional RowSchema branch from the same schema S; TypeScript cannot reduce that branch for a generic S.
-  const base: Result = Object.assign({}, result, { relationTargets }) as unknown as Result
+  const resultWithTargets = Struct.assign(result, { relationTargets })
+  const base = narrowContract<Result, typeof resultWithTargets>(resultWithTargets)
 
   return Option.match(copiedRelations, {
-    onNone: () => base,
-    onSome: (relations) => Object.assign({}, base, { relations }),
+    onNone: Function.constant(base),
+    onSome: (relations) => Struct.assign(base, { relations }),
   })
 }
 
-// Decode the physical model because native Schema traversal copies nested arrays and classes.
-const snapshot = (table: Table) => pipe(
-  table,
-  Struct.pick(["name", "identifier", "fields", "relations"]),
+// Branch before construction because Schema.Class rejects an explicitly undefined optional field.
+const snapshotInput = (table: Table) => {
+  const relations = Option.fromNullishOr(table.relations)
+
+  return Option.match(relations, {
+    onNone: () => TableSnapshot.make({
+      name: table.name,
+      identifier: table.identifier,
+      fields: table.fields,
+    }),
+    onSome: (value) => TableSnapshot.make({
+      name: table.name,
+      identifier: table.identifier,
+      fields: table.fields,
+      relations: value,
+    }),
+  })
+}
+
+const snapshot = flow(
+  snapshotInput,
   Schema.decodeUnknownEffect(TableSnapshot),
   Effect.runSync,
 )
 
 const fieldsEqual = Equivalence.Array(Equivalence.strictEqual<string>())
 
+
 const compatibleForeignKeyScalars = (source: TableField["scalar"], target: TableField["scalar"]) => {
   const same = Equivalence.strictEqual<TableField["scalar"]>()(source, target)
-  const numeric = numericScalar(source) && numericScalar(target)
+  const numeric = isNumericTableScalar(source) && isNumericTableScalar(target)
 
   return same || numeric
 }
@@ -191,7 +302,7 @@ const validateTable = Effect.fn("Table.validateTable")(function* (
   const normalized = table.name.toLowerCase()
   const duplicate = HashSet.has(names, normalized)
 
-  if (duplicate) return yield* failTableDefinition(table.name, `duplicate table ${table.name}`)
+  if (duplicate) return yield* TableDefinitionError.make({ table: table.name, reason: `duplicate table ${table.name}` })
 
   const relations = Option.fromNullishOr(table.relations)
 
@@ -210,8 +321,8 @@ const validateIndex = (tableNames: HashSet.HashSet<string>) =>
     const tableCollision = HashSet.has(tableNames, normalized)
     const duplicate = HashSet.has(indexNames, normalized)
 
-    if (tableCollision) return yield* failTableDefinition(table, `index constraint ${index.name} collides with a table name`)
-    if (duplicate) return yield* failTableDefinition(table, `duplicate index constraint name ${index.name}`)
+    if (tableCollision) return yield* TableDefinitionError.make({ table: table, reason: `index constraint ${index.name} collides with a table name` })
+    if (duplicate) return yield* TableDefinitionError.make({ table: table, reason: `duplicate index constraint name ${index.name}` })
 
     return HashSet.add(indexNames, normalized)
   })
@@ -233,20 +344,14 @@ const validateForeignKeyPair = (
   const fields = Option.all([source, targetField])
 
   if (Option.isNone(fields)) {
-    return yield* failTableDefinition(
-      table.name,
-      `foreign key constraint ${foreignKey.name} references unknown field ${sourceName} or ${targetName}`,
-    )
+    return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} references unknown field ${sourceName} or ${targetName}` })
   }
 
   const [sourceField, referencedField] = fields.value
   const compatible = compatibleForeignKeyScalars(sourceField.scalar, referencedField.scalar)
 
   if (!compatible) {
-    return yield* failTableDefinition(
-      table.name,
-      `foreign key constraint ${foreignKey.name} has incompatible field types ${sourceName} and ${target.name}.${targetName}`,
-    )
+    return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} has incompatible field types ${sourceName} and ${target.name}.${targetName}` })
   }
 }
 
@@ -257,10 +362,7 @@ const validateForeignKey = (
   const targetOption = HashMap.get(tables, foreignKey.references.table)
 
   if (Option.isNone(targetOption)) {
-    return yield* failTableDefinition(
-      table.name,
-      `foreign key constraint ${foreignKey.name} references unknown table ${foreignKey.references.table}`,
-    )
+    return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} references unknown table ${foreignKey.references.table}` })
   }
 
   const arityMatches = Equivalence.strictEqual<number>()(
@@ -269,41 +371,36 @@ const validateForeignKey = (
   )
 
   if (!arityMatches) {
-    return yield* failTableDefinition(
-      table.name,
-      `foreign key constraint ${foreignKey.name} has incompatible source and target arity`,
-    )
+    return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} has incompatible source and target arity` })
   }
 
-  const target = targetOption.value
-  const targetIsIdentifier = fieldsEqual(foreignKey.references.fields, [target.identifier])
-  const unique = target.relations?.unique ?? []
+  const referencedTable = Option.getOrThrow(targetOption)
+  const targetIsIdentifier = fieldsEqual(foreignKey.references.fields, [referencedTable.identifier])
+  const unique = referencedTable.relations?.unique ?? []
   const targetIsUnique = Array.some(unique, uniqueFieldsEqual(foreignKey.references.fields))
   const validTarget = targetIsIdentifier || targetIsUnique
 
   if (!validTarget) {
-    return yield* failTableDefinition(
-      table.name,
-      `foreign key constraint ${foreignKey.name} must reference the primary key or a declared unique tuple of ${target.name}`,
-    )
+    return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} must reference the primary key or a declared unique tuple of ${referencedTable.name}` })
   }
 
   const sourceEntries = Array.map(table.fields, fieldEntry)
-  const targetEntries = Array.map(target.fields, fieldEntry)
+  const targetEntries = Array.map(referencedTable.fields, fieldEntry)
   const sourceFields = HashMap.fromIterable(sourceEntries)
   const targetFields = HashMap.fromIterable(targetEntries)
   const pairs = Array.zip(foreignKey.fields, foreignKey.references.fields)
 
-  yield* Effect.forEach(
-    pairs,
-    ([sourceName, targetName]) => Effect.gen(() => validateForeignKeyPair(
+  const validatePair = Effect.fn("Table.validateForeignKeyPair")(function* (pair: readonly [string, string]) {
+    yield* validateForeignKeyPair(
       table,
       foreignKey,
       sourceFields,
-      target,
+      referencedTable,
       targetFields,
-    )([sourceName, targetName])),
-  )
+    )(pair)
+  })
+
+  yield* Effect.forEach(pairs, validatePair)
 })
 
 const validateForeignKeys = (tables: HashMap.HashMap<string, TableSnapshot>) => (table: TableSnapshot) =>
@@ -314,11 +411,12 @@ const validateRelations = Effect.fn("Table.validateRelations")(function* (
 ) {
   const tableEntries = Array.map(tables, tableEntry)
   const byName = HashMap.fromIterable(tableEntries)
-  const tableNames = yield* Effect.reduce(tables, () => emptyNames, validateTable)
+  const emptyTableNames = Function.constant(emptyNames)
+  const tableNames = yield* Effect.reduce(tables, emptyTableNames, validateTable)
   const indexes = Array.flatMap(tables, tableIndexPairs)
 
-  yield* Effect.reduce(indexes, () => emptyNames, validateIndex(tableNames))
+  yield* Effect.reduce(indexes, emptyTableNames, validateIndex(tableNames))
   yield* Effect.forEach(tables, validateForeignKeys(byName))
 })
 
-export { isOneOfCheck, make, snapshot, validateRelations }
+export { make, snapshot, validateRelations }

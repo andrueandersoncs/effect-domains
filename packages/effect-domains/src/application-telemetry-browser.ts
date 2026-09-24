@@ -64,7 +64,11 @@ const validateRequestHeaders = (
   const isCompressed = (value: string) => !identityEncoding(value, "identity")
   const compressed = Option.exists(contentEncoding, isCompressed)
 
-  if (compressed) return Result.fail(reject(415))
+  if (compressed) {
+    const response = reject(415)
+
+    return Result.fail(response)
+  }
 
   const normalizeContentType = (value: string) => {
     const parts = value.split(";", 1)
@@ -83,14 +87,19 @@ const validateRequestHeaders = (
   const json = Equivalence.strictEqual<string>()(contentType, "application/json")
   const supported = protobuf || json
 
-  if (!supported) return Result.fail(reject(415))
+  if (!supported) {
+    const response = reject(415)
+
+    return Result.fail(response)
+  }
 
   const contentLength = Number(headers["content-length"] ?? 0)
   const declaredOversized = Number.isFinite(contentLength) && contentLength > maxRequestBytes
+  const response = reject(413)
+  const failure = Result.fail(response)
+  const success = Result.succeed(contentType)
 
-  if (declaredOversized) return Result.fail(reject(413))
-
-  return Result.succeed(contentType)
+  return declaredOversized ? failure : success
 }
 
 const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBrowserTelemetryRequest")(function* (
@@ -114,14 +123,13 @@ const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBr
 
   if (Result.isFailure(validation)) return validation.failure
 
-  const contentType = validation.success
   const body = yield* Effect.result(request.arrayBuffer)
 
   if (Result.isFailure(body)) return gatewayContext.reject(400)
   if (body.success.byteLength > gatewayContext.maxRequestBytes) return gatewayContext.reject(413)
 
   const requestBytes = new Uint8Array(body.success)
-  const requestWithBody = HttpClientRequest.bodyUint8Array(requestBytes, contentType)
+  const requestWithBody = HttpClientRequest.bodyUint8Array(requestBytes, validation.success)
 
   const outbound = pipe(
     HttpClientRequest.post(transport.endpoint),
@@ -139,11 +147,12 @@ const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBr
   if (Result.isFailure(responseBody)) return gatewayContext.reject(502)
 
   const responseBytes = new Uint8Array(responseBody.success)
+  const responseHeaders = Headers.set(Headers.empty, "cache-control", "no-store")
 
   return HttpServerResponse.uint8Array(responseBytes, {
     status: forwarded.success.status,
-    contentType: forwarded.success.headers["content-type"] ?? contentType,
-    headers: Headers.set(Headers.empty, "cache-control", "no-store"),
+    contentType: forwarded.success.headers["content-type"] ?? validation.success,
+    headers: responseHeaders,
   })
 })
 
@@ -154,7 +163,7 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
     ingestPath: string
     maxRequestBytes: number
     requestsPerMinute: number
-    allowedOrigins: ReadonlyArray<string> | undefined
+    allowedOrigins: Option.Option<ReadonlyArray<string>>
     tracesTransport: Option.Option<OtlpTransport>
     metricsTransport: Option.Option<OtlpTransport>
     logsTransport: Option.Option<OtlpTransport>
@@ -180,8 +189,11 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
           onNone: Function.constant(false),
           onSome: (url) => {
             const sameOrigin = Equivalence.strictEqual<string>()(origin, url.origin)
-            const allowedOrigins = Option.fromUndefinedOr(options.allowedOrigins)
-            const explicitlyAllowed = Option.exists(allowedOrigins, (allowed) => Array.contains(allowed, origin))
+
+            const explicitlyAllowed = Option.exists(
+              options.allowedOrigins,
+              (allowed) => Array.contains(allowed, origin),
+            )
 
             return sameOrigin || explicitlyAllowed
           },
@@ -247,11 +259,9 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
 
   const { value: telemetry } = telemetryOption
 
-  const configuredBrowser = pipe(
-    Option.fromUndefinedOr(telemetry.browser),
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    Option.filter(Predicate.isObject as Predicate.Refinement<unknown, BrowserOptions>),
-  )
+  const configuredBrowser = Predicate.isObject(telemetry.browser)
+    ? Option.some(telemetry.browser)
+    : Option.none<BrowserOptions>()
 
   const emptyBrowser: BrowserOptions = Record.empty()
   const browser = pipe(configuredBrowser, Option.getOrElse(Function.constant(emptyBrowser)))
@@ -286,6 +296,8 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
   const client = yield* HttpClient.HttpClient
   const maxRequestBytes = browser.maxRequestBytes ?? 256 * 1024
   const requestsPerMinute = browser.requestsPerMinute ?? 120
+  const allowedOrigins = Option.fromUndefinedOr(options.allowedOrigins)
+
 
   yield* registerBrowserGatewayRoutes({
     router,
@@ -293,7 +305,7 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
     ingestPath,
     maxRequestBytes,
     requestsPerMinute,
-    allowedOrigins: options.allowedOrigins,
+    allowedOrigins,
     tracesTransport,
     metricsTransport,
     logsTransport,

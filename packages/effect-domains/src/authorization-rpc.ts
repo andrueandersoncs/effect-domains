@@ -1,7 +1,8 @@
 import { Context, Effect, Layer, Option, Schema, pipe } from "effect"
 import type { Headers } from "effect/unstable/http"
 import { RpcMiddleware } from "effect/unstable/rpc"
-import { Authorization, AuthorizationSubject, Forbidden, Unauthenticated, type SubjectPolicy } from "./authorization.ts"
+import { Authorization } from "./authorization.ts"
+import { AuthorizationSubject, Forbidden, Unauthenticated, type SubjectPolicy } from "./authorization-model.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { IdentityUnavailable } from "./identity.ts"
 

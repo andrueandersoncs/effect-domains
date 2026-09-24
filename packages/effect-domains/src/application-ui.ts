@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Struct, pipe } from "effect"
+import { Effect, Layer, Option, Schema, Struct, pipe } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
@@ -12,7 +12,8 @@ import {
 
 import { applicationUiPaths } from "./application-ui-paths.ts"
 import { ApplicationInspect } from "./application-inspect.ts"
-import { ApplicationTelemetry, type TelemetryOptions } from "./application-telemetry.ts"
+import { ApplicationTelemetry } from "./application-telemetry.ts"
+import type { TelemetryOptions } from "./application-telemetry-config.ts"
 
 export type ApplicationUiOptions = Readonly<Partial<{
   path: string
@@ -20,11 +21,18 @@ export type ApplicationUiOptions = Readonly<Partial<{
   allowedOrigins: ReadonlyArray<string>
 }>>
 
-type ApplicationUiLayerOptions<App extends ApplicationIR = ApplicationIR> = Readonly<{
-  application: App
-  javascript: string
-  stylesheet: string
-}> & Readonly<Partial<{ telemetry: TelemetryOptions }>> & ApplicationUiOptions
+export class ApplicationUiAssets extends Schema.Class<ApplicationUiAssets>("ApplicationUiAssets")({
+  javascript: Schema.String,
+  stylesheet: Schema.String,
+}) {}
+
+
+
+type ApplicationUiLayerOptions<App extends ApplicationIR = ApplicationIR> =
+  & Readonly<{ application: App }>
+  & ApplicationUiAssets
+  & Readonly<Partial<{ telemetry: TelemetryOptions }>>
+  & ApplicationUiOptions
 
 const maximumAssetCodeUnits = 2_000_000
 
@@ -44,15 +52,20 @@ const validateAssets = Effect.fn("ApplicationUi.validateAssets")(function* (
   }
 })
 
-const uiPath = Effect.fn("ApplicationUi.path")(function* (path: string) {
-  if (!/^\/$|^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(path)) {
-    return yield* ApplicationUiDefinitionError.make({
-      reason: "Application UI path must be root or contain nonempty URL path segments without a trailing slash",
-    })
-  }
+const UiPathSchema = Schema.TemplateLiteral(["/", Schema.String]).check(
+  Schema.isPattern(/^\/$|^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/),
+)
 
-  // SAFETY: The validation proves the path type because only slash-prefixed forms are accepted.
-  return path as `/${string}`
+const decodeUiPath = Schema.decodeUnknownOption(UiPathSchema)
+
+const uiPath = Effect.fn("ApplicationUi.path")(function* (path: string) {
+  const decoded = decodeUiPath(path)
+
+  if (Option.isSome(decoded)) return decoded.value
+
+  return yield* ApplicationUiDefinitionError.make({
+    reason: "Application UI path must be root or contain nonempty URL path segments without a trailing slash",
+  })
 })
 
 const escapeAttribute = (value: string) => {
@@ -103,10 +116,15 @@ const uiResponses = Effect.fn("ApplicationUi.responses")(function* (
   path: `/${string}`,
   telemetry: string,
 ) {
+
+  const toDefinitionError = (error: Effect.Error<ReturnType<typeof ApplicationInspect.describe>>) =>
+    ApplicationUiDefinitionError.make({ reason: error.message })
+
   const inspection = yield* pipe(
     ApplicationInspect.describe(options.application),
-    Effect.mapError((error) => ApplicationUiDefinitionError.make({ reason: error.message })),
+    Effect.mapError(toDefinitionError),
   )
+
   const presentation = options.presentation ?? {}
   const metadata = Struct.assign(inspection, { presentation })
   const paths = applicationUiPaths(path)
@@ -178,14 +196,6 @@ const layerHttp = <App extends ApplicationIR>(
 ) => pipe(
   register(options),
   Layer.effectDiscard,
-) as Layer.Layer<
-  never,
-  ApplicationUiDefinitionError,
-  | HttpRouter.HttpRouter
-  | Rpc.ToHandler<RpcGroup.Rpcs<App["group"]>>
-  | Rpc.Middleware<RpcGroup.Rpcs<App["group"]>>
-  | Rpc.MiddlewareClient<RpcGroup.Rpcs<App["group"]>>
-  | Rpc.ServicesServer<RpcGroup.Rpcs<App["group"]>>
->
+)
 
 export const ApplicationUi = { layerHttp }

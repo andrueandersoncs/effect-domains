@@ -1,4 +1,4 @@
-import { Layer, pipe } from "effect"
+import { Effect, Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import * as ApplicationBun from "effect-domains/application-bun"
 import { PurchasedGuidesApplication } from "./application.ts"
@@ -23,4 +23,4 @@ const program = ApplicationBun.runApplication(PurchasedGuidesApplication, {
   },
 })
 
-pipe(program, ApplicationBun.runMain)
+pipe(program, ApplicationBun.runMain, Effect.runSync)
