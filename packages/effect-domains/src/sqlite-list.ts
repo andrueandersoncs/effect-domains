@@ -240,21 +240,25 @@ const make = <InputError, CodecError, CursorError>(
 
 type Column = (field: string) => Statement.Identifier | Statement.Fragment
 
-const equalityClause = (
+const renderEquality = (
   sql: SqlClient.SqlClient,
   column: Column,
-) => ([field, value]: readonly [string, unknown]) => unknownEquals(value, null)
+  field: string,
+  value: unknown,
+) => unknownEquals(value, null)
   ? sql`${column(field)} IS NULL`
   : sql`${column(field)} = ${value}`
 
+const equalityClause = (
+  sql: SqlClient.SqlClient,
+  column: Column,
+) => ([field, value]: readonly [string, unknown]) => renderEquality(sql, column, field, value)
 
 const keysetPrevious = (
   sql: SqlClient.SqlClient,
   column: Column,
   after: StoredFilter,
-) => ({ field }: RepositoryOrder) => unknownEquals(after[field], null)
-  ? sql`${column(field)} IS NULL`
-  : sql`${column(field)} = ${after[field]}`
+) => ({ field }: RepositoryOrder) => renderEquality(sql, column, field, after[field])
 
 const keysetComparison = (
   sql: SqlClient.SqlClient,

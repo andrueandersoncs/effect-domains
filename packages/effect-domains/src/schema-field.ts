@@ -134,12 +134,14 @@ const finiteNumber = (ast: SchemaAST.Number) => {
   })
 }
 
+const isFiniteLiteral = Schema.is(Schema.Finite)
+
 export const describeLiteral = (value: unknown) => pipe(
   Match.value(value),
   Match.when(Predicate.isNull, Function.constant(optionalNull)),
   Match.when(Predicate.isString, Function.constant(optionalString)),
   Match.when(Predicate.isBoolean, Function.constant(optionalBoolean)),
-  Match.when(Schema.is(Schema.Finite), Function.constant(optionalNumber)),
+  Match.when(isFiniteLiteral, Function.constant(optionalNumber)),
   Match.orElse(Option.none<FieldIR>),
 )
 
@@ -175,12 +177,13 @@ const combineDescriptions = (
     return Option.some(combined)
   }
 
+  const mergePair = Function.tupled(merge)
+
   const reduce = (
     state: Option.Option<FieldIR>,
     next: Option.Option<FieldIR>,
   ) => {
     const pair = Option.all([state, next] as const)
-    const mergePair = Function.tupled(merge)
 
     return Option.flatMap(pair, mergePair)
   }

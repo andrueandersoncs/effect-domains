@@ -185,18 +185,15 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
       onSome: (origin) => {
         const url = HttpServerRequest.toURL(request)
 
-        return Option.match(url, {
-          onNone: Function.constant(false),
-          onSome: (url) => {
-            const sameOrigin = Equivalence.strictEqual<string>()(origin, url.origin)
+        return Option.exists(url, (url) => {
+          const sameOrigin = Equivalence.strictEqual<string>()(origin, url.origin)
 
-            const explicitlyAllowed = Option.exists(
-              options.allowedOrigins,
-              (allowed) => Array.contains(allowed, origin),
-            )
+          const explicitlyAllowed = Option.exists(
+            options.allowedOrigins,
+            (allowed) => Array.contains(allowed, origin),
+          )
 
-            return sameOrigin || explicitlyAllowed
-          },
+          return sameOrigin || explicitlyAllowed
         })
       },
     })

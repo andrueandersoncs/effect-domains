@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, Function, Match, Option, Predicate, Schema, flow, pipe } from "effect"
+import { Array, Data, Effect, Equivalence, Function, Match, Predicate, Schema, flow, pipe } from "effect"
 import { SqlClient, Statement } from "effect/unstable/sql"
 
 import {
@@ -15,15 +15,15 @@ import {
 
 type Binder = (sql: SqlClient.SqlClient, environment: PolicyEnvironment) => Effect.Effect<Statement.Fragment, PolicyEvaluationError>
 
-const ScalarKindSchema = Schema.Literals(["boolean", "null", "number", "string"])
-const isScalarKind = Schema.is(ScalarKindSchema)
-
-type ScalarKind = typeof ScalarKindSchema.Type
-
 class Expression extends Data.Class<{
   readonly fragment: Statement.Fragment
   readonly kind: "boolean" | "null" | "number" | "string" | "row"
 }> {}
+
+type ScalarKind = Exclude<Expression["kind"], "row">
+
+const ScalarKindSchema = Schema.Literals(["boolean", "null", "number", "string"])
+const isScalarKind = Schema.is(ScalarKindSchema)
 
 const scalarKindEquals = Equivalence.strictEqual<Expression["kind"]>()
 
@@ -91,31 +91,19 @@ const rowScalarEquality = (sql: SqlClient.SqlClient, row: Statement.Fragment, sc
   nativeFragment(sql`${typeMatches(sql, row, kind)} AND ${row} IS ${scalar}`)
 
 const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expression) => {
-  const leftKind = Option.liftPredicate(left.kind, isScalarKind)
-  const rightKind = Option.liftPredicate(right.kind, isScalarKind)
+  const bothScalars = isScalarKind(left.kind) && isScalarKind(right.kind)
 
-  return pipe(
-    Match.value(leftKind),
-    Match.tagsExhaustive({
-      None: () => pipe(
-        Match.value(rightKind),
-        Match.tagsExhaustive({
-          None: () => rowEquality(sql, left, right),
-          Some: ({ value }) => rowScalarEquality(sql, left.fragment, right.fragment, value),
-        }),
-      ),
-      Some: ({ value: leftScalarKind }) => pipe(
-        Match.value(rightKind),
-        Match.tagsExhaustive({
-          None: () => rowScalarEquality(sql, right.fragment, left.fragment, leftScalarKind),
-          Some: ({ value: rightScalarKind }) =>
-            scalarKindEquals(leftScalarKind, rightScalarKind)
-              ? nativeFragment(sql`${left.fragment} IS ${right.fragment}`)
-              : falseExpression(sql),
-        }),
-      ),
-    }),
-  )
+  if (bothScalars) {
+    return scalarKindEquals(left.kind, right.kind)
+      ? nativeFragment(sql`${left.fragment} IS ${right.fragment}`)
+      : falseExpression(sql)
+  }
+
+  if (isScalarKind(left.kind)) return rowScalarEquality(sql, right.fragment, left.fragment, left.kind)
+
+  return isScalarKind(right.kind)
+    ? rowScalarEquality(sql, left.fragment, right.fragment, right.kind)
+    : rowEquality(sql, left, right)
 }
 
 const scalarExpressionFor = (sql: SqlClient.SqlClient) => (value: Scalar) => makeScalarExpression(sql, value)

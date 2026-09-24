@@ -61,27 +61,32 @@ const incrementCount = (
 
 const noNameCounts = HashMap.empty<string, number>()
 
+const firstDuplicateName = (names: ReadonlyArray<string>) => {
+  const counts = Array.reduce(names, noNameCounts, incrementCount)
+
+  const repeated = (name: string) => {
+    const count = HashMap.get(counts, name)
+
+    return Option.exists(count, (value) => value > 1)
+  }
+
+  return Array.findFirst(names, repeated)
+}
+
 const validate = Effect.fn("FeatureFlags.validate")(function* (
   flags: ReadonlyArray<FeatureFlag>,
 ) {
   const names = Array.map(flags, Struct.get("name"))
-  const nameCounts = Array.reduce(names, noNameCounts, incrementCount)
   const empty = Array.findFirst(names, isBlankFlagName)
 
-  const duplicateName = (name: string) => pipe(
-    HashMap.get(nameCounts, name),
-    Option.exists((count) => count > 1),
-  )
+  if (Option.isSome(empty)) {
+    return yield* FeatureFlagDefinitionError.make({ reason: "feature flag name must not be empty" })
+  }
 
-  const duplicate = Array.findFirst(names, duplicateName)
-  const problem = Option.orElse(empty, Function.constant(duplicate))
+  const duplicate = firstDuplicateName(names)
 
-  if (Option.isSome(problem)) {
-    const reason = isBlankFlagName(problem.value)
-      ? "feature flag name must not be empty"
-      : `duplicate feature flag name ${problem.value}`
-
-    return yield* FeatureFlagDefinitionError.make({ reason })
+  if (Option.isSome(duplicate)) {
+    return yield* FeatureFlagDefinitionError.make({ reason: `duplicate feature flag name ${duplicate.value}` })
   }
 })
 
@@ -125,26 +130,11 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
 ): Layer.Layer<FeatureFlags, FeatureFlagDefinitionError> => {
   const make = Effect.gen(function* () {
     const flags = yield* compileFlags(declarations)
-    const overrideNames = Array.map(overrides, ([flag]) => flag.name)
-
-    const overrideCounts = Array.reduce(
-      overrideNames,
-      noNameCounts,
-      incrementCount,
-    )
-
-    const overrideEntry = ([flag, enabled]: FeatureFlagOverrides<Flags>[number]) => [flag.name, enabled] as const
-    const overrideByName = pipe(overrides, Array.map(overrideEntry), HashMap.fromIterable)
 
     const unknownOverride = Array.findFirst(
       overrides,
       ([flag]) => !Array.containsWith(flagsEqual)(flags, flag),
     )
-
-    const duplicateOverride = Array.findFirst(overrides, ([flag]) => pipe(
-      HashMap.get(overrideCounts, flag.name),
-      Option.exists((count) => count > 1),
-    ))
 
     if (Option.isSome(unknownOverride)) {
       const [flag] = unknownOverride.value
@@ -154,13 +144,17 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
       })
     }
 
-    if (Option.isSome(duplicateOverride)) {
-      const [flag] = duplicateOverride.value
+    const overrideNames = Array.map(overrides, ([flag]) => flag.name)
+    const duplicateOverride = firstDuplicateName(overrideNames)
 
+    if (Option.isSome(duplicateOverride)) {
       return yield* FeatureFlagDefinitionError.make({
-        reason: `duplicate override for feature flag ${flag.name}`,
+        reason: `duplicate override for feature flag ${duplicateOverride.value}`,
       })
     }
+
+    const overrideEntry = ([flag, enabled]: FeatureFlagOverrides<Flags>[number]) => [flag.name, enabled] as const
+    const overrideByName = pipe(overrides, Array.map(overrideEntry), HashMap.fromIterable)
 
     const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
       const enabled = pipe(

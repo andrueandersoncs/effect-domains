@@ -137,11 +137,14 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
       const generatedField = Source.$is("Generated")(source)
       const subjectField = Source.$is("Subject")(source)
       const protectedField = generatedField || subjectField
-      const label = generatedField ? "generated" : "subject-bound"
       const override = protectedField && supplied
+
+      if (!override) return compiled.evaluate(input, subject)
+
+      const label = generatedField ? "generated" : "subject-bound"
       const failure = inputFailure(`create input must not provide ${label} field ${name}`)
 
-      return override ? Effect.fail(failure) : compiled.evaluate(input, subject)
+      return Effect.fail(failure)
     }
 
     return { inputSchema: compiled.inputSchema, read }

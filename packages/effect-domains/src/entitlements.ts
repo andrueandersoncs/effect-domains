@@ -1,4 +1,4 @@
-import { Array, Clock, Context, Data, DateTime, Effect, Equivalence, Function, HashMap, Layer, Match, Option, Predicate, Record, Schema, Struct, Tuple, pipe } from "effect"
+import { Array, Clock, Context, Data, DateTime, Effect, Equivalence, Function, HashMap, HashSet, Layer, Match, Option, Predicate, Record, Schema, Tuple, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { StructSchema, StructValue } from "./domain.ts"
 import type { Scalar } from "./policy.ts"
@@ -220,43 +220,33 @@ interface AnyEntitlementSource {
   readonly grant: Grant
 }
 
-const isEmptyName = (name: string) => {
-  const trimmed = name.trim()
-
-  return Equivalence.strictEqual()(trimmed.length, 0)
-}
-
-
-const equal = Equivalence.strictEqual<unknown>()
-
-const sameName = (name: string) => (candidate: string) => equal(name, candidate)
-
-const nameOccursMoreThanOnce = (names: ReadonlyArray<string>) => (name: string) => {
-  const matching = Array.filter(names, sameName(name))
-
-  return matching.length > 1
-}
-
-const failureForName = Effect.fn("Entitlements.failureForName")(function* (name: string) {
-  const reason = isEmptyName(name) ? "entitlement name must not be empty" : `duplicate entitlement name ${name}`
-  const failure = invalidDefinition(reason)
-
-  return yield* Effect.fail(failure)
-})
-
 const validation = Effect.fn("Entitlements.validation")(function* (definitions: ReadonlyArray<AnyEntitlementSource>) {
-  const names = Array.map(definitions, Struct.get("name"))
-  const missing = Array.findFirst(names, isEmptyName)
-  const duplicate = Array.findFirst(names, nameOccursMoreThanOnce(names))
-  const invalidName = Option.orElse(missing, Function.constant(duplicate))
+  const isEmpty = ({ name }: AnyEntitlementSource) => {
+    const trimmed = name.trim()
 
-  return yield* Option.match(invalidName, {
-    onNone: Function.constant(Effect.void),
-    onSome: failureForName,
-  })
+    return Equivalence.strictEqual<number>()(trimmed.length, 0)
+  }
+
+  if (Array.some(definitions, isEmpty)) {
+    const error = invalidDefinition("entitlement name must not be empty")
+
+    return yield* Effect.fail(error)
+  }
+
+  const unique = (seen: HashSet.HashSet<string>, { name }: AnyEntitlementSource) => {
+    if (HashSet.has(seen, name)) {
+      const error = invalidDefinition(`duplicate entitlement name ${name}`)
+
+      return Effect.fail(error)
+    }
+
+    const next = HashSet.add(seen, name)
+
+    return Effect.succeed(next)
+  }
+
+  yield* Effect.reduce(definitions, HashSet.empty<string>, unique)
 })
-
-
 
 const equality = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
   Predicate.isNull(value) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`

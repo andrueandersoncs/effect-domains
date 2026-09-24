@@ -148,12 +148,12 @@ const make = <
 
   const guard = <A extends Action>(action: A, key: string, actual: string) => {
     const declaration = transitions[action]
-    const permitted = allows(actual)(declaration)
-    const failure = invalid(action, key, actual)
 
-    return permitted
-      ? Effect.succeed(declaration.to)
-      : Effect.fail(failure)
+    if (allows(actual)(declaration)) return Effect.succeed(declaration.to)
+
+    const error = invalid(action, key, actual)
+
+    return Effect.fail(error)
   }
 
   const applyTo = <Row extends Readonly<Record<Field, Status["Type"]>>, A extends Action>(row: Row) =>

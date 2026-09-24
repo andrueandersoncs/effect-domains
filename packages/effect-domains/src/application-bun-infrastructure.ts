@@ -1,4 +1,4 @@
-import { Data, Effect, Equivalence, Function, Layer, Option, Schema } from "effect"
+import { Data, Effect, Equivalence, Layer, Option, Schema } from "effect"
 import type { ApplicationIR } from "./application.ts"
 import { runApplication, type RunErrors, type RunRequirements } from "./application-bun-runtime.ts"
 import { ApplicationInfrastructure, type ApplicationInfrastructureError } from "./application-infrastructure.ts"
@@ -75,15 +75,13 @@ export const runInfrastructure = Effect.fn("ApplicationBun.runInfrastructure")(f
     })
   }
 
-  const defaultDatabase = ephemeral
-    ? new InfrastructureFileDatabaseOptions({
-      migrations: plan.database.resource.migrations,
-      filename: ":memory:",
-    })
-    : new InfrastructureDatabaseOptions({ migrations: plan.database.resource.migrations })
-
   const database = Option.match(configuredFilename, {
-    onNone: Function.constant(defaultDatabase),
+    onNone: () => ephemeral
+      ? new InfrastructureFileDatabaseOptions({
+        migrations: plan.database.resource.migrations,
+        filename: ":memory:",
+      })
+      : new InfrastructureDatabaseOptions({ migrations: plan.database.resource.migrations }),
     onSome: (filename) => new InfrastructureFileDatabaseOptions({
       migrations: plan.database.resource.migrations,
       filename,

@@ -70,18 +70,27 @@ const compileResourceValue = <
     return invalidInput(table.name, `repository codec failure: ${causeText}`)
   }
 
-  const createAuthorized = Effect.fn("Repository.create")(function* (
-    store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceDraft<S, Creation, Version>,
+  const insertAuthorized = Effect.fn("Repository.insertAuthorized")(function* (
+    store: RepositoryStore["Service"],
+    permission: RepositoryAccess,
+    row: StructValue,
   ) {
-    const complete = yield* creationPlan.materialize(input, permission.subject)
-    const encoded = yield* encodeRow(complete)
-    const next = Option.some(complete)
+    const encoded = yield* encodeRow(row)
+    const next = Option.some(row)
 
     yield* authorize("create", permission.subject, noCurrent, next)
 
     const stored = yield* store.insert(table, encoded)
 
     return yield* readable(permission.subject, stored)
+  })
+
+  const createAuthorized = Effect.fn("Repository.create")(function* (
+    store: RepositoryStore["Service"], permission: RepositoryAccess, input: ResourceDraft<S, Creation, Version>,
+  ) {
+    const complete = yield* creationPlan.materialize(input, permission.subject)
+
+    return yield* insertAuthorized(store, permission, complete)
   })
 
   const identifierOrder = new RepositoryOrder({ field: table.identifier, direction: "asc" as const })
@@ -319,12 +328,10 @@ const compileResourceValue = <
     return yield* listPlan.page(prepared, rows, decodeListRows)
   })
 
-  const transitionDefaults = Struct.assign(noChanges, noChanges)
-
   const noTransitionChanges = narrowContract<
     TransitionChanges<S, CanonicalKey, Version, Transition>,
-    typeof transitionDefaults
-  >(transitionDefaults)
+    typeof noChanges
+  >(noChanges)
 
   const transitionAuthorized = Effect.fn("Repository.transition")(function* (
     store: RepositoryStore["Service"],
@@ -413,21 +420,7 @@ const compileResourceValue = <
   const patch = withAccess("patch", patchAuthorized)
   const remove = withAccess("remove", removeAuthorized)
   const transitionRepository = withAccess("transition", transitionAuthorized)
-
-  const ensureCreateAuthorized = Effect.fn("Repository.ensureCreate")(function* (
-    store: RepositoryStore["Service"], permission: RepositoryAccess, row: CanonicalTable["rowSchema"]["Type"],
-  ) {
-    const encoded = yield* encodeRow(row)
-    const next = Option.some(row)
-
-    yield* authorize("create", permission.subject, noCurrent, next)
-
-    const stored = yield* store.insert(table, encoded)
-
-    return yield* readable(permission.subject, stored)
-  })
-
-  const ensureCreate = withAccess("create", ensureCreateAuthorized)
+  const ensureCreate = withAccess("create", insertAuthorized)
 
   const ensure = Effect.fn("Repository.ensure")(function* (row: CanonicalTable["rowSchema"]["Type"] & StructValue) {
     const keyValue = pipe(Record.get(row, table.identifier), Option.getOrThrow)

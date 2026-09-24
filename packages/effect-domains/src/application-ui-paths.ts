@@ -6,7 +6,7 @@ export const applicationUiPaths = (path: `/${string}`) => {
   const javascript: `/${string}` = `${prefix}/client.js`
   const stylesheet: `/${string}` = `${prefix}/style.css`
   const api: `/${string}` = `${prefix}/api`
-  const call: `/${string}` = `${prefix}/api/call`
+  const call: `/${string}` = `${api}/call`
 
   return Object.freeze({
     document: path,

@@ -104,6 +104,12 @@ const milliseconds = (duration: Option.Option<Duration.Input>) => pipe(
   Option.getOrUndefined,
 )
 
+const batchSize = (size: Option.Option<number>) => pipe(
+  size,
+  Option.map(String),
+  Option.getOrUndefined,
+)
+
 const signalEndpoint = (base: string, signal: Signal) => {
   const url = new URL(base)
   const trailingSlash = url.pathname.endsWith("/")
@@ -141,20 +147,14 @@ const environment = (options: TelemetryOptions) => {
   const tracesDisabled = equalsFalse(options.traces, false)
   const metricsDisabled = equalsFalse(options.metrics, false)
   const logsDisabled = equalsFalse(options.logs, false)
-  const traceExportIntervalOption = Option.fromUndefinedOr(traces?.exportInterval)
-  const traceExportInterval = milliseconds(traceExportIntervalOption)
-  const traceBatchSize = pipe(Option.fromNullishOr(traces?.maxBatchSize), Option.map(String), Option.getOrUndefined)
-  const traceShutdownTimeoutOption = Option.fromUndefinedOr(traces?.shutdownTimeout)
-  const traceShutdownTimeout = milliseconds(traceShutdownTimeoutOption)
-  const metricExportIntervalOption = Option.fromUndefinedOr(metrics?.exportInterval)
-  const metricExportInterval = milliseconds(metricExportIntervalOption)
-  const metricShutdownTimeoutOption = Option.fromUndefinedOr(metrics?.shutdownTimeout)
-  const metricShutdownTimeout = milliseconds(metricShutdownTimeoutOption)
-  const logExportIntervalOption = Option.fromUndefinedOr(logs?.exportInterval)
-  const logExportInterval = milliseconds(logExportIntervalOption)
-  const logBatchSize = pipe(Option.fromNullishOr(logs?.maxBatchSize), Option.map(String), Option.getOrUndefined)
-  const logShutdownTimeoutOption = Option.fromUndefinedOr(logs?.shutdownTimeout)
-  const logShutdownTimeout = milliseconds(logShutdownTimeoutOption)
+  const traceExportInterval = pipe(Option.fromUndefinedOr(traces?.exportInterval), milliseconds)
+  const traceBatchSize = pipe(Option.fromNullishOr(traces?.maxBatchSize), batchSize)
+  const traceShutdownTimeout = pipe(Option.fromUndefinedOr(traces?.shutdownTimeout), milliseconds)
+  const metricExportInterval = pipe(Option.fromUndefinedOr(metrics?.exportInterval), milliseconds)
+  const metricShutdownTimeout = pipe(Option.fromUndefinedOr(metrics?.shutdownTimeout), milliseconds)
+  const logExportInterval = pipe(Option.fromUndefinedOr(logs?.exportInterval), milliseconds)
+  const logBatchSize = pipe(Option.fromNullishOr(logs?.maxBatchSize), batchSize)
+  const logShutdownTimeout = pipe(Option.fromUndefinedOr(logs?.shutdownTimeout), milliseconds)
 
   return Record.fromEntries([
     ["OTEL_SERVICE_NAME", options.resource?.serviceName],

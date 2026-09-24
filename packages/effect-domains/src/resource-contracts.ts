@@ -104,17 +104,9 @@ export const makeResourceContractSchemas = <
 
   const patchWireSchema = Schema.toCodecJson(patchInputSchema)
 
-  const transitionFieldsSchema = (field: string) => {
-    const optionalFields = Record.map(mutableFields, Schema.optionalKey)
-    const immutableIdentifier = Record.set(optionalFields, table.identifier, ForbiddenFieldSchema)
-    const transitionFields = Record.set(immutableIdentifier, field, ForbiddenFieldSchema)
-
-    return Schema.Struct(transitionFields)
-  }
-
   const TransitionFieldsSchema = Option.match(transitionOption, {
     onNone: Function.constant(patchFieldsContract),
-    onSome: (definition) => transitionFieldsSchema(definition.field),
+    onSome: ({ field }) => Schema.Struct(Record.set(patchFields, field, ForbiddenFieldSchema)),
   })
 
   const changesFieldSchema = Schema.optionalKey(TransitionFieldsSchema)

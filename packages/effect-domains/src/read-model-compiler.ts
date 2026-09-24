@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Equivalence, Function, HashSet, Match, Option, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Effect, Equivalence, HashSet, Match, Option, Record, Schema, Struct, flow, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Resource } from "./resource.ts"
 import { quoteIdentifier } from "./sqlite-ddl.ts"
@@ -208,7 +208,7 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: CompiledDe
 
   interface Result extends Schema.Schema.Type<typeof ResultSchema> {}
 
-  const dependencyTables = pipe(definition.tables, Record.values, Array.dedupe)
+  const dependencyTables = pipe(definition.tables, Record.values, Array.dedupeWith(Equivalence.strictEqual<Table>()))
   const dependencies = Object.freeze(dependencyTables)
   const columns = Array.map(entries, ([output, reference]) => `${qualified(reference)} AS ${quoteIdentifier(output)}`)
 
@@ -256,10 +256,6 @@ const compileDefinition = <
   const compiledDefinition = new CompiledDefinition({ tables, from, joins, select })
   const compilation = compile(compiledDefinition)
   const result = Effect.runSync(compilation)
-  const CompiledViewSchema = Schema.Struct(Record.map(result.projected, Struct.get("storageSchema")))
-
-  interface CompiledView extends Schema.Schema.Type<typeof CompiledViewSchema> {}
-
   const column = (sql: SqlClient.SqlClient, reference: ReferenceFor<Sources>) => result.column(sql, reference)
 
   const outputField = (sql: SqlClient.SqlClient, field: string) => pipe(
@@ -270,9 +266,9 @@ const compileDefinition = <
   )
 
   const viewSchema = narrowContract<
-    typeof CompiledViewSchema & ViewSchema<Sources, Joins, Selection>,
-    typeof CompiledViewSchema
-  >(CompiledViewSchema)
+    typeof result.schema & ViewSchema<Sources, Joins, Selection>,
+    typeof result.schema
+  >(result.schema)
 
   return Object.freeze({
     _tag: "CompiledReadModel" as const,
@@ -286,20 +282,7 @@ const compileDefinition = <
   })
 }
 
-class PageConfiguration extends Data.Class<{
-  readonly filter: ReadonlyArray<string>
-  readonly range: ReadonlyArray<string>
-  readonly order: ReadonlyArray<readonly [string, "asc" | "desc"]>
-  readonly limit: number
-}> {}
-
-class ReadModelPlan extends Data.Class<{
-  readonly definition: CompiledDefinition
-  readonly page: Option.Option<PageConfiguration>
-}> {}
-
 const emptySelection: Readonly<Record<string, Reference>> = Object.freeze({})
-const noPage = Option.none<PageConfiguration>()
 
 const compileSource = pipe(
   Match.type<TableSource>(),
@@ -309,69 +292,42 @@ const compileSource = pipe(
   }),
 )
 
-const planAlgebra: ReadModelAlgebra<ReadModelPlan> = (layer) => pipe(
+const planAlgebra: ReadModelAlgebra<CompiledDefinition> = (layer) => pipe(
   Match.value(layer),
   Match.tagsExhaustive({
     Scan: ({ alias, table }) => {
       const compiledTable = compileSource(table)
       const tables = Record.singleton(alias, compiledTable)
 
-      const definition = new CompiledDefinition({
+      return new CompiledDefinition({
         tables,
         from: alias,
         joins: [],
         select: emptySelection,
       })
-
-      return new ReadModelPlan({ definition, page: noPage })
     },
     Join: ({ source, kind, alias, table, on }) => {
       const compiledTable = compileSource(table)
-      const tables = Record.set(source.definition.tables, alias, compiledTable)
+      const tables = Record.set(source.tables, alias, compiledTable)
       const join = JoinSchema.make({ kind, table: alias, on })
-      const joins = Array.append(source.definition.joins, join)
-      const definition = new CompiledDefinition({ ...source.definition, tables, joins })
+      const joins = Array.append(source.joins, join)
 
-      return new ReadModelPlan({ definition, page: source.page })
+      return new CompiledDefinition({ ...source, tables, joins })
     },
-    Project: ({ source, select }) => {
-      const definition = new CompiledDefinition({ ...source.definition, select })
-
-      return new ReadModelPlan({ definition, page: source.page })
-    },
-    Page: ({ source, filter, range, order, limit }) => {
-      const page = new PageConfiguration({ filter, range, order, limit })
-      const configuredPage = Option.some(page)
-
-      return new ReadModelPlan({ definition: source.definition, page: configuredPage })
-    },
-  }),
-)
-
-const dependencyAlgebra: ReadModelAlgebra<ReadonlyArray<Table>> = (layer) => pipe(
-  Match.value(layer),
-  Match.tagsExhaustive({
-    Scan: ({ table }) => [compileSource(table)],
-    Join: ({ source, table }) => {
-      const dependency = compileSource(table)
-      const dependencies = Array.append(source, dependency)
-
-      return Array.dedupeWith(dependencies, Equivalence.strictEqual<Table>())
-    },
-    Project: ({ source }) => source,
+    Project: ({ source, select }) => new CompiledDefinition({ ...source, select }),
     Page: ({ source }) => source,
   }),
 )
 
 const compilePlan = foldReadModel(planAlgebra)
-const readModelDependencies = foldReadModel(dependencyAlgebra)
+
 
 const describeReadModel = (spec: ReadModelSpec): ReadModelDescription => {
-  const plan = compilePlan(spec.syntax)
+  const definition = compilePlan(spec.syntax)
 
   return ReadModelDescription.make({
-    ...plan.definition,
-    tables: Record.map(plan.definition.tables, Struct.get("name")),
+    ...definition,
+    tables: Record.map(definition.tables, Struct.get("name")),
   })
 }
 
@@ -446,7 +402,7 @@ const compileReadModel = <const Spec extends ReadModelSpec>(
 
   Effect.runSync(aliasValidation)
 
-  const compiledAliases = Record.keys(plan.definition.tables)
+  const compiledAliases = Record.keys(plan.tables)
 
   if (declaredAliases.length !== compiledAliases.length) {
     pipe(
@@ -455,12 +411,10 @@ const compileReadModel = <const Spec extends ReadModelSpec>(
     )
   }
 
-  const compiledDefinition = narrowContract<never, typeof plan.definition>(plan.definition)
+  const compiledDefinition = narrowContract<never, typeof plan>(plan)
   const compiled = compileDefinition(compiledDefinition)
-  const dependencies = readModelDependencies(spec.syntax)
-  const complete = Object.freeze({ ...compiled, dependencies })
 
-  return narrowContract<CompiledReadModelFor<Spec>, typeof complete>(complete)
+  return narrowContract<CompiledReadModelFor<Spec>, typeof compiled>(compiled)
 }
 
 export {
