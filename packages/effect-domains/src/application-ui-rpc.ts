@@ -73,7 +73,23 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
     const unaryProcedure = asUnaryProcedure(procedure)
     const withCodecContext = withHandlerContext(unaryProcedure)
 
-    const invoke = Effect.fn("ApplicationUi.invoke")(function* (
+    const respondToDeclaredFailure = Effect.fn("ApplicationUi.respondToDeclaredFailure")(function* (error: unknown) {
+      const envelope = OperationErrorEnvelope.make({ error })
+      const encodedEnvelope = encodeError(envelope)
+      const encoded = yield* withCodecContext(encodedEnvelope)
+
+      return yield* applicationUiDeclaredErrorResponse(encoded)
+    })
+
+    const respondToDeclaredSuccess = Effect.fn("ApplicationUi.respondToDeclaredSuccess")(function* (result: unknown) {
+      const envelope = OperationResult.make({ result })
+      const encodedEnvelope = encodeResult(envelope)
+      const encoded = yield* withCodecContext(encodedEnvelope)
+
+      return yield* applicationUiSuccessResponse(encoded)
+    })
+
+    const execute: Invocation = Effect.fn("ApplicationUi.execute")(function* (
       input: unknown,
       request: HttpServerRequest.HttpServerRequest,
     ) {
@@ -82,52 +98,19 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
       const decoded = yield* Effect.result(contextualInput)
 
       if (Result.isFailure(decoded)) {
-        const invalidInput = applicationUiFailureResponse(
+        return yield* applicationUiFailureResponse(
           400,
           `Invalid input for ${contract._tag}: ${decoded.failure.message}`,
-        )
-
-        return yield* Effect.catchTag(
-          invalidInput,
-          "HttpBodyError",
-          recoverResponseEncodingFailure,
         )
       }
 
       const call = client(contract._tag, decoded.success, { headers: request.headers })
 
-      const respondToDeclaredFailure = Effect.fn("ApplicationUi.respondToDeclaredFailure")(function* (error: unknown) {
-        const envelope = OperationErrorEnvelope.make({ error })
-        const encodedEnvelope = encodeError(envelope)
-        const encoded = yield* withCodecContext(encodedEnvelope)
-
-        return yield* applicationUiDeclaredErrorResponse(encoded)
-      })
-
-      const respondToDeclaredSuccess = Effect.fn("ApplicationUi.respondToDeclaredSuccess")(function* (result: unknown) {
-        const envelope = OperationResult.make({ result })
-        const encodedEnvelope = encodeResult(envelope)
-        const encoded = yield* withCodecContext(encodedEnvelope)
-
-        return yield* applicationUiSuccessResponse(encoded)
-      })
-
-      const response = Effect.matchEffect(call, {
+      return yield* Effect.matchEffect(call, {
         onFailure: respondToDeclaredFailure,
         onSuccess: respondToDeclaredSuccess,
       })
-
-      return yield* Effect.catchTags(response, {
-        SchemaError: recoverResponseEncodingFailure,
-        HttpBodyError: recoverResponseEncodingFailure,
-      })
-    })
-
-    const execute: Invocation = Effect.fn("ApplicationUi.execute")(function* (input, request) {
-      const response = invoke(input, request)
-
-      return yield* Effect.catchCause(response, recoverResponseEncodingFailure)
-    })
+    }, Effect.catchCause(recoverResponseEncodingFailure))
 
     return [contract._tag, execute] as const
   })

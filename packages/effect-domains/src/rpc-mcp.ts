@@ -1,7 +1,7 @@
-import { Effect, flow, Function, Layer, Option, Schema, Struct, pipe } from "effect"
+import { Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
-import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
-import { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { Headers, HttpServerRequest } from "effect/unstable/http"
+import { RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationIR } from "./application.ts"
 import { compileUnaryRpc } from "./rpc-contract.ts"
 import { inProcessClient, type UnaryRpc } from "./rpc-in-process.ts"
@@ -53,10 +53,6 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
       }),
     )
 
-    // SAFETY: The cast is valid because compileUnaryRpc rejected streaming success schemas for this original procedure.
-    const contractGroup = RpcGroup.make(procedure as UnaryRpc)
-    const { client, withHandlerContext } = yield* inProcessClient(contractGroup)
-
     if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(contract._tag)) {
       return yield* RpcMcpDefinitionError.make({
         procedure: contract._tag,
@@ -64,6 +60,9 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
       })
     }
 
+    // SAFETY: This procedure has a unary success schema because compileUnaryRpc rejected streaming schemas above.
+    const contractGroup = RpcGroup.make(procedure as UnaryRpc)
+    const { client, withHandlerContext } = yield* inProcessClient(contractGroup)
     const InputSchema = Schema.Struct({ input: contract.payloadSchema })
 
     interface Input extends Schema.Schema.Type<typeof InputSchema> {}
@@ -83,13 +82,31 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
     const tool = McpSchema.Tool.make({ name: contract._tag, inputSchema, outputSchema })
     const withCodecContext = withHandlerContext(contract)
+    const decodeInput = Schema.decodeUnknownEffect(InputSchema)
+    const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
+    const encodeError = Schema.encodeUnknownEffect(ErrorSchema)
+    const decodeJsonObject = Schema.decodeUnknownEffect(Schema.JsonObject)
+
+    const failureResponse = (cause: unknown) => pipe(
+      encodeError(cause),
+      withCodecContext,
+      Effect.map(errorResult),
+      Effect.catch(failInternally),
+    )
+
+    const successResponse = (result: unknown) => pipe(
+      OutputSchema.make({ result }),
+      encodeOutput,
+      withCodecContext,
+      Effect.flatMap(decodeJsonObject),
+      Effect.map(successResult),
+      Effect.catch(failInternally),
+    )
 
     const toolResultFromArguments = Effect.fn("RpcMcp.execute")(function* (
       arguments_: unknown,
       headers: Headers.Headers,
     ) {
-      const decodeInput = Schema.decodeUnknownEffect(InputSchema)
-
       const payload: Input = yield* pipe(
         decodeInput(arguments_),
         withCodecContext,
@@ -98,26 +115,11 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
         })),
       )
 
-      const failureResponse = (cause: unknown) => pipe(
-        Schema.encodeUnknownEffect(ErrorSchema)(cause),
-        withCodecContext,
-        Effect.map(errorResult),
-        Effect.catch(failInternally),
-      )
+      const invocation = client(contract._tag, payload.input, { headers })
 
-      const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
-      const call = client(contract._tag, payload.input, { headers })
-
-      return yield* Effect.matchEffect(call, {
+      return yield* Effect.matchEffect(invocation, {
         onFailure: failureResponse,
-        onSuccess: flow(
-          (result: unknown) => OutputSchema.make({ result }),
-          encodeOutput,
-          withCodecContext,
-          Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
-          Effect.map(successResult),
-          Effect.catch(failInternally),
-        ),
+        onSuccess: successResponse,
       })
     })
 
@@ -146,7 +148,6 @@ export const layerHttp = <App extends ApplicationIR>(options: Readonly<{
   application: App
   path: `/${string}`
 }>) => {
-
   const { application } = options
 
   const server = McpServer.layerHttp({

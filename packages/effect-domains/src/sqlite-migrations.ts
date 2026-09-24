@@ -1,7 +1,6 @@
 import { Array, Effect, Equivalence, Option, pipe, Predicate, Record, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "./migrations.ts"
-import { Table } from "./table.ts"
 import { TableSnapshot } from "./table-snapshot-model.ts"
 import type { Table as TableDefinition } from "./table-relations.ts"
 
@@ -39,8 +38,6 @@ import {
   validateMigration,
   validateSnapshot,
 } from "./sqlite-migration-model.ts"
-
-
 
 const same = Equivalence.strictEqual<unknown>()
 

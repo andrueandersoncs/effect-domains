@@ -47,12 +47,13 @@ const updateRateLimit = (
   })
 }
 
+const noStore = Headers.set(Headers.empty, "cache-control", "no-store")
+const reject = (status: number) => HttpServerResponse.empty({ status, headers: noStore })
+
 const validateRequestHeaders = (
   headers: HttpServerRequest.HttpServerRequest["headers"],
   maxRequestBytes: number,
 ) => {
-  const noStore = Headers.set(Headers.empty, "cache-control", "no-store")
-  const reject = (status: number) => HttpServerResponse.empty({ status, headers: noStore })
   const normalizeHeader = (value: string) => value.trim().toLowerCase()
 
   const contentEncoding = pipe(
@@ -95,29 +96,29 @@ const validateRequestHeaders = (
 
   const contentLength = Number(headers["content-length"] ?? 0)
   const declaredOversized = Number.isFinite(contentLength) && contentLength > maxRequestBytes
-  const response = reject(413)
-  const failure = Result.fail(response)
-  const success = Result.succeed(contentType)
 
-  return declaredOversized ? failure : success
+  if (!declaredOversized) return Result.succeed(contentType)
+
+  const response = reject(413)
+
+  return Result.fail(response)
 }
 
 const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBrowserTelemetryRequest")(function* (
   request: HttpServerRequest.HttpServerRequest,
   transport: OtlpTransport,
   gatewayContext: Readonly<{
-    isTrusted: (request: HttpServerRequest.HttpServerRequest) => boolean
+    allowedOrigins: Option.Option<ReadonlyArray<string>>
     rateLimited: (request: HttpServerRequest.HttpServerRequest) => Effect.Effect<boolean>
     client: HttpClient.HttpClient
     maxRequestBytes: number
-    reject: (status: number) => HttpServerResponse.HttpServerResponse
   }>,
 ) {
-  if (!gatewayContext.isTrusted(request)) return gatewayContext.reject(403)
+  if (!isTrustedGatewayRequest(request, gatewayContext.allowedOrigins)) return reject(403)
 
   const limited = yield* gatewayContext.rateLimited(request)
 
-  if (limited) return gatewayContext.reject(429)
+  if (limited) return reject(429)
 
   const validation = validateRequestHeaders(request.headers, gatewayContext.maxRequestBytes)
 
@@ -125,8 +126,8 @@ const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBr
 
   const body = yield* Effect.result(request.arrayBuffer)
 
-  if (Result.isFailure(body)) return gatewayContext.reject(400)
-  if (body.success.byteLength > gatewayContext.maxRequestBytes) return gatewayContext.reject(413)
+  if (Result.isFailure(body)) return reject(400)
+  if (body.success.byteLength > gatewayContext.maxRequestBytes) return reject(413)
 
   const requestBytes = new Uint8Array(body.success)
   const requestWithBody = HttpClientRequest.bodyUint8Array(requestBytes, validation.success)
@@ -140,27 +141,48 @@ const forwardBrowserTelemetryRequest = Effect.fn("ApplicationTelemetry.forwardBr
   const forwarding = gatewayContext.client.execute(outbound)
   const forwarded = yield* Effect.result(forwarding)
 
-  if (Result.isFailure(forwarded)) return gatewayContext.reject(502)
+  if (Result.isFailure(forwarded)) return reject(502)
 
   const responseBody = yield* Effect.result(forwarded.success.arrayBuffer)
 
-  if (Result.isFailure(responseBody)) return gatewayContext.reject(502)
+  if (Result.isFailure(responseBody)) return reject(502)
 
   const responseBytes = new Uint8Array(responseBody.success)
-  const responseHeaders = Headers.set(Headers.empty, "cache-control", "no-store")
 
   return HttpServerResponse.uint8Array(responseBytes, {
     status: forwarded.success.status,
     contentType: forwarded.success.headers["content-type"] ?? validation.success,
-    headers: responseHeaders,
+    headers: noStore,
   })
 })
+
+const isTrustedGatewayRequest = (
+  request: HttpServerRequest.HttpServerRequest,
+  allowedOrigins: Option.Option<ReadonlyArray<string>>,
+) => {
+  const trustedFetchSite = !Equivalence.strictEqual<string>()(request.headers["sec-fetch-site"] ?? "", "cross-site")
+  const origin = Option.fromUndefinedOr(request.headers.origin)
+
+  return trustedFetchSite && Option.match(origin, {
+    onNone: Function.constant(true),
+    onSome: (value) => {
+      const url = HttpServerRequest.toURL(request)
+
+      return Option.exists(url, (candidate) => {
+        const sameOrigin = Equivalence.strictEqual<string>()(value, candidate.origin)
+        const explicitlyAllowed = Option.exists(allowedOrigins, (allowed) => Array.contains(allowed, value))
+
+        return sameOrigin || explicitlyAllowed
+      })
+    },
+  })
+}
 
 const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBrowserGatewayRoutes")(function* (
   options: Readonly<{
     router: HttpRouter.HttpRouter
     client: HttpClient.HttpClient
-    ingestPath: string
+    ingestPath: `/${string}`
     maxRequestBytes: number
     requestsPerMinute: number
     allowedOrigins: Option.Option<ReadonlyArray<string>>
@@ -171,35 +193,6 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
 ) {
   const emptyWindows = HashMap.empty<string, GatewayWindow>()
   const windows = yield* Ref.make(emptyWindows)
-  const noStore = Headers.set(Headers.empty, "cache-control", "no-store")
-  const reject = (status: number) => HttpServerResponse.empty({ status, headers: noStore })
-
-  const isTrusted = (request: HttpServerRequest.HttpServerRequest) => {
-    const fetchSite = request.headers["sec-fetch-site"] ?? ""
-    const crossSite = Equivalence.strictEqual<string>()(fetchSite, "cross-site")
-    const siteTrusted = !crossSite
-    const origin = Option.fromUndefinedOr(request.headers.origin)
-
-    const originTrusted = Option.match(origin, {
-      onNone: Function.constant(true),
-      onSome: (origin) => {
-        const url = HttpServerRequest.toURL(request)
-
-        return Option.exists(url, (url) => {
-          const sameOrigin = Equivalence.strictEqual<string>()(origin, url.origin)
-
-          const explicitlyAllowed = Option.exists(
-            options.allowedOrigins,
-            (allowed) => Array.contains(allowed, origin),
-          )
-
-          return sameOrigin || explicitlyAllowed
-        })
-      },
-    })
-
-    return siteTrusted && originTrusted
-  }
 
   const rateLimited = Effect.fn("ApplicationTelemetry.browserGatewayRateLimit")(function* (
     request: HttpServerRequest.HttpServerRequest,
@@ -214,11 +207,10 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
   })
 
   const gatewayContext = {
-    isTrusted,
+    allowedOrigins: options.allowedOrigins,
     rateLimited,
     client: options.client,
     maxRequestBytes: options.maxRequestBytes,
-    reject,
   }
 
   const addRoute = Effect.fn("ApplicationTelemetry.browserGatewayRoute")(function* (
@@ -227,8 +219,7 @@ const registerBrowserGatewayRoutes = Effect.fn("ApplicationTelemetry.registerBro
   ) {
     if (Option.isNone(transport)) return
 
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-    const path = `${options.ingestPath}/v1/${signal}` as `/${string}`
+    const path: `/${string}` = `${options.ingestPath}/v1/${signal}`
 
     const handler = Effect.fn("ApplicationTelemetry.browserGateway.forward")(function* (
       request: HttpServerRequest.HttpServerRequest,
@@ -255,13 +246,8 @@ const browserGateway = Effect.fn("ApplicationTelemetry.browserGateway")(function
   if (Option.isNone(telemetryOption)) return Option.none<BrowserTelemetryConfiguration>()
 
   const { value: telemetry } = telemetryOption
-
-  const configuredBrowser = Predicate.isObject(telemetry.browser)
-    ? Option.some(telemetry.browser)
-    : Option.none<BrowserOptions>()
-
   const emptyBrowser: BrowserOptions = Record.empty()
-  const browser = pipe(configuredBrowser, Option.getOrElse(Function.constant(emptyBrowser)))
+  const browser = Predicate.isObject(telemetry.browser) ? telemetry.browser : emptyBrowser
   const ingestPath = browser.ingestPath ?? "/otel"
   const emptySignals: NonNullable<BrowserOptions["signals"]> = Record.empty()
   const configuredSignals = browser.signals ?? emptySignals

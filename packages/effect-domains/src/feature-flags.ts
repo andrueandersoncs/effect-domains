@@ -44,6 +44,9 @@ const define = <const Name extends string>(
 
 const flagsEqual = Equivalence.strictEqual<FeatureFlag>()
 
+const isRegistered = (registered: ReadonlyArray<FeatureFlag>, flag: FeatureFlag) =>
+  Array.containsWith(flagsEqual)(registered, flag)
+
 const isBlankFlagName = (name: string) => {
   const trimmed = name.trim()
 
@@ -100,20 +103,45 @@ const compileFlags = Effect.fn("FeatureFlags.compile")(function* (
   return flags
 })
 
-const unavailableFor = (flag: FeatureFlag) => () =>
-  FeatureFlagUnavailable.make({ name: flag.name })
-
 const requireRegistered = Effect.fn("FeatureFlags.requireRegistered")(function* (
   registered: ReadonlyArray<FeatureFlag>,
   flag: FeatureFlag,
 ) {
-  const available = Array.findFirst(registered, (candidate) => flagsEqual(candidate, flag))
+  if (!isRegistered(registered, flag)) {
+    return yield* FeatureFlagUnavailable.make({ name: flag.name })
+  }
+})
 
-  return yield* pipe(
-    available,
-    Effect.fromOption,
-    Effect.mapError(unavailableFor(flag)),
+const compileOverrides = Effect.fn("FeatureFlags.compileOverrides")(function* (
+  flags: ReadonlyArray<FeatureFlag>,
+  overrides: FeatureFlagOverrides<ReadonlyArray<FeatureFlag>>,
+) {
+  const unknownOverride = Array.findFirst(
+    overrides,
+    ([flag]) => !isRegistered(flags, flag),
   )
+
+  if (Option.isSome(unknownOverride)) {
+    const [flag] = unknownOverride.value
+
+    return yield* FeatureFlagDefinitionError.make({
+      reason: `override references undeclared feature flag ${flag.name}`,
+    })
+  }
+
+  const overrideNames = Array.map(overrides, ([flag]) => flag.name)
+  const duplicateOverride = firstDuplicateName(overrideNames)
+
+  if (Option.isSome(duplicateOverride)) {
+    return yield* FeatureFlagDefinitionError.make({
+      reason: `duplicate override for feature flag ${duplicateOverride.value}`,
+    })
+  }
+
+  const overrideEntry = ([flag, enabled]: FeatureFlagOverrides<ReadonlyArray<FeatureFlag>>[number]) =>
+    [flag.name, enabled] as const
+
+  return pipe(overrides, Array.map(overrideEntry), HashMap.fromIterable)
 })
 
 const stateFor = (flag: FeatureFlag) => (
@@ -121,7 +149,7 @@ const stateFor = (flag: FeatureFlag) => (
 ) => pipe(
   HashMap.get(current, flag.name),
   Effect.fromOption,
-  Effect.mapError(unavailableFor(flag)),
+  Effect.mapError(() => FeatureFlagUnavailable.make({ name: flag.name })),
 )
 
 const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
@@ -130,31 +158,7 @@ const layerMemory = <const Flags extends ReadonlyArray<FeatureFlag>>(
 ): Layer.Layer<FeatureFlags, FeatureFlagDefinitionError> => {
   const make = Effect.gen(function* () {
     const flags = yield* compileFlags(declarations)
-
-    const unknownOverride = Array.findFirst(
-      overrides,
-      ([flag]) => !Array.containsWith(flagsEqual)(flags, flag),
-    )
-
-    if (Option.isSome(unknownOverride)) {
-      const [flag] = unknownOverride.value
-
-      return yield* FeatureFlagDefinitionError.make({
-        reason: `override references undeclared feature flag ${flag.name}`,
-      })
-    }
-
-    const overrideNames = Array.map(overrides, ([flag]) => flag.name)
-    const duplicateOverride = firstDuplicateName(overrideNames)
-
-    if (Option.isSome(duplicateOverride)) {
-      return yield* FeatureFlagDefinitionError.make({
-        reason: `duplicate override for feature flag ${duplicateOverride.value}`,
-      })
-    }
-
-    const overrideEntry = ([flag, enabled]: FeatureFlagOverrides<Flags>[number]) => [flag.name, enabled] as const
-    const overrideByName = pipe(overrides, Array.map(overrideEntry), HashMap.fromIterable)
+    const overrideByName = yield* compileOverrides(flags, overrides)
 
     const initialEntry = (flag: FeatureFlag): readonly [string, boolean] => {
       const enabled = pipe(

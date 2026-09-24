@@ -104,20 +104,30 @@ export const makeResourceContractSchemas = <
 
   const patchWireSchema = Schema.toCodecJson(patchInputSchema)
 
-  const TransitionFieldsSchema = Option.match(transitionOption, {
+  const transitionFieldsSchema = Option.match(transitionOption, {
     onNone: Function.constant(patchFieldsContract),
     onSome: ({ field }) => Schema.Struct(Record.set(patchFields, field, ForbiddenFieldSchema)),
   })
 
-  const changesFieldSchema = Schema.optionalKey(TransitionFieldsSchema)
+  const changesFieldSchema = Schema.optionalKey(transitionFieldsSchema)
 
-  const transitionInputStructSchema = Option.match(transitionOption, {
-    onNone: () => Schema.Struct({ key: canonicalIdentifierSchema, action: Schema.String, changes: changesFieldSchema }),
-    onSome: (definition) => Option.match(versionOption, {
-      onNone: () => Schema.Struct({ key: canonicalIdentifierSchema, action: definition.actions, changes: changesFieldSchema }),
-      onSome: () => Schema.Struct({ key: canonicalIdentifierSchema, action: definition.actions, expectedVersion: Schema.Int, changes: changesFieldSchema }),
-    }),
+  const actionSchema = Option.match(transitionOption, {
+    onNone: Function.constant(Schema.String),
+    onSome: Struct.get("actions"),
   })
+
+  const transitionInputStructSchema = Option.isSome(transitionOption) && Option.isSome(versionOption)
+    ? Schema.Struct({
+      key: canonicalIdentifierSchema,
+      action: actionSchema,
+      changes: changesFieldSchema,
+      expectedVersion: Schema.Int,
+    })
+    : Schema.Struct({
+      key: canonicalIdentifierSchema,
+      action: actionSchema,
+      changes: changesFieldSchema,
+    })
 
   const transitionJsonSchema = Schema.toCodecJson(transitionInputStructSchema)
 

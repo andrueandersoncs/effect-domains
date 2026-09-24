@@ -261,18 +261,20 @@ type ResourceListRequest<S extends StructSchema, Policy extends ListPolicy<S>> =
 }>>
 
 const ListOperationSchema = Schema.Struct({
-  filter: Schema.optionalKey(Schema.Array(Schema.String)),
-  range: Schema.optionalKey(Schema.Array(Schema.String)),
-  order: Schema.optionalKey(Schema.Array(Schema.Tuple([Schema.String, Schema.Literals(["asc", "desc"])]))),
-  limit: Schema.optionalKey(PageLimitSchema),
-  publish: Schema.optionalKey(Schema.Literal(false)),
+  filter: OptionalListFieldsSchema,
+  range: OptionalListFieldsSchema,
+  order: OptionalListOrderSchema,
+  limit: OptionalPageLimitSchema,
+  publish: OptionalPublishSchema,
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
+
+const GeneratedFieldsSchema = Schema.Record(Schema.String, GenerationTokenSchema)
 
 const CreateOperationSchema = Schema.Struct({
   defaults: Schema.optionalKey(UnknownRecordSchema),
-  generated: Schema.optionalKey(Schema.Record(Schema.String, Schema.Literals(["uuidV7", "now"]))),
+  generated: Schema.optionalKey(GeneratedFieldsSchema),
   fromSubject: Schema.optionalKey(UnknownRecordSchema),
-  publish: Schema.optionalKey(Schema.Literal(false)),
+  publish: OptionalPublishSchema,
 })
 
 interface CreateOperation extends Schema.Schema.Type<typeof CreateOperationSchema> {}

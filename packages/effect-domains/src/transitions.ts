@@ -1,4 +1,4 @@
-import { Array, Effect, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Effect, Option, Predicate, Record, Schema, Struct, pipe } from "effect"
 
 /** One declared edge: the action is allowed from any `from` status and lands on `to`. */
 type TransitionDeclaration<Status extends string = string> = Readonly<{
@@ -46,32 +46,47 @@ class TransitionDefinitionError extends Schema.TaggedError<TransitionDefinitionE
   }
 }
 
-const definitionFailure = (name: string, reason: string) =>
-  pipe(TransitionDefinitionError.make({ name, reason }), Effect.fail)
-
-const validateDeclarations = Effect.fn("Transitions.validateDeclarations")(function* (
+const validateDeclarations = (
   name: string,
   isStatus: (value: unknown) => boolean,
   declarations: TransitionDeclarations,
-) {
+) => {
   const entries = Record.toEntries(declarations)
 
-  if (Array.isReadonlyArrayEmpty(entries)) return yield* definitionFailure(name, "must declare at least one transition")
+  if (Array.isReadonlyArrayEmpty(entries)) {
+    const error = TransitionDefinitionError.make({ name, reason: "must declare at least one transition" })
 
-  yield* Effect.forEach(entries, ([action, declaration]) => {
+    return Option.some(error)
+  }
+
+  const noFailure = Option.none<TransitionDefinitionError>()
+
+  return Array.reduce(entries, noFailure, (failure, [action, declaration]) => {
+    if (Option.isSome(failure)) return failure
+
     if (Array.isReadonlyArrayEmpty(declaration.from)) {
-      return definitionFailure(name, `transition ${action} must declare at least one source status`)
+      const error = TransitionDefinitionError.make({ name, reason: `transition ${action} must declare at least one source status` })
+
+      return Option.some(error)
     }
 
     if (!isStatus(declaration.to)) {
-      return definitionFailure(name, `transition ${action} declares a status outside the status schema`)
+      const error = TransitionDefinitionError.make({ name, reason: `transition ${action} declares a status outside the status schema` })
+
+      return Option.some(error)
     }
 
     const knownSources = Array.every(declaration.from, isStatus)
 
-    return knownSources ? Effect.void : definitionFailure(name, `transition ${action} declares a status outside the status schema`)
-  }, { discard: true })
-})
+    if (!knownSources) {
+      const error = TransitionDefinitionError.make({ name, reason: `transition ${action} declares a status outside the status schema` })
+
+      return Option.some(error)
+    }
+
+    return failure
+  })
+}
 
 const freezeDeclaration = <Status extends string>(declaration: TransitionDeclaration<Status>) => {
   const copiedFrom = Array.copy(declaration.from)
@@ -86,14 +101,17 @@ const arrayValues = (values: unknown) =>
     : Option.none<ReadonlyArray<unknown>>()
 
 const allStrings = (values: ReadonlyArray<unknown>) => Array.every(values, Predicate.isString)
-const nonEmptyArrayValues = flow(arrayValues, Option.filter(Array.isReadonlyArrayNonEmpty))
-const stringValues = flow(nonEmptyArrayValues, Option.exists(allStrings))
 
 const statusValues = (status: Schema.Schema<string>) => {
   const document = Schema.toJsonSchemaDocument(status)
   const values = Predicate.hasProperty(document.schema, "enum") ? Option.some(document.schema.enum) : Option.none()
 
-  return pipe(values, Option.filter(stringValues))
+  return pipe(
+    values,
+    Option.flatMap(arrayValues),
+    Option.filter(Array.isReadonlyArrayNonEmpty),
+    Option.filter(allStrings),
+  )
 }
 
 /**
@@ -113,16 +131,25 @@ const make = <
   const literals = statusValues(input.status)
 
   if (Option.isNone(literals)) {
-    const invalidStatus = definitionFailure(input.name, "status must be a non-empty string literal schema")
-    const fatalInvalidStatus = Effect.orDie(invalidStatus)
+    const invalidStatus = TransitionDefinitionError.make({
+      name: input.name,
+      reason: "status must be a non-empty string literal schema",
+    })
+
+    const invalidStatusFailure = Effect.fail(invalidStatus)
+    const fatalInvalidStatus = Effect.orDie(invalidStatusFailure)
 
     Effect.runSync(fatalInvalidStatus)
   }
 
   const isStatus = Schema.is(input.status)
-  const validDeclarations = validateDeclarations(input.name, isStatus, input.transitions)
+  const invalidDeclarations = validateDeclarations(input.name, isStatus, input.transitions)
 
-  Effect.runSync(validDeclarations)
+  if (Option.isSome(invalidDeclarations)) {
+    const invalidDeclarationFailure = Effect.fail(invalidDeclarations.value)
+
+    Effect.runSync(invalidDeclarationFailure)
+  }
 
   const tag = `Invalid${input.name}Transition` as const
 

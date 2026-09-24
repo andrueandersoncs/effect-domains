@@ -1,7 +1,7 @@
-import { Array, Context, Data, Effect, Equivalence, Function, HashSet, Option, Predicate, Record, Schema, SchemaAST, Struct, flow, pipe } from "effect"
+import { Context, Data, Effect, Equivalence, Function, HashSet, Option, Predicate, Record, Schema, SchemaAST, Struct, flow, pipe } from "effect"
 import type { StructSchema, StructValue } from "./domain.ts"
 import { EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
-import { LiteralSchema, NextFieldSchema, OperandSchema, Policy, type Operand, type Policy as PolicySyntax, RowFieldSchema, type Scalar, SubjectFieldSchema, PolicyEvaluationError } from "./policy.ts"
+import { LiteralSchema, OperandSchema, Policy, type Operand, type Policy as PolicySyntax, type Scalar, PolicyEvaluationError } from "./policy.ts"
 import type { FieldIR } from "./schema-field.ts"
 
 export class AuthorizationSubject extends Context.Service<AuthorizationSubject, StructValue>()("@effect-domains/AuthorizationSubject") {}
@@ -65,8 +65,6 @@ const PolicyRulesSchema = Schema.Struct({
   transition: OptionalPolicySchema,
   remove: OptionalPolicySchema,
 }).annotate({ parseOptions: { onExcessProperty: "error" } })
-
-interface PolicyRules extends Schema.Schema.Type<typeof PolicyRulesSchema> {}
 
 export const EntitlementRequirementSchema = Schema.Struct({
   name: Schema.NonEmptyString,
@@ -174,32 +172,15 @@ const collectionOperand = <Value extends Scalar>(
 
 const expression = <Phases extends PolicyPhase>(policy: PolicySyntax): PolicyExpression<Phases> => policy
 
-const PolicyFieldRecordSchema = Schema.Record(Schema.String, OperandSchema)
-const decodePolicyFieldRecord = Schema.decodeUnknownOption(PolicyFieldRecordSchema)
-
 const policyFields = <Phases extends PolicyPhase>() => <
   S extends StructSchema,
   Tag extends "SubjectField" | "RowField" | "NextField",
 >(
   schema: S,
-  tag: Tag,
   construct: (input: Readonly<{ readonly field: string }>) => Operand & Readonly<{ readonly _tag: Tag }>,
-): FieldReferences<S, Tag, Phases> => {
-  const references = Record.map(schema.fields, (_, field) => construct({ field }))
-  const hasTag = (reference: Operand) => Predicate.isTagged(reference, tag)
-
-  const isFieldReference = (value: unknown): value is FieldReferences<S, Tag, Phases> => pipe(
-    value,
-    decodePolicyFieldRecord,
-    Option.map(Record.values),
-    Option.exists(Array.every(hasTag)),
-  )
-
-  const FieldReferencesSchema = Schema.declare(isFieldReference)
-  const decoded = Schema.decodeUnknownOption(FieldReferencesSchema)(references)
-
-  return Option.getOrThrow(decoded)
-}
+): FieldReferences<S, Tag, Phases> =>
+  // SAFETY: The asserted type matches because each field is constructed with its schema key and the phase/value are type-only.
+  Record.map(schema.fields, (_, field) => construct({ field })) as FieldReferences<S, Tag, Phases>
 
 const eq = <Left extends ScalarOperand, Right extends ScalarOperand>(left: Left, right: Right & Comparable<OperandValue<Left>, OperandValue<Right>>) => {
   const leftOperand = operand(left)

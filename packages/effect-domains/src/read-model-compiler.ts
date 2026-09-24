@@ -11,7 +11,6 @@ import {
   type CompiledReadModel,
   type CompiledSources,
   type Condition,
-  ConditionSchema,
   DefinitionSchema,
   foldReadModel,
   type Join,
@@ -139,35 +138,42 @@ const compile = Effect.fn("ReadModel.compile")(function* (definition: CompiledDe
 
   const initialAliases = () => HashSet.make(input.from)
 
-  const introduced = yield* Effect.reduce(input.joins, initialAliases, Effect.fn("ReadModel.join")(function* (seen, join) {
+  const validateJoinCondition = Effect.fn("ReadModel.joinCondition")(function* (
+    join: Join,
+    seen: HashSet.HashSet<string>,
+    condition: Condition,
+  ) {
+    const [leftAlias] = condition.left
+    const [rightAlias] = condition.right
+    const prior = Equivalence.strictEqual<string>()(leftAlias, join.table) ? rightAlias : leftAlias
+
+    if (!HashSet.has(seen, prior)) return yield* definitionError(`join ${join.table} references an alias not yet introduced`)
+
+    const left = yield* fieldFor(condition.left)
+    const right = yield* fieldFor(condition.right)
+    const sameScalar = Equivalence.strictEqual<string>()(left.metadata.scalar, right.metadata.scalar)
+    const leftNumeric = !Equivalence.strictEqual<string>()(left.metadata.scalar, "string")
+    const rightNumeric = !Equivalence.strictEqual<string>()(right.metadata.scalar, "string")
+    const numeric = leftNumeric && rightNumeric
+    const compatible = sameScalar || numeric
+
+    if (!compatible) {
+      return yield* definitionError(`join ${join.table} has incompatible physical scalars`)
+    }
+  })
+
+  const validateJoin = Effect.fn("ReadModel.join")(function* (seen: HashSet.HashSet<string>, join: Join) {
     yield* tableFor(join.table)
 
     if (HashSet.has(seen, join.table)) return yield* definitionError(`duplicate join alias ${join.table}`)
     if (Array.isReadonlyArrayEmpty(join.on)) return yield* definitionError(`join ${join.table} must contain at least one equality`)
 
-    yield* Effect.forEach(join.on, Effect.fn("ReadModel.joinCondition")(function* (condition) {
-      const [leftAlias] = condition.left
-      const [rightAlias] = condition.right
-      const leftJoined = Equivalence.strictEqual<string>()(leftAlias, join.table)
-      const rightJoined = Equivalence.strictEqual<string>()(rightAlias, join.table)
-      const prior = leftJoined ? rightAlias : leftAlias
-
-      if (!HashSet.has(seen, prior)) return yield* definitionError(`join ${join.table} references an alias not yet introduced`)
-
-      const left = yield* fieldFor(condition.left)
-      const right = yield* fieldFor(condition.right)
-      const sameScalar = Equivalence.strictEqual<string>()(left.metadata.scalar, right.metadata.scalar)
-      const leftNumeric = !Equivalence.strictEqual<string>()(left.metadata.scalar, "string")
-      const rightNumeric = !Equivalence.strictEqual<string>()(right.metadata.scalar, "string")
-      const numeric = leftNumeric && rightNumeric
-      const compatible = sameScalar || numeric
-
-      if (!compatible) return yield* definitionError(`join ${join.table} has incompatible physical scalars`)
-    }))
+    yield* Effect.forEach(join.on, (condition) => validateJoinCondition(join, seen, condition))
 
     return HashSet.add(seen, join.table)
-  }))
+  })
 
+  const introduced = yield* Effect.reduce(input.joins, initialAliases, validateJoin)
   const introducedCount = HashSet.size(introduced)
   const complete = Equivalence.strictEqual<number>()(introducedCount, tableNames.length)
 

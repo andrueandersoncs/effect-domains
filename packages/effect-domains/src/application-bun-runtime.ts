@@ -101,7 +101,7 @@ const databaseFilename = (name: string, configured: Option.Option<string>) => {
 
 
 
-const withApplicationRuntime = <
+const withApplicationRuntime = Effect.fn("ApplicationBun.withApplicationRuntime")(function* <
   App extends ApplicationIR,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
@@ -113,24 +113,17 @@ const withApplicationRuntime = <
   application: App,
   options: RuntimeOptions<Services, Initialize, Background>,
   use: Effect.Effect<UseSuccess, UseError, UseRequirements>,
-) => {
+) {
   const configuredFilename = Option.fromNullishOr(options.database.filename)
-  const filenameEffect = databaseFilename(application.name, configuredFilename)
+  const filename = yield* databaseFilename(application.name, configuredFilename)
+  const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
 
-  const run = Effect.flatMap(filenameEffect, (filename) => {
-    const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
-
-    const runtime = ApplicationRuntime.use(application, database, {
-      services: options.services,
-      initialize: options.initialize,
-      background: options.background,
-    }, use)
-
-    return runtime
-  })
-
-  return Effect.withSpan(run, "ApplicationBun.withApplicationRuntime")
-}
+  return yield* ApplicationRuntime.use(application, database, {
+    services: options.services,
+    initialize: options.initialize,
+    background: options.background,
+  }, use)
+})
 
 const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   App extends ApplicationIR,
@@ -141,8 +134,14 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
 >(application: App, options: RunOptions<Services, Initialize, Background, Routes>) {
   const port = yield* pipe(Config.port("PORT"), Config.withDefault(3000))
   const telemetryDisabled = Predicate.isBoolean(options.telemetry)
-  const uiConfigured = !Predicate.isBoolean(options.ui)
-  const uiAssets = uiConfigured ? yield* readApplicationUiAssets() : undefined
+  const ui = Option.fromUndefinedOr(options.ui)
+
+  const uiEnabled = Option.match(ui, {
+    onNone: Function.constant(false),
+    onSome: (value) => Predicate.isBoolean(value) ? value : true,
+  })
+
+  const uiAssets = uiEnabled ? yield* readApplicationUiAssets() : undefined
 
   const routes = yield* ApplicationRuntime.httpLayer(application, {
     routes: options.routes,
@@ -245,11 +244,11 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
 
   const serveCommand = Command.make("serve", {}, serveCommandHandler)
   const background = Option.fromNullishOr(options.background)
+  const hasBackground = Option.isSome(background)
 
-  const localCommands = Option.match(background, {
-    onNone: () => ["serve", "inspect"],
-    onSome: () => ["serve", "worker", "inspect"],
-  })
+  const localCommands = hasBackground
+    ? ["serve", "worker", "inspect"]
+    : ["serve", "inspect"]
 
   const inspect = makeInspectCommand(application, localCommands)
 
@@ -261,7 +260,7 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
 
   const workerCommand = Command.make("worker", {}, workerHandler)
 
-  const subcommands = Option.isSome(background)
+  const subcommands = hasBackground
     ? [serveCommand, workerCommand, inspect]
     : [serveCommand, inspect]
 
@@ -289,11 +288,9 @@ export const runApplication = Effect.fn("ApplicationBun.run")(function* <
     Layer.provide(FetchHttpClient.layer),
   )
 
-  const result = yield* pipe(
+  return yield* pipe(
     runCli(application, options),
     Effect.provide(BunServices.layer),
     Effect.provide(telemetry),
   )
-
-  return result
 })

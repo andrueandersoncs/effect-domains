@@ -5,16 +5,21 @@ import type { ApplicationIR } from "./application.ts"
 import {
   type ApplicationInfrastructureSpec,
   type BackupSchedule,
+  type BackgroundRuntime,
+  type HttpRuntime,
   type InfrastructureBinding,
   type InfrastructurePublication,
   type InfrastructureResource,
   type InfrastructureSpec,
   type RuntimeExecution,
+  type ScheduledRuntime,
   type TransactionSemantics,
   type WriterTopology,
 } from "./infrastructure.ts"
 
 type InfrastructureDefinition = InfrastructureSpec | ApplicationInfrastructureSpec<ApplicationIR>
+
+type RuntimeResource = HttpRuntime | BackgroundRuntime | ScheduledRuntime
 
 type InfrastructureCapability = Data.TaggedEnum<{
   RuntimeExecutionCapability: { readonly execution: RuntimeExecution }
@@ -65,31 +70,11 @@ export class ApplicationInfrastructureIR<App extends ApplicationIR> extends Data
 
 const sameResource = Equivalence.strictEqual<InfrastructureResource>()
 const containsResource = Array.containsWith(sameResource)
+
 const sameDurability = Equivalence.strictEqual<"ephemeral" | "persistent">()
 
-const NoBindings: ReadonlyArray<InfrastructureBinding> = []
-const noBindings = Function.constant(NoBindings)
 const NoPublications: ReadonlyArray<InfrastructurePublication> = []
 const noPublications = Function.constant(NoPublications)
-
-const bindings = (resource: InfrastructureResource) => pipe(
-  Match.value(resource),
-  Match.tagsExhaustive({
-    HttpRuntime: ({ bindings }) => bindings,
-    BackgroundRuntime: ({ bindings }) => bindings,
-    ScheduledRuntime: ({ bindings }) => bindings,
-    SqliteStore: noBindings,
-    DurableFilesystem: noBindings,
-    ObjectStore: noBindings,
-    Queue: noBindings,
-    Secret: noBindings,
-    Variable: noBindings,
-    PublicEndpoint: noBindings,
-    Domain: noBindings,
-    OtlpDestination: noBindings,
-    Extension: noBindings,
-  }),
-)
 
 const publications = (resource: InfrastructureResource) => pipe(
   Match.value(resource),
@@ -110,45 +95,29 @@ const publications = (resource: InfrastructureResource) => pipe(
   }),
 )
 
-const bindingTarget = (binding: InfrastructureBinding): InfrastructureResource => pipe(
-  Match.value(binding),
+const runtimeDependencies = (resource: RuntimeResource) =>
+  Array.map(resource.bindings, ({ target }) => target)
+
+const noDependencies = Function.constant<ReadonlyArray<InfrastructureResource>>([])
+
+const dependencies = (resource: InfrastructureResource): ReadonlyArray<InfrastructureResource> => pipe(
+  Match.value(resource),
   Match.tagsExhaustive({
-    ReadWriteSqliteBinding: ({ target }) => target,
-    ReadObjectStoreBinding: ({ target }) => target,
-    WriteObjectStoreBinding: ({ target }) => target,
-    ProduceQueueBinding: ({ target }) => target,
-    ConsumeQueueBinding: ({ target }) => target,
-    UseSecretBinding: ({ target }) => target,
-    UseVariableBinding: ({ target }) => target,
-    EmitTelemetryBinding: ({ target }) => target,
+    HttpRuntime: runtimeDependencies,
+    BackgroundRuntime: runtimeDependencies,
+    ScheduledRuntime: runtimeDependencies,
+    SqliteStore: noDependencies,
+    DurableFilesystem: noDependencies,
+    ObjectStore: noDependencies,
+    Queue: noDependencies,
+    Secret: noDependencies,
+    Variable: noDependencies,
+    PublicEndpoint: ({ target }) => [target],
+    Domain: ({ target }) => [target],
+    OtlpDestination: noDependencies,
+    Extension: noDependencies,
   }),
 )
-
-const dependencies = (resource: InfrastructureResource): ReadonlyArray<InfrastructureResource> => {
-  const resourceBindings = bindings(resource)
-  const bound = Array.map(resourceBindings, bindingTarget)
-  const boundDependencies = Function.constant(bound)
-  const noDependencies = Function.constant<ReadonlyArray<InfrastructureResource>>([])
-
-  return pipe(
-    Match.value(resource),
-    Match.tagsExhaustive({
-      HttpRuntime: boundDependencies,
-      BackgroundRuntime: boundDependencies,
-      ScheduledRuntime: boundDependencies,
-      SqliteStore: noDependencies,
-      DurableFilesystem: noDependencies,
-      ObjectStore: noDependencies,
-      Queue: noDependencies,
-      Secret: noDependencies,
-      Variable: noDependencies,
-      PublicEndpoint: ({ target }) => [target],
-      Domain: ({ target }) => [target],
-      OtlpDestination: noDependencies,
-      Extension: noDependencies,
-    }),
-  )
-}
 
 const DurableFilesystemCapabilities = [Capabilities.DurableFilesystemCapability()]
 const ObjectStorageCapabilities = [Capabilities.ObjectStorageCapability()]
@@ -177,50 +146,51 @@ const bindingCapabilities = (binding: InfrastructureBinding): ReadonlyArray<Infr
   }),
 )
 
-const resourceCapabilities = (resource: InfrastructureResource): ReadonlyArray<InfrastructureCapability> => {
-  const resourceBindings = bindings(resource)
-  const bound = Array.flatMap(resourceBindings, bindingCapabilities)
+const boundCapabilities = (resource: RuntimeResource) =>
+  Array.flatMap(resource.bindings, bindingCapabilities)
 
-  return pipe(
-    Match.value(resource),
-    Match.tagsExhaustive({
-      HttpRuntime: ({ execution }) => {
-        const runtime = Capabilities.RuntimeExecutionCapability({ execution })
+const resourceCapabilities = (resource: InfrastructureResource): ReadonlyArray<InfrastructureCapability> => pipe(
+  Match.value(resource),
+  Match.tagsExhaustive({
+    HttpRuntime: (resource) => {
+      const bound = boundCapabilities(resource)
+      const runtime = Capabilities.RuntimeExecutionCapability({ execution: resource.execution })
 
-        return Array.prepend(bound, runtime)
-      },
-      BackgroundRuntime: ({ execution }) => {
-        const runtime = Capabilities.RuntimeExecutionCapability({ execution })
-        const background = Capabilities.BackgroundLifetimeCapability()
+      return Array.prepend(bound, runtime)
+    },
+    BackgroundRuntime: (resource) => {
+      const bound = boundCapabilities(resource)
+      const runtime = Capabilities.RuntimeExecutionCapability({ execution: resource.execution })
+      const background = Capabilities.BackgroundLifetimeCapability()
 
-        return Array.appendAll([runtime, background], bound)
-      },
-      ScheduledRuntime: ({ execution }) => {
-        const runtime = Capabilities.RuntimeExecutionCapability({ execution })
-        const scheduled = Capabilities.ScheduledExecutionCapability()
+      return Array.appendAll([runtime, background], bound)
+    },
+    ScheduledRuntime: (resource) => {
+      const bound = boundCapabilities(resource)
+      const runtime = Capabilities.RuntimeExecutionCapability({ execution: resource.execution })
+      const scheduled = Capabilities.ScheduledExecutionCapability()
 
-        return Array.appendAll([runtime, scheduled], bound)
-      },
-      SqliteStore: ({ durability, transactions, writerTopology, lifecycle }) => {
-        const transaction = Capabilities.RelationalTransactionsCapability({ transactions })
-        const durable = sameDurability(durability, "persistent") ? [Capabilities.DurableFilesystemCapability()] : []
-        const writer = Capabilities.WriterTopologyCapability({ topology: writerTopology })
-        const backups = Capabilities.BackupScheduleCapability({ schedule: lifecycle.backups })
+      return Array.appendAll([runtime, scheduled], bound)
+    },
+    SqliteStore: ({ durability, transactions, writerTopology, lifecycle }) => {
+      const transaction = Capabilities.RelationalTransactionsCapability({ transactions })
+      const durable = sameDurability(durability, "persistent") ? [Capabilities.DurableFilesystemCapability()] : []
+      const writer = Capabilities.WriterTopologyCapability({ topology: writerTopology })
+      const backups = Capabilities.BackupScheduleCapability({ schedule: lifecycle.backups })
 
-        return pipe([transaction], Array.appendAll(durable), Array.append(writer), Array.append(backups))
-      },
-      DurableFilesystem: Function.constant(DurableFilesystemCapabilities),
-      ObjectStore: Function.constant(ObjectStorageCapabilities),
-      Queue: ({ delivery }) => [Capabilities.QueueCapability({ delivery })],
-      Secret: Function.constant(SecretCapabilities),
-      Variable: noCapabilities,
-      PublicEndpoint: Function.constant(PublicHttpCapabilities),
-      Domain: Function.constant(CustomDomainCapabilities),
-      OtlpDestination: Function.constant(OtlpCapabilities),
-      Extension: ({ namespace, version }) => [Capabilities.ExtensionCapability({ namespace, version })],
-    }),
-  )
-}
+      return pipe([transaction], Array.appendAll(durable), Array.append(writer), Array.append(backups))
+    },
+    DurableFilesystem: Function.constant(DurableFilesystemCapabilities),
+    ObjectStore: Function.constant(ObjectStorageCapabilities),
+    Queue: ({ delivery }) => [Capabilities.QueueCapability({ delivery })],
+    Secret: Function.constant(SecretCapabilities),
+    Variable: noCapabilities,
+    PublicEndpoint: Function.constant(PublicHttpCapabilities),
+    Domain: Function.constant(CustomDomainCapabilities),
+    OtlpDestination: Function.constant(OtlpCapabilities),
+    Extension: ({ namespace, version }) => [Capabilities.ExtensionCapability({ namespace, version })],
+  }),
+)
 
 const capabilityKey = (capability: InfrastructureCapability) => pipe(
   Match.value(capability),

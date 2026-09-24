@@ -96,8 +96,8 @@ const dependencySet = (
     Equivalence.strictEqual<Table>(),
   )
 
-  const frozenTables = Object.freeze([...tables])
-  const frozenReadModels = Object.freeze([...readModels])
+  const frozenTables = Object.freeze(tables)
+  const frozenReadModels = Object.freeze(readModels)
 
   return new CommandDependencySet({
     tables: frozenTables,
@@ -276,24 +276,19 @@ const compileCommand = <
   const transaction = Option.fromNullishOr(definition.transaction)
   const transactional = Option.getOrElse(transaction, Function.constant(false))
 
+  type Invocation = Effect.Effect<
+    Success["Type"],
+    Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
+    HandlerRequirements<Implementation>
+  >
+
   const invokeUnprotected = narrowContract<
-    (input: PayloadType<Payload>) => Effect.Effect<
-      Success["Type"],
-      Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
-      HandlerRequirements<Implementation>
-    >,
+    (input: PayloadType<Payload>) => Invocation,
     typeof implementation
   >(implementation)
 
   const invokeProtected = narrowContract<
-    (
-      input: PayloadType<Payload>,
-      subject: SubjectType<Policy>
-    ) => Effect.Effect<
-      Success["Type"],
-      Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
-      HandlerRequirements<Implementation>
-    >,
+    (input: PayloadType<Payload>, subject: SubjectType<Policy>) => Invocation,
     typeof implementation
   >(implementation)
 

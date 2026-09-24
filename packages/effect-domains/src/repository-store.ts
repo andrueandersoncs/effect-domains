@@ -3,9 +3,6 @@ import { Policy } from "./policy.ts"
 import type { Table } from "./table-relations.ts"
 import type { StructValue } from "./domain.ts"
 
-
-
-
 export class RepositoryOrder extends Data.Class<Readonly<{
   field: string
   direction: "asc" | "desc"
@@ -31,7 +28,6 @@ export class RepositoryAccess extends Data.Class<Readonly<{
   subject: StructValue
 }>> {}
 
-
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()(
   "RepositoryError",
   { resource: Schema.String },
@@ -49,7 +45,6 @@ export class ResourceNotFound extends Schema.TaggedError<ResourceNotFound>()(
     return `${this.resource} has no record with key ${this.key}`
   }
 }
-
 
 export class UniqueViolation extends Schema.TaggedError<UniqueViolation>()(
   "UniqueViolation",

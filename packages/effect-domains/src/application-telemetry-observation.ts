@@ -34,8 +34,6 @@ const rpcServerDuration = Metric.histogram("rpc.server.call.duration", {
   attributes: { unit: "s" },
 })
 
-const sampledByValue = (rate: number, value: number) => value < rate
-
 const randomSample = (rate: number, crypto: Pick<Crypto, "getRandomValues">) => {
   const disabled = rate <= 0
   const complete = rate >= 1
@@ -49,7 +47,7 @@ const randomSample = (rate: number, crypto: Pick<Crypto, "getRandomValues">) => 
 
   const normalized = (value[0] ?? 0) / 0x1_0000_0000
 
-  return sampledByValue(rate, normalized)
+  return normalized < rate
 }
 
 const taggedFailure = (exit: Exit.Exit<unknown, unknown>) => {
@@ -76,20 +74,14 @@ const observeRpcSpan = (
   exit: Exit.Exit<unknown, unknown>,
 ) => {
   const method = span.name.slice("RpcServer.".length)
+  const methodAttribute = Record.singleton("rpc.method", method)
+  const baseAttributes = Record.set(methodAttribute, "rpc.system.name", "effect")
+  const failure = taggedFailure(exit)
 
-  const baseAttributes = pipe(
-    Record.empty<string, string>(),
-    (attributes) => Record.set(attributes, "rpc.method", method),
-    (attributes) => Record.set(attributes, "rpc.system.name", "effect"),
-  )
-
-  const attributes = pipe(
-    taggedFailure(exit),
-    Option.match({
-      onNone: Function.constant(baseAttributes),
-      onSome: (type) => Record.set(baseAttributes, "error.type", type),
-    }),
-  )
+  const attributes = Option.match(failure, {
+    onNone: Function.constant(baseAttributes),
+    onSome: (type) => Record.set(baseAttributes, "error.type", type),
+  })
 
   const ended = Predicate.isTagged(span.status, "Ended")
   const duration = ended ? span.status.endTime - startTime : 0n
@@ -142,25 +134,22 @@ const withTelemetryTracer = <ROut, E, RIn>(
     onSome: (rate) => rate >= 1,
   })
 
-  const samplingConfigured = !completeSampling
-  const traceEverything = !samplingConfigured
   const noRpcObservation = !observeRpc
-  const unnecessary = traceEverything && noRpcObservation
+  const unnecessary = completeSampling && noRpcObservation
 
   if (unnecessary) return tracerLayer
 
   const makeTelemetryTracer = (tracer: Tracer.Tracer): Tracer.Tracer => {
     const wrapSpan = (delegate: Tracer.Tracer["span"]) => {
       const createSpan = (spanOptions: Parameters<Tracer.Tracer["span"]>[0]) => {
-        const inherited = Option.isSome(spanOptions.parent)
+        const rootRequested = spanOptions.sampled && Option.isNone(spanOptions.parent)
 
-        const sampleRoot = Option.match(sampleRate, {
+        const sampleRoot = rootRequested ? Option.match(sampleRate, {
           onNone: Function.constant(true),
           onSome: (rate) => randomSample(rate, crypto),
-        })
+        }) : true
 
-        const sampledRoot = spanOptions.sampled && sampleRoot
-        const sampled = inherited ? spanOptions.sampled : sampledRoot
+        const sampled = spanOptions.sampled && sampleRoot
         const configured = Struct.evolve(spanOptions, { sampled: Function.constant(sampled) })
         const span = delegate.call(tracer, configured)
         const serverRpc = span.name.startsWith("RpcServer.")
@@ -217,14 +206,9 @@ const httpMiddleware = Effect.fn("ApplicationTelemetry.httpMiddleware")(function
     const end = yield* Clock.currentTimeNanos
     const status = Exit.isSuccess(exit) ? exit.value.status : 500
     const statusCode = String(status)
-
-    const baseAttributes = pipe(
-      Record.empty<string, string>(),
-      (attributes) => Record.set(attributes, "http.request.method", method),
-      (attributes) => Record.set(attributes, "http.response.status_code", statusCode),
-      (attributes) => Record.set(attributes, "url.scheme", scheme),
-    )
-
+    const methodAttribute = Record.singleton("http.request.method", method)
+    const statusAttributes = Record.set(methodAttribute, "http.response.status_code", statusCode)
+    const baseAttributes = Record.set(statusAttributes, "url.scheme", scheme)
     const failed = status >= 400
     const errorType = `http_${Math.floor(status / 100)}xx`
 

@@ -178,31 +178,26 @@ export const prepareResource = <
     Effect.runSync,
   )
 
-  const isImplicitDefault = (field: TableField) => {
+  const needsImplicitDefault = (field: TableField) => {
     const notIdentifier = !Equal.equals(field.name, table.identifier)
-
-    return field.nullable && notIdentifier
-  }
-
-  const lacksConfiguredValue = (field: TableField) => {
     const defaulted = Record.has(declaredDefaults, field.name)
     const generated = Record.has(declaredGenerated, field.name)
     const subjectBound = Record.has(subjectBindings, field.name)
-    const generatedOrDefaulted = defaulted || generated
-    const configured = generatedOrDefaulted || subjectBound
+    const eligible = field.nullable && notIdentifier
+    const configured = defaulted || generated
+    const configuredForCreate = configured || subjectBound
+    const unconfigured = !configuredForCreate
 
-    return !configured
+    return eligible && unconfigured
   }
 
-  const defaultEntry = (field: TableField) => [field.name, null] as const
-
-  const implicitDefaultFields = pipe(
+  const implicitDefaults = pipe(
     table.fields,
-    Array.filter(isImplicitDefault),
-    Array.filter(lacksConfiguredValue),
+    Array.filter(needsImplicitDefault),
+    Array.map((field) => [field.name, null] as const),
+    Record.fromEntries,
   )
 
-  const implicitDefaults = pipe(implicitDefaultFields, Array.map(defaultEntry), Record.fromEntries)
   const defaults = Struct.assign(implicitDefaults, declaredDefaults)
 
   const versionGenerated = Predicate.isUndefined(version)

@@ -140,35 +140,20 @@ const InfrastructureInspectionSchema = Schema.Struct({
 
 interface InfrastructureInspection extends Schema.Schema.Type<typeof InfrastructureInspectionSchema> {}
 
-const binding = (value: InfrastructureBinding) => pipe(
-  Match.value(value),
-  Match.tagsExhaustive({
-    ReadWriteSqliteBinding: ({ target }) => BindingInspectionSchema.make({ kind: "ReadWriteSqlite", target: target.id }),
-    ReadObjectStoreBinding: ({ target }) => BindingInspectionSchema.make({ kind: "ReadObjectStore", target: target.id }),
-    WriteObjectStoreBinding: ({ target }) => BindingInspectionSchema.make({ kind: "WriteObjectStore", target: target.id }),
-    ProduceQueueBinding: ({ target }) => BindingInspectionSchema.make({ kind: "ProduceQueue", target: target.id }),
-    ConsumeQueueBinding: ({ target }) => BindingInspectionSchema.make({ kind: "ConsumeQueue", target: target.id }),
-    UseSecretBinding: ({ target }) => BindingInspectionSchema.make({ kind: "UseSecret", target: target.id }),
-    UseVariableBinding: ({ target }) => BindingInspectionSchema.make({ kind: "UseVariable", target: target.id }),
-    EmitTelemetryBinding: ({ target }) => BindingInspectionSchema.make({ kind: "EmitTelemetry", target: target.id }),
-  }),
-)
+const binding = (value: InfrastructureBinding) => BindingInspectionSchema.make({
+  kind: value._tag.replace("Binding", ""),
+  target: value.target.id,
+})
 
 const publication = (value: InfrastructurePublication) => pipe(
   Match.value(value),
   Match.tagsExhaustive({
-    RpcPublication: (publication) => RpcPublicationInspectionSchema.make({
-      kind: "Rpc",
-      path: Infrastructure.publicationPath(publication),
-    }),
-    McpPublication: (publication) => McpPublicationInspectionSchema.make({
-      kind: "Mcp",
-      path: Infrastructure.publicationPath(publication),
-    }),
-    UiPublication: (publication) => UiPublicationInspectionSchema.make({
+    RpcPublication: ({ path }) => RpcPublicationInspectionSchema.make({ kind: "Rpc", path }),
+    McpPublication: ({ path }) => McpPublicationInspectionSchema.make({ kind: "Mcp", path }),
+    UiPublication: ({ path, presentation }) => UiPublicationInspectionSchema.make({
       kind: "Ui",
-      path: Infrastructure.publicationPath(publication),
-      presentation: publication.presentation,
+      path,
+      presentation,
     }),
   }),
 )
@@ -234,27 +219,14 @@ const inspectResource = (value: InfrastructureResource): unknown => pipe(
       id: resource.id,
       configurationKey: Infrastructure.configurationKey(resource),
     }),
-    Variable: (resource) => {
-      const defaultValue = Infrastructure.variableDefaultValue(resource)
-      const defaults = Record.getSomes({ defaultValue })
-
-      return VariableInspectionSchema.make({
-        kind: "Variable",
-        id: resource.id,
-        configurationKey: Infrastructure.configurationKey(resource),
-        ...defaults,
-      })
-    },
-    PublicEndpoint: (resource) => {
-      const target = Infrastructure.target(resource)
-
-      return TargetInspectionSchema.make({ kind: "PublicEndpoint", id: resource.id, target: target.id })
-    },
-    Domain: (resource) => {
-      const target = Infrastructure.target(resource)
-
-      return DomainInspectionSchema.make({ kind: "Domain", id: resource.id, name: resource.name, target: target.id })
-    },
+    Variable: (resource) => VariableInspectionSchema.make({
+      kind: "Variable",
+      id: resource.id,
+      configurationKey: resource.configurationKey,
+      ...Record.getSomes({ defaultValue: resource.defaultValue }),
+    }),
+    PublicEndpoint: ({ id, target }) => TargetInspectionSchema.make({ kind: "PublicEndpoint", id, target: target.id }),
+    Domain: ({ id, name, target }) => DomainInspectionSchema.make({ kind: "Domain", id, name, target: target.id }),
     OtlpDestination: (resource) => ConfigurationInspectionSchema.make({
       kind: "OtlpDestination",
       id: resource.id,

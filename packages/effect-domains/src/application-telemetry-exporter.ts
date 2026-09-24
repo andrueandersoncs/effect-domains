@@ -5,49 +5,35 @@ import { equalsFalse, equalsProtocol, environment, IngestPathSchema, type OtlpTr
 import { withTelemetryTracer } from "./application-telemetry-observation.ts"
 import { TelemetryOptionsError, telemetryOptionsError } from "./telemetry-options-error.ts"
 
-const validateValue = Effect.fn("ApplicationTelemetry.validateValue")(function* <S extends Schema.Top>(
-  schema: S,
-  value: Option.Option<unknown>,
-) {
-  if (Option.isNone(value)) return
-
-  yield* pipe(
-    Schema.decodeUnknownEffect(schema)(value.value),
-    Effect.mapError(telemetryOptionsError),
-    Effect.asVoid,
-  )
-})
-
 const validateOptional = Effect.fn("ApplicationTelemetry.validateOptional")(function* <S extends Schema.Top>(
   schema: S,
   value: unknown,
 ) {
   const optional = Option.fromNullishOr(value)
 
-  return yield* validateValue(schema, optional)
+  if (Option.isNone(optional)) return
+
+  yield* pipe(
+    Schema.decodeUnknownEffect(schema)(optional.value),
+    Effect.mapError(telemetryOptionsError),
+    Effect.asVoid,
+  )
 })
 
 const invalidDuration = () => TelemetryOptionsError.make({ reason: "telemetry duration must be a valid Duration.Input" })
-
-const validateDuration = Effect.fn("ApplicationTelemetry.validateDuration")(function* (
-  optional: Option.Option<Duration.Input>,
-) {
-  if (Option.isNone(optional)) return
-
-  const parsed = Duration.fromInput(optional.value)
-  const duration = yield* Effect.fromOption(parsed, invalidDuration)
-  const millis = Duration.toMillis(duration)
-  const measured = Option.some(millis)
-
-  yield* validateValue(PositiveFiniteSchema, measured)
-})
 
 const validateDurationInput = Effect.fn("ApplicationTelemetry.validateDurationInput")(function* (
   value: unknown,
 ) {
   const optional = Option.fromNullishOr(value)
 
-  yield* validateDuration(optional)
+  if (Option.isNone(optional)) return
+
+  const parsed = Duration.fromInput(optional.value)
+  const duration = yield* Effect.fromOption(parsed, invalidDuration)
+  const millis = Duration.toMillis(duration)
+
+  yield* validateOptional(PositiveFiniteSchema, millis)
 })
 
 const validateOptionValues = Effect.fn("ApplicationTelemetry.validateOptionValues")(function* <S extends Schema.Top>(

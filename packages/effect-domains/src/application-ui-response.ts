@@ -14,7 +14,6 @@ const ErrorEnvelopeSchema = Schema.Struct({
 
 interface ErrorEnvelope extends Schema.Schema.Type<typeof ErrorEnvelopeSchema> {}
 
-
 const response = Effect.fn("ApplicationUi.response")(function* (
   status: number,
   body: Schema.Json,

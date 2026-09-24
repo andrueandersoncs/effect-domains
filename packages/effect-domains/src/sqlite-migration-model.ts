@@ -148,7 +148,13 @@ const emptySnapshot = schemaSnapshot([])
 const snapshotFromTable = flow(Array.map(Table.snapshot), schemaSnapshot)
 const declaredIndexes = (table: TableSnapshot) => table.relations?.indexes ?? []
 const same = Equivalence.strictEqual<unknown>()
-const uniqueCount = flow(HashSet.fromIterable<string>, HashSet.size)
+
+const namesAreUnique = (names: ReadonlyArray<string>) => {
+  const distinct = HashSet.fromIterable(names)
+  const count = HashSet.size(distinct)
+
+  return same(count, names.length)
+}
 
 const migrationFailure = (reason: string) =>
   MigrationError.make({ reason })
@@ -161,9 +167,8 @@ const relationFailure = flow(errorMessage, migrationFailure)
 
 const validateSnapshot = Effect.fn("SqliteMigrations.validateSnapshot")(function* (snapshot: SqliteSchemaSnapshot) {
   const tableNames = Array.map(snapshot.tables, Struct.get("name"))
-  const tableCount = uniqueCount(tableNames)
 
-  if (!same(tableCount, tableNames.length)) return yield* migrationFailure("table names must be unique")
+  if (!namesAreUnique(tableNames)) return yield* migrationFailure("table names must be unique")
 
   yield* Effect.forEach(snapshot.tables, Effect.fn("SqliteMigrations.validateTable")(function* (table) {
     const names = Array.map(table.fields, Struct.get("name"))
@@ -171,9 +176,7 @@ const validateSnapshot = Effect.fn("SqliteMigrations.validateSnapshot")(function
 
     if (Array.contains(allNames, "")) return yield* migrationFailure("table names, field names and identifiers must not be empty")
 
-    const count = uniqueCount(names)
-
-    if (!same(count, names.length)) return yield* migrationFailure(`table ${table.name} contains duplicate fields`)
+    if (!namesAreUnique(names)) return yield* migrationFailure(`table ${table.name} contains duplicate fields`)
 
     const isIdentifier = (field: TableField) => same(field.name, table.identifier)
     const identifier = Array.findFirst(table.fields, isIdentifier)
@@ -216,12 +219,14 @@ const validateRebuild = (previous: SqliteSchemaSnapshot, target: SqliteSchemaSna
   Effect.fn("SqliteMigrations.validateRebuild")(function* (rebuild: SqliteRebuildTable) {
     const table = yield* tableFor(target, rebuild.table, "rebuild")
     const columns = copiedColumns(rebuild.copies)
-    const columnCount = uniqueCount(columns)
+    const copied = HashSet.fromIterable(columns)
+    const copiedCount = HashSet.size(copied)
 
-    if (!same(columnCount, columns.length)) return yield* migrationFailure(`rebuild ${rebuild.table} copies a column more than once`)
+    if (!same(copiedCount, columns.length)) return yield* migrationFailure(`rebuild ${rebuild.table} copies a column more than once`)
 
     const targetNames = Array.map(table.fields, Struct.get("name"))
-    const invalidTargetColumn = (column: string) => !Array.contains(targetNames, column)
+    const targetColumns = HashSet.fromIterable(targetNames)
+    const invalidTargetColumn = (column: string) => !HashSet.has(targetColumns, column)
     const invalid = Array.some(columns, invalidTargetColumn)
 
     if (invalid) return yield* migrationFailure(`rebuild ${rebuild.table} copies an unknown target column`)
@@ -233,9 +238,15 @@ const validateRebuild = (previous: SqliteSchemaSnapshot, target: SqliteSchemaSna
       onSome: flow(Struct.get("fields"), Array.map(Struct.get("name"))),
     })
 
-    const unlisted = (column: string) => !Array.contains(columns, column)
-    const unknownPrevious = (column: string) => !Array.contains(priorNames, column)
-    const missingColumn = (column: string) => unlisted(column) && unknownPrevious(column)
+    const priorColumns = HashSet.fromIterable(priorNames)
+
+    const missingColumn = (column: string) => {
+      const unlisted = !HashSet.has(copied, column)
+      const unknownPrevious = !HashSet.has(priorColumns, column)
+
+      return unlisted && unknownPrevious
+    }
+
     const missing = Array.findFirst(targetNames, missingColumn)
 
     if (Option.isSome(missing)) return yield* migrationFailure(`rebuild ${rebuild.table} must explicitly copy new column ${missing.value}`)
@@ -297,9 +308,8 @@ const historySnapshot = (migrations: ReadonlyArray<SqliteMigration>, index: numb
 
 const validateHistory = Effect.fn("SqliteMigrations.validateHistory")(function* (migrations: ReadonlyArray<SqliteMigration>) {
   const ids = Array.map(migrations, Struct.get("id"))
-  const count = uniqueCount(ids)
 
-  if (!same(count, ids.length)) return yield* migrationFailure("migration ids must be unique non-empty strings")
+  if (!namesAreUnique(ids)) return yield* migrationFailure("migration ids must be unique non-empty strings")
 
   yield* Effect.forEach(migrations, Effect.fn("SqliteMigrations.validateHistoryEntry")(function* (migration, index) {
     const previous = historySnapshot(migrations, index - 1)

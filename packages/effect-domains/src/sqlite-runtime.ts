@@ -16,10 +16,8 @@ import { SchemaStore } from "./migrations.ts"
 import { sqliteMigrationStore } from "./sqlite-migrations.ts"
 import type { SqliteMigration } from "./sqlite-migration-model.ts"
 import type { Table } from "./table-relations.ts"
-import { SqliteList } from "./sqlite-list.ts"
+import { equalityClause, SqliteList } from "./sqlite-list.ts"
 import type { StructValue } from "./domain.ts"
-
-
 
 class PrivateDatabaseConflict extends Schema.TaggedError<PrivateDatabaseConflict>()(
   "PrivateDatabaseConflict",
@@ -34,17 +32,10 @@ const emptyGuard = Record.empty<string, unknown>()
 
 const absentPolicyValue = Option.none<StructValue>()
 
-const whereFragment = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
-  unknownEquals(value, null) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
-
-
-
-
 
 const transactionFailure = Effect.fn("SqliteRuntime.transactionFailure")(function* (_cause: SqlError.SqlError) {
   return yield* repositoryFailure("transaction")
 })
-
 
 const errorMessage = (value: unknown) => {
   if (value instanceof Error) return Option.some(value.message)
@@ -68,12 +59,9 @@ const isUniqueViolation = (
 
 const uniqueConstraint = (table: Table, cause: SqlError.SqlError) => {
   const message = pipe(errorMessage(cause.reason.cause), Option.getOrElse(Function.constant(cause.message)))
-  const uniqueReason = isUniqueViolation(cause.reason)
-  const sqliteUnique = /(?:UNIQUE|PRIMARY KEY) constraint failed:/i.test(message)
-  const recognizedUniqueViolation = uniqueReason || sqliteUnique
-  const unsupportedViolation = !recognizedUniqueViolation
+  const recognized = isUniqueViolation(cause.reason) || /(?:UNIQUE|PRIMARY KEY) constraint failed:/i.test(message)
 
-  if (unsupportedViolation) return Option.none<UniqueViolation>()
+  if (!recognized) return Option.none<UniqueViolation>()
 
   const violation = UniqueViolation.make({ resource: table.name })
 
@@ -162,7 +150,7 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
       const key = value[table.identifier]
       const policy = yield* policyBinding(table, access)
       const guardEntries = Record.toEntries(guard)
-      const guards = Array.map(guardEntries, whereFragment(sqlClient))
+      const guards = Array.map(guardEntries, equalityClause(sqlClient, sqlClient))
       const conditions = [policy, sqlClient`${sqlClient(table.identifier)} = ${key}`, ...guards]
 
       const rows = yield* pipe(
@@ -200,7 +188,6 @@ const makeRepositoryStore = Effect.fn("RepositoryStore.make")(function* (sqlClie
   })
 })
 
-
 const migrationStore = (
   options: Readonly<{ migrations: ReadonlyArray<SqliteMigration> }>,
 ) => (sql: SqlClient.SqlClient) => sqliteMigrationStore(sql, options.migrations)
@@ -213,7 +200,6 @@ const enableForeignKeys = Effect.fn("SqliteRuntime.enableForeignKeys")(function*
     Effect.asVoid,
   )
 })
-
 
 const relativeParents = HashMap.make([".", true], ["", true])
 

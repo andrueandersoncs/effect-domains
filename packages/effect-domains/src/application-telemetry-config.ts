@@ -1,4 +1,4 @@
-import { Array, Config, ConfigProvider, Duration, Effect, Equivalence, Function, Match, Option, Predicate, Record, Schema, flow, pipe } from "effect"
+import { Array, Config, ConfigProvider, Duration, Effect, Equivalence, Function, Option, Predicate, Record, Schema, flow, pipe } from "effect"
 import type { LogLevel } from "effect"
 import * as Headers from "effect/unstable/http/Headers"
 import { OtlpMetrics, OtlpTracer } from "effect/unstable/observability"
@@ -83,6 +83,12 @@ const SampleRateSchema = Schema.Finite.check(Schema.isBetween({ minimum: 0, maxi
 type Signal = "TRACES" | "METRICS" | "LOGS"
 type SignalName = Lowercase<Signal>
 
+const signalNames: Record<Signal, SignalName> = {
+  TRACES: "traces",
+  METRICS: "metrics",
+  LOGS: "logs",
+}
+
 const UrlSchema = Schema.instanceOf(URL)
 
 class OtlpTransport extends Schema.Class<OtlpTransport>("OtlpTransport")({
@@ -112,18 +118,9 @@ const batchSize = (size: Option.Option<number>) => pipe(
 
 const signalEndpoint = (base: string, signal: Signal) => {
   const url = new URL(base)
-  const trailingSlash = url.pathname.endsWith("/")
-  const separator = trailingSlash ? "" : "/"
+  const separator = url.pathname.endsWith("/") ? "" : "/"
 
-  const name = pipe(
-    Match.value(signal),
-    Match.when("TRACES", Function.constant("traces" as const)),
-    Match.when("METRICS", Function.constant("metrics" as const)),
-    Match.when("LOGS", Function.constant("logs" as const)),
-    Match.exhaustive,
-  )
-
-  url.pathname += `${separator}v1/${name}`
+  url.pathname += `${separator}v1/${signalNames[signal]}`
 
   return url.href
 }
@@ -197,8 +194,13 @@ const signalTransport = Effect.fn("ApplicationTelemetry.signalTransport")(functi
     Effect.provideService(ConfigProvider.ConfigProvider, provider),
   )
 
-  const normalizedExporters = Array.map(exporters, normalizeExporter)
-  const enabled = Array.contains(normalizedExporters, "otlp")
+  const isOtlpExporter = (exporter: string) => {
+    const normalized = normalizeExporter(exporter)
+
+    return Equivalence.strictEqual<string>()(normalized, "otlp")
+  }
+
+  const enabled = Array.some(exporters, isOtlpExporter)
 
   if (!enabled) return Option.none<OtlpTransport>()
 
@@ -227,13 +229,11 @@ const signalTransport = Effect.fn("ApplicationTelemetry.signalTransport")(functi
     Effect.provideService(ConfigProvider.ConfigProvider, provider),
   )
 
-  const signalOptions = pipe(
-    Match.value(signal),
-    Match.when("TRACES", Function.constant(options.traces)),
-    Match.when("METRICS", Function.constant(options.metrics)),
-    Match.when("LOGS", Function.constant(options.logs)),
-    Match.exhaustive,
-  )
+  const signalOptions = {
+    TRACES: options.traces,
+    METRICS: options.metrics,
+    LOGS: options.logs,
+  }[signal]
 
   const explicitHeaders = Predicate.isObject(signalOptions) ? signalOptions.headers : options.headers
   const environmentHeaders = Headers.fromInput(configuredHeaders)

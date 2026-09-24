@@ -70,6 +70,7 @@ class ApplicationDefinitionError extends Schema.TaggedError<ApplicationDefinitio
   }
 }
 
+
 class CompiledPart extends Data.Class<Readonly<{
   bundles: ReadonlyArray<RpcBundle>
   resources: ReadonlyArray<CompiledResource>
@@ -208,7 +209,7 @@ const validateApplication = Effect.fn("Application.validate")(function* (
     return HashSet.add(names, procedure._tag)
   }))
 
-  return { tables, procedures }
+  return tables
 })
 
 const compileParts = (
@@ -258,12 +259,6 @@ const compileParts = (
   return Array.flatMap(parts, compileNestedParts)
 }
 
-interface CompileApplication {
-  <const Definition extends ApplicationSpec>(
-    definition: Definition,
-  ): Effect.Effect<ApplicationIRFor<Definition>, ApplicationDefinitionError>
-  (definition: ApplicationSpec): Effect.Effect<ApplicationIR, ApplicationDefinitionError>
-}
 
 interface ApplicationOperations {
   define<const Parts extends ReadonlyArray<ApplicationPart>>(
@@ -305,7 +300,7 @@ export const Application: ApplicationOperations = {
 
     const groups = Array.map(bundles, Struct.get("group"))
 
-    const validation = yield* pipe(
+    const tables = yield* pipe(
       validateApplication(resources, groups, commands),
       Effect.mapError(({ message }) => ApplicationDefinitionError.make({ reason: message })),
     )
@@ -320,7 +315,7 @@ export const Application: ApplicationOperations = {
       resources,
       commands,
       featureFlags,
-      tables: validation.tables,
+      tables,
     })
   }),
   prepare: Effect.fn("Application.prepare")(function* (

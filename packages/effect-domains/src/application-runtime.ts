@@ -84,14 +84,11 @@ class ResolvedHttpOptions<Routes extends RuntimeLayer> extends Data.Class<Readon
 const resolveEndpoint = (
   setting: Option.Option<false | HttpEndpointOptions>,
   defaultPath: `/${string}`,
-) => {
-  const defaultEndpoint = Option.some(defaultPath)
-
-  return Option.match(setting, {
-    onNone: Function.constant(defaultEndpoint),
+) =>
+  Option.match(setting, {
+    onNone: () => Option.some(defaultPath),
     onSome: (value) => Predicate.isBoolean(value) ? Option.none() : Option.some(value.path),
   })
-}
 
 const resolveTelemetry = (setting: Option.Option<false | TelemetryOptions>) =>
   Option.match(setting, {

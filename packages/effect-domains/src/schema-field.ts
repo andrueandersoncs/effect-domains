@@ -1,4 +1,4 @@
-import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, Tuple, flow, pipe } from "effect"
+import { Array, Data, Equivalence, Function, HashSet, Match, Option, Predicate, Schema, SchemaAST, Struct, flow, pipe } from "effect"
 
 /** Retain original AST evidence because canonical and physical interpretations are different. */
 export type ScalarF<A> = Data.TaggedEnum<{
@@ -47,17 +47,20 @@ const project = (ast: SchemaAST.AST, storage: boolean): ScalarF<SchemaAST.AST> =
     }),
     Match.tag("Union", unionNode),
     Match.tag("Arrays", (ast) => {
-      const single = Equivalence.strictEqual<number>()(ast.rest.length, 1)
-      const homogeneous = Array.isReadonlyArrayEmpty(ast.elements) && single
+      const homogeneous = Array.isReadonlyArrayEmpty(ast.elements)
+        && Equivalence.strictEqual<number>()(ast.rest.length, 1)
+
       const canonical = !storage
       const supported = canonical && homogeneous
 
-      if (!supported) return Nodes.Unsupported({ ast })
-
-      const first = Array.head(ast.rest)
-      const value = Option.getOrThrow(first)
-
-      return Nodes.Collection({ ast, value })
+      return pipe(
+        Array.head(ast.rest),
+        Option.filter(Function.constant(supported)),
+        Option.match({
+          onNone: () => Nodes.Unsupported({ ast }),
+          onSome: (value) => Nodes.Collection({ ast, value }),
+        }),
+      )
     }),
     Match.orElse((ast) => Nodes.Leaf({ ast })),
   )
@@ -96,7 +99,7 @@ const flattenChecks = (check: SchemaAST.Check<unknown>): ReadonlyArray<SchemaAST
 
 export const scalarChecks = (ast: SchemaAST.AST) => Array.flatMap(ast.checks ?? [], flattenChecks)
 
-export type FieldCategory = "string" | "number" | "boolean"
+type FieldCategory = "string" | "number" | "boolean"
 
 /** Canonical scalar evidence shared by authorization, persistence, and read models. */
 export class FieldIR extends Data.Class<Readonly<{
@@ -158,53 +161,39 @@ const sameCategory = (
 const combineDescriptions = (
   descriptions: ReadonlyArray<Option.Option<FieldIR>>,
 ) => {
-  const merge = (left: FieldIR, right: FieldIR) => {
-    const same = sameCategory(left.category, right.category)
-    const scalar = !right.collection
-    const compatible = scalar && same
+  const initial: Option.Option<FieldIR> = Option.some(neutralDescription)
 
-    if (!compatible) return Option.none<FieldIR>()
+  return Array.reduce<Option.Option<FieldIR>, Option.Option<FieldIR>>(
+    descriptions,
+    initial,
+    (state, next) => pipe(
+      Option.all([state, next] as const),
+      Option.filter(([left, right]) => {
+        const scalar = !right.collection
+        const compatible = sameCategory(left.category, right.category)
 
-    const category = Option.orElse(left.category, () => right.category)
+        return scalar && compatible
+      }),
+      Option.map(([left, right]) => {
+        const category = Option.orElse(left.category, () => right.category)
 
-    const combined = describe(
-      category,
-      left.nullable || right.nullable,
-      left.collection,
-      left.transformsStoredNull || right.transformsStoredNull,
-    )
-
-    return Option.some(combined)
-  }
-
-  const mergePair = Function.tupled(merge)
-
-  const reduce = (
-    state: Option.Option<FieldIR>,
-    next: Option.Option<FieldIR>,
-  ) => {
-    const pair = Option.all([state, next] as const)
-
-    return Option.flatMap(pair, mergePair)
-  }
-
-  const initial = Option.some(neutralDescription)
-
-  return Array.reduce(descriptions, initial, reduce)
+        return describe(
+          category,
+          left.nullable || right.nullable,
+          left.collection,
+          left.transformsStoredNull || right.transformsStoredNull,
+        )
+      }),
+    ),
+  )
 }
 
 const asCollection = (field: FieldIR) =>
   new FieldIR({ ...field, collection: true })
 
-const describeEnumEntry = (entry: readonly [string, string | number]) => pipe(
-  entry,
-  Tuple.get(1),
-  describeLiteral,
-)
-
 const describeEnum = flow(
   Struct.get<SchemaAST.Enum, "enums">("enums"),
-  Array.map(describeEnumEntry),
+  Array.map(([, value]) => describeLiteral(value)),
   combineDescriptions,
 )
 

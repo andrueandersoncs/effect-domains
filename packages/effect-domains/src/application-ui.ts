@@ -1,6 +1,5 @@
 import { Effect, Layer, Option, Schema, Struct, pipe } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
-import { type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationUiPresentation } from "@effect-domains/application-ui/contract"
 import type { ApplicationIR } from "./application.ts"
 import { compileApplicationCall, ApplicationUiDefinitionError } from "./application-ui-rpc.ts"

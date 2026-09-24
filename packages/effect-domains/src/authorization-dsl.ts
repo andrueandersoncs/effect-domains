@@ -43,9 +43,9 @@ import { absentPolicyRow, constructPolicy, subjectPhases } from "./authorization
 const policyDsl = <Resource extends StructSchema, Subject extends StructSchema>(
   schemas: Readonly<{ readonly resource: Resource; readonly subject: Subject }>,
 ) => {
-  const subject = policyFields<"subject">()(schemas.subject, "SubjectField", SubjectFieldSchema.make)
-  const row = policyFields<"row">()(schemas.resource, "RowField", RowFieldSchema.make)
-  const next = policyFields<"next">()(schemas.resource, "NextField", NextFieldSchema.make)
+  const subject = policyFields<"subject">()(schemas.subject, SubjectFieldSchema.make)
+  const row = policyFields<"row">()(schemas.resource, RowFieldSchema.make)
+  const next = policyFields<"next">()(schemas.resource, NextFieldSchema.make)
 
   const sameAs = <Field extends FieldName<Resource> & FieldName<Subject>>(
     field: Field & (FieldValue<Resource, Field> extends Scalar
@@ -169,7 +169,7 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
   }
 
   return {
-    subject: policyFields<"subject">()(subject, "SubjectField", SubjectFieldSchema.make),
+    subject: policyFields<"subject">()(subject, SubjectFieldSchema.make),
     eq,
     includes: membership,
     all,

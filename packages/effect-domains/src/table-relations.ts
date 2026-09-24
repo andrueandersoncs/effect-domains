@@ -12,8 +12,8 @@ import {
   TableUnique,
 } from "./physical-table-relations.ts"
 
-import { isNumericTableScalar } from "./physical-table-scalar.ts"
-import type { TableReference, TableRelationsInput } from "./table-relation-input.ts"
+import { compatibleTableScalars } from "./physical-table-scalar.ts"
+import type { TableRelationsInput } from "./table-relation-input.ts"
 
 import { TableSnapshot } from "./table-snapshot-model.ts"
 
@@ -277,14 +277,6 @@ const snapshot = flow(
 
 const fieldsEqual = Equivalence.Array(Equivalence.strictEqual<string>())
 
-
-const compatibleForeignKeyScalars = (source: TableField["scalar"], target: TableField["scalar"]) => {
-  const same = Equivalence.strictEqual<TableField["scalar"]>()(source, target)
-  const numeric = isNumericTableScalar(source) && isNumericTableScalar(target)
-
-  return same || numeric
-}
-
 const tableEntry = (table: TableSnapshot) => [table.name, table] as const
 const tableIndexPair = (table: TableSnapshot) => (index: TableIndex) => [table.name, index] as const
 
@@ -348,7 +340,7 @@ const validateForeignKeyPair = (
   }
 
   const [sourceField, referencedField] = fields.value
-  const compatible = compatibleForeignKeyScalars(sourceField.scalar, referencedField.scalar)
+  const compatible = compatibleTableScalars(sourceField.scalar, referencedField.scalar)
 
   if (!compatible) {
     return yield* TableDefinitionError.make({ table: table.name, reason: `foreign key constraint ${foreignKey.name} has incompatible field types ${sourceName} and ${target.name}.${targetName}` })

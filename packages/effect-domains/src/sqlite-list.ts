@@ -249,7 +249,7 @@ const renderEquality = (
   ? sql`${column(field)} IS NULL`
   : sql`${column(field)} = ${value}`
 
-const equalityClause = (
+export const equalityClause = (
   sql: SqlClient.SqlClient,
   column: Column,
 ) => ([field, value]: readonly [string, unknown]) => renderEquality(sql, column, field, value)

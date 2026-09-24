@@ -170,6 +170,9 @@ const compileCopy = (sql: SqlClient.SqlClient) => (copy: Schema.Schema.Type<type
 
 const quotedName = (sql: SqlClient.SqlClient) => flow(quoteIdentifier, sql.literal)
 
+const requiredTable = (snapshot: SqliteSchemaSnapshot, name: string) =>
+  pipe(snapshotTable(snapshot, name), Option.getOrThrow)
+
 const implicitCopies = (
   previous: SqliteSchemaSnapshot,
   table: TableSnapshot,
@@ -182,9 +185,13 @@ const implicitCopies = (
     Array.map(Struct.get("name")),
   )
 
-  const priorFields = Option.match(prior, { onNone: Function.constant([]), onSome: fieldNames })
+  const priorFields = pipe(
+    Option.match(prior, { onNone: Function.constant([]), onSome: fieldNames }),
+    HashSet.fromIterable,
+  )
+
   const explicit = pipe(copies, copiedColumns, HashSet.fromIterable)
-  const existing = (column: string) => Array.contains(priorFields, column)
+  const existing = (column: string) => HashSet.has(priorFields, column)
   const notExplicit = (column: string) => !HashSet.has(explicit, column)
   const copiedByIdentity = (column: string) => existing(column) && notExplicit(column)
   const sourceCopy = (column: string) => SqliteColumnSource.make({ column, source: column })
@@ -228,12 +235,7 @@ const compileStep = (
   target: SqliteSchemaSnapshot,
 ) => (step: SqliteMigrationStep): ReadonlyArray<Statement.Statement<unknown>> =>
   pipe(Match.value(step), Match.tagsExhaustive({
-    SqliteCreateTable: (create) => {
-      const tableOption = snapshotTable(target, create.table)
-      const table = Option.getOrThrow(tableOption)
-
-      return pipe(table, renderCreateTable, statement(sql), Array.of)
-    },
+    SqliteCreateTable: (create) => [pipe(requiredTable(target, create.table), renderCreateTable, statement(sql))],
     SqliteAddColumn: (addition) => {
       const column = renderColumn(addition.column, false)
       const name = quotedName(sql)
@@ -246,14 +248,12 @@ const compileStep = (
       return [sql`ALTER TABLE ${name(rename.table)} RENAME COLUMN ${name(rename.from)} TO ${name(rename.to)}`]
     },
     SqliteRebuildTable: (rebuild) => {
-      const tableOption = snapshotTable(target, rebuild.table)
-      const table = Option.getOrThrow(tableOption)
+      const table = requiredTable(target, rebuild.table)
 
       return compileRebuild(sql, previous, table, rebuild)
     },
     SqliteCreateIndex: (create) => {
-      const tableOption = snapshotTable(target, create.table)
-      const table = Option.getOrThrow(tableOption)
+      const table = requiredTable(target, create.table)
       const indexes = declaredIndexes(table)
       const sameName = (candidate: (typeof indexes)[number]) => Equivalence.strictEqual()(candidate.name, create.name)
       const indexOption = Array.findFirst(indexes, sameName)

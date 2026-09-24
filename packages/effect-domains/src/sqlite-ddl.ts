@@ -1,4 +1,4 @@
-import { Array, Equivalence, Function, Match, Option, Predicate, Schema, pipe } from "effect"
+import { Array, Equivalence, Match, Option, Predicate, Schema, pipe } from "effect"
 import type { TableCheck } from "./table-check-model.ts"
 import type { TableField } from "./physical-table-field.ts"
 import type { TableForeignKey, TableIndex, TableUnique } from "./physical-table-relations.ts"
@@ -15,24 +15,15 @@ const quoteLiteral = (value: string | number) => {
   return String(finite)
 }
 
-const typeFor = (scalar: TableField["scalar"]) => pipe(
-  Match.value(scalar),
-  Match.when("string", Function.constant("TEXT")),
-  Match.when("integer", Function.constant("INTEGER")),
-  Match.orElse(Function.constant("REAL")),
-)
+const scalarSql = {
+  string: { type: "TEXT", accepts: "= 'text'" },
+  integer: { type: "INTEGER", accepts: "= 'integer'" },
+  number: { type: "REAL", accepts: "IN ('integer', 'real')" },
+} satisfies Record<TableField["scalar"], { readonly type: string; readonly accepts: string }>
 
-const acceptsFor = (scalar: TableField["scalar"]) => pipe(
-  Match.value(scalar),
-  Match.when("string", Function.constant("= 'text'")),
-  Match.when("integer", Function.constant("= 'integer'")),
-  Match.orElse(Function.constant("IN ('integer', 'real')")),
-)
-
-const typeCheck = (field: TableField) => {
+const typeCheck = (field: TableField, accepts: string) => {
   const column = quoteIdentifier(field.name)
-  const accepted = acceptsFor(field.scalar)
-  const expression = `typeof(${column}) ${accepted}`
+  const expression = `typeof(${column}) ${accepts}`
 
   return field.nullable ? `CHECK (${column} IS NULL OR ${expression})` : `CHECK (${expression})`
 }
@@ -67,17 +58,17 @@ const uuidV7Default = `DEFAULT (lower(
 ))`
 
 export const renderColumn = (field: TableField, primaryKey: boolean) => {
+  const scalar = scalarSql[field.scalar]
   const fieldChecks = Array.map(field.checks, renderCheck(field))
-  const scalarCheck = typeCheck(field)
+  const scalarCheck = typeCheck(field, scalar.accepts)
   const checks = Array.prepend(fieldChecks, scalarCheck)
   const constraints = Array.join(checks, " ")
   const primaryKeyConstraint = primaryKey ? " PRIMARY KEY" : ""
   const nullability = field.nullable ? "" : " NOT NULL"
   const generated = Option.isSome(field.generation) ? ` ${uuidV7Default}` : ""
-  const type = typeFor(field.scalar)
   const column = quoteIdentifier(field.name)
 
-  return `${column} ${type}${primaryKeyConstraint}${nullability}${generated} ${constraints}`
+  return `${column} ${scalar.type}${primaryKeyConstraint}${nullability}${generated} ${constraints}`
 }
 
 const renderFields = (fields: ReadonlyArray<string>) => {
@@ -115,8 +106,7 @@ export const renderCreateTable = (table: TableSnapshot) => {
   const columns = Array.map(table.fields, renderTableColumn(table.identifier))
   const unique = Array.map(table.relations?.unique ?? [], renderUnique)
   const foreignKeys = Array.map(table.relations?.foreignKeys ?? [], renderForeignKey)
-  const tableItems = Array.appendAll(columns, unique)
-  const definitions = Array.appendAll(tableItems, foreignKeys)
+  const definitions = [...columns, ...unique, ...foreignKeys]
   const rendered = Array.join(definitions, ", ")
   const name = quoteIdentifier(table.name)
 

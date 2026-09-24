@@ -106,21 +106,22 @@ const totalEquality = (sql: SqlClient.SqlClient, left: Expression, right: Expres
     : rowEquality(sql, left, right)
 }
 
-const scalarExpressionFor = (sql: SqlClient.SqlClient) => (value: Scalar) => makeScalarExpression(sql, value)
 
 const scalarOperand = Effect.fn("PolicySql.scalarOperand")(function* (
   sql: SqlClient.SqlClient,
   environment: PolicyEnvironment,
   operand: Operand,
 ) {
+  const expressionFor = (value: Scalar) => makeScalarExpression(sql, value)
+
+  const resolveExpression = (value: Extract<Operand, { readonly _tag: "Literal" | "SubjectField" }>) =>
+    pipe(resolveScalarLiteralOrSubject(value, environment), Effect.map(expressionFor))
+
   return yield* pipe(
     Match.value(operand),
-    Match.tagsExhaustive({
-      Literal: (literal) => pipe(resolveScalarLiteralOrSubject(literal, environment), Effect.map(scalarExpressionFor(sql))),
-      SubjectField: (subject) => pipe(resolveScalarLiteralOrSubject(subject, environment), Effect.map(scalarExpressionFor(sql))),
-      RowField: ({ field }) => pipe(makeRowExpression(sql, field), Effect.succeed),
-      NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
-    }),
+    Match.tag("Literal", "SubjectField", resolveExpression),
+    Match.tag("RowField", ({ field }) => pipe(makeRowExpression(sql, field), Effect.succeed)),
+    Match.orElse(() => policyFailure("next fields are unavailable to SQL predicates")),
   )
 })
 
@@ -130,12 +131,10 @@ const collectionValues = Effect.fn("PolicySql.collectionValues")(function* (
 ) {
   return yield* pipe(
     Match.value(operand),
-    Match.tagsExhaustive({
-      Literal: (literal) => resolveScalarCollectionsLiteralOrSubjects(literal, environment),
-      SubjectField: (subject) => resolveScalarCollectionsLiteralOrSubjects(subject, environment),
-      RowField: () => policyFailure("policy collection must resolve to finite scalar values"),
-      NextField: () => policyFailure("next fields are unavailable to SQL predicates"),
-    }),
+    Match.tag("Literal", "SubjectField", (collection) =>
+      resolveScalarCollectionsLiteralOrSubjects(collection, environment)),
+    Match.tag("RowField", () => policyFailure("policy collection must resolve to finite scalar values")),
+    Match.orElse(() => policyFailure("next fields are unavailable to SQL predicates")),
   )
 })
 
@@ -163,7 +162,20 @@ const bindIncludes = ({ collection, value }: Extract<PolicyF<Binder>, { readonly
     if (Array.isReadonlyArrayEmpty(entries)) return falseExpression(sql)
 
     const member = yield* scalarOperand(sql, environment, value)
-    const equalities = Array.map(entries, entryEquality(sql, member))
+
+    const matchesMemberKind = (entry: Scalar) => {
+      const kind = scalarKind(entry)
+
+      return scalarKindEquals(kind, member.kind)
+    }
+
+    const comparableEntries = isScalarKind(member.kind)
+      ? Array.filter(entries, matchesMemberKind)
+      : entries
+
+    if (Array.isReadonlyArrayEmpty(comparableEntries)) return falseExpression(sql)
+
+    const equalities = Array.map(comparableEntries, entryEquality(sql, member))
     const statement = sql.or(equalities)
 
     return nativeFragment(statement)

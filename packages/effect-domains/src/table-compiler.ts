@@ -32,7 +32,6 @@ const unsupportedTableScalar = Effect.fn("Table.unsupportedScalar")(function* (t
   return yield* TableDefinitionError.make({ table, reason: `field ${field} must encode to a supported scalar` })
 })
 
-
 const ownValue = (value: unknown, key: string | symbol) =>
   Predicate.hasProperty(value, key) ? value[key] : undefined
 
@@ -92,6 +91,12 @@ const scalarAlgebra = (table: string, field: string) => (
   const storageCodec = Option.none<Schema.Constraint>()
   const base = new ScalarCompilation({ scalar, nullable: false, checks, orderable: true, storageCodec })
 
+  const withScalar = (value: TableField["scalar"], codec: Option.Option<Schema.Constraint> = storageCodec) => {
+    const scalar = Option.some(value)
+
+    return new ScalarCompilation({ ...base, scalar, storageCodec: codec })
+  }
+
   const literals = (values: ReadonlyArray<string | number>): Effect.Effect<ScalarCompilation, TableDefinitionError> => {
     const empty = Array.isReadonlyArrayEmpty(values)
 
@@ -114,12 +119,7 @@ const scalarAlgebra = (table: string, field: string) => (
 
   const leaf = (ast: SchemaAST.AST) => pipe(Match.value(ast),
     Match.tag("Null", () => pipe(new ScalarCompilation({ ...base, nullable: true, orderable: false }), Effect.succeed)),
-    Match.tag("String", "TemplateLiteral", () => {
-      const scalar = Option.some("string" as const)
-      const result = new ScalarCompilation({ ...base, scalar })
-
-      return Effect.succeed(result)
-    }),
+    Match.tag("String", "TemplateLiteral", () => pipe(withScalar("string"), Effect.succeed)),
     Match.tag("Number", () => {
       const integerCheck = (filter: SchemaAST.Filter<unknown>) => {
         const id = representationId(filter.annotations?.representation)
@@ -128,15 +128,14 @@ const scalarAlgebra = (table: string, field: string) => (
       }
 
       const integer = Array.some(filters, integerCheck)
-      const scalar = Option.some(integer ? "integer" as const : "number" as const)
-      const result = new ScalarCompilation({ ...base, scalar })
+      const scalar = integer ? "integer" as const : "number" as const
+      const result = withScalar(scalar)
 
       return Effect.succeed(result)
     }),
     Match.tag("Boolean", () => {
-      const scalar = Option.some("integer" as const)
-      const storageCodec = Option.some(Schema.BooleanFromBit)
-      const result = new ScalarCompilation({ ...base, scalar, storageCodec })
+      const codec = Option.some(Schema.BooleanFromBit)
+      const result = withScalar("integer", codec)
 
       return Effect.succeed(result)
     }),
@@ -146,9 +145,8 @@ const scalarAlgebra = (table: string, field: string) => (
 
       if (!dateTime) return unsupportedTableScalar(table, field)
 
-      const scalar = Option.some("string" as const)
-      const storageCodec = Option.some(Schema.DateTimeUtcFromString)
-      const result = new ScalarCompilation({ ...base, scalar, storageCodec })
+      const codec = Option.some(Schema.DateTimeUtcFromString)
+      const result = withScalar("string", codec)
 
       return Effect.succeed(result)
     }),

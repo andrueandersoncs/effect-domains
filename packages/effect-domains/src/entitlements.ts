@@ -248,7 +248,7 @@ const validation = Effect.fn("Entitlements.validation")(function* (definitions: 
   yield* Effect.reduce(definitions, HashSet.empty<string>, unique)
 })
 
-const equality = (sql: SqlClient.SqlClient) => ([field, value]: readonly [string, unknown]) =>
+const equality = (sql: SqlClient.SqlClient, field: string, value: unknown) =>
   Predicate.isNull(value) ? sql`${sql(field)} IS NULL` : sql`${sql(field)} = ${value}`
 
 const resolverEntry = (definition: AnyEntitlementSource) => [
@@ -290,14 +290,11 @@ const fromTables = <const Definitions extends ReadonlyArray<AnyEntitlementSource
         typeof rawScopeEntries
       >(rawScopeEntries)
 
-      const filterEntries = Array.map(
-        scopeEntries,
-        ([field, subjectField]) => Tuple.make(field, subject[subjectField]),
-      )
-
-      const filterPredicates = Array.map(filterEntries, equality(sql))
-      const keyPredicate = equality(sql)([found.value.key, request.key])
-      const predicates = [keyPredicate, ...filterPredicates]
+      const predicates = [
+        equality(sql, found.value.key, request.key),
+        ...Array.map(scopeEntries, ([field, subjectField]) =>
+          equality(sql, field, subject[subjectField])),
+      ]
 
       const rows = yield* pipe(
         sql<StructValue>`

@@ -40,7 +40,7 @@ export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* <R
   const withHandlerContext = (rpc: Rpcs) => {
     class Handler extends Context.Service<Rpc.Handler<string>, Rpc.Handler<string>>()(rpc.key) {}
 
-    // SAFETY: The cast is valid because RpcServer derives ToHandler<Rpcs> from the same keyed RPC group.
+    // SAFETY: The handler lookup uses this group's RPC key because the server was built from the same group.
     const handler = Context.get(handlers as Context.Context<Rpc.Handler<string>>, Handler)
 
     const provideCodecContext = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -65,14 +65,14 @@ export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(funct
   const ready = yield* Deferred.make<Client>()
   const deliver = deliverServerResponses<Parameters<Client["write"]>[0], Client>(ready)
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  // SAFETY: The widened group preserves dispatch because no-serialization transport does not execute its codecs.
   const server = yield* RpcServer.makeNoSerialization(group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>, {
     disableFatalDefects: true,
     onFromServer: deliver,
   })
 
   const client = yield* RpcClient.makeNoSerialization<ClientRpc, never, false>(
-    // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+    // SAFETY: The widened group preserves dispatch because no-serialization transport does not execute its codecs.
     group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<ClientRpc>,
     {
       flatten: false,
@@ -82,6 +82,6 @@ export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(funct
 
   yield* Deferred.succeed(ready, client)
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  // SAFETY: The client retains the group's keys and handlers because the widened transport only changes codec types.
   return client.client as RpcClient.RpcClient<Rpcs>
 })

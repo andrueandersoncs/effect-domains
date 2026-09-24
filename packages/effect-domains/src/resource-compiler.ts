@@ -131,9 +131,8 @@ const compileResourceValue = <
   const versionReplacement = (
     current: StructValue,
     candidate: StructValue,
-    versionField: Option.Option<string>,
     expectedVersion: Option.Option<number>,
-  ) => Option.match(versionField, {
+  ) => Option.match(versionOption, {
     onNone: () => new Replacement({ next: candidate, expected: current }),
     onSome: (field) => {
       const expectedValue = Option.getOrThrow(expectedVersion)
@@ -142,6 +141,23 @@ const compileResourceValue = <
 
       return new Replacement({ next, expected })
     },
+  })
+
+  const encodeReplacement = Effect.fn("Repository.encodeReplacement")(function* (
+    current: StructValue,
+    candidate: StructValue,
+    expectedVersion: Option.Option<number>,
+  ) {
+    const replacement = versionReplacement(current, candidate, expectedVersion)
+    const encodedExpected = yield* encodeRow(replacement.expected)
+    const encoded = yield* encodeRow(replacement.next)
+
+    const versionGuard = Option.match(versionOption, {
+      onNone: Record.empty,
+      onSome: (field) => Record.singleton(field, encodedExpected[field]),
+    })
+
+    return { next: replacement.next, encoded, encodedExpected, versionGuard }
   })
 
   const replaceExisting = Effect.fn("Repository.replaceExisting")(function* (
@@ -155,18 +171,9 @@ const compileResourceValue = <
 
     const current = yield* decodeRow(stored.value)
     const candidate = Equivalence.strictEqual()(action, "patch") ? Struct.assign(current, changes) : changes
-    const versionField = Option.fromNullishOr(version)
-    const versioned = versionReplacement(current, candidate, versionField, expectedVersion)
-    const encodedExpected = yield* encodeRow(versioned.expected)
-    const encoded = yield* encodeRow(versioned.next)
-
-    const versionGuard = Option.match(versionField, {
-      onNone: Record.empty,
-      onSome: (field) => Record.singleton(field, encodedExpected[field]),
-    })
-
+    const { next, encoded, versionGuard } = yield* encodeReplacement(current, candidate, expectedVersion)
     const currentValue = Option.some(current)
-    const nextValue = Option.some(versioned.next)
+    const nextValue = Option.some(next)
     const updateGuard = Struct.assign(guard, versionGuard)
 
     yield* authorize(action, permission.subject, currentValue, nextValue)
@@ -175,7 +182,7 @@ const compileResourceValue = <
 
     if (Option.isSome(updated)) return yield* readable(permission.subject, updated.value)
 
-    return yield* Option.match(versionField, {
+    return yield* Option.match(versionOption, {
       onNone: () => missing(key),
       onSome: () => {
         const expectedValue = Option.getOrThrow(expectedVersion)
@@ -188,9 +195,7 @@ const compileResourceValue = <
   const updateAuthorized = Effect.fn("Repository.update")(function* (
     store: RepositoryStore["Service"], permission: RepositoryAccess, value: typeof canonicalRowSchema.Type & StructValue,
   ) {
-    const versionField = Option.fromNullishOr(version)
-
-    const expected = yield* Option.match(versionField, {
+    const expected = yield* Option.match(versionOption, {
       onNone: Function.constant(noVersion),
       onSome: (field) => pipe(decodeVersion(value[field]), Effect.map(Option.some)),
     })
@@ -204,8 +209,8 @@ const compileResourceValue = <
     if (Record.has(changes, table.identifier)) return yield* inputFailure(`patch must not provide immutable field ${table.identifier}`)
 
     const expectedVersion = Array.head(expectedVersions)
-    const hasVersion = !Predicate.isUndefined(version)
-    const changesVersion = hasVersion && Record.has(changes, version)
+    const hasVersion = Option.isSome(versionOption)
+    const changesVersion = Option.exists(versionOption, (field) => Record.has(changes, field))
     const missingExpectedVersion = hasVersion && Option.isNone(expectedVersion)
     const invalidVersion = changesVersion || missingExpectedVersion
 
@@ -345,8 +350,7 @@ const compileResourceValue = <
 
     const changesIdentifier = Record.has(changes, table.identifier)
     const changesTransition = Record.has(changes, transition.field)
-    const versionField = Option.fromNullishOr(version)
-    const changesVersion = Option.exists(versionField, (field) => Record.has(changes, field))
+    const changesVersion = Option.exists(versionOption, (field) => Record.has(changes, field))
     const changesIdentifierOrTransition = changesIdentifier || changesTransition
     const immutableChanges = changesIdentifierOrTransition || changesVersion
 
@@ -354,7 +358,7 @@ const compileResourceValue = <
 
     const expectedVersionValue = Array.head(expectedVersions)
     const missingExpectedVersion = Option.isNone(expectedVersionValue)
-    const needsExpectedVersion = Option.isSome(versionField) && missingExpectedVersion
+    const needsExpectedVersion = Option.isSome(versionOption) && missingExpectedVersion
 
     if (needsExpectedVersion) return yield* inputFailure("transition must provide expectedVersion")
 
@@ -369,23 +373,17 @@ const compileResourceValue = <
     const sourceActual = String(source)
     const transitionAction = narrowContract<never, typeof action>(action)
     const to = yield* transition.guard(transitionAction, keyText, sourceActual)
-    const encodedCurrent = yield* encodeRow(current)
-    const encodedStatus = pipe(Record.get(encodedCurrent, transition.field), Option.getOrThrow)
-    const statusGuard = Record.singleton(transition.field, encodedStatus)
     const withChanges = Struct.assign(current, changes)
     const statusChange = Record.singleton(transition.field, to)
     const candidate = Struct.assign(withChanges, statusChange)
-    const versioned = versionReplacement(current, candidate, versionField, expectedVersionValue)
-    const encodedExpected = yield* encodeRow(versioned.expected)
-    const encoded = yield* encodeRow(versioned.next)
 
-    const versionGuard = Option.match(versionField, {
-      onNone: Record.empty,
-      onSome: (field) => Record.singleton(field, encodedExpected[field]),
-    })
+    const { next, encoded, encodedExpected, versionGuard } =
+      yield* encodeReplacement(current, candidate, expectedVersionValue)
 
+    const encodedStatus = pipe(Record.get(encodedExpected, transition.field), Option.getOrThrow)
+    const statusGuard = Record.singleton(transition.field, encodedStatus)
     const currentValue = Option.some(current)
-    const nextValue = Option.some(versioned.next)
+    const nextValue = Option.some(next)
     const guard = Struct.assign(statusGuard, versionGuard)
 
     yield* authorize("transition", permission.subject, currentValue, nextValue)
@@ -394,7 +392,7 @@ const compileResourceValue = <
 
     if (Option.isSome(updated)) return yield* readable(permission.subject, updated.value)
 
-    if (Option.isSome(versionField)) {
+    if (Option.isSome(versionOption)) {
       const expectedValue = Option.getOrThrow(expectedVersionValue)
 
       return yield* VersionConflict.make({ resource: table.name, key: String(key), expectedVersion: expectedValue })

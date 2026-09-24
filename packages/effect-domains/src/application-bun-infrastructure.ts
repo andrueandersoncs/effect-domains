@@ -75,16 +75,13 @@ export const runInfrastructure = Effect.fn("ApplicationBun.runInfrastructure")(f
     })
   }
 
-  const database = Option.match(configuredFilename, {
-    onNone: () => ephemeral
-      ? new InfrastructureFileDatabaseOptions({
-        migrations: plan.database.resource.migrations,
-        filename: ":memory:",
-      })
-      : new InfrastructureDatabaseOptions({ migrations: plan.database.resource.migrations }),
-    onSome: (filename) => new InfrastructureFileDatabaseOptions({
+  const filename = ephemeral ? Option.some(":memory:") : configuredFilename
+
+  const database = Option.match(filename, {
+    onNone: () => new InfrastructureDatabaseOptions({ migrations: plan.database.resource.migrations }),
+    onSome: (value) => new InfrastructureFileDatabaseOptions({
       migrations: plan.database.resource.migrations,
-      filename,
+      filename: value,
     }),
   })
 

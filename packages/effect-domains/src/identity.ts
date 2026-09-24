@@ -1,4 +1,4 @@
-import { Context, type DateTime, type Effect, Schema } from "effect"
+import { Context, type Effect, Schema } from "effect"
 import type { Unauthenticated } from "./authorization-model.ts"
 
 const UsernameSchema = Schema.NonEmptyString.check(Schema.isMaxLength(320))
@@ -30,16 +30,12 @@ export const CurrentSessionSchema = Schema.Struct({
 
 interface CurrentSession extends Schema.Schema.Type<typeof CurrentSessionSchema> {}
 
-type AuthenticatedIdentity = Readonly<{
-  sessionId: string
-  expiresAt: DateTime.Utc
-  subject: typeof SubjectSchema.Type
-}>
+type AuthenticatedIdentity = Readonly<CurrentSession & { sessionId: string }>
 
 export class IdentityRuntime extends Context.Service<IdentityRuntime, {
   readonly login: (
-    credentials: Schema.Schema.Type<typeof CredentialsSchema>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof IssuedSessionSchema>, Unauthenticated | IdentityUnavailable>
+    credentials: Credentials,
+  ) => Effect.Effect<IssuedSession, Unauthenticated | IdentityUnavailable>
   readonly authenticate: (token: string) => Effect.Effect<AuthenticatedIdentity, Unauthenticated | IdentityUnavailable>
   readonly revoke: (sessionId: string) => Effect.Effect<void, IdentityUnavailable>
 }>()("@effect-domains/IdentityRuntime") {}

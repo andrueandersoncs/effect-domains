@@ -83,11 +83,18 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
       return Effect.fail(failure)
     }
 
-    const occurrences = Array.filter(declarations, (declaration) => Record.has(declaration, name))
-    const valid = Equivalence.strictEqual<number>()(occurrences.length, 1)
-    const failure = definitionFailure(`multiply configures create field ${name}`)
+    const defaulted = Record.has(defaults, name)
+    const generatedField = Record.has(generated, name)
+    const subjectBound = Record.has(bindings, name)
+    const occurrences = Number(defaulted) + Number(generatedField) + Number(subjectBound)
 
-    return valid ? Effect.void : Effect.fail(failure)
+    if (!Equivalence.strictEqual<number>()(occurrences, 1)) {
+      const failure = definitionFailure(`multiply configures create field ${name}`)
+
+      return Effect.fail(failure)
+    }
+
+    return Effect.void
   }, { discard: true })
 
   const defaultSources = Record.map(defaults, (value) => Source.Default({ value }))
@@ -101,25 +108,42 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
   const subjectSources = Record.map(bindings, ({ field }) => Source.Subject({ field }))
   const sources = new Data.Class({ ...defaultSources, ...generatedSources, ...subjectSources })
 
+  type CompiledRead = (input: StructValue, subject: StructValue) => Effect.Effect<unknown, E>
+
   const plan = Record.map(fields, (schema, name) => {
     const source = sources[name] ?? Source.Input()
 
     const readInput = (fallback: unknown): ReadValue => (input) => {
       const supplied = Record.has(input, name)
+      const value = supplied ? input[name] : fallback
 
-      return Effect.succeed(supplied ? input[name] : fallback)
+      return Effect.succeed(value)
     }
 
-    const compiled: { readonly inputSchema: Schema.Constraint; readonly evaluate: ReadValue } = Source.$match(source, {
-      Input: () => ({ inputSchema: schema, evaluate: readInput(undefined) }),
+    const protectedRead = (
+      label: string,
+      evaluate: ReadValue,
+    ): CompiledRead =>
+      (input, subject) => {
+        if (Record.has(input, name)) {
+          const failure = inputFailure(`create input must not provide ${label} field ${name}`)
+
+          return Effect.fail(failure)
+        }
+
+        return evaluate(input, subject)
+      }
+
+    const compiled: { readonly inputSchema: Schema.Constraint; readonly read: CompiledRead } = Source.$match(source, {
+      Input: () => ({ inputSchema: schema, read: readInput(undefined) }),
       Default: ({ value }) => ({
         inputSchema: Schema.optionalKey(schema),
-        evaluate: readInput(value),
+        read: readInput(value),
       }),
       Subject: ({ field }) => {
         const evaluate: ReadValue = (_input, subject) => Effect.succeed(subject[field])
 
-        return { inputSchema: ForbiddenFieldSchema, evaluate }
+        return { inputSchema: ForbiddenFieldSchema, read: protectedRead("subject-bound", evaluate) }
       },
       Generated: ({ token }) => {
         const evaluate = Effect.fn("Creation.generated")(function* () {
@@ -128,26 +152,11 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
           return yield* (isGeneration(token, "uuidV7") ? uuidV7() : DateTime.now)
         })
 
-        return { inputSchema: ForbiddenFieldSchema, evaluate }
+        return { inputSchema: ForbiddenFieldSchema, read: protectedRead("generated", evaluate) }
       },
     })
 
-    const read = (input: StructValue, subject: StructValue): Effect.Effect<unknown, E> => {
-      const supplied = Record.has(input, name)
-      const generatedField = Source.$is("Generated")(source)
-      const subjectField = Source.$is("Subject")(source)
-      const protectedField = generatedField || subjectField
-      const override = protectedField && supplied
-
-      if (!override) return compiled.evaluate(input, subject)
-
-      const label = generatedField ? "generated" : "subject-bound"
-      const failure = inputFailure(`create input must not provide ${label} field ${name}`)
-
-      return Effect.fail(failure)
-    }
-
-    return { inputSchema: compiled.inputSchema, read }
+    return compiled
   })
 
   const materialize = Effect.fn("Creation.materialize")(function* (input: StructValue, subject: StructValue) {

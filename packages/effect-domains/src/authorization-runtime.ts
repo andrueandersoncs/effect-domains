@@ -71,11 +71,7 @@ const decodeEntitlementMap = Schema.decodeUnknownOption(EntitlementMapSchema)
 const lookupFieldDescription = (fields: FieldDescriptions, field: string) =>
   pipe(Record.get(fields, field), Option.flatten)
 
-const matchesFieldCategory = (left: FieldIR["category"], right: FieldIR["category"]) =>
-  Option.match(left, {
-    onNone: () => Option.isNone(right),
-    onSome: (category) => Option.exists(right, equals(category)),
-  })
+const matchesFieldCategory = Option.makeEquivalence(Equivalence.strictEqual<"string" | "number" | "boolean">())
 
 const requireSubject = <Subject extends StructSchema, Requirements extends ReadonlyArray<EntitlementRequirement>>(policy: SubjectPolicy<Subject, Requirements>) => {
   const effect = isRegisteredSubjectPolicy(policy)
@@ -184,8 +180,8 @@ const makeCheck = (
 
   const evaluate = yield* pipe(Record.get(rules, action), Effect.fromOption, Effect.mapError(Function.constant(forbiddenError)))
 
-  yield* scopeCheck(subject, values.row, values.next)
-  yield* scopeCheck(subject, values.next, values.next)
+  if (current) yield* scopeCheck(subject, values.row, values.next)
+  if (candidate) yield* scopeCheck(subject, values.next, values.next)
 
   const environment = new PolicyEnvironment({ subject, ...values })
   const allowed = yield* evaluate(environment)

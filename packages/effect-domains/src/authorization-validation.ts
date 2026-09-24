@@ -1,8 +1,8 @@
-import { Array, Data, Effect, Function, HashSet, Match, Option, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
+import { Array, Data, Effect, Function, HashSet, Match, Option, Predicate, Record, flow, pipe } from "effect"
 import type { StructSchema } from "./domain.ts"
 import { Entitlements, EntitlementRequired, EntitlementUnavailable } from "./entitlements.ts"
 import { Policy, PolicyEnvironment, type Operand, type Policy as PolicySyntax, type PolicyF } from "./policy.ts"
-import { type FieldIR, SchemaField, type FieldCategory } from "./schema-field.ts"
+import { type FieldIR, SchemaField } from "./schema-field.ts"
 
 import {
   actions,

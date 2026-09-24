@@ -46,42 +46,45 @@ const makeRpcCli = <
       const inputJsonSchema = Schema.fromJsonString(contract.payloadSchema)
       const outputSchema = Schema.fromJsonString(contract.successSchema)
       const errorSchema = Schema.fromJsonString(contract.errorSchema)
-      const decodedPayloadSchema = Schema.toType(contract.payloadSchema)
+      const payloadTypeSchema = Schema.toType(contract.payloadSchema)
+      const voidPayload = SchemaAST.isVoid(payloadTypeSchema.ast)
+      const decodePayload = Schema.decodeUnknownEffect(contract.payloadSchema)
+      const encodePayload = Schema.encodeUnknownEffect(contract.payloadSchema)
+      const decodeJsonInput = Schema.decodeUnknownEffect(inputJsonSchema)
+      const encodeOutput = Schema.encodeUnknownEffect(outputSchema)
+      const encodeError = Schema.encodeUnknownEffect(errorSchema)
+      const contractGroup = RpcGroup.make(contract)
+
+      const decodeNoInput = Effect.fn("RpcCli.decodeNoInput")(function* () {
+        const encoded = voidPayload ? yield* encodePayload(undefined) : {}
+
+        return yield* decodePayload(encoded)
+      })
+
+      const reportFailure = Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
+        const userMessage = yield* pipe(
+          encodeError(cause),
+          Effect.catch(() => pipe(cause, causeMessage, Effect.succeed)),
+        )
+
+        return yield* CliError.UserError.make({ cause, userMessage })
+      })
 
       const execute = Effect.fn("RpcCli.execute")(function* (inputJson: Option.Option<string>) {
-        const decodeNoInput = Effect.fn("RpcCli.decodeNoInput")(function* () {
-          const encoded = SchemaAST.isVoid(decodedPayloadSchema.ast)
-            ? yield* Schema.encodeUnknownEffect(contract.payloadSchema)(undefined)
-            : {}
-
-          return yield* Schema.decodeUnknownEffect(contract.payloadSchema)(encoded)
-        })
-
         const payload = yield* Option.match(inputJson, {
           onNone: decodeNoInput,
-          onSome: Schema.decodeUnknownEffect(inputJsonSchema),
+          onSome: decodeJsonInput,
         })
 
-        const contractGroup = RpcGroup.make(contract)
         const client = yield* RpcClient.make(contractGroup, { flatten: true })
         const success = yield* client(contract._tag, payload)
-        const encoded = yield* Schema.encodeUnknownEffect(outputSchema)(success)
+        const encoded = yield* encodeOutput(success)
         const stdio = yield* Stdio.Stdio
         const output = Stream.make(`${encoded}\n`)
         const stdout = stdio.stdout()
 
         yield* Stream.run(output, stdout)
-      }, Effect.scoped, Effect.catch(Effect.fn("RpcCli.reportFailure")(function* (cause: unknown) {
-        const encodedError = Schema.encodeUnknownEffect(errorSchema)(cause)
-
-        const fallbackMessage = Effect.fn("RpcCli.fallbackMessage")(function* () {
-          return causeMessage(cause)
-        })
-
-        const userMessage = yield* pipe(encodedError, Effect.catch(fallbackMessage))
-
-        return yield* CliError.UserError.make({ cause, userMessage })
-      })))
+      }, Effect.scoped, Effect.catch(reportFailure))
 
       const inputFlag = Flag.string("input-json")
       const describedInput = Flag.withDescription(inputFlag, "Canonical JSON payload")

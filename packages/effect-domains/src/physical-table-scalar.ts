@@ -7,3 +7,10 @@ export const isNumericTableScalar = (scalar: TableField["scalar"]) => {
 
   return integer || number
 }
+
+export const compatibleTableScalars = (source: TableField["scalar"], target: TableField["scalar"]) => {
+  const same = Equivalence.strictEqual<TableField["scalar"]>()(source, target)
+  const numeric = isNumericTableScalar(source) && isNumericTableScalar(target)
+
+  return same || numeric
+}

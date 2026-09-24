@@ -83,21 +83,19 @@ export const policyFailure = Effect.fn("Policy.failure")(function* (reason: stri
 const isScalar = Schema.is(ScalarSchema)
 const isScalarCollection = Schema.is(ScalarCollectionSchema)
 
-const valueFrom = (record: Option.Option<StructValue>, source: string, field: string) =>
-  pipe(
-    record,
-    Option.match({
-      onNone: () => policyFailure(`${source} is unavailable`),
-      onSome: (value) => pipe(
-        value,
-        Record.get(field),
-        Option.match({
-          onNone: () => policyFailure(`${source}.${field} is unavailable`),
-          onSome: Effect.succeed,
-        }),
-      ),
-    }),
-  )
+const valueFrom = Effect.fn("Policy.valueFrom")(function* (
+  record: Option.Option<StructValue>,
+  source: string,
+  field: string,
+) {
+  if (Option.isNone(record)) return yield* policyFailure(`${source} is unavailable`)
+
+  const value = Record.get(record.value, field)
+
+  if (Option.isNone(value)) return yield* policyFailure(`${source}.${field} is unavailable`)
+
+  return value.value
+})
 
 const resolve = (operand: Operand, environment: PolicyEnvironment) =>
   pipe(
@@ -153,6 +151,17 @@ const collectionOperands = (operand: Operand, environment: PolicyEnvironment) =>
 const scalarEquals = Equivalence.strictEqual<Scalar>()
 const containsScalar = Array.containsWith(scalarEquals)
 
+const evaluateJunction = (
+  children: ReadonlyArray<(environment: PolicyEnvironment) => Effect.Effect<boolean, PolicyEvaluationError>>,
+  all: boolean,
+) => Effect.fn("Policy.junction")(function* (environment: PolicyEnvironment) {
+  return yield* Effect.reduce(children, Function.constant(all), (matched, child) => {
+    const shouldEvaluate = Equivalence.strictEqual<boolean>()(all, matched)
+
+    return shouldEvaluate ? child(environment) : Effect.succeed(matched)
+  })
+})
+
 const evaluateLayer: Algebra<(environment: PolicyEnvironment) => Effect.Effect<boolean, PolicyEvaluationError>> = (layer) =>
   pipe(
     Match.value(layer),
@@ -174,20 +183,8 @@ const evaluateLayer: Algebra<(environment: PolicyEnvironment) => Effect.Effect<b
 
         return containsScalar(values, member)
       }),
-      All: ({ children }) => Effect.fn("Policy.all")(function* (environment: PolicyEnvironment) {
-        return yield* Effect.reduce(
-          children,
-          Function.constant(true),
-          (allowed, child) => allowed ? child(environment) : Effect.succeed(false),
-        )
-      }),
-      Any: ({ children }) => Effect.fn("Policy.any")(function* (environment: PolicyEnvironment) {
-        return yield* Effect.reduce(
-          children,
-          Function.constant(false),
-          (allowed, child) => allowed ? Effect.succeed(true) : child(environment),
-        )
-      }),
+      All: ({ children }) => evaluateJunction(children, true),
+      Any: ({ children }) => evaluateJunction(children, false),
     }),
   )
 
