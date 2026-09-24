@@ -49,12 +49,9 @@ const validateRequestHeaders = Effect.fn("ApplicationUi.validateRequestHeaders")
   request: HttpServerRequest.HttpServerRequest,
 ) {
 
-  const crossSite = Equivalence.strictEqual<string | undefined>()(
-    request.headers["sec-fetch-site"],
-    "cross-site",
-  )
-
   const trustedOrigin = trustedRequestOrigin(request, allowedOrigins)
+  const fetchSite = request.headers["sec-fetch-site"] ?? ""
+  const crossSite = Equivalence.strictEqual<string>()(fetchSite, "cross-site")
   const untrustedOrigin = !trustedOrigin
   const rejectedOrigin = crossSite || untrustedOrigin
 
@@ -87,43 +84,15 @@ const requestBody = Effect.fn("ApplicationUi.requestBody")(function* (
     maximumCallBytes,
   )
 
-  const decodeBody = Schema.decodeUnknownEffect(CallSchema)
-  const parsedBody = Effect.flatMap(boundedBody, decodeBody)
+  const decodedBody = Effect.flatMap(boundedBody, Schema.decodeUnknownEffect(CallSchema))
 
-  const invalidEnvelope = () => ApplicationUiRequestError.make({
-    status: 400,
-    reason: "Invalid application UI call envelope",
-  })
-
-
-  return yield* Effect.mapError(parsedBody, invalidEnvelope)
-})
-
-const configuredInvocation = Effect.fn("ApplicationUi.configuredInvocation")(function* (
-  invocations: HashMap.HashMap<string, Invocation>,
-  operation: string,
-) {
-  const configured = HashMap.get(invocations, operation)
-
-  const unknownOperation = () => ApplicationUiRequestError.make({
-    status: 400,
-    reason: "Unknown operation",
-  })
-
-  return yield* Effect.fromOption(configured, unknownOperation)
-})
-
-const decodedCall = Effect.fn("ApplicationUi.decodedCall")(function* (
-  invocations: HashMap.HashMap<string, Invocation>,
-  allowedOrigins: Option.Option<ReadonlyArray<string>>,
-  request: HttpServerRequest.HttpServerRequest,
-) {
-  yield* validateRequestHeaders(allowedOrigins, request)
-
-  const body = yield* requestBody(request)
-  const invocation = yield* configuredInvocation(invocations, body.operation)
-
-  return { invocation, input: body.input }
+  return yield* Effect.mapError(
+    decodedBody,
+    () => ApplicationUiRequestError.make({
+      status: 400,
+      reason: "Invalid application UI call envelope",
+    }),
+  )
 })
 
 const requestFailure = Effect.fn("ApplicationUi.requestFailure")(function* (
@@ -135,20 +104,26 @@ const requestFailure = Effect.fn("ApplicationUi.requestFailure")(function* (
 const internalResponse = Effect.succeed(applicationUiInternalResponse)
 const internalFailure = Function.constant(internalResponse)
 
-
 const receive = Effect.fn("ApplicationUi.receive")(function* (
   invocations: HashMap.HashMap<string, Invocation>,
   allowedOrigins: Option.Option<ReadonlyArray<string>>,
   request: HttpServerRequest.HttpServerRequest,
 ) {
-  const call = yield* decodedCall(invocations, allowedOrigins, request)
+  yield* validateRequestHeaders(allowedOrigins, request)
 
-  return yield* call.invocation(call.input, request)
+  const body = yield* requestBody(request)
+  const operation = HashMap.get(invocations, body.operation)
+
+  const invocation = yield* Effect.fromOption(
+    operation,
+    () => ApplicationUiRequestError.make({ status: 400, reason: "Unknown operation" }),
+  )
+
+  return yield* invocation(body.input, request)
 },
 Effect.catchTag("ApplicationUiRequestError", requestFailure),
 Effect.catchTag("HttpBodyError", internalFailure),
 Effect.catchDefect(internalFailure))
-
 
 export const requestHandlerFor = (
   invocations: HashMap.HashMap<string, Invocation>,

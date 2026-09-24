@@ -30,6 +30,12 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-24: Framework implementation simplification
+
+The package removes internal per-field creation wrappers, reuses the prepared canonical schema for creation planning, shortens application UI/RPC/CLI/MCP forwarding, and avoids repeated migration catalog rendering and unnecessary validation intermediates. These are internal changes; the declared resource, transport, and migration contracts remain in their owning modules. ([Creation compiler](../../packages/effect-domains/src/resource-creation.ts); [resource preparation](../../packages/effect-domains/src/resource-compiler-prepare.ts); [UI request](../../packages/effect-domains/src/application-ui-request.ts); [MCP adapter](../../packages/effect-domains/src/rpc-mcp.ts); [migration verification](../../packages/effect-domains/src/sqlite-migration-database.ts))
+
+Package TypeScript and deterministic lint pass across all 77 source files; `bun run test` passes 156 tests in 32 files. A fresh Reading List SQLite database accepted `books.create`, returned the book via filtered CLI `books.list`, and rendered that row in the generated browser list. This exercises creation, migration preparation, CLI, UI RPC, and list decoding, not all deployment modes. Workspace-wide `bun run check` stops on lint diagnostics in unchanged example files; separate workspace typechecking reports errors in eight example workspaces, and `lint:architecture` rejects its configured `--deterministic` flag. These wider checks are not recorded as passes.
+
 ### 2026-09-23: Framework source line limit
 
 The private `effect-domains` package now rejects every `src/**/*.ts` file above 500 physical lines before Better TypeScript runs. The largest resource, read-model, table, authorization, telemetry, and SQLite migration modules remain split by model, validation, compilation, runtime, projection, transport, and database responsibility. The package contracts now use explicit owning modules and named model subpaths rather than lint-exempt re-export facades. ([Package scripts](../../packages/effect-domains/package.json); [line check](../../packages/effect-domains/scripts/check-file-lines.ts); [lint configuration](../../better-typescript.json))

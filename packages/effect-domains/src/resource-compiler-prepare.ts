@@ -101,7 +101,7 @@ export const prepareResource = <
   const publishesPatch = isPublished("patch")
   const publishesTransition = isPublished("transition")
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
+  // SAFETY: The asserted type matches because publication is derived from the decoded operation declaration.
   const published = Object.freeze({
     get: publishesGet,
     list: publishesList,
@@ -112,14 +112,13 @@ export const prepareResource = <
     transition: publishesTransition,
   }) as PublishedCapabilities<Operations>
 
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
-
+  // SAFETY: The assertion holds because the decoded operation configuration retains its declaration's policy type.
   const creation = pipe(
     Option.fromNullishOr(options.operations.create),
     Option.filter(Predicate.isObject),
   ) as Option.Option<CreationPolicy<S, Auth>>
-  // SAFETY: The asserted type matches because this path constructs or validates the value from the corresponding declaration.
 
+  // SAFETY: The assertion holds because the decoded operation configuration retains its declaration's policy type.
   const listConfiguration = pipe(
     Option.fromNullishOr(options.operations.list),
     Option.filter(Predicate.isObject),
@@ -299,12 +298,11 @@ export const prepareResource = <
     return result
   })
 
-  const creationSchema = implicitIdentifier ? withImplicitIdentifier(options.schema) : options.schema
   const generatedIdentifier = implicitIdentifier ? Option.some(table.identifier) : Option.none<string>()
 
   const creationPlan = pipe(
     Creation.compile(
-      creationSchema.fields,
+      selectedCanonicalSchema.fields,
       defaults,
       versionGenerated,
       subjectBindings,

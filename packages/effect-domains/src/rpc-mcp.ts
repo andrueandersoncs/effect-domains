@@ -1,4 +1,4 @@
-import { Effect, Function, Layer, Option, Schema, Struct, pipe } from "effect"
+import { Effect, flow, Function, Layer, Option, Schema, Struct, pipe } from "effect"
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, type HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
@@ -106,23 +106,19 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
       )
 
       const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
-      const invokeClient = (input: Input["input"]) => client(contract._tag, input, { headers })
-      const invocation = invokeClient(payload.input)
+      const call = client(contract._tag, payload.input, { headers })
 
-      return yield* pipe(
-        invocation,
-        Effect.matchEffect({
-          onFailure: failureResponse,
-          onSuccess: (result) => pipe(
-            OutputSchema.make({ result }),
-            encodeOutput,
-            withCodecContext,
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
-            Effect.map(successResult),
-            Effect.catch(failInternally),
-          ),
-        }),
-      )
+      return yield* Effect.matchEffect(call, {
+        onFailure: failureResponse,
+        onSuccess: flow(
+          (result: unknown) => OutputSchema.make({ result }),
+          encodeOutput,
+          withCodecContext,
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
+          Effect.map(successResult),
+          Effect.catch(failInternally),
+        ),
+      })
     })
 
     const handle = Effect.fn("RpcMcp.handle")(function* (payload: unknown) {
@@ -133,10 +129,9 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
         onSome: Struct.get("headers"),
       })
 
-      return yield* pipe(
-        toolResultFromArguments(payload, headers),
-        Effect.catchDefect(failInternally),
-      )
+      const result = toolResultFromArguments(payload, headers)
+
+      return yield* Effect.catchDefect(result, failInternally)
     })
 
     yield* registry.addTool({
@@ -161,10 +156,8 @@ export const layerHttp = <App extends ApplicationIR>(options: Readonly<{
     protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26],
   })
 
-  const registration = register(application.group)
-
   return pipe(
-    registration,
+    register(application.group),
     Layer.effectDiscard,
     Layer.provide(server),
   )

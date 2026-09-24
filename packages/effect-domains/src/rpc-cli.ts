@@ -20,15 +20,6 @@ const causeMessage = (cause: unknown) =>
     ? `${cause.name}: ${cause.message}`
     : String(cause)
 
-const makeInputJsonFlag = () => {
-  const flag = Flag.string("input-json")
-  const describedFlag = Flag.withDescription(flag, "Canonical JSON payload")
-
-  return Flag.optional(describedFlag)
-}
-
-
-
 const makeRpcCli = <
   App extends ApplicationIR,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
@@ -92,7 +83,9 @@ const makeRpcCli = <
         return yield* CliError.UserError.make({ cause, userMessage })
       })))
 
-      const inputJson = makeInputJsonFlag()
+      const inputFlag = Flag.string("input-json")
+      const describedInput = Flag.withDescription(inputFlag, "Canonical JSON payload")
+      const inputJson = Flag.optional(describedInput)
 
       return Command.make(contract._tag, { inputJson }, ({ inputJson }) =>
         pipe(execute(inputJson), Effect.provide(options.protocol)))

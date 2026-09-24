@@ -1,4 +1,4 @@
-import { Array, Effect, Equivalence, Function, Option, pipe, Predicate, Record, Schema } from "effect"
+import { Array, Effect, Equivalence, Option, pipe, Predicate, Record, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SchemaStore } from "./migrations.ts"
 import { Table } from "./table.ts"
@@ -44,9 +44,6 @@ import {
 
 const same = Equivalence.strictEqual<unknown>()
 
-const applyStatement = <A, E, R>(statement: Effect.Effect<A, E, R>) =>
-  pipe(statement, Effect.asVoid)
-
 const make = (input: Readonly<{
   id: string
   to: SqliteSchemaSnapshot
@@ -78,14 +75,9 @@ export const decodeHistory = Effect.fn("SqliteMigrations.decodeHistory")(functio
 
     if (legacy) return yield* migrationFailure("SQLite migration artifacts must use version 2")
 
-    const historySchema = Schema.Array(SqliteMigration)
-    const decodeCurrent = Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw)
-    const decodeLegacy = Schema.decodeUnknownEffect(historySchema)(raw)
-    const onCurrentDecodeFailure = Function.constant(decodeLegacy)
-
     const migrations = yield* pipe(
-      decodeCurrent,
-      Effect.catch(onCurrentDecodeFailure),
+      Schema.decodeUnknownEffect(SqliteMigrationHistorySchema)(raw),
+      Effect.catch(() => Schema.decodeUnknownEffect(Schema.Array(SqliteMigration))(raw)),
       Effect.mapError(asMigrationFailure("invalid SQLite migration history")),
     )
 
@@ -123,21 +115,22 @@ export const sqliteMigrationStore = (sql: SqlClient.SqlClient, migrations: Reado
   prepare: Effect.fn("SqliteMigrations.prepare")(function* (tables) {
       const target = schemaSnapshot(tables)
 
-      yield* applyStatement(sql`PRAGMA foreign_keys = ON`)
+      yield* Effect.asVoid(sql`PRAGMA foreign_keys = ON`)
       yield* validateSnapshot(target)
       yield* validateHistory(migrations)
 
       const expectedTarget = historySnapshot(migrations, migrations.length - 1)
-      const emptyHistory = same(migrations.length, 0)
-      const missingHistory = emptyHistory && target.tables.length > 0
+      const needsInitialHistory = same(migrations.length, 0) && target.tables.length > 0
 
-      if (missingHistory) return yield* migrationFailure("nonempty application schemas require an initial migration history")
+      if (needsInitialHistory) {
+        return yield* migrationFailure("nonempty application schemas require an initial migration history")
+      }
 
       if (!snapshotEquals(expectedTarget, target)) {
         return yield* migrationFailure("the frozen migration history does not end at the application schema")
       }
 
-      yield* applyStatement(sql`CREATE TABLE IF NOT EXISTS ${sql(LedgerTable)} (position INTEGER PRIMARY KEY NOT NULL, id TEXT UNIQUE NOT NULL, artifact TEXT NOT NULL)`)
+      yield* Effect.asVoid(sql`CREATE TABLE IF NOT EXISTS ${sql(LedgerTable)} (position INTEGER PRIMARY KEY NOT NULL, id TEXT UNIQUE NOT NULL, artifact TEXT NOT NULL)`)
 
       const ledger = yield* pipe(
         sql`SELECT id, artifact FROM ${sql(LedgerTable)} ORDER BY position`,
@@ -153,11 +146,10 @@ export const sqliteMigrationStore = (sql: SqlClient.SqlClient, migrations: Reado
 
       const changed = Array.findFirst(compared, ([recorded, migration]) => {
         const artifact = canonicalText(migration)
-        const sameId = same(recorded.id, migration.id)
-        const sameArtifact = same(recorded.artifact, artifact)
-        const unchanged = sameId && sameArtifact
+        const idChanged = !same(recorded.id, migration.id)
+        const artifactChanged = !same(recorded.artifact, artifact)
 
-        return !unchanged
+        return idChanged || artifactChanged
       })
 
       if (Option.isSome(changed)) {

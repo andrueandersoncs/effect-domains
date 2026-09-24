@@ -41,10 +41,6 @@ const uuidV7 = Effect.fn("Creation.uuidV7")(function* () {
 
 type ReadValue = (input: StructValue, subject: StructValue) => Effect.Effect<unknown>
 
-class FieldCompilation extends Data.Class<Readonly<{
-  inputSchema: Schema.Constraint
-  evaluate: ReadValue
-}>> {}
 
 export const CreationInspectionSchema = Schema.Struct({
   defaults: Schema.Unknown,
@@ -114,22 +110,16 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
       return Effect.succeed(supplied ? input[name] : fallback)
     }
 
-    const compiled = Source.$match(source, {
-      Input: () => {
-        const evaluate = readInput(undefined)
-
-        return new FieldCompilation({ inputSchema: schema, evaluate })
-      },
-      Default: ({ value }) => {
-        const inputSchema = Schema.optionalKey(schema)
-        const evaluate = readInput(value)
-
-        return new FieldCompilation({ inputSchema, evaluate })
-      },
+    const compiled: { readonly inputSchema: Schema.Constraint; readonly evaluate: ReadValue } = Source.$match(source, {
+      Input: () => ({ inputSchema: schema, evaluate: readInput(undefined) }),
+      Default: ({ value }) => ({
+        inputSchema: Schema.optionalKey(schema),
+        evaluate: readInput(value),
+      }),
       Subject: ({ field }) => {
         const evaluate: ReadValue = (_input, subject) => Effect.succeed(subject[field])
 
-        return new FieldCompilation({ inputSchema: ForbiddenFieldSchema, evaluate })
+        return { inputSchema: ForbiddenFieldSchema, evaluate }
       },
       Generated: ({ token }) => {
         const evaluate = Effect.fn("Creation.generated")(function* () {
@@ -138,7 +128,7 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
           return yield* (isGeneration(token, "uuidV7") ? uuidV7() : DateTime.now)
         })
 
-        return new FieldCompilation({ inputSchema: ForbiddenFieldSchema, evaluate })
+        return { inputSchema: ForbiddenFieldSchema, evaluate }
       },
     })
 
@@ -154,7 +144,7 @@ const compile = Effect.fn("Creation.compile")(function* <D, E>(
       return override ? Effect.fail(failure) : compiled.evaluate(input, subject)
     }
 
-    return new Data.Class({ inputSchema: compiled.inputSchema, read })
+    return { inputSchema: compiled.inputSchema, read }
   })
 
   const materialize = Effect.fn("Creation.materialize")(function* (input: StructValue, subject: StructValue) {

@@ -189,11 +189,10 @@ const validateSnapshot = Effect.fn("SqliteMigrations.validateSnapshot")(function
 
 const sqlExpressionIsValid = (expression: string) => {
   const trimmed = expression.trim()
-  const content = trimmed.length > 0
-  const forbidden = /\0|;|--|\/\*/.test(expression)
-  const valid = !forbidden
+  const nonempty = trimmed.length > 0
+  const safe = !/\0|;|--|\/\*/.test(expression)
 
-  return content && valid
+  return nonempty && safe
 }
 
 const namedTable = (name: string) => (table: TableSnapshot) =>
@@ -247,16 +246,19 @@ const validateMigration = Effect.fn("SqliteMigrations.validateMigration")(functi
 
   yield* validateSnapshot(migration.to)
 
-  const expressions = pipe(
-    migration.steps,
-    Array.filter(Schema.is(SqliteRebuildTable)),
-    Array.flatMap(Struct.get("copies")),
-    Array.filter(Schema.is(SqliteColumnExpression)),
-  )
+  const invalidExpression = (copy: Schema.Schema.Type<typeof SqliteColumnCopySchema>) => {
+    const isExpression = Schema.is(SqliteColumnExpression)(copy)
+    const valid = isExpression ? sqlExpressionIsValid(copy.expression) : true
 
-  const invalid = (copy: SqliteColumnExpression) => !sqlExpressionIsValid(copy.expression)
+    return !valid
+  }
 
-  if (Array.some(expressions, invalid)) return yield* migrationFailure("migration copy expressions must be single SQL expressions")
+  const invalidStep = (step: SqliteMigrationStep) =>
+    Schema.is(SqliteRebuildTable)(step) && Array.some(step.copies, invalidExpression)
+
+  if (Array.some(migration.steps, invalidStep)) {
+    return yield* migrationFailure("migration copy expressions must be single SQL expressions")
+  }
 
   return migration
 })

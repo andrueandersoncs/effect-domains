@@ -47,28 +47,29 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
   }
 
   const unaryGroup = asUnaryGroup(application.group)
-  const inProcess = yield* inProcessClient(unaryGroup)
-  const { client, withHandlerContext } = inProcess
+  const { client, withHandlerContext } = yield* inProcessClient(unaryGroup)
 
   const compileOperation = Effect.fn("ApplicationUi.compileOperation")(function* (procedure: RpcProcedure) {
     const compiled = compileUnaryRpc(procedure)
 
-    const failUnavailableOperation = () => ApplicationUiDefinitionError.make({
-      reason: `Application UI operations must be unary: ${procedure._tag}`,
-    })
+    const contract = yield* Effect.fromOption(
+      compiled,
+      () => ApplicationUiDefinitionError.make({
+        reason: `Application UI operations must be unary: ${procedure._tag}`,
+      }),
+    )
 
-    const contract = yield* Effect.fromOption(compiled, failUnavailableOperation)
-    const OperationResultSchema = Schema.Struct({ result: contract.successSchema })
+    class OperationResult extends Schema.Class<OperationResult>("OperationResult")({
+      result: contract.successSchema,
+    }) {}
 
-    interface OperationResult extends Schema.Schema.Type<typeof OperationResultSchema> {}
-
-    const OperationErrorEnvelopeSchema = Schema.Struct({ error: contract.errorSchema })
-
-    interface OperationErrorEnvelope extends Schema.Schema.Type<typeof OperationErrorEnvelopeSchema> {}
+    class OperationErrorEnvelope extends Schema.Class<OperationErrorEnvelope>("OperationErrorEnvelope")({
+      error: contract.errorSchema,
+    }) {}
 
     const decode = Schema.decodeUnknownEffect(contract.payloadSchema)
-    const encodeResult = Schema.encodeUnknownEffect(OperationResultSchema)
-    const encodeError = Schema.encodeUnknownEffect(OperationErrorEnvelopeSchema)
+    const encodeResult = Schema.encodeUnknownEffect(OperationResult)
+    const encodeError = Schema.encodeUnknownEffect(OperationErrorEnvelope)
     const unaryProcedure = asUnaryProcedure(procedure)
     const withCodecContext = withHandlerContext(unaryProcedure)
 
@@ -76,9 +77,9 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
       input: unknown,
       request: HttpServerRequest.HttpServerRequest,
     ) {
-      const inputEffect = decode(input)
-      const decodedInput = withCodecContext(inputEffect)
-      const decoded = yield* Effect.result(decodedInput)
+      const decodedInput = decode(input)
+      const contextualInput = withCodecContext(decodedInput)
+      const decoded = yield* Effect.result(contextualInput)
 
       if (Result.isFailure(decoded)) {
         const invalidInput = applicationUiFailureResponse(
@@ -96,15 +97,17 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
       const call = client(contract._tag, decoded.success, { headers: request.headers })
 
       const respondToDeclaredFailure = Effect.fn("ApplicationUi.respondToDeclaredFailure")(function* (error: unknown) {
-        const errorEffect = encodeError({ error })
-        const encoded = yield* withCodecContext(errorEffect)
+        const envelope = OperationErrorEnvelope.make({ error })
+        const encodedEnvelope = encodeError(envelope)
+        const encoded = yield* withCodecContext(encodedEnvelope)
 
         return yield* applicationUiDeclaredErrorResponse(encoded)
       })
 
       const respondToDeclaredSuccess = Effect.fn("ApplicationUi.respondToDeclaredSuccess")(function* (result: unknown) {
-        const resultEffect = encodeResult({ result })
-        const encoded = yield* withCodecContext(resultEffect)
+        const envelope = OperationResult.make({ result })
+        const encodedEnvelope = encodeResult(envelope)
+        const encoded = yield* withCodecContext(encodedEnvelope)
 
         return yield* applicationUiSuccessResponse(encoded)
       })

@@ -1,6 +1,6 @@
-import { Array, Effect, Equivalence, flow, Function, HashMap, HashSet, Match, Option, pipe, Record, Schema, Struct } from "effect"
+import { Array, Effect, Equivalence, flow, Function, HashMap, HashSet, Match, Option, pipe, Schema, Struct } from "effect"
 import { SqlClient, Statement } from "effect/unstable/sql"
-import { quoteIdentifier, renderColumn, renderCreateIndexes, renderCreateTable, renderIndex } from "./sqlite-ddl.ts"
+import { quoteIdentifier, renderColumn, renderCreateTable, renderIndex } from "./sqlite-ddl.ts"
 
 import {
   LedgerTable,
@@ -65,12 +65,6 @@ const verifyForeignKeys = Effect.fn("SqliteMigrations.verifyForeignKeys")(functi
 
 const catalogKey = (object: Pick<SqliteCatalogRow, "type" | "name">) => `${object.type}:${object.name}`
 
-const catalogEntry = (object: SqliteCatalogRow) => {
-  const key = catalogKey(object)
-
-  return [key, object] as const
-}
-
 const expectedCatalog = (table: TableSnapshot) => {
   const statement = renderCreateTable(table)
   const object = SqliteCatalogRowSchema.make({ type: "table", name: table.name, tbl_name: table.name, sql: statement })
@@ -107,21 +101,20 @@ const verifyDatabase = Effect.fn("SqliteMigrations.verifyDatabase")(function* (
 
   if (!tablesMatch) return yield* migrationFailure("SQLite contains tables not tracked by the schema migration history")
 
+  const catalogEntry = (object: SqliteCatalogRow) => [catalogKey(object), object] as const
+  const tableCatalog = (table: TableSnapshot) => [table, expectedCatalog(table)] as const
   const catalog = pipe(actual, Array.map(catalogEntry), HashMap.fromIterable)
-  const expectedObjects = Array.flatMap(snapshot.tables, expectedCatalog)
+  const expectedByTable = Array.map(snapshot.tables, tableCatalog)
+  const expectedCount = Array.reduce(expectedByTable, 0, (count, [, objects]) => count + objects.length)
 
-  if (!same(actual.length, expectedObjects.length)) return yield* migrationFailure("SQLite contains missing or untracked indexes or triggers")
+  if (!same(actual.length, expectedCount)) return yield* migrationFailure("SQLite contains missing or untracked indexes or triggers")
 
-  yield* Effect.forEach(snapshot.tables, Effect.fn("SqliteMigrations.verifyTable")(function* (table) {
-    const objects = expectedCatalog(table)
-
+  yield* Effect.forEach(expectedByTable, Effect.fn("SqliteMigrations.verifyTable")(function* ([table, objects]) {
     yield* Effect.forEach(objects, Effect.fn("SqliteMigrations.verifyObject")(function* (expected) {
-      const key = catalogKey(expected)
-      const found = HashMap.get(catalog, key)
       const drift = migrationFailure(`SQLite schema drift detected for table ${table.name}`)
-      const object = yield* pipe(found, Effect.fromOption, Effect.mapError(Function.constant(drift)))
-      const sqlOption = Option.fromNullishOr(object.sql)
-      const objectSql = yield* pipe(sqlOption, Effect.fromOption, Effect.mapError(Function.constant(drift)))
+      const key = catalogKey(expected)
+      const object = yield* pipe(HashMap.get(catalog, key), Effect.fromOption, Effect.mapError(Function.constant(drift)))
+      const objectSql = yield* pipe(Option.fromNullishOr(object.sql), Effect.fromOption, Effect.mapError(Function.constant(drift)))
       const actualSql = normalizedSql(objectSql)
 
       if (!same(object.tbl_name, table.name)) return yield* drift
@@ -139,11 +132,11 @@ const verifyDatabase = Effect.fn("SqliteMigrations.verifyDatabase")(function* (
       const fields = pipe(table.fields, Array.map((field) => [field.name, field] as const), HashMap.fromIterable)
       const fieldFor = (column: Schema.Schema.Type<typeof SqliteColumnRowsSchema>[number]) => HashMap.get(fields, column.name)
       const ordered = pipe(columns, Array.map(fieldFor), Array.getSomes)
-      const knownColumns = same(columns.length, ordered.length)
-      const complete = same(ordered.length, table.fields.length)
-      const fieldsMatch = knownColumns && complete
+      const missingColumns = !same(columns.length, ordered.length)
+      const wrongFieldCount = !same(ordered.length, table.fields.length)
+      const driftedColumns = missingColumns || wrongFieldCount
 
-      if (!fieldsMatch) return yield* drift
+      if (driftedColumns) return yield* drift
 
       const physical = TableSnapshot.make({ ...table, fields: ordered })
       const physicalSql = pipe(physical, renderCreateTable, normalizedSql)
@@ -190,8 +183,7 @@ const implicitCopies = (
   )
 
   const priorFields = Option.match(prior, { onNone: Function.constant([]), onSome: fieldNames })
-  const explicitColumns = copiedColumns(copies)
-  const explicit = HashSet.fromIterable(explicitColumns)
+  const explicit = pipe(copies, copiedColumns, HashSet.fromIterable)
   const existing = (column: string) => Array.contains(priorFields, column)
   const notExplicit = (column: string) => !HashSet.has(explicit, column)
   const copiedByIdentity = (column: string) => existing(column) && notExplicit(column)
@@ -266,11 +258,8 @@ const compileStep = (
       const sameName = (candidate: (typeof indexes)[number]) => Equivalence.strictEqual()(candidate.name, create.name)
       const indexOption = Array.findFirst(indexes, sameName)
       const index = Option.getOrThrow(indexOption)
-      const renderTableIndex = renderIndex(create.table)
-      const renderedIndex = renderTableIndex(index)
-      const compileStatement = statement(sql)
 
-      return [compileStatement(renderedIndex)]
+      return [pipe(index, renderIndex(create.table), statement(sql))]
     },
     SqliteDropIndex: (drop) => {
       const name = quotedName(sql)
