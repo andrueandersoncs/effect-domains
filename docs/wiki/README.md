@@ -99,3 +99,5 @@ The `effect-domains` workspace lint first runs `lint:file-lines`; any framework 
 bun run check
 bun run lint:semantic
 ```
+
+The project adds a file-scoped [repetition policy](../../.better-typescript/rules/repetition-requires-abstraction.md) to the embedded semantic catalog. It treats independently repeated implementation of one concern as a missing abstraction, while keeping distinct business decisions explicit; semantic review cannot detect duplication across files.

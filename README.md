@@ -237,3 +237,5 @@ bun run build
 bun run check
 bun run lint:semantic
 ```
+
+Semantic lint includes the repository policy in [`.better-typescript/rules/repetition-requires-abstraction.md`](.better-typescript/rules/repetition-requires-abstraction.md): repeated implementations of one concern should be replaced by a shared abstraction. Run `bun run better-typescript semantic --files 'packages/effect-domains/src/**/*.ts' --rules repetition-requires-abstraction` to review that policy alone. Semantic review is file-scoped and requires `TYPESAFE_API_KEY`; it cannot establish whether the same concern is duplicated across files.

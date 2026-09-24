@@ -30,6 +30,12 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-09-24: Repetition requires abstraction semantic policy
+
+The repository adds a [file-scoped semantic policy](../../.better-typescript/rules/repetition-requires-abstraction.md) requiring independently repeated implementations of one concern to be replaced by a shared abstraction, without collapsing distinct business decisions. The policy is discovered automatically by `better-typescript semantic` and can be selected alone with `--rules repetition-requires-abstraction`.
+
+A live review of a disposable file with two identical email-normalization and validation implementations classified it as a violation (0.95 probability). After extracting one implementation and reusing it, the same review classified the file as a pass (0.08 probability). The disposable file was removed. The policy also classified `packages/effect-domains/src/resource.ts` as a pass (0.06 probability), and the VitePress build passed. The review does not establish detection across files, guarantee deterministic classifications, or prove that all production code already meets this policy.
+
 ### 2026-09-24: Framework implementation simplification
 
 The package removes internal per-field creation wrappers, reuses the prepared canonical schema for creation planning, shortens application UI/RPC/CLI/MCP forwarding, and avoids repeated migration catalog rendering and unnecessary validation intermediates. These are internal changes; the declared resource, transport, and migration contracts remain in their owning modules. ([Creation compiler](../../packages/effect-domains/src/resource-creation.ts); [resource preparation](../../packages/effect-domains/src/resource-compiler-prepare.ts); [UI request](../../packages/effect-domains/src/application-ui-request.ts); [MCP adapter](../../packages/effect-domains/src/rpc-mcp.ts); [migration verification](../../packages/effect-domains/src/sqlite-migration-database.ts))
