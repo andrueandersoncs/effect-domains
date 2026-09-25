@@ -78,7 +78,6 @@
     "@types/bun": "latest",
     "effect": "catalog:",
     "effect-domains": "workspace:*",
-    "effect-machine": "0.27.0",
     "prettier": "3.9.8",
     "typescript": "^7",
     "vitepress": "1.6.4",

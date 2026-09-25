@@ -20,7 +20,6 @@
         "@types/bun": "latest",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "effect-machine": "0.27.0",
         "prettier": "3.9.8",
         "typescript": "^7",
         "vitepress": "1.6.4",
@@ -127,7 +126,6 @@
         "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
-        "effect-machine": "0.27.0",
       },
     },
     "examples/team-tasks": {
@@ -939,8 +937,6 @@
     "effect": ["effect@4.0.0-rc.112", "", { "dependencies": { "fast-check": "^4.9.0", "msgpackr": "^2.0.5" } }, "sha512-wXxwuh1Ywnv4cPRM3Wfa0vDwuOHnZ1TsTgHJkG9XgzND6inhBH9n1vBxhg3iIXOia/OrpmvVmd3lrD4vq6bF3A=="],
 
     "effect-domains": ["effect-domains@workspace:packages/effect-domains"],
-
-    "effect-machine": ["effect-machine@0.27.0", "", { "peerDependencies": { "effect": ">=4.0.0-rc.112 <5" } }, "sha512-gBZq1P+qUZxvPFRkU/4oylypGgmfuPyPLlPmaPa1R0YA6dAzZDID8POYMWIjmpgks7srFFPBVelyYbvpUlR9FA=="],
 
     "emoji-regex": ["emoji-regex@10.6.0", "", {}, "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A=="],
 
