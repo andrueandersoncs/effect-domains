@@ -8,22 +8,25 @@ The final runtime composes two sibling applications. `SupportDirectory` owns cus
 
 ## Run it
 
-Use Bun from the repository root with a disposable SQLite file:
+Use Bun from the repository root with separate disposable application and identity SQLite files:
 
 ```bash
 bun install
 bun run build
+export EFFECT_DOMAINS_DEMO_PASSWORD='a-local-demo-secret'
 export SUPPORT_CASES_DB="$(mktemp -d)/support-cases.sqlite"
+export SUPPORT_CASES_IDENTITY_DB="$(mktemp -d)/support-cases-identity.sqlite"
 bun run support-cases:server
 ```
 
 The server provides:
 
 - The generated Application UI with authored presentation at [http://127.0.0.1:3000/](http://127.0.0.1:3000/).
+- An optional, application-owned guided intake at [http://127.0.0.1:3000/intake](http://127.0.0.1:3000/intake).
 - Effect JSON RPC at `http://127.0.0.1:3000/rpc/v1`.
 - Streamable HTTP MCP at `http://127.0.0.1:3000/mcp`.
 
-No bearer token is required. Keep this demonstration server on loopback.
+Customer lookup and case opening are public operations; no bearer token is required for this flow. Other operations such as `support.auditTrail` still require the server's normal identity and authorization checks. Keep this demonstration server on loopback.
 
 ## Register a customer and agents
 
@@ -88,9 +91,11 @@ open --triage--> triaged --assign--> assigned --resolve--> resolved
                          +-----------reopen----------+
 ```
 
-## Use the Application UI or MCP
+## Use the Application UI, guided intake, or MCP
 
 The generated UI at `/` exposes published resource reads, customer and agent CRUD, the joined board, and authored support operations. Its `ui.presentation` supplies the **Support operations** title, resource and operation labels, descriptions, and deliberate table columns. These values affect presentation only; inspected schemas and server-side authorization remain authoritative. Case/event creation and transitions still use `support.openCase` and `support.advanceCase` so event history shares the transaction.
+
+The optional `/intake` page uses the published `effect-machine@0.27.0` package only in this example. Its browser-local actor owns the `Customer → LookingUp → Editing → Submitting → Complete/Failed` interaction. Back-navigation interrupts the in-flight customer lookup; submissions are disabled while the first command is pending. The browser calls `support_customers.get` and finally `support.openCase` through the same `/api/call` boundary as the generated UI. The authoritative case, history, and audit writes are still the command's SQLite transaction, not actor state. A failed or interrupted submission may have committed on the server: inspect the case list before submitting another. Reloading or closing the tab discards the draft and actor; it does not undo a committed case. The page does not persist or replay a session.
 
 For MCP, call the same operations with arguments shaped as `{ "input": <RPC payload> }`. A successful tool result is `{ "result": <RPC result> }`.
 
@@ -99,6 +104,8 @@ For MCP, call the same operations with arguments shaped as `{ "input": <RPC payl
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `SUPPORT_CASES_DB` | `data/support-cases.sqlite` | Application SQLite file |
+| `SUPPORT_CASES_IDENTITY_DB` | Private store default | Separate example identity SQLite file |
+| `EFFECT_DOMAINS_DEMO_PASSWORD` | Required | Local identity bootstrap secret |
 | `PORT` | `3000` | Loopback server port |
 | `SUPPORT_CASES_URL` | `http://127.0.0.1:3000/rpc/v1` | Remote CLI endpoint |
 
@@ -127,7 +134,8 @@ bun run support-cases support.board --input-json '{"filter":{"status":"open"}}'
 - [`contracts.ts`](contracts.ts): the nested case-detail result.
 - [`audit.ts`](audit.ts): private typed lifecycle records, deterministic identifiers, and authorized history reads.
 - [`sqlite.ts`](sqlite.ts): transactional open/advance handlers and the authored nested history query.
+- [`intake-machine.ts`](intake-machine.ts), [`intake-client.ts`](intake-client.ts), and [`intake-route.ts`](intake-route.ts): application-owned transient protocol, browser request adapter, and route assets.
 - [`application.ts`](application.ts): sibling directory/case-management applications and final composition.
-- [`main.ts`](main.ts): frozen migration history, Application UI presentation, OTLP resource metadata, and runner.
+- [`main.ts`](main.ts): migration history, Application UI presentation, optional intake route, OTLP resource metadata, and runner.
 
 This slice exercises version, transition, list range/order, operation transaction, joined projection, authored-query, sibling-application composition, runtime-owned UI presentation, and telemetry configuration seams together in another domain.

@@ -1,0 +1,21 @@
+.admin-header a { color: #dbeafe; font-size: .9rem; text-underline-offset: .2em; }
+.admin-header a:focus-visible, .intake-shell a:focus-visible, .intake-shell button:focus-visible { outline: 3px solid #3973c5; outline-offset: 3px; }
+.intake-shell { width: min(100% - 2.5rem, 50rem); margin: 3rem auto; }
+.intake-intro { margin-bottom: 2rem; }
+.intake-intro h1 { margin: 0 0 .4rem; font-size: clamp(1.6rem, 4vw, 2.3rem); letter-spacing: -.025em; }
+.intake-intro p { max-width: 65ch; color: #536179; line-height: 1.55; }
+#intake { min-height: 17rem; padding: clamp(1.25rem, 4vw, 2rem); background: #fff; border: 1px solid #dce2ed; border-radius: .65rem; }
+#intake h2 { margin: 0 0 .5rem; font-size: 1.35rem; }
+#intake p { color: #536179; line-height: 1.5; }
+#intake form { display: grid; gap: 1rem; max-width: 30rem; margin: 1.5rem 0 0; }
+#intake label { display: grid; gap: .4rem; color: #48566d; font-size: .9rem; font-weight: 650; }
+#intake input, #intake select { min-height: 2.7rem; padding: .6rem .7rem; color: #172033; background: #fff; border: 1px solid #b9c5d8; border-radius: .38rem; }
+#intake input:focus-visible, #intake select:focus-visible { outline: 3px solid #3973c533; border-color: #3973c5; }
+#intake button { justify-self: start; padding: .65rem 1rem; border: 1px solid #215eb1; border-radius: .4rem; color: #fff; background: #215eb1; font-weight: 650; }
+#intake button:hover { background: #194c92; }
+#intake button.secondary { margin-top: 1.1rem; color: #314563; background: #fff; border-color: #b9c5d8; }
+#intake button.secondary:hover { background: #edf3fb; }
+#intake .notice { margin-top: 1.2rem; padding: .75rem .9rem; border-radius: .42rem; white-space: pre-wrap; }
+#intake .error { color: #8c2630; border: 1px solid #e9b8bf; background: #fff1f2; }
+#intake .case-id { display: inline-block; margin-top: .7rem; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .intake-shell { margin: 2rem auto; } }

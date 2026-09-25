@@ -63,7 +63,7 @@
     "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
   },
   "devDependencies": {
-    "@better-typescript/better-typescript": "0.4.28",
+    "@better-typescript/better-typescript": "0.4.29",
     "@effect-domains/alchemy": "workspace:*",
     "@effect-domains/example-field-notes": "workspace:*",
     "@effect-domains/example-orders-invoices": "workspace:*",
@@ -78,6 +78,7 @@
     "@types/bun": "latest",
     "effect": "catalog:",
     "effect-domains": "workspace:*",
+    "effect-machine": "0.27.0",
     "prettier": "3.9.8",
     "typescript": "^7",
     "vitepress": "1.6.4",

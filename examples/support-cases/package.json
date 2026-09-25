@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./application": "./application.ts",
+    "./intake-machine": "./intake-machine.ts",
     "./migrations": "./migrations.ts"
   },
   "scripts": {
@@ -15,6 +16,7 @@
   "dependencies": {
     "@effect-domains/example-support": "workspace:*",
     "effect": "catalog:",
-    "effect-domains": "workspace:*"
+    "effect-domains": "workspace:*",
+    "effect-machine": "0.27.0"
   }
 }

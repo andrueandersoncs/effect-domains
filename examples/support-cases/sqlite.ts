@@ -243,12 +243,14 @@ const advanceCaseSpec = SupportTransaction.define({
 const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.advanceCase")(function* (
   input: typeof AdvanceSupportCaseInputSchema.Type,
 ) {
+  // SAFETY: The published command decodes the declared transition action before this handler executes.
+  const action = input.action as keyof typeof eventKinds
   yield* requireCase(input.caseId)
 
   const assignment = yield* assignmentFor(input)
 
   const changes = pipe(
-    Match.value(input.action),
+    Match.value(action),
     Match.when("assign", () => pipe(
       assignment,
       Option.map(
@@ -266,7 +268,7 @@ const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.a
 
   const supportCase = yield* Resource.repository(SupportCasesResource).transition(
     input.caseId,
-    input.action,
+    action,
     transitionChanges,
     input.expectedVersion,
   )
@@ -276,12 +278,12 @@ const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.a
     Option.match({
       onNone: () => Resource.repository(SupportCaseEventsResource).create({
         caseId: supportCase.id,
-        kind: eventKinds[input.action],
+        kind: eventKinds[action],
         agentId: supportCase.assignedAgentId,
       }),
       onSome: (note) => Resource.repository(SupportCaseEventsResource).create({
         caseId: supportCase.id,
-        kind: eventKinds[input.action],
+        kind: eventKinds[action],
         agentId: supportCase.assignedAgentId,
         note,
       }),
@@ -290,7 +292,7 @@ const advanceCase = Command.implement(advanceCaseSpec, Effect.fn("SupportCases.a
 
   yield* appendSupportCaseAudit({
     id: `support-case:${supportCase.id}:${supportCase.version}`,
-    action: input.action,
+    action,
     actorId: "public-api",
     targetId: supportCase.id,
   })

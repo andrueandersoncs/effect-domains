@@ -1,8 +1,9 @@
-import { Effect, pipe } from "effect"
+import { Effect, Layer, pipe } from "effect"
 import { ExampleIdentity } from "@effect-domains/example-support/identity"
 import * as ApplicationBun from "effect-domains/application-bun"
 import { SupportCasesApplication } from "./application.ts"
 import { SupportCasesMigrations } from "./migrations.ts"
+import { IntakeRoutes } from "./intake-route.ts"
 
 const services = ExampleIdentity.layer("support-cases")
 
@@ -57,10 +58,11 @@ const ui = {
   },
 }
 
-const program = ApplicationBun.runApplication(SupportCasesApplication, {
+const program = ApplicationBun.runApplication<typeof SupportCasesApplication, typeof services, Effect.Effect<void>, Layer.Layer<never, never, never>, typeof IntakeRoutes>(SupportCasesApplication, {
   database: { migrations: SupportCasesMigrations },
   services,
   ui,
+  routes: IntakeRoutes,
   telemetry: {
     protocol: "http/protobuf",
     resource: {
