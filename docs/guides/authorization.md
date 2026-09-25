@@ -90,6 +90,12 @@ export const TasksResource = Resource.define({
 
 `scope` constrains every row-bearing action. `read` determines visibility; `create` receives the candidate `next` row; `update` and `patch` can compare stored and candidate rows. `fromSubject` is a trusted binding, not a permission grant: the `create` rule still authorizes the candidate.
 
+## Gate authored operations with managed permissions
+
+`identity.permission.check({ permission })` resolves current tenant-scoped direct and group grants for the authenticated account. `identity.group.*` manages persisted groups and membership; it does not rewrite subject role claims or automatically alter `Resource` policies. Tenant admins issue/revoke grants explicitly. The [Team Tasks walkthrough](../../examples/team-tasks/README.md#manage-groups-and-permissions) shows Bob denied `todos.review`, allowed after a group grant, then denied again immediately after membership removal. Its [authored review command](../../examples/team-tasks/review.ts) calls the narrow `GroupRuntime.check` service before SQL, while ordinary `todos` resource reads retain the owner/tenant policy above.
+
+The permission key `todos.review` is an exact name chosen by the application, not a resource action inferred from `TaskSchema`. Other protected commands must opt in; a group grant does not widen existing Resource row visibility.
+
 ## Keep entitlements separate
 
 Use policy expressions for identity, tenant visibility, ownership, and roles. Use an entitlement when an already-authorized action also needs a current persisted grant.

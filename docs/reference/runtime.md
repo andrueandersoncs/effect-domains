@@ -318,15 +318,21 @@ Help and inspection do not need a running server. Inspection does not execute ha
 
 ## Identity services and RPC
 
-`effect-domains/identity` is the portable identity boundary. It exports `CredentialsSchema`, `IssuedSessionSchema`, `CurrentSessionSchema`, `SubjectSchema`, `IdentityUnavailable`, and the narrow `IdentityRuntime` service. `IdentityRuntime` verifies credentials, authenticates an opaque token into a session ID, expiry, and current subject, and revokes a session ID.
+`effect-domains/identity` exports credential, signup, password-reset, issued/current-session, and subject schemas plus the narrow `IdentityRuntime`. `effect-domains/identity-groups` defines `GroupRuntime` for group management and `check(username, tenantId, permission)` for authored authorization seams. The supplied SQLite implementation lives in a separate identity database, not the application database.
 
-`effect-domains/identity-rpc` is the native RPC adapter. `IdentityBundle` packages its `IdentityRpcs` group and `IdentityHandlers` layer for `Application.parts`, publishing `identity.login`, `identity.current`, and `identity.logout`. `authenticateIdentity(headers)` parses and verifies a bearer credential; `current` and `logout` authenticate every call. Their failures are `Unauthenticated` and `IdentityUnavailable`.
+`IdentityBundle` publishes `identity.login`, `identity.current`, `identity.logout`, `identity.signup`, `identity.close`, `identity.issueInvite`, `identity.issuePasswordReset`, and `identity.resetPassword`, together with `identity.group.*` and `identity.permission.*`. Protected operations authenticate the presented bearer every time; direct and inherited permission checks read current persisted facts. Missing grants return `false`, not a role inferred from the schema. The group RPCs return `Forbidden`, `GroupNotFound`, `AccountNotFound`, `AlreadyMember`, or `MemberNotFound` as applicable; database details remain behind `IdentityUnavailable`.
 
-`SqliteIdentity.layer({ application, accounts, password, sessionLifetime?, filename? })` supplies `IdentityRuntime` and the narrower `AuthorizationRpc.Authenticator`. Its identity database is private to the named application. An application can instead provide a verified custom IdP adapter to `AuthorizationRpc.Authenticator`.
+`identity.signup` accepts `{ username, password, inviteToken? }` and returns a session. Without an invitation the account starts an isolated tenant as its administrator. A current tenant admin can call `identity.issueInvite` and deliver its returned one-use opaque credential to a prospective member, who joins that tenant as a reader. Invitations expire after 15 minutes. Closed usernames remain reserved. `identity.logout` revokes only the presented session; `identity.close` disables the authenticated account and revokes all its sessions, but does not delete application rows.
 
-The examples wrap that factory in `ExampleIdentity.layer(application)`, with seeded demonstration accounts. It is example bootstrap data, not a production user-management system or IdP.
+`identity.issuePasswordReset({ username })` requires a current admin in the target account's tenant. Its one-use credential expires in 15 minutes; the admin must deliver it out of band. Public `identity.resetPassword({ token, password })` replaces the Argon2id hash and revokes all existing sessions in one transaction. Expired or reused tokens fail with `InvalidPasswordResetToken`. There is no anonymous reset issuance, email service, or production IdP integration.
 
-The CLI uses the normal `<APP>_URL` and `<APP>_TOKEN` variables. `identity.login` returns canonical JSON containing a secret token, ISO `expiresAt`, and subject; handle the token as a secret. `identity.current` returns the expiry and subject, and `identity.logout` revokes the presented credential.
+Groups are tenant-scoped: `identity.group.create({ name })` returns `{ id, name }`; `.update({ id, name })`, `.delete({ id })`, `.addMember({ id, username })`, and `.removeMember({ id, username })` are admin-only. `.listMembers({ id })` is available to the tenant's admin or a member of that group; `.isMember({ id, username })` is available to the named account or an admin. A closed account is not an active member. Group deletion removes members and grants transactionally.
+
+Direct grants use `identity.permission.grantAccount({ username, permission })` and `.revokeAccount(...)`; group grants use `.grantGroup({ id, permission })` and `.revokeGroup(...)`. The mutation and group-grant listing operations require the tenant admin; `listAccount({ username })` permits self or admin. `identity.permission.check({ permission })` returns whether the authenticated account has a direct grant or belongs to a group with that grant. Permission names are opaque exact strings; there are no wildcards, inferred resource actions, or built-in cross-resource grant policies. [Team Tasks](../../examples/team-tasks/review.ts) explicitly gates `todos.review` through `GroupRuntime.check` before a tenant-wide aggregate.
+
+`SqliteIdentity.layer({ application, accounts, password, sessionLifetime?, filename? })` provides `IdentityRuntime`, `GroupRuntime`, and `AuthorizationRpc.Authenticator` from the same private SQLite connection. It preserves insert-once demonstration seeds and the previous `001_initial` account/session history, applying an explicit `002_account_groups_permissions` migration for new tables. `ExampleIdentity.layer(application)` provisions seeded Alice, Bob, Admin, and Outsider accounts; these role claims are distinct from persisted groups.
+
+The CLI uses `<APP>_URL` and `<APP>_TOKEN`. Do not print or commit bearer, invitation, or reset credentials. The generated Application UI stores issued login/signup tokens only in memory and clears the bearer on logout/close.
 
 ```bash
 bun run team-tasks identity.login --input-json '{"username":"alice","password":"…"}'
@@ -376,7 +382,7 @@ Each published RPC operation becomes a tool. Arguments wrap the canonical payloa
 
 Successful structured content is `{ "result": <operation result> }`, also returned as JSON text; void results become `null`. Declared failures return `isError: true` with the encoded error.
 
-No-payload identity tools still require the MCP wrapper: call `identity.current` and `identity.logout` with `{ "input": null }`. Read the issued token from `identity.login`'s structured content at `result.token`.
+No-payload identity tools still require the MCP wrapper: call `identity.current`, `identity.logout`, or `identity.close` with `{ "input": null }`. Read the issued token from `identity.login` or `identity.signup` structured content at `result.token`.
 
 Protected tools require bearer credentials on every call. Tool discovery exposes contracts, not authorization to read protected rows. The [equipment example](/examples#equipment-register) includes an SDK client.
 
@@ -388,7 +394,7 @@ The UI mechanically derives operation forms, resource navigation, resource lists
 
 `presentation` may provide an application title and description, resource labels and columns, and operation labels and descriptions. This display-only configuration does not alter canonical schemas, inspection, authorization, or handler behavior.
 
-Protected operations use the bearer field. Tokens remain in memory and are never written to local or session storage. A successful `identity.login` operation places its returned token in that field; `identity.logout` clears it. The UI does not bypass authentication or infer permissions.
+Protected operations use the bearer field. Tokens remain in memory and are never written to local or session storage. Successful `identity.login` and `identity.signup` operations place their returned token in that field; `identity.logout` and `identity.close` clear it. The UI does not bypass authentication or infer permissions.
 
 `allowedOrigins` lists exact origins accepted by the UI's call endpoint when using a non-loopback host. It is an origin check, not CORS configuration, authentication policy, or a permission grant. Loopback hosts are trusted by default. Call envelopes must use `application/json` and fit within 64 KiB.
 

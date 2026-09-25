@@ -1177,12 +1177,12 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
         result.replaceChildren(loading)
 
         const value = yield* call(entry.name, input)
-        const loginResult = equals(entry.name, "identity.login")
+        const issuesSession = equals(entry.name, "identity.login") || equals(entry.name, "identity.signup")
         const resultRecord = pipe(Option.some(value), Option.filter(isRecords))
-        const issuedToken = loginResult ? pipe(resultRecord, Option.flatMap((record) => fieldValue(record, "token")), Option.filter(isString)) : Option.none<string>()
+        const issuedToken = issuesSession ? pipe(resultRecord, Option.flatMap((record) => fieldValue(record, "token")), Option.filter(isString)) : Option.none<string>()
 
         if (Option.isSome(issuedToken)) token.value = issuedToken.value
-        if (equals(entry.name, "identity.logout")) token.value = ""
+        if (equals(entry.name, "identity.logout") || equals(entry.name, "identity.close")) token.value = ""
 
         const completed = notice("success", "Operation completed.")
         const display = showResult(value)

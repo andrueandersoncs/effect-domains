@@ -1,8 +1,8 @@
 # Team tasks: tenant-owned operational work
 
-This guide runs a small task board through the same authenticated RPC operations used by its generated Application UI. We will create two Acme tasks as Alice, page the filtered list, show that Bob cannot see Alice's work, complete a task, and use an administrator only for the actions an owner cannot take.
+This guide runs a small task board through the same authenticated RPC operations used by its generated Application UI. Create two Acme tasks as Alice, page the filtered list, show that Bob cannot see Alice's work, complete a task, then manage a permission-gated tenant report through group membership.
 
-The application has one generated resource, historically named `todos`, so its commands are `todos.*` even though the application is Team tasks. Its [canonical task fields](domain.ts) are project, title, optional detail and due date, priority, completion state, and server-returned tenant and owner fields.
+The application has a generated resource, historically named `todos`, and an authored `todos.review` aggregate. Its [canonical task fields](domain.ts) are project, title, optional detail and due date, priority, completion state, and server-returned tenant and owner fields. The report is explicit application SQL guarded by a persisted permission, not an inferred Resource capability.
 
 ## Before you start
 
@@ -116,11 +116,52 @@ The update reopens the task. The attempted transfer exits nonzero with `Forbidde
 bun run team-tasks todos.create --input-json '{"project":"North Yard pump inspection","title":"Impossible date","dueDate":"2026-02-30"}'
 ```
 
-The example intentionally does not add scheduling, reminders, dependencies, reassignment, cross-project reporting, or a production identity flow.
+### Manage groups and permissions
+
+`todos.review` counts tasks across the authenticated tenant, including other owners' tasks. Unlike `todos.list`, it requires an exact `todos.review` permission. Bob initially receives `Forbidden`:
+
+```bash
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks todos.review
+```
+
+An Acme admin can create a group, manage active same-tenant members, and grant the group the report permission:
+
+```bash
+export GROUP_ID="$(
+  TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.group.create --input-json '{"name":"Review team"}' \
+    | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).id)'
+)"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.group.addMember --input-json "{\"id\":\"$GROUP_ID\",\"username\":\"bob\"}"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.permission.grantGroup --input-json "{\"id\":\"$GROUP_ID\",\"permission\":\"todos.review\"}"
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.group.listMembers --input-json "{\"id\":\"$GROUP_ID\"}"
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks identity.group.isMember --input-json "{\"id\":\"$GROUP_ID\",\"username\":\"bob\"}"
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks todos.review
+```
+
+The final result has `total` and `completed` integer counts for Acme only. Group names can be changed with `identity.group.update({ id, name })`. Members can list their own group, but only the tenant admin changes membership/grants or lists a group's grants. Direct per-account grants are independent:
+
+```bash
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.permission.grantAccount --input-json '{"username":"alice","permission":"todos.review"}'
+bun run team-tasks identity.permission.listAccount --input-json '{"username":"alice"}'
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.permission.revokeAccount --input-json '{"username":"alice","permission":"todos.review"}'
+```
+
+The original `TEAM_TASKS_TOKEN` still belongs to Alice; per-command overrides do not change it. `listAccount` lists only direct grants, not grants inherited from groups. Remove Bob from the group to revoke report access immediately:
+
+```bash
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.group.removeMember --input-json "{\"id\":\"$GROUP_ID\",\"username\":\"bob\"}"
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks identity.permission.check --input-json '{"permission":"todos.review"}'
+TEAM_TASKS_TOKEN="$BOB_TOKEN" bun run team-tasks todos.review
+TEAM_TASKS_TOKEN="$ADMIN_TOKEN" bun run team-tasks identity.group.delete --input-json "{\"id\":\"$GROUP_ID\"}"
+```
+
+`check` returns `false`; `todos.review` exits nonzero with `Forbidden`. Deleting a group transactionally removes its remaining memberships and grants. An admin can issue `identity.issueInvite` for another person to join Acme; `identity.signup({ username, password, inviteToken })` consumes it once and returns that new reader's session. A signup without an invitation creates a separate tenant and cannot be silently added to Acme. Password-reset issuance is admin-only and requires out-of-band credential delivery; see the [identity runtime reference](../../docs/reference/runtime.md#identity-services-and-rpc).
+
+The example intentionally does not add scheduling, reminders, dependencies, reassignment, or a production identity flow.
 
 ## Application UI and MCP
 
-With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/). Run `identity.login` with a seeded account; the generated UI keeps the returned bearer token only in memory. It derives task operation forms, exact project/priority/status filters, and cursor paging from the compiled application. Tenant and owner fields remain server-owned, and authorization failures remain visible.
+With the server running, open [http://127.0.0.1:3001/](http://127.0.0.1:3001/). Run `identity.login` with a seeded account, or `identity.signup` for a new isolated tenant; the generated UI keeps the returned bearer token only in memory and clears it on logout or closure. It derives task operation forms, exact project/priority/status filters, and cursor paging from the compiled application. Tenant and owner fields remain server-owned, and authorization failures remain visible.
 
 Streamable HTTP MCP is available at `http://127.0.0.1:3001/mcp`. Tool arguments wrap the RPC payload as `{ "input": <payload> }`; MCP does not bypass task policy.
 

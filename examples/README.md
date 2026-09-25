@@ -41,7 +41,7 @@ export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'
 export TEAM_TASKS_IDENTITY_DB="$(mktemp -d)/team-tasks-identity.sqlite"
 ```
 
-`SqliteIdentity.layer({ application: "team-tasks", ... })` derives `TEAM_TASKS_IDENTITY_DB`; the default is `data/team-tasks-identity.sqlite`. Never set it to the application database. Seeded accounts are Alice (Acme editor), Bob (Acme reader), Admin (Acme administrator), and Outsider (other-tenant editor). They are demonstration bootstrap data, not a user-management or IdP implementation.
+`SqliteIdentity.layer({ application: "team-tasks", ... })` derives `TEAM_TASKS_IDENTITY_DB`; the default is `data/team-tasks-identity.sqlite`. Never set it to the application database. Seeded accounts are Alice (Acme editor), Bob (Acme reader), Admin (Acme administrator), and Outsider (other-tenant editor). They are demonstration bootstrap data; additional accounts can join an existing tenant only through a one-time administrator invitation.
 
 After setting `<APP>_URL`, acquire a token through `identity.login`:
 
@@ -53,7 +53,7 @@ export TEAM_TASKS_TOKEN="$(
 )"
 ```
 
-Treat it as a secret. The CLI sends `<APP>_TOKEN` as a bearer credential. `identity.current` returns its verified subject and expiry; `identity.logout` revokes it. `EFFECT_DOMAINS_SESSION_LIFETIME` defaults to eight hours. Account seeding inserts missing accounts and preserves changed account state.
+Treat session, invitation, and reset tokens as secrets. The CLI sends `<APP>_TOKEN` as a bearer credential. `identity.current` returns the verified subject and expiry; `identity.logout` revokes only the presented credential. `identity.signup` creates an isolated tenant admin, or joins an invited tenant as a reader using `inviteToken` from `identity.issueInvite`. `identity.close` disables the authenticated account and revokes every session. A tenant admin issues a one-use 15-minute `identity.issuePasswordReset` token for out-of-band delivery; `identity.resetPassword` replaces the hash and revokes all sessions. `EFFECT_DOMAINS_SESSION_LIFETIME` defaults to eight hours. Account seeding inserts missing accounts and preserves changed account state. Group/member and direct/group grant operations are [documented in the Team Tasks walkthrough](team-tasks/README.md#manage-groups-and-permissions); application commands explicitly opt in to permission checks. This is not a production IdP or email recovery service.
 
 ### Durable execution storage
 

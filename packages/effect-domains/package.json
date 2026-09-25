@@ -19,6 +19,7 @@
     "./entitlements": "./src/entitlements.ts",
     "./feature-flags": "./src/feature-flags.ts",
     "./identity": "./src/identity.ts",
+    "./identity-groups": "./src/identity-groups.ts",
     "./identity-rpc": "./src/identity-rpc.ts",
     "./migrations": "./src/migrations.ts",
     "./command": "./src/command.ts",

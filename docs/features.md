@@ -40,6 +40,7 @@ description: Complete list of features implemented in the current Effect Domains
 - Transactional patch merging with identifier preservation.
 - Declarative optimistic-version fields with automatic initial values, increments, expected-version checks, and `VersionConflict` failures.
 - Declarative status-transition graphs with derived action schemas, guards, conditional writes, and transition failures.
+- Atomic updates to other mutable fields alongside guarded status transitions.
 - Equality-filtered resource lists.
 - Inclusive range-filtered resource lists.
 - Fixed ascending and descending list ordering with stable identifier tie-breaking.
@@ -65,11 +66,14 @@ description: Complete list of features implemented in the current Effect Domains
 - Trusted subject-to-create-field bindings.
 - Request-local bearer authentication for protected RPCs.
 - Typed `Unauthenticated` and `Forbidden` failures.
-- Portable credential, issued-session, current-session, subject, and identity-runtime contracts.
-- Native `identity.login`, `identity.current`, and `identity.logout` RPCs.
-- SQLite identity implementation with Argon2id password verification.
-- Random opaque session tokens stored only as SHA-256 digests.
+- Portable credential, signup, reset, issued-session, current-session, subject, identity-runtime, and group-runtime contracts.
+- Native login/current/logout, signup/close/invitation/reset, group membership, and account/group grant RPCs.
+- SQLite identity implementation with Argon2id password hashing and verification.
+- Isolated self-signup or one-use tenant invitation for new members; insert-once demonstration accounts preserve existing account state.
+- Administrator-issued expiring, single-use password-reset credentials and transactional all-session revocation on replacement or closure.
+- Random opaque session, invitation, and reset tokens stored only as SHA-256 digests.
 - Expiring and revocable sessions checked against current account state on every authenticated call.
+- Tenant-scoped group memberships, direct and inherited grants, current effective-permission checks, and explicit revocation.
 - Separate private identity databases with application-database path and inode collision protection.
 - Declarative entitlement requirements attached to authorization policies.
 - Typed table-backed entitlement sources with subject-to-storage scope bindings.
@@ -118,6 +122,7 @@ description: Complete list of features implemented in the current Effect Domains
 - Ordered imported migration-history decoding and validation.
 - Create-table, add-column, rename-column, rebuild-table, create-index, and drop-index steps.
 - Rebuild copies from source columns, constant values, or authored SQL expressions.
+- Automatic preservation of same-name columns during table rebuilds, with explicit copy mappings required for new columns.
 - Immutable applied-migration ledger with canonical artifact comparison.
 - Transactional migration application and ledger updates.
 - Rollback of failed schema changes or invalid copied rows.
@@ -135,6 +140,7 @@ description: Complete list of features implemented in the current Effect Domains
 - Optional native HTTP route composition.
 - Effect HTTP RPC publication with configurable path.
 - Streamable HTTP MCP publication with configurable path.
+- MCP Streamable HTTP support for protocol revisions `2025-03-26`, `2025-06-18`, and `2025-11-25`.
 - Generated CLI commands for every published unary RPC.
 - Canonical `--input-json` CLI input and JSON stdout results.
 - Schema-derived omission of no-payload, empty-struct, and all-optional CLI inputs.
@@ -148,6 +154,7 @@ description: Complete list of features implemented in the current Effect Domains
 - Display-only application and resource titles, descriptions, labels, and columns.
 - In-memory browser bearer-token handling with automatic login capture and logout clearing.
 - Exact-origin checks for non-loopback Application UI calls.
+- Generated Application UI responses with `no-store`, `nosniff`, `no-referrer`, and restrictive Content Security Policy headers.
 - Static asset loading without runtime compilation.
 - Loopback-only Bun HTTP binding.
 
@@ -158,6 +165,7 @@ description: Complete list of features implemented in the current Effect Domains
 - Shared resource identity across server, CLI, initialization, worker, and browser signals.
 - Explicit and standard OpenTelemetry environment-variable configuration with deterministic precedence.
 - Per-signal endpoints, protocols, headers, batching, export intervals, and shutdown timeouts.
+- Metric aggregation temporality, minimum trace and log levels, and log-span exclusion and logger-merging controls.
 - Root trace sampling with parent sampling preserved.
 - Effect fiber runtime metrics when metric export is enabled.
 - Safe HTTP server, RPC server, and browser RPC duration histograms.

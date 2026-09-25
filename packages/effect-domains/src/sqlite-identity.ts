@@ -1,13 +1,16 @@
 import { createHash, randomBytes } from "node:crypto"
-import { Clock, Config, DateTime, Duration, Effect, Function, Layer, Option, Redacted, Schema, Semaphore, Struct, pipe } from "effect"
+import { Array, Clock, Config, DateTime, Duration, Effect, Function, Layer, Option, Predicate, Redacted, Schema, Semaphore, Struct, pipe } from "effect"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
 import { Unauthenticated } from "./authorization-model.ts"
 import { AuthorizationRpc } from "./authorization-rpc.ts"
 import { identifier } from "./domain.ts"
-import { CredentialsSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema, SubjectSchema } from "./identity.ts"
-import { authenticateIdentity } from "./identity-rpc.ts"
+import { AccountAlreadyExists, CredentialsSchema, IdentityRuntime, IdentityUnavailable, IssuedSessionSchema, SignupSchema, SubjectSchema } from "./identity.ts"
+import { database, unavailable } from "./identity-database.ts"
+import { authenticateIdentity } from "./identity-authenticate.ts"
+import { GroupRuntimeLive, GroupTables } from "./sqlite-identity-groups.ts"
 import { SqliteBunRuntime } from "./sqlite-bun.ts"
 import { sqliteMigrationStore, SqliteMigrations } from "./sqlite-migrations.ts"
+import { identityCredentialOperations, PasswordResets, TenantInvites } from "./sqlite-identity-reset.ts"
 import { Table } from "./table.ts"
 
 const StoredSubjectSchema = Schema.fromJsonString(SubjectSchema)
@@ -21,7 +24,7 @@ const AccountsSchema = Schema.Struct({
 
 interface Accounts extends Schema.Schema.Type<typeof AccountsSchema> {}
 
-const Accounts = Table.make({
+export const Accounts = Table.make({
   name: "identity_accounts",
   schema: AccountsSchema,
 })
@@ -57,7 +60,35 @@ const InitialIdentityMigration = SqliteMigrations.initial({
   tables: [Accounts, Sessions],
 })
 
-const IdentityMigrations = SqliteMigrations.history(InitialIdentityMigration)
+const AddedIdentityTables = [PasswordResets, TenantInvites, ...GroupTables]
+const IdentityTables = [Accounts, Sessions, ...AddedIdentityTables]
+const identitySnapshot = SqliteMigrations.snapshot(IdentityTables)
+
+const createIdentityTable = (table: (typeof AddedIdentityTables)[number]) =>
+  SqliteMigrations.steps.CreateTable.make({ table: table.name })
+
+const createdIdentityTables = Array.map(AddedIdentityTables, createIdentityTable)
+
+const identityIndexNames = [
+  { table: PasswordResets.name, name: "identity_password_resets_username_idx" },
+  { table: TenantInvites.name, name: "identity_tenant_invites_issuer_idx" },
+  { table: "identity_groups", name: "identity_groups_tenant" },
+  { table: "identity_group_memberships", name: "identity_group_memberships_user" },
+  { table: "identity_account_grants", name: "identity_account_grants_user" },
+]
+
+const createIdentityIndex = ({ table, name }: (typeof identityIndexNames)[number]) =>
+  SqliteMigrations.steps.CreateIndex.make({ table, name })
+
+const identityIndexes = Array.map(identityIndexNames, createIdentityIndex)
+
+const IdentityExtension = SqliteMigrations.make({
+  id: "002_account_groups_permissions",
+  to: identitySnapshot,
+  steps: [...createdIdentityTables, ...identityIndexes],
+})
+
+const IdentityMigrations = SqliteMigrations.history(InitialIdentityMigration, IdentityExtension)
 
 const AccountRowSchema = Schema.Struct({
   username: Schema.String,
@@ -67,8 +98,21 @@ const AccountRowSchema = Schema.Struct({
 
 interface AccountRow extends Schema.Schema.Type<typeof AccountRowSchema> {}
 
+const NewAccountSchema = Schema.Struct({
+  username: Schema.String,
+  password_hash: Schema.String,
+  subject_json: Schema.String,
+})
+
+interface NewAccount extends Schema.Schema.Type<typeof NewAccountSchema> {}
+
+const InsertedAccountSchema = Schema.Struct({ username: Schema.String })
+
+interface InsertedAccount extends Schema.Schema.Type<typeof InsertedAccountSchema> {}
+
 const SessionRowSchema = Schema.Struct({
   id: Schema.String,
+  username: Schema.String,
   expires_at: Schema.Int,
   subject_json: StoredSubjectSchema,
 })
@@ -95,12 +139,7 @@ interface SqliteIdentityOptions extends Partial<SqliteIdentityOptionalOptions> {
   readonly password: Config.Config<Redacted.Redacted<string>> | Redacted.Redacted<string>
 }
 
-const unavailable = () => IdentityUnavailable.make({})
 const unauthenticated = () => Unauthenticated.make({})
-
-const database = Effect.fn("SqliteIdentity.database")(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-  return yield* pipe(effect, Effect.mapError(unavailable))
-})
 
 const tokenDigest = (token: string) => createHash("sha256").update(token).digest("hex")
 const newToken = Effect.try({ try: () => randomBytes(32).toString("base64url"), catch: unavailable })
@@ -133,7 +172,7 @@ const verifyPassword = Effect.fn("SqliteIdentity.verifyPassword")(function* (
 
 const prepare = Effect.fn("SqliteIdentity.prepare")(function* (sql: SqlClient.SqlClient) {
   const store = sqliteMigrationStore(sql, IdentityMigrations)
-  const tables = [Table.snapshot(Accounts), Table.snapshot(Sessions)]
+  const tables = Array.map(IdentityTables, Table.snapshot)
 
   yield* pipe(store.prepare(tables), database)
 })
@@ -179,6 +218,17 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
 
   const dummyPassword = yield* pipe(newToken, Effect.map(Redacted.make))
   const dummyHash = yield* hashPassword(dummyPassword)
+  const credentialsRuntime = identityCredentialOperations(sql, clock, Accounts.name, Sessions.name, hashPassword)
+
+  const insertAccount = SqlSchema.findOneOption({
+    Request: NewAccountSchema,
+    Result: InsertedAccountSchema,
+    execute: (account) => sql`
+      INSERT INTO ${sql(Accounts.name)} ${sql.insert({ ...account, disabled: 0 })}
+      ON CONFLICT(username) DO NOTHING RETURNING username
+    `,
+  })
+
   const passwordVerifications = yield* Semaphore.make(2)
 
   const accountFor = SqlSchema.findOneOption({
@@ -194,7 +244,7 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     Request: SessionLookupSchema,
     Result: SessionRowSchema,
     execute: ({ digest, now }) => sql`
-      SELECT sessions.id, sessions.expires_at, accounts.subject_json
+      SELECT sessions.id, sessions.username, sessions.expires_at, accounts.subject_json
       FROM ${sql(Sessions.name)} AS sessions
       INNER JOIN ${sql(Accounts.name)} AS accounts ON accounts.username = sessions.username
       WHERE sessions.token_digest = ${digest} AND sessions.revoked_at IS NULL
@@ -209,24 +259,10 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     const session = yield* pipe(sessionFor({ digest, now }), database, Effect.flatMap(Effect.fromOption(unauthenticated)))
     const expiresAt = yield* pipe(DateTime.make(session.expires_at), Effect.fromOption(unavailable))
 
-    return { sessionId: session.id, expiresAt, subject: session.subject_json }
+    return { sessionId: session.id, username: session.username, expiresAt, subject: session.subject_json }
   })
 
-  const login = Effect.fn("SqliteIdentity.login")(function* (credentials: Schema.Schema.Type<typeof CredentialsSchema>) {
-    const attempt = Effect.gen(function* () {
-      const account = yield* pipe(accountFor(credentials.username), database)
-      const hash = Option.match(account, { onNone: Function.constant(dummyHash), onSome: Struct.get("password_hash") })
-      const valid = yield* pipe(verifyPassword(credentials.password, hash), Effect.uninterruptible)
-
-      return { account, valid }
-    })
-
-    const resultOption = yield* passwordVerifications.withPermitsIfAvailable(1)(attempt)
-    const result = yield* Effect.fromOption(resultOption, unavailable)
-
-    if (!result.valid) return yield* unauthenticated()
-
-    const account = yield* Effect.fromOption(result.account, unauthenticated)
+  const issueSession = Effect.fn("SqliteIdentity.issueSession")(function* (account: Pick<AccountRow, "username" | "subject_json">) {
     const token = yield* newToken
     const sessionId = yield* newSessionId
     const digest = yield* Effect.try({ try: () => tokenDigest(token), catch: unavailable })
@@ -246,7 +282,80 @@ const makeRuntime = Effect.fn("SqliteIdentity.runtime")(function* (
     return IssuedSessionSchema.make({ token: Redacted.make(token), expiresAt, subject: account.subject_json })
   })
 
+  const signup = Effect.fn("SqliteIdentity.signup")(function* (credentials: Schema.Schema.Type<typeof SignupSchema>) {
+    const password_hash = yield* hashPassword(credentials.password)
+    const invite = Option.fromNullishOr(credentials.inviteToken)
+
+    const register = Effect.gen(function* () {
+      const now = yield* clock.currentTimeMillis
+
+      const tenantId = yield* Option.match(invite, {
+        onNone: () => Effect.succeed(credentials.username),
+        onSome: (token) => credentialsRuntime.consumeInvite(token, now),
+      })
+
+      const role = Option.isNone(invite) ? "admin" : "reader"
+      const subject = SubjectSchema.make({ userId: credentials.username, tenantId, roles: [role] })
+      const subject_json = yield* Schema.encodeEffect(StoredSubjectSchema)(subject)
+      const inserted = yield* insertAccount({ username: credentials.username, password_hash, subject_json })
+
+      if (Option.isNone(inserted)) return yield* AccountAlreadyExists.make({})
+
+      return yield* issueSession({ username: credentials.username, subject_json: subject })
+    })
+
+    const committed = sql.withTransaction(register)
+
+    return yield* pipe(committed, Effect.mapError((error) => {
+      const accountConflict = Predicate.isTagged(error, "AccountAlreadyExists")
+      const invalidInvite = Predicate.isTagged(error, "InvalidInviteToken")
+
+      return accountConflict || invalidInvite ? error : unavailable()
+    }))
+  })
+
+  const close = Effect.fn("SqliteIdentity.close")(function* (username: string) {
+    const now = yield* clock.currentTimeMillis
+
+    const disable = Effect.gen(function* () {
+      yield* sql`UPDATE ${sql(Accounts.name)} SET disabled = 1 WHERE username = ${username} AND disabled = 0`
+
+      yield* sql`UPDATE ${sql(Sessions.name)} SET revoked_at = ${now}
+        WHERE username = ${username} AND revoked_at IS NULL`
+
+      yield* sql`DELETE FROM ${sql(PasswordResets.name)} WHERE username = ${username}`
+    })
+
+    const committed = sql.withTransaction(disable)
+
+    yield* database(committed)
+  })
+
+  const login = Effect.fn("SqliteIdentity.login")(function* (credentials: Schema.Schema.Type<typeof CredentialsSchema>) {
+    const attempt = Effect.gen(function* () {
+      const account = yield* pipe(accountFor(credentials.username), database)
+      const hash = Option.match(account, { onNone: Function.constant(dummyHash), onSome: Struct.get("password_hash") })
+      const valid = yield* pipe(verifyPassword(credentials.password, hash), Effect.uninterruptible)
+
+      return { account, valid }
+    })
+
+    const resultOption = yield* passwordVerifications.withPermitsIfAvailable(1)(attempt)
+    const result = yield* Effect.fromOption(resultOption, unavailable)
+
+    if (!result.valid) return yield* unauthenticated()
+
+    const account = yield* Effect.fromOption(result.account, unauthenticated)
+
+    return yield* issueSession(account)
+  })
+
   return IdentityRuntime.of({
+    signup,
+    close,
+    issueInvite: credentialsRuntime.issueInvite,
+    issuePasswordReset: credentialsRuntime.issuePasswordReset,
+    resetPassword: credentialsRuntime.resetPassword,
     login,
     authenticate,
     revoke: Effect.fn("SqliteIdentity.revoke")(function* (sessionId: string) {
@@ -297,11 +406,9 @@ const layer = (options: SqliteIdentityOptions) => {
     return yield* makeRuntime(options.accounts, password, lifetime)
   })
 
-  const runtime = pipe(
-    Layer.effect(IdentityRuntime, identityRuntime),
-    Layer.provide(privateClient),
-  )
-
+  const accountService = Layer.effect(IdentityRuntime, identityRuntime)
+  const services = Layer.merge(accountService, GroupRuntimeLive)
+  const runtime = pipe(services, Layer.provide(privateClient))
   const authorization = Layer.effect(AuthorizationRpc.Authenticator, authenticator)
 
   return pipe(
