@@ -95,4 +95,4 @@ The repository implements Bun and Node application runtime seams over SQLite. Th
 - [Restrict access](/guides/authorization)
 - [Choose an example](/examples)
 
-Implementation sources: [`Resource`](../packages/effect-domains/src/resource.ts), [`Command`](../packages/effect-domains/src/command.ts), [`ReadModel`](../packages/effect-domains/src/read-model.ts), [`Application`](../packages/effect-domains/src/application.ts), [portable runtime](../packages/effect-domains/src/application-runtime.ts), [infrastructure compiler](../packages/effect-domains/src/infrastructure-compiler.ts), and [Alchemy backends](../packages/effect-domains-alchemy/src/).
+Implementation sources: [`Resource`](../packages/effect-domains/src/resource/index.ts), [`Command`](../packages/effect-domains/src/command.ts), [`ReadModel`](../packages/effect-domains/src/read-model/index.ts), [`Application`](../packages/effect-domains/src/application/index.ts), [portable runtime](../packages/effect-domains/src/application/runtime.ts), [infrastructure compiler](../packages/effect-domains/src/infrastructure/compiler.ts), and [Alchemy backends](../packages/effect-domains-alchemy/src/).

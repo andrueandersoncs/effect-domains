@@ -100,8 +100,8 @@ At `http://127.0.0.1:3000/`, the generated UI offers resource lists, declared fi
 ## Read next
 
 - [Asset schema](domain.ts), [resource and derived unique/index declarations](resources.ts), and [frozen migration history](migrations.ts)
-- [Application/runtime entry point](main.ts) and [shared Application UI adapter](../../packages/effect-domains/src/application-ui.ts)
+- [Application/runtime entry point](main.ts) and [shared Application UI adapter](../../packages/effect-domains/src/application/ui/index.ts)
 - [Official SDK MCP walkthrough](client.ts)
 - [Resource CRUD, list, cursor, and implicit UUID contract](../../docs/reference/resources.md)
-- [Bun server, CLI endpoint, and MCP adapter setup](../../packages/effect-domains/src/application-bun.ts)
-- [MCP RPC envelope implementation](../../packages/effect-domains/src/rpc-mcp.ts) and [runtime reference](../../docs/reference/runtime.md)
+- [Bun server, CLI endpoint, and MCP adapter setup](../../packages/effect-domains/src/application/bun/index.ts)
+- [MCP RPC envelope implementation](../../packages/effect-domains/src/rpc/mcp.ts) and [runtime reference](../../docs/reference/runtime.md)

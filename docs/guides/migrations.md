@@ -104,6 +104,6 @@ At startup the runtime rejects a history that does not end at the application sc
 
 ## Sources
 
-- [`SqliteMigrations`](../../packages/effect-domains/src/sqlite-migrations.ts)
+- [`SqliteMigrations`](../../packages/effect-domains/src/sqlite/migrations.ts)
 - [Editorial migration history](../../examples/editorial-calendar/migrations.ts)
 - [Editorial artifact](../../examples/editorial-calendar/migrations/004_editorial_metadata.json)

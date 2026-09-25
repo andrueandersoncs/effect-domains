@@ -117,9 +117,9 @@ Resource generation covers routine record persistence. Cross-resource invariants
 
 ## Source
 
-- [`Resource`](../../packages/effect-domains/src/resource.ts)
+- [`Resource`](../../packages/effect-domains/src/resource/index.ts)
 - [`Command`](../../packages/effect-domains/src/command.ts)
-- [`ReadModel`](../../packages/effect-domains/src/read-model.ts)
-- [`Transitions.make`](../../packages/effect-domains/src/transitions.ts)
-- [`Table`](../../packages/effect-domains/src/table.ts)
-- [`RepositoryStore` errors](../../packages/effect-domains/src/repository-store.ts)
+- [`ReadModel`](../../packages/effect-domains/src/read-model/index.ts)
+- [`Transitions.make`](../../packages/effect-domains/src/resource/transitions.ts)
+- [`Table`](../../packages/effect-domains/src/table/index.ts)
+- [`RepositoryStore` errors](../../packages/effect-domains/src/resource/repository-store.ts)
