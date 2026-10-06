@@ -24,11 +24,15 @@ export const SupportCustomerSchema = Schema.Struct({
   name: Schema.NonEmptyString,
 })
 
+interface SupportCustomer extends Schema.Schema.Type<typeof SupportCustomerSchema> {}
+
 export const SupportAgentSchema = Schema.Struct({
   id: SupportPartyIdSchema,
   name: Schema.NonEmptyString,
   onDuty: Schema.Boolean,
 })
+
+interface SupportAgent extends Schema.Schema.Type<typeof SupportAgentSchema> {}
 
 export const SupportCaseSchema = Schema.Struct({
   customerId: Schema.NonEmptyString,
@@ -39,6 +43,8 @@ export const SupportCaseSchema = Schema.Struct({
   openedAt: Schema.DateTimeUtc,
   version: SupportCaseVersionSchema,
 })
+
+interface SupportCase extends Schema.Schema.Type<typeof SupportCaseSchema> {}
 
 export const SupportCaseEventKindSchema = Schema.Literals([
   "opened",
@@ -56,11 +62,15 @@ export const SupportCaseEventSchema = Schema.Struct({
   occurredAt: Schema.DateTimeUtc,
 })
 
+interface SupportCaseEvent extends Schema.Schema.Type<typeof SupportCaseEventSchema> {}
+
 export const OpenSupportCaseInputSchema = Schema.Struct({
   customerId: Schema.NonEmptyString,
   subject: Schema.NonEmptyString,
   priority: Schema.optionalKey(SupportCasePrioritySchema),
 })
+
+interface OpenSupportCaseInput extends Schema.Schema.Type<typeof OpenSupportCaseInputSchema> {}
 
 export const AdvanceSupportCaseInputSchema = Schema.Struct({
   caseId: Schema.NonEmptyString,
@@ -70,9 +80,13 @@ export const AdvanceSupportCaseInputSchema = Schema.Struct({
   note: Schema.optionalKey(Schema.NonEmptyString),
 })
 
+interface AdvanceSupportCaseInput extends Schema.Schema.Type<typeof AdvanceSupportCaseInputSchema> {}
+
 export const GetSupportCaseInputSchema = Schema.Struct({
   caseId: Schema.NonEmptyString,
 })
+
+interface GetSupportCaseInput extends Schema.Schema.Type<typeof GetSupportCaseInputSchema> {}
 
 export class SupportCustomerNotFound extends Schema.TaggedError<SupportCustomerNotFound>()(
   "SupportCustomerNotFound",

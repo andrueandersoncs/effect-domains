@@ -109,7 +109,7 @@ const subjectPolicyDsl = <Subject extends StructSchema>(subject: Subject) => {
   const policy = <const Requirements extends ReadonlyArray<TypedEntitlement<"subject">> = readonly []>(
     condition: PolicyExpression<"subject">,
     options: Readonly<Partial<{ require: Requirements }>> = {},
-  ) => {
+  ): SubjectPolicy<Subject, Requirements> => {
     pipe(
       checkPolicy(condition, fields, subjectPhases, "subject policy"),
       Effect.runSync,

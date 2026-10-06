@@ -33,11 +33,15 @@ export const ReportExportExecutionSchema = Schema.Struct({
   failure: Schema.NullOr(Schema.String),
 })
 
+export interface ReportExportExecution extends Schema.Schema.Type<typeof ReportExportExecutionSchema> {}
+
 const ReportExportExecutionRowSchema = Schema.Struct({
   ...ReportExportExecutionSchema.fields,
   createdAt: Schema.DateTimeUtc,
   updatedAt: Schema.DateTimeUtc,
 })
+
+interface ReportExportExecutionRow extends Schema.Schema.Type<typeof ReportExportExecutionRowSchema> {}
 
 const StoredReportExportRequestSchema = Schema.fromJsonString(Schema.toCodecJson(ReportExportRequestSchema))
 const StoredReportArtifactSchema = Schema.fromJsonString(Schema.toCodecJson(ReportArtifactSchema))
@@ -48,11 +52,15 @@ const StoredReportExportExecutionSchema = Schema.Struct({
   artifact: Schema.NullOr(StoredReportArtifactSchema),
 })
 
+interface StoredReportExportExecution extends Schema.Schema.Type<typeof StoredReportExportExecutionSchema> {}
+
 const StoredExecutionResultSchema = Schema.Struct({
   ...ReportExportExecutionSchema.fields,
   request: StoredReportExportRequestSchema,
   artifact: Schema.NullOr(StoredReportArtifactSchema),
 })
+
+interface StoredExecutionResult extends Schema.Schema.Type<typeof StoredExecutionResultSchema> {}
 
 export const ReportExportExecutionsResource = Resource.define({
   authorization: Authorization.public,
@@ -65,7 +73,6 @@ export const ReportExportExecutionsResource = Resource.define({
   },
 })
 
-export type ReportExportExecution = typeof ReportExportExecutionSchema.Type
 type Request = typeof ReportExportRequestSchema.Type
 type Artifact = typeof ReportArtifactSchema.Type
 
@@ -94,21 +101,6 @@ const executionTable = Resource.table(ReportExportExecutionsResource)
 const encodeExecution = Schema.encodeUnknownEffect(executionTable.storageSchema)
 const decodeExecution = Schema.decodeUnknownEffect(StoredExecutionResultSchema)
 const encodeArtifact = Schema.encodeUnknownEffect(StoredReportArtifactSchema)
-
-const KnownStoreErrorSchema = Schema.Struct({
-  _tag: Schema.Literals([
-    "ReportExportCancellationRejected",
-    "ReportExportNotFound",
-    "ReportExportUnavailable",
-  ]),
-})
-
-const isKnownStoreError = Schema.is(KnownStoreErrorSchema)
-
-const knownCancelError = (error: unknown) => isKnownStoreError(error)
-  // SAFETY: The asserted error type matches because the preceding schema guard validates the discriminant.
-  ? error as ReportExportUnavailable | ReportExportNotFound | ReportExportCancellationRejected
-  : storeUnavailable(error)
 
 const makeExecutionStore = Effect.gen(function* () {
   const database = yield* SqlClient.SqlClient
@@ -202,18 +194,21 @@ const makeExecutionStore = Effect.gen(function* () {
   const cancel = Effect.fn("ReportExports.ExecutionStore.cancel")(function* (executionId: string) {
     const updatedAt = DateTime.formatIso(yield* DateTime.now)
 
-    yield* database`
-      UPDATE ${table}
-      SET status = 'cancelled', updatedAt = ${updatedAt}
-      WHERE id = ${executionId} AND status IN ('accepted', 'dispatched')
-    `
+    yield* pipe(
+      database`
+        UPDATE ${table}
+        SET status = 'cancelled', updatedAt = ${updatedAt}
+        WHERE id = ${executionId} AND status IN ('accepted', 'dispatched')
+      `,
+      Effect.mapError(storeUnavailable),
+    )
 
     const execution = yield* requireExecution(executionId)
 
     if (sameStatus(execution.status, "cancelled")) return execution
 
     return yield* ReportExportCancellationRejected.make({ executionId, status: execution.status })
-  }, Effect.mapError(knownCancelError))
+  })
 
   const accept = Effect.fn("ReportExports.ExecutionStore.accept")(function* ({ id, request, tenantId }) {
     const now = yield* DateTime.now

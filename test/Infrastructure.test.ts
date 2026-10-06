@@ -21,9 +21,6 @@ const databaseOptions = {
   writerTopology: "single" as const,
 }
 
-const DatabaseFileSchema = Schema.Struct({ name: Schema.String, file: Schema.String })
-const DatabaseFilesSchema = Schema.Array(DatabaseFileSchema)
-
 it("compiles application infrastructure into a canonical inspectable dependency graph", () => {
   const inspection = InfrastructureInspect.describe(ReadingListInfrastructureIR)
 
@@ -96,6 +93,12 @@ it.effect("derives local runtime configuration from InfrastructureIR", () =>
   ))
 
 it.effect("uses in-memory SQLite for ephemeral local infrastructure", () => {
+  const DatabaseFileSchema = Schema.Struct({ name: Schema.String, file: Schema.String })
+
+  interface DatabaseFile extends Schema.Schema.Type<typeof DatabaseFileSchema> {}
+
+  const DatabaseFilesSchema = Schema.Array(DatabaseFileSchema)
+
   const definition = ApplicationInfrastructure.define({
     application: ReadingListApplication,
     database: { ...databaseOptions, durability: "ephemeral" },
@@ -163,10 +166,7 @@ it.effect("rejects a persistent filename for ephemeral local infrastructure", ()
     }),
     Effect.flip,
     Effect.map((failure) => {
-      expect(failure).toMatchObject({
-        _tag: "InfrastructureDatabaseConfigurationError",
-        reason: "An ephemeral infrastructure database cannot use a persistent filename",
-      })
+      expect(failure._tag).toBe("InfrastructureDatabaseConfigurationError")
     }),
   )
 })

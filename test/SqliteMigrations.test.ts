@@ -8,7 +8,6 @@ import { renderCreateTable } from "effect-domains/sqlite-ddl"
 import { SqlClient } from "effect/unstable/sql"
 import { Resource } from "effect-domains/resource"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
-
 import { sqliteMigrationStore, SqliteMigrations } from "effect-domains/sqlite-migrations"
 import { SqliteMigration } from "effect-domains/sqlite-migration-model"
 
@@ -17,6 +16,8 @@ const sqliteClient = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const SqliteMigrationJsonSchema = Schema.toCodecJson(SqliteMigration)
 const encodeMigration = Schema.encodeUnknownSync(SqliteMigrationJsonSchema)
 const TitleSchema = Schema.Struct({ title: Schema.NonEmptyString })
+
+interface Title extends Schema.Schema.Type<typeof TitleSchema> {}
 
 const nullableAdditionsAndRenamesAction = Effect.fn("SqliteMigrations.nullableAdditionsAndRenames")(function* () {
   const database = yield* SqlClient.SqlClient
@@ -223,7 +224,9 @@ const nullableIdentifierSnapshotsAction = Effect.fn("SqliteMigrations.nullableId
   const history = SqliteMigrations.decodeHistory([encodedArtifact])
   const decodedHistory = yield* Effect.result(history)
 
-  expect(decodedHistory).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(decodedHistory._tag).toBe("Failure")
+
+  expect(decodedHistory).toHaveProperty("failure._tag", "MigrationError")
 
   const makeInvalid = () => SqliteMigrations.make({ ...nullableArtifact })
 
@@ -306,7 +309,10 @@ const driftDetectionAction = Effect.fn("SqliteMigrations.driftDetection")(functi
   const outcome = yield* Effect.result(prepareSource)
   const loadedRecord = yield* Resource.repository(changed).get(record.id)
 
-  expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(outcome._tag).toBe("Failure")
+
+  expect(outcome).toHaveProperty("failure._tag", "MigrationError")
+
   expect(loadedRecord).toEqual(record)
 })()
 
@@ -329,12 +335,9 @@ const missingInitialHistoryAction = Effect.fn("SqliteMigrations.missingInitialHi
     WHERE type = 'table' AND name = 'requires_initial_history'
   `
 
-  expect(outcome).toMatchObject({
-    _tag: "Failure",
-    failure: {
-      _tag: "MigrationError",
-    },
-  })
+  expect(outcome._tag).toBe("Failure")
+
+  expect(outcome).toHaveProperty("failure._tag", "MigrationError")
 
   expect(tables).toEqual([])
 })()
@@ -427,7 +430,9 @@ const decodedHistoryValidation = Effect.fn("SqliteMigrations.decodedHistoryValid
 
   const malformed = yield* pipe(SqliteMigrations.decodeHistory([{ id: 42 }]), Effect.result)
 
-  expect(malformed).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(malformed._tag).toBe("Failure")
+
+  expect(malformed).toHaveProperty("failure._tag", "MigrationError")
 })
 
 it.effect("imported history validates artifacts and freezes nested snapshots", decodedHistoryValidation)
@@ -454,7 +459,9 @@ const invalidHistories = Effect.fn("SqliteMigrations.invalidHistories")(function
   const rejectHistory = Effect.fn("SqliteMigrations.rejectHistory")(function* (history: unknown) {
     const outcome = yield* pipe(SqliteMigrations.decodeHistory(history), Effect.result)
 
-    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+    expect(outcome._tag).toBe("Failure")
+
+    expect(outcome).toHaveProperty("failure._tag", "MigrationError")
   })
 
   yield* Effect.forEach(invalid, rejectHistory)
@@ -501,20 +508,27 @@ const tamperedHistory = Effect.fn("SqliteMigrations.tamperedHistory")(function* 
   const changedStore = sqliteMigrationStore(database, [changed, second, third])
   const changedArtifact = yield* pipe(changedStore.prepare(target.tables), Effect.result)
 
-  expect(changedArtifact).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(changedArtifact._tag).toBe("Failure")
+
+  expect(changedArtifact).toHaveProperty("failure._tag", "MigrationError")
 
   yield* database`UPDATE _effect_schema_migrations SET artifact = '{}' WHERE id = '003'`
 
   const forgedLedger = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(forgedLedger).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(forgedLedger._tag).toBe("Failure")
+
+  expect(forgedLedger).toHaveProperty("failure._tag", "MigrationError")
+
   yield* database`DELETE FROM _effect_schema_migrations WHERE id = '003'`
   yield* store.prepare(target.tables)
   yield* database`DELETE FROM _effect_schema_migrations WHERE id = '002'`
 
   const gap = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(gap).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(gap._tag).toBe("Failure")
+
+  expect(gap).toHaveProperty("failure._tag", "MigrationError")
 
   const preserved = yield* Resource.repository(resource).get(record.id)
 
@@ -539,13 +553,19 @@ const untrackedObjects = Effect.fn("SqliteMigrations.untrackedObjects")(function
 
   const index = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(index).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(index._tag).toBe("Failure")
+
+  expect(index).toHaveProperty("failure._tag", "MigrationError")
+
   yield* database`DROP INDEX untracked_title`
   yield* database`CREATE TRIGGER untracked_trigger AFTER INSERT ON untracked_objects BEGIN SELECT 1; END`
 
   const trigger = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(trigger).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(trigger._tag).toBe("Failure")
+
+  expect(trigger).toHaveProperty("failure._tag", "MigrationError")
+
   yield* database`DROP TRIGGER untracked_trigger`
   yield* store.prepare(target.tables)
 
@@ -576,12 +596,18 @@ const catalogIdentity = Effect.fn("SqliteMigrations.catalogIdentity")(function* 
 
   const missing = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(missing).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(missing._tag).toBe("Failure")
+
+  expect(missing).toHaveProperty("failure._tag", "MigrationError")
+
   yield* database`CREATE TRIGGER catalog_title AFTER INSERT ON catalog_identity BEGIN SELECT 1; END`
 
   const replaced = yield* pipe(store.prepare(target.tables), Effect.result)
 
-  expect(replaced).toMatchObject({ _tag: "Failure", failure: { _tag: "MigrationError" } })
+  expect(replaced._tag).toBe("Failure")
+
+  expect(replaced).toHaveProperty("failure._tag", "MigrationError")
+
   yield* database`DROP TRIGGER catalog_title`
   yield* database`CREATE INDEX "catalog_title" ON "catalog_identity" ("title")`
   yield* store.prepare(target.tables)

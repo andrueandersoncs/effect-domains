@@ -2,8 +2,6 @@ import { Context, Deferred, Effect } from "effect"
 import { RpcClient, RpcServer, type Rpc, type RpcGroup } from "effect/unstable/rpc"
 import type { Schema } from "effect"
 
-export type UnaryRpc = Rpc.Rpc<string, Schema.Top, Schema.Top, Schema.Top>
-
 const deliverServerResponses = <
   Message,
   Client extends { readonly write: (message: Message) => Effect.Effect<void> },
@@ -16,7 +14,7 @@ const deliverServerResponses = <
   return deliver
 }
 
-export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* <Rpcs extends UnaryRpc>(
+export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* <Rpcs extends Rpc.Any>(
   group: RpcGroup.RpcGroup<Rpcs>,
 ) {
   type ClientRpc = Rpc.Rpc<string, Schema.Codec<unknown>, Schema.Codec<unknown>, Schema.Codec<unknown>>
@@ -37,7 +35,7 @@ export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* <R
     onFromClient: ({ message }) => server.write(0, message),
   })
 
-  const withHandlerContext = (rpc: Rpcs) => {
+  const withHandlerContext = (rpc: Rpc.Any) => {
     class Handler extends Context.Service<Rpc.Handler<string>, Rpc.Handler<string>>()(rpc.key) {}
 
     // SAFETY: The handler lookup uses this group's RPC key because the server was built from the same group.
@@ -52,36 +50,9 @@ export const inProcessClient = Effect.fn("RpcInProcess.makeClient")(function* <R
 
   yield* Deferred.succeed(ready, client)
 
-  // SAFETY: The intersection is valid because no-serialization dispatch never executes either client's codecs.
-  return { client: client.client as PublicClient["client"] & typeof client.client, withHandlerContext }
+  // SAFETY: Dispatch is valid because this transport never executes client codecs.
+  const { client: dispatch }: Pick<PublicClient, "client"> = client as typeof client & Pick<PublicClient, "client">
+
+  return { client: dispatch, withHandlerContext }
 })
 
-export const makeObjectClient = Effect.fn("RpcInProcess.makeObjectClient")(function* <Rpcs extends Rpc.Any>(
-  group: RpcGroup.RpcGroup<Rpcs>,
-) {
-  type ClientRpc = Rpc.Rpc<string, Schema.Codec<unknown>, Schema.Codec<unknown>, Schema.Codec<unknown>>
-  type Client = Effect.Success<ReturnType<typeof RpcClient.makeNoSerialization<UnaryRpc, never, false>>>
-
-  const ready = yield* Deferred.make<Client>()
-  const deliver = deliverServerResponses<Parameters<Client["write"]>[0], Client>(ready)
-
-  // SAFETY: The widened group preserves dispatch because no-serialization transport does not execute its codecs.
-  const server = yield* RpcServer.makeNoSerialization(group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<UnaryRpc>, {
-    disableFatalDefects: true,
-    onFromServer: deliver,
-  })
-
-  const client = yield* RpcClient.makeNoSerialization<ClientRpc, never, false>(
-    // SAFETY: The widened group preserves dispatch because no-serialization transport does not execute its codecs.
-    group as RpcGroup.RpcGroup<Rpcs> & RpcGroup.RpcGroup<ClientRpc>,
-    {
-      flatten: false,
-      onFromClient: ({ message }) => server.write(0, message),
-    },
-  )
-
-  yield* Deferred.succeed(ready, client)
-
-  // SAFETY: The client retains the group's keys and handlers because the widened transport only changes codec types.
-  return client.client as RpcClient.RpcClient<Rpcs>
-})

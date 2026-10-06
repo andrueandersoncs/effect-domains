@@ -20,6 +20,8 @@ const ReportSubscriptionSchema = Schema.Struct({
   graceUntil: Schema.NullOr(Schema.DateTimeUtc),
 })
 
+interface ReportSubscription extends Schema.Schema.Type<typeof ReportSubscriptionSchema> {}
+
 export const ReportSubscriptionsResource = Resource.define({
   authorization: Authorization.public,
   name: "report_subscriptions",

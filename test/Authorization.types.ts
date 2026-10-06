@@ -164,6 +164,9 @@ subject.policy(candidateOwned)
 subject.includes(subject.subject.roles, 1)
 
 const LiteralRolesSchema = Schema.Struct({ roles: Schema.Array(Schema.Literals(["reader", "editor"])) })
+
+interface LiteralRoles extends Schema.Schema.Type<typeof LiteralRolesSchema> {}
+
 const literalRoles = Authorization.subject(LiteralRolesSchema)
 
 literalRoles.includes(literalRoles.subject.roles, "reader")

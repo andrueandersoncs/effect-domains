@@ -16,6 +16,8 @@ export const GuideSchema = Schema.Struct({
   body: Schema.NonEmptyString,
 })
 
+interface Guide extends Schema.Schema.Type<typeof GuideSchema> {}
+
 export const GuidePurchaseStatusSchema = Schema.Literals(["granted", "refunded", "revoked"])
 
 export const GuidePurchaseSchema = Schema.Struct({
@@ -25,3 +27,5 @@ export const GuidePurchaseSchema = Schema.Struct({
   guideId: GuideIdSchema,
   status: GuidePurchaseStatusSchema,
 })
+
+interface GuidePurchase extends Schema.Schema.Type<typeof GuidePurchaseSchema> {}

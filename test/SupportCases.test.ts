@@ -10,6 +10,7 @@ import { ApplicationInspect } from "effect-domains/application-inspect"
 import { SchemaStore } from "effect-domains/migrations"
 import { SupportCasesApplication } from "@effect-domains/example-support-cases/application"
 import { SupportCasesMigrations } from "@effect-domains/example-support-cases/migrations"
+import { AdvanceSupportCaseInputSchema } from "@effect-domains/example-support-cases/domain"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", {
@@ -35,6 +36,14 @@ const supportCasesTest = Effect.gen(function* () {
     priority: "high",
   })
 
+  const advanceCase = Effect.fn("SupportCases.advanceCase")(function* (
+    input: Omit<Parameters<typeof client["support.advanceCase"]>[0], "caseId">,
+  ) {
+    const payload = AdvanceSupportCaseInputSchema.make({ caseId: opened.id, ...input })
+
+    return yield* client["support.advanceCase"](payload)
+  })
+
   expect(opened.status).toBe("open")
   expect(opened.version).toBe(1)
   expect(opened.assignedAgentId).toBeNull()
@@ -54,78 +63,62 @@ const supportCasesTest = Effect.gen(function* () {
     version: 1,
   }])
 
-  const triaged = yield* client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 1,
-    action: "triage",
-    note: "Reproduced from the customer export payload.",
-  })
+  const triaged = yield* advanceCase({ expectedVersion: 1,
+  action: "triage",
+  note: "Reproduced from the customer export payload.", })
 
   expect(triaged.status).toBe("triaged")
   expect(triaged.version).toBe(2)
 
-  const offDuty = yield* pipe(client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 2,
-    action: "assign",
-    assignedAgentId: "sam",
-  }), Effect.result)
+  const offDuty = yield* pipe(advanceCase({ expectedVersion: 2,
+  action: "assign",
+  assignedAgentId: "sam", }), Effect.result)
 
-  expect(offDuty).toMatchObject({ _tag: "Failure", failure: { _tag: "AgentOffDuty", agentId: "sam" } })
+  expect(offDuty._tag).toBe("Failure")
+
+  expect(offDuty).toHaveProperty("failure._tag", "AgentOffDuty")
+  expect(offDuty).toMatchObject({ failure: { agentId: "sam" } })
 
   yield* client["support_agents.patch"]({ key: "sam", changes: { onDuty: true } })
 
-  const assigned = yield* client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 2,
-    action: "assign",
-    assignedAgentId: "sam",
-  })
+  const assigned = yield* advanceCase({ expectedVersion: 2,
+  action: "assign",
+  assignedAgentId: "sam", })
 
   expect(assigned.status).toBe("assigned")
   expect(assigned.version).toBe(3)
   expect(assigned.assignedAgentId).toBe("sam")
 
-  const staleResolve = yield* pipe(client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 2,
-    action: "resolve",
-  }), Effect.result)
+  const staleResolve = yield* pipe(advanceCase({ expectedVersion: 2,
+  action: "resolve", }), Effect.result)
+
+  expect(staleResolve._tag).toBe("Failure")
+
+  expect(staleResolve).toHaveProperty("failure._tag", "VersionConflict")
 
   expect(staleResolve).toMatchObject({
-    _tag: "Failure",
-    failure: {
-      _tag: "VersionConflict",
-      resource: "support_cases",
-      key: opened.id,
-      expectedVersion: 2,
-    },
+    failure: { resource: "support_cases", key: opened.id, expectedVersion: 2 },
   })
 
   yield* database`CREATE TRIGGER reject_case_event BEFORE INSERT ON support_case_events
     BEGIN SELECT RAISE(ABORT, 'event storage unavailable'); END`
 
-  const interrupted = yield* pipe(client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 3,
-    action: "resolve",
-  }), Effect.result)
+  const interrupted = yield* pipe(advanceCase({ expectedVersion: 3,
+  action: "resolve", }), Effect.result)
 
-  expect(interrupted).toMatchObject({ _tag: "Failure", failure: { _tag: "SupportCasesUnavailable" } })
+  expect(interrupted._tag).toBe("Failure")
+
+  expect(interrupted).toHaveProperty("failure._tag", "SupportCasesUnavailable")
 
   const afterRollback = yield* client["support_cases.get"]({ id: opened.id })
 
   expect(afterRollback.status).toBe("assigned")
   expect(afterRollback.version).toBe(3)
-
   yield* database`DROP TRIGGER reject_case_event`
 
-  const resolved = yield* client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 3,
-    action: "resolve",
-    note: "Export permission repaired.",
-  })
+  const resolved = yield* advanceCase({ expectedVersion: 3,
+  action: "resolve",
+  note: "Export permission repaired.", })
 
   expect(resolved.status).toBe("resolved")
   expect(resolved.version).toBe(4)
@@ -140,19 +133,20 @@ const supportCasesTest = Effect.gen(function* () {
   const lastEvent = Array.last(detail.events)
 
   expect(eventKinds).toEqual(["opened", "triaged", "assigned", "resolved"])
-  expect(lastEvent).toMatchObject({ _tag: "Some", value: { note: "Export permission repaired." } })
+  expect(lastEvent._tag).toBe("Some")
+
+  expect(lastEvent).toMatchObject({ value: { note: "Export permission repaired." } })
 
   yield* database`CREATE TRIGGER reject_case_audit BEFORE INSERT ON support_case_audits
     BEGIN SELECT RAISE(ABORT, 'audit storage unavailable'); END`
 
 
-  const auditInterrupted = yield* pipe(client["support.advanceCase"]({
-    caseId: opened.id,
-    expectedVersion: 4,
-    action: "reopen",
-  }), Effect.result)
+  const auditInterrupted = yield* pipe(advanceCase({ expectedVersion: 4,
+  action: "reopen", }), Effect.result)
 
-  expect(auditInterrupted).toMatchObject({ _tag: "Failure", failure: { _tag: "SupportCasesUnavailable" } })
+  expect(auditInterrupted._tag).toBe("Failure")
+
+  expect(auditInterrupted).toHaveProperty("failure._tag", "SupportCasesUnavailable")
 
   const afterAuditRollback = yield* client["support_cases.get"]({ id: opened.id })
 
@@ -165,14 +159,18 @@ const supportCasesTest = Effect.gen(function* () {
     Effect.result,
   )
 
-  expect(anonymousAudit).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+  expect(anonymousAudit._tag).toBe("Failure")
+
+  expect(anonymousAudit).toHaveProperty("failure._tag", "Unauthenticated")
 
   const deniedAudit = yield* pipe(
     client["support.auditTrail"]({ caseId: opened.id }, { headers: readerSession }),
     Effect.result,
   )
 
-  expect(deniedAudit).toMatchObject({ _tag: "Failure", failure: { _tag: "Forbidden" } })
+  expect(deniedAudit._tag).toBe("Failure")
+
+  expect(deniedAudit).toHaveProperty("failure._tag", "Forbidden")
 
   const audit = yield* client["support.auditTrail"]({ caseId: opened.id }, { headers: adminSession })
 
@@ -201,7 +199,7 @@ const supportCasesTest = Effect.gen(function* () {
 
   expect(distinctAuditCount).toBe(4)
 
-  const inspection = Effect.runSync(ApplicationInspect.describe(SupportCasesApplication))
+  const inspection = pipe(ApplicationInspect.describe(SupportCasesApplication), Effect.runSync)
 
   const auditOperation = (operation: typeof inspection.operations[number]) =>
     operation.name.startsWith("support_case_audits.")

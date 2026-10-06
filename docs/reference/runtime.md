@@ -70,7 +70,7 @@ The memory layer resets on process restart. Persistent, remote, targeted, schedu
 
 Import `ApplicationBun` from `effect-domains/application-bun`. Use `ApplicationBun.runApplication(application, options)` when the entrypoint intentionally owns runtime publications and migration configuration. Use `ApplicationBun.runInfrastructure(infrastructure, options)` when an `InfrastructureIR` is authoritative: it derives the application, migration history, RPC path, MCP path, UI path, and UI presentation from that graph. Both return the command Effect; pass it to the re-exported `ApplicationBun.runMain` boundary in a Bun entrypoint.
 
-`runInfrastructure` accepts local runtime concerns without restating deployment intent: an optional database filename for a persistent store, services, initialization, background layers, native routes, and telemetry. It derives persistent storage from the normal `<PREFIX>_DB` configuration and uses `:memory:` for an ephemeral store; supplying a filename for an ephemeral declaration fails before command execution. It does not accept RPC, MCP, UI, or UI-asset overrides.
+`runInfrastructure` requires an options object; pass `{}` when there are no local overrides. Its local runtime concerns do not restate deployment intent: an optional database filename for a persistent store, services, initialization, background layers, native routes, and telemetry. It derives persistent storage from the normal `<PREFIX>_DB` configuration and uses `:memory:` for an ephemeral store; supplying a filename for an ephemeral declaration fails before command execution. It does not accept RPC, MCP, UI, or UI-asset overrides.
 
 `ApplicationBun.runApplication` accepts:
 
@@ -82,12 +82,16 @@ Import `ApplicationBun` from `effect-domains/application-bun`. Use `ApplicationB
 | `initialize` | Startup Effect, run after database preparation and service construction. |
 | `background` | Background layer, built after initialization. Also enables the `worker` command. |
 | `routes` | Additional native HTTP route layer for `serve`. |
-| `rpc` | Omit or `true` for HTTP RPC at `/rpc/v1`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
-| `mcp` | Omit or `true` for Streamable HTTP MCP at `/mcp`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
+| `rpc` | Omit for HTTP RPC at `/rpc/v1`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
+| `mcp` | Omit for Streamable HTTP MCP at `/mcp`; `false` disables it; `{ path }` publishes it at a custom absolute path. |
 | `ui` | Omitted or `false` disables the generated UI without loading its bundle; `true` enables it at `/`; an object accepts `path`, `presentation`, and `allowedOrigins`. |
 | `telemetry` | Project-owned OTLP traces, metrics, logs, safe HTTP/RPC measurements, and optional browser ingestion. An object configures it; `false` opts out of every automatic telemetry layer. |
 
 For `serve` and `worker`, startup prepares the database, builds `services`, runs `initialize`, and then starts `background`. `serve` additionally starts HTTP. Initialization therefore also runs in worker mode; it must be appropriate for each process you launch.
+
+The runner preserves concrete layer outputs, errors, and unmet dependencies. A `services` or `background` layer that supplies services must be present when its output type is selected; only empty-output layers may be omitted. Storage and wire codec dependencies remain distinct: handler-owned codecs use their captured service context in the generated UI and MCP, while a remote CLI still requires any service needed by its wire codecs.
+
+The portable `effect-domains/application-runtime` module exposes `httpEffect(application, database, options)` for provider runtimes. Acquiring it prepares the application and returns a request Effect; it does not execute an HTTP request. Supply `HttpServerRequest` separately for every invocation, with telemetry enabled or disabled.
 
 ## Environment variables
 

@@ -6,7 +6,7 @@ import { ApplicationTelemetry } from "effect-domains/application-telemetry"
 import { telemetryCollector } from "./telemetry-collector.ts"
 
 const applicationDefinition = Application.define({ name: "telemetry-browser-test", parts: [] })
-const application = Effect.runSync(Application.compile(applicationDefinition))
+const application = pipe(Application.compile(applicationDefinition), Effect.runSync)
 
 it.effect("forwards bounded same-origin browser OTLP without exposing collector credentials", Effect.fn(
   "ApplicationTelemetry.browserGateway",
@@ -24,13 +24,12 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
       },
     })
 
-    expect(configured).toMatchObject({
-      _tag: "Some",
-      value: {
-        endpoint: "/otel",
-        serviceName: "telemetry-browser-test-browser",
-        signals: { traces: true, metrics: true, logs: false },
-      },
+    const configuration = yield* Effect.fromOption(configured)
+
+    expect(configuration).toMatchObject({
+      endpoint: "/otel",
+      serviceName: "telemetry-browser-test-browser",
+      signals: { traces: true, metrics: true, logs: false },
     })
   })
 
@@ -40,7 +39,7 @@ it.effect("forwards bounded same-origin browser OTLP without exposing collector 
   const providedRoutes = pipe(
     routes,
     Layer.provide(FetchHttpClient.layer),
-  ) as Layer.Layer<never, unknown, HttpRouter.HttpRouter>
+  )
 
   const server = HttpRouter.toWebHandler(providedRoutes, { disableLogger: true })
 

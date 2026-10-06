@@ -177,7 +177,7 @@ const inspectResource = Effect.fn("ApplicationInspect.resource")(function* (defi
   })
 })
 
-class InspectionError extends Schema.TaggedError<InspectionError>()("ApplicationInspectionError", {
+export class InspectionError extends Schema.TaggedError<InspectionError>()("ApplicationInspectionError", {
   reason: Schema.String,
 }) {}
 

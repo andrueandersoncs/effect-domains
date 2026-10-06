@@ -1,13 +1,13 @@
-import { Array, Context, Data, Effect, Function, Layer, Option, Predicate, Record, Schema, pipe } from "effect"
+import { Context, Data, Effect, Function, Layer, Option, Predicate, Record, Schema, type Scope, pipe } from "effect"
 import { FetchHttpClient, HttpMiddleware, HttpRouter } from "effect/unstable/http"
-import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
+import { type RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Application, type ApplicationIR } from "./index.ts"
 import { ApplicationUi, type ApplicationUiAssets, type ApplicationUiOptions } from "./ui/index.ts"
 import { ApplicationTelemetry } from "./telemetry/index.ts"
 import type { TelemetryOptions } from "./telemetry/config.ts"
 import { AuthorizationRpc } from "../authorization/rpc.ts"
 import { RpcMcp } from "../rpc/mcp.ts"
-import { SchemaStore } from "../sqlite/schema-store.ts"
+import { type MigrationError, SchemaStore } from "../sqlite/schema-store.ts"
 
 export type RuntimeLayer = Layer.Any
 
@@ -17,21 +17,26 @@ type RuntimeLayerValue<Runtime extends RuntimeLayer> = Layer.Layer<
   Layer.Services<Runtime>
 >
 
-type DatabaseLayer<E, R> = Layer.Layer<SchemaStore, E, R>
+type DatabaseLayer<Database extends RuntimeLayer> = Layer.Layer<SchemaStore | Layer.Success<Database>, Layer.Error<Database>, Layer.Services<Database>>
 export type Initialization = Effect.Effect<void, any, any>
+
+type RequiredRuntimeLayerOption<Key extends string, Runtime extends RuntimeLayer> =
+  [Layer.Success<Runtime>] extends [never]
+    ? Readonly<Record<never, never>>
+    : Readonly<Record<Key, Runtime & RuntimeLayerValue<Runtime>>>
 
 export type ApplicationRuntimeOptions<
   Services extends RuntimeLayer = Layer.Layer<never, never, never>,
   Initialize extends Initialization = Effect.Effect<void>,
   Background extends RuntimeLayer = Layer.Layer<never, never, never>,
 > = Readonly<Partial<{
-  services: RuntimeLayerValue<Services>
-  initialize: Initialize
-  background: RuntimeLayerValue<Background>
-}>>
+  services: Services & RuntimeLayerValue<Services>
+  initialize: Initialize & Effect.Effect<void, Effect.Error<Initialize>, Effect.Services<Initialize>>
+  background: Background & RuntimeLayerValue<Background>
+}>> & RequiredRuntimeLayerOption<"services", Services> & RequiredRuntimeLayerOption<"background", Background>
 
 type HttpEndpointOptions = Readonly<{ path: `/${string}` }>
-type RoutesHttpOptions<Routes extends RuntimeLayer> = Readonly<Partial<{ routes: RuntimeLayerValue<Routes> }>>
+type RoutesHttpOptions<Routes extends RuntimeLayer> = Readonly<Partial<{ routes: Routes & RuntimeLayerValue<Routes> }>>
 
 type RpcHttpOptions = Readonly<Partial<{ rpc: false | HttpEndpointOptions }>>
 type McpHttpOptions = Readonly<Partial<{ mcp: false | HttpEndpointOptions }>>
@@ -57,7 +62,7 @@ export type ApplicationHttpOptions<
   Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
 > = ApplicationRuntimeOptions<Services, Initialize, Background> & HttpOptions<Routes>
 
-class ApplicationUiAssetsUnavailable extends Schema.TaggedError<ApplicationUiAssetsUnavailable>()(
+export class ApplicationUiAssetsUnavailable extends Schema.TaggedError<ApplicationUiAssetsUnavailable>()(
   "ApplicationUiAssetsUnavailable",
   {},
 ) {
@@ -119,52 +124,59 @@ const resolveHttpOptions = <Routes extends RuntimeLayer>(
   const telemetrySetting = Option.fromUndefinedOr(options.telemetry)
   const telemetry = resolveTelemetry(telemetrySetting)
 
-  return new ResolvedHttpOptions({ routes, rpc, mcp, ui, uiAssets, telemetry })
+  return new ResolvedHttpOptions<Routes>({ routes, rpc, mcp, ui, uiAssets, telemetry })
 }
 
 const buildContext = Effect.fn("ApplicationRuntime.buildContext")(function* <
-  DatabaseError,
-  DatabaseRequirements,
+  Database extends RuntimeLayer,
   Services extends RuntimeLayer,
   Initialize extends Initialization,
   Background extends RuntimeLayer,
 >(
   application: ApplicationIR,
-  database: DatabaseLayer<DatabaseError, DatabaseRequirements>,
+  database: Database & DatabaseLayer<Database>,
   options: ApplicationRuntimeOptions<Services, Initialize, Background>,
-) {
-  const databaseContext = yield* Layer.build(database)
+): Effect.fn.Return<
+  Context.Context<SchemaStore | Layer.Success<Database> | Layer.Success<Services> | Layer.Success<Background>>,
+  MigrationError | Layer.Error<Database> | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background>,
+  | Scope.Scope
+  | Layer.Services<Database>
+  | Exclude<Layer.Services<Services>, SchemaStore | Layer.Success<Database>>
+  | Exclude<Effect.Services<Initialize> | Layer.Services<Background>, SchemaStore | Layer.Success<Database> | Layer.Success<Services>>
+> {
+  const databaseContext = yield* Layer.build<Layer.Services<Database>, Layer.Error<Database>, SchemaStore | Layer.Success<Database>>(database)
   const schemaStore = Context.get(databaseContext, SchemaStore)
 
   yield* Application.prepare(application, schemaStore)
 
-  const services = Predicate.isUndefined(options.services)
-    ? Context.empty()
-    : yield* pipe(
-      Layer.build<Layer.Services<Services>, Layer.Error<Services>, Layer.Success<Services>>(options.services),
-      Effect.provideContext(databaseContext),
-    )
+  const services = Predicate.isUndefined(options.services) ? Context.empty() : yield* pipe(
+    Layer.build<Layer.Services<Services>, Layer.Error<Services>, Layer.Success<Services>>(options.services),
+    Effect.provideContext<SchemaStore | Layer.Success<Database>>(databaseContext),
+  )
 
-  const serviceContext = Context.merge(databaseContext, services)
+  type ServiceContext = SchemaStore | Layer.Success<Database> | Layer.Success<Services>
+
+  // SAFETY: The merged context has these outputs because the options require every nonempty service layer.
+  const serviceContext = Context.merge(databaseContext, services) as Context.Context<ServiceContext>
 
   if (!Predicate.isUndefined(options.initialize)) {
-    yield* Effect.provideContext(options.initialize, serviceContext)
+    yield* Effect.provideContext<void, Effect.Error<Initialize>, Effect.Services<Initialize>, ServiceContext>(options.initialize, serviceContext)
   }
 
-  const background = Predicate.isUndefined(options.background)
-    ? Context.empty()
-    : yield* pipe(
-      Layer.build<Layer.Services<Background>, Layer.Error<Background>, Layer.Success<Background>>(options.background),
-      Effect.provideContext(serviceContext),
-    )
+  const background = Predicate.isUndefined(options.background) ? Context.empty() : yield* pipe(
+    Layer.build<Layer.Services<Background>, Layer.Error<Background>, Layer.Success<Background>>(options.background),
+    Effect.provideContext<ServiceContext>(serviceContext),
+  )
 
-  return Context.merge(serviceContext, background)
+  // SAFETY: The merged context has these outputs because the options require every nonempty background layer.
+  return Context.merge(serviceContext, background) as Context.Context<ServiceContext | Layer.Success<Background>>
 })
 
 const buildUiLayer = Effect.fn("ApplicationRuntime.uiLayer")(function* <
+  App extends ApplicationIR,
   Routes extends RuntimeLayer,
 >(
-  application: ApplicationIR,
+  application: App,
   options: ResolvedHttpOptions<Routes>,
 ) {
   if (Option.isNone(options.ui)) return Layer.empty
@@ -183,22 +195,21 @@ const buildUiLayer = Effect.fn("ApplicationRuntime.uiLayer")(function* <
   })
 })
 
-const buildRpcLayer = (
-  application: ApplicationIR,
+const buildRpcLayer = <App extends ApplicationIR>(
+  application: App,
   rpc: Option.Option<`/${string}`>,
 ) => Option.match(rpc, {
   onNone: Function.constant(Layer.empty),
-  onSome: (path) => {
-    const procedures = pipe(application.group.requests.values(), Array.fromIterable)
-    const rpcs = Array.filter(procedures, Rpc.isRpc)
-    const group = RpcGroup.make(...rpcs)
-
-    return RpcServer.layerHttp({ group, path, protocol: "http" })
-  },
+  // SAFETY: The group retains its precise requirements because Application.compile assembled these procedures.
+  onSome: (path) => RpcServer.layerHttp({
+    group: application.group as App["group"] & RpcGroup.RpcGroup<RpcGroup.Rpcs<App["group"]>>,
+    path,
+    protocol: "http",
+  }),
 })
 
-const buildMcpLayer = (
-  application: ApplicationIR,
+const buildMcpLayer = <App extends ApplicationIR>(
+  application: App,
   mcp: Option.Option<`/${string}`>,
 ) => Option.match(mcp, {
   onNone: Function.constant(Layer.empty),
@@ -206,15 +217,16 @@ const buildMcpLayer = (
 })
 
 const buildHttpLayer = Effect.fn("ApplicationRuntime.buildHttpLayer")(function* <
+  App extends ApplicationIR,
   Routes extends RuntimeLayer,
 >(
-  application: ApplicationIR,
+  application: App,
   options: ResolvedHttpOptions<Routes>,
 ) {
 
-  const rpc = buildRpcLayer(application, options.rpc)
-  const mcp = buildMcpLayer(application, options.mcp)
-  const ui = yield* buildUiLayer(application, options)
+  const rpc = buildRpcLayer<App>(application, options.rpc)
+  const mcp = buildMcpLayer<App>(application, options.mcp)
+  const ui = yield* buildUiLayer<App, Routes>(application, options)
   const builtIn = Layer.mergeAll(rpc, mcp, ui)
 
   const routes = Option.match(options.routes, {
@@ -222,7 +234,12 @@ const buildHttpLayer = Effect.fn("ApplicationRuntime.buildHttpLayer")(function* 
     onSome: (routeLayer) => Layer.merge(builtIn, routeLayer),
   })
 
-  const withHandlers = Layer.provideMerge(routes, application.handlers)
+  // SAFETY: The layer retains its precise dependencies because Application.compile merged these exact handlers.
+  const withHandlers = Layer.provideMerge(
+    routes,
+    application.handlers as Layer.Layer<Layer.Success<App["handlers"]>, Layer.Error<App["handlers"]>, Layer.Services<App["handlers"]>>,
+  )
+
   const withAuthorization = Layer.provide(withHandlers, AuthorizationRpc.layer)
   const withSerialization = Layer.provide(withAuthorization, RpcSerialization.layerJson)
 
@@ -230,31 +247,32 @@ const buildHttpLayer = Effect.fn("ApplicationRuntime.buildHttpLayer")(function* 
 })
 
 export const httpLayer = Effect.fn("ApplicationRuntime.httpLayer")(function* <
-  Routes extends RuntimeLayer,
+  App extends ApplicationIR,
+  Routes extends RuntimeLayer = Layer.Layer<never>,
 >(
-  application: ApplicationIR,
+  application: App,
   options: HttpOptions<Routes>,
 ) {
-  const resolved = resolveHttpOptions(options)
+  const resolved = resolveHttpOptions<Routes>(options)
 
-  return yield* buildHttpLayer(application, resolved)
+  return yield* buildHttpLayer<App, Routes>(application, resolved)
 })
 
 export const httpEffect = Effect.fn("ApplicationRuntime.httpEffect")(function* <
-  DatabaseError,
-  DatabaseRequirements,
-  Services extends RuntimeLayer,
-  Initialize extends Initialization,
-  Background extends RuntimeLayer,
-  Routes extends RuntimeLayer,
+  App extends ApplicationIR,
+  Database extends RuntimeLayer,
+  Services extends RuntimeLayer = Layer.Layer<never>,
+  Initialize extends Initialization = Effect.Effect<void>,
+  Background extends RuntimeLayer = Layer.Layer<never>,
+  Routes extends RuntimeLayer = Layer.Layer<never>,
 >(
-  application: ApplicationIR,
-  database: DatabaseLayer<DatabaseError, DatabaseRequirements>,
+  application: App,
+  database: Database & DatabaseLayer<Database>,
   options: ApplicationHttpOptions<Services, Initialize, Background, Routes>,
 ) {
-  const runtimeContext = yield* buildContext(application, database, options)
-  const resolved = resolveHttpOptions(options)
-  const routes = yield* buildHttpLayer(application, resolved)
+  const runtimeContext = yield* buildContext<Database, Services, Initialize, Background>(application, database, options)
+  const resolved = resolveHttpOptions<Routes>(options)
+  const routes = yield* buildHttpLayer<App, Routes>(application, resolved)
   const runtimeLayer = Layer.succeedContext(runtimeContext)
   const providedRoutes = Layer.provide(routes, runtimeLayer)
 
@@ -271,26 +289,48 @@ export const httpEffect = Effect.fn("ApplicationRuntime.httpEffect")(function* <
   const handler = yield* HttpRouter.toHttpEffect(applicationLayer)
   const tracerDisabled = Layer.succeed(HttpMiddleware.TracerDisabledWhen, Function.constant(true))
 
-  return yield* Effect.provide(handler, tracerDisabled)
+  return Effect.provide(handler, tracerDisabled)
 })
 
-export const use = Effect.fn("ApplicationRuntime.use")(function* <
-  DatabaseError,
-  DatabaseRequirements,
-  Services extends RuntimeLayer,
-  Initialize extends Initialization,
-  Background extends RuntimeLayer,
+type RuntimeExecution<A, E, R, Database extends RuntimeLayer, Services extends RuntimeLayer, Initialize extends Initialization, Background extends RuntimeLayer> = Effect.Effect<
   A,
-  E,
-  R,
+  E | MigrationError | Layer.Error<Database> | Layer.Error<Services> | Effect.Error<Initialize> | Layer.Error<Background>,
+  | Scope.Scope
+  | Layer.Services<Database>
+  | Exclude<Layer.Services<Services>, SchemaStore | Layer.Success<Database>>
+  | Exclude<Effect.Services<Initialize> | Layer.Services<Background>, SchemaStore | Layer.Success<Database> | Layer.Success<Services>>
+  | Exclude<R, SchemaStore | Layer.Success<Database> | Layer.Success<Services> | Layer.Success<Background>>
+>
+
+export const use: <
+  Database extends RuntimeLayer,
+  Services extends RuntimeLayer = Layer.Layer<never>,
+  Initialize extends Initialization = Effect.Effect<void>,
+  Background extends RuntimeLayer = Layer.Layer<never>,
+  A = unknown,
+  E = never,
+  R = never,
 >(
   application: ApplicationIR,
-  database: DatabaseLayer<DatabaseError, DatabaseRequirements>,
+  database: Database & DatabaseLayer<Database>,
+  options: ApplicationRuntimeOptions<Services, Initialize, Background>,
+  effect: Effect.Effect<A, E, R>,
+) => RuntimeExecution<A, E, R, Database, Services, Initialize, Background> = Effect.fn("ApplicationRuntime.use")(function* <
+  Database extends RuntimeLayer,
+  Services extends RuntimeLayer = Layer.Layer<never>,
+  Initialize extends Initialization = Effect.Effect<void>,
+  Background extends RuntimeLayer = Layer.Layer<never>,
+  A = unknown,
+  E = never,
+  R = never,
+>(
+  application: ApplicationIR,
+  database: Database & DatabaseLayer<Database>,
   options: ApplicationRuntimeOptions<Services, Initialize, Background>,
   effect: Effect.Effect<A, E, R>,
 ) {
-  const runtimeContext = yield* buildContext(application, database, options)
+  const runtimeContext = yield* buildContext<Database, Services, Initialize, Background>(application, database, options)
 
-  return yield* Effect.provideContext(effect, runtimeContext)
+  return yield* Effect.provideContext<A, E, R, SchemaStore | Layer.Success<Database> | Layer.Success<Services> | Layer.Success<Background>>(effect, runtimeContext)
 })
 

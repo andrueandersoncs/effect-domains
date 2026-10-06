@@ -1,0 +1,421 @@
+{
+  "id": "001_initial",
+  "to": {
+    "version": 1,
+    "tables": [
+      {
+        "name": "elections",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "title",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "status",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "OneOf",
+                "values": [
+                  "draft",
+                  "open",
+                  "closed"
+                ]
+              }
+            ]
+          },
+          {
+            "_tag": "TableField",
+            "name": "version",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              }
+            ]
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "elections_tenant_id_id_key",
+              "fields": [
+                "tenantId",
+                "id"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "election_candidates",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "electionId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "name",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "election_candidates_tenant_id_election_id_id_key",
+              "fields": [
+                "tenantId",
+                "electionId",
+                "id"
+              ]
+            }
+          ],
+          "foreignKeys": [
+            {
+              "name": "election_candidates_tenant_id_election_id_fkey",
+              "fields": [
+                "tenantId",
+                "electionId"
+              ],
+              "references": {
+                "table": "elections",
+                "fields": [
+                  "tenantId",
+                  "id"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "election_ballots",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "electionId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "voterId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "election_ballots_tenant_id_election_id_id_key",
+              "fields": [
+                "tenantId",
+                "electionId",
+                "id"
+              ]
+            },
+            {
+              "name": "election_ballots_tenant_id_election_id_voter_id_key",
+              "fields": [
+                "tenantId",
+                "electionId",
+                "voterId"
+              ]
+            }
+          ],
+          "foreignKeys": [
+            {
+              "name": "election_ballots_tenant_id_election_id_fkey",
+              "fields": [
+                "tenantId",
+                "electionId"
+              ],
+              "references": {
+                "table": "elections",
+                "fields": [
+                  "tenantId",
+                  "id"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "election_preferences",
+        "identifier": "id",
+        "fields": [
+          {
+            "_tag": "TableField",
+            "name": "id",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "Some",
+              "value": "uuidv7"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "tenantId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "electionId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "ballotId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "candidateId",
+            "scalar": "string",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": []
+          },
+          {
+            "_tag": "TableField",
+            "name": "rank",
+            "scalar": "integer",
+            "nullable": false,
+            "generation": {
+              "_id": "Option",
+              "_tag": "None"
+            },
+            "checks": [
+              {
+                "_tag": "GreaterThanOrEqualTo",
+                "value": 1
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 9007199254740991
+              },
+              {
+                "_tag": "LessThanOrEqualTo",
+                "value": 20
+              }
+            ]
+          }
+        ],
+        "relations": {
+          "unique": [
+            {
+              "name": "election_preferences_ballot_id_rank_key",
+              "fields": [
+                "ballotId",
+                "rank"
+              ]
+            },
+            {
+              "name": "election_preferences_ballot_id_candidate_id_key",
+              "fields": [
+                "ballotId",
+                "candidateId"
+              ]
+            }
+          ],
+          "foreignKeys": [
+            {
+              "name": "election_preferences_tenant_id_election_id_ballot_id_fkey",
+              "fields": [
+                "tenantId",
+                "electionId",
+                "ballotId"
+              ],
+              "references": {
+                "table": "election_ballots",
+                "fields": [
+                  "tenantId",
+                  "electionId",
+                  "id"
+                ]
+              }
+            },
+            {
+              "name": "election_preferences_tenant_id_election_id_candidate_id_fkey",
+              "fields": [
+                "tenantId",
+                "electionId",
+                "candidateId"
+              ],
+              "references": {
+                "table": "election_candidates",
+                "fields": [
+                  "tenantId",
+                  "electionId",
+                  "id"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "elections"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "election_candidates"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "election_ballots"
+    },
+    {
+      "_tag": "SqliteCreateTable",
+      "table": "election_preferences"
+    }
+  ]
+}

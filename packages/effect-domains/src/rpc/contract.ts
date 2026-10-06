@@ -26,18 +26,28 @@ const make = <Group extends RpcBundle["group"]>(group: Group) =>
 
 export const RpcBundle = { make }
 
-export const compileUnaryRpc = (procedure: RpcProcedure) => {
+export const compileUnaryRpc = <Procedure extends RpcProcedure>(procedure: Procedure) => {
   if (RpcSchema.isStreamSchema(procedure.successSchema)) return Option.none()
 
   const middlewares = Array.fromIterable(procedure.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))
   const errors = [procedure.errorSchema, ...middlewareErrors] as const
-  const payloadSchema = Schema.toCodecJson(procedure.payloadSchema)
-  const successSchema = Schema.toCodecJson(procedure.successSchema)
+  const payloadSchema = Schema.toCodecJson<Procedure["payloadSchema"]>(procedure.payloadSchema)
+  const successSchema = Schema.toCodecJson<Procedure["successSchema"]>(procedure.successSchema)
   const ErrorUnionSchema = Schema.Union(errors)
-  const errorSchema = Schema.toCodecJson(ErrorUnionSchema)
 
-  const compiled = Rpc.make(procedure._tag, {
+  type Errors = Rpc.ErrorSchema<Procedure>
+
+  const declaredErrorsSchema = Schema.make<Schema.Codec<
+    Errors["Type"],
+    Errors["Encoded"],
+    Errors["DecodingServices"],
+    Errors["EncodingServices"]
+  >>(ErrorUnionSchema.ast)
+
+  const errorSchema = Schema.toCodecJson(declaredErrorsSchema)
+
+  const compiled = Rpc.make<Procedure["_tag"], typeof payloadSchema, typeof successSchema, typeof errorSchema>(procedure._tag, {
     payload: payloadSchema, success: successSchema, error: errorSchema,
   }).annotateMerge(procedure.annotations)
 

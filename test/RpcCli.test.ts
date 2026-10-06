@@ -1,6 +1,6 @@
 import { BunServices } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Stream, pipe } from "effect"
+import { Array, Effect, Option, Stream, pipe } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 const runBun = Effect.fn("RpcCli.runBun")(function* (arguments_: ReadonlyArray<string>) {
@@ -319,15 +319,20 @@ it.effect(
 
     const lines = result.stdout.trim().split("\n")
     const values = Array.map(lines, (line) => JSON.parse(line, undefined))
+    const responses = Array.take(values, 2)
 
-    expect(values).toEqual([
+    expect(responses).toEqual([
       {
         inputJson: "wire:canonical", help: "ordinary field", fooBar: "camel", foo_bar: "snake",
         amount: "42", when: "2026-01-02T03:04:05.000Z",
         nested: { values: ["one", null], choice: 7, dictionary: { enabled: true } },
       },
       "7",
-      { decoded: true, error: { _tag: "Rejected", amount: "9" } },
     ])
+
+    const failure = pipe(Array.get(values, 2), Option.getOrThrow)
+
+    expect(failure).toMatchObject({ decoded: true, error: { amount: "9" } })
+    expect(failure.error._tag).toBe("Rejected")
   }, Effect.provide(BunServices.layer)),
 )

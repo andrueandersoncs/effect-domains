@@ -6,10 +6,15 @@ import { Table } from "effect-domains/table"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
 
 const JobSchema = Schema.Struct({ urgent: Schema.Boolean, technicianId: Schema.NullOr(Schema.String) })
+
+interface Job extends Schema.Schema.Type<typeof JobSchema> {}
+
 const TechnicianSchema = Schema.Struct({ id: identifier(Schema.String), name: StoredTextSchema })
+
+interface Technician extends Schema.Schema.Type<typeof TechnicianSchema> {}
+
 const Jobs = Table.make({ name: "jobs", schema: JobSchema })
 const Technicians = Table.make({ name: "technicians", schema: TechnicianSchema })
-
 const modelSources = ReadModel.sources({ j: Jobs, t: Technicians })
 
 const model = ReadModel.define({
@@ -20,7 +25,6 @@ const model = ReadModel.define({
 })
 
 const view = ReadModel.compile(model)
-
 const row: typeof view.schema.Type = { urgent: true, name: null }
 // @ts-expect-error because projections decode booleans, not SQLite bits.
 const badBoolean: typeof view.schema.Type = { urgent: 1, name: "Sam" }

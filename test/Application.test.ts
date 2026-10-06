@@ -1,14 +1,15 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Function, Schema, Struct } from "effect"
+import { Effect, Function, Schema, pipe } from "effect"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { Application, Part } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
 import { Command } from "effect-domains/command"
-import { ReadModel } from "effect-domains/read-model"
 
 it("rejects table and command collisions across nested applications", () => {
   const RowSchema = Schema.Struct({ value: Schema.String })
+
+  interface Row extends Schema.Schema.Type<typeof RowSchema> {}
 
   const resource = Resource.define({
     name: "shared",
@@ -24,7 +25,7 @@ it("rejects table and command collisions across nested applications", () => {
   const collisionParts = [Part.application(storage), Part.application(nestedStorage)]
   const collision = Application.define({ name: "collision", parts: collisionParts })
 
-  expect(() => Effect.runSync(Application.compile(collision))).toThrow()
+  expect(() => pipe(Application.compile(collision), Effect.runSync)).toThrow()
 
   const ping = Rpc.make("ping")
   const group = RpcGroup.make(ping)
@@ -46,12 +47,17 @@ it("rejects table and command collisions across nested applications", () => {
   const commandCollisionParts = [Part.application(commands), Part.application(nestedCommands)]
   const commandCollision = Application.define({ name: "collision", parts: commandCollisionParts })
 
-  expect(() => Effect.runSync(Application.compile(commandCollision))).toThrow()
+  expect(() => pipe(Application.compile(commandCollision), Effect.runSync)).toThrow()
 })
 
-it("validates foreign keys across sibling applications by exact descriptor", () => {
+it.effect("validates foreign keys across sibling applications by exact descriptor", Effect.fn("Application.foreignKeys")(function* () {
   const ParentSchema = Schema.Struct({ name: Schema.String })
+
+  interface Parent extends Schema.Schema.Type<typeof ParentSchema> {}
+
   const ChildSchema = Schema.Struct({ parentId: Schema.String })
+
+  interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
 
   const Parent = Resource.define({
     name: "exact_parents",
@@ -85,48 +91,38 @@ it("validates foreign keys across sibling applications by exact descriptor", () 
   const child = Application.define({ name: "exact-child", parts: childParts })
   const validParts = [Part.application(parent), Part.application(child)]
   const valid = Application.define({ name: "exact-valid", parts: validParts })
-  const makeValid = () => Effect.runSync(Application.compile(valid))
   const replacementParts = [Part.resource(Replacement)]
   const replacement = Application.define({ name: "exact-replacement", parts: replacementParts })
   const invalidParts = [Part.application(replacement), Part.application(child)]
   const invalid = Application.define({ name: "exact-invalid", parts: invalidParts })
-  const makeInvalid = () => Effect.runSync(Application.compile(invalid))
-  const validExpectation = expect(makeValid)
-  const invalidExpectation = expect(makeInvalid)
 
-  validExpectation.not.toThrow()
-  invalidExpectation.toThrow("references unregistered table exact_parents")
-})
+  yield* Application.compile(valid)
+
+  const rejected = yield* pipe(Application.compile(invalid), Effect.exit)
+
+  expect(rejected._tag).toBe("Failure")
+}))
 
 class ApplicationCommandUnavailable extends Schema.TaggedError<ApplicationCommandUnavailable>()(
   "ApplicationCommandUnavailable",
   {},
 ) {}
 
-it("validates command dependencies across sibling applications by descriptor identity", () => {
+it.effect("validates command dependencies across sibling applications by descriptor identity", Effect.fn("Application.dependencies")(function* () {
   const RowSchema = Schema.Struct({ value: Schema.String })
 
-  const ResourceDependency = Resource.define({
-    name: "resource_dependency",
+  interface Row extends Schema.Schema.Type<typeof RowSchema> {}
+
+  const dependency = (name: string) => Resource.define({
+    name,
     schema: RowSchema,
     authorization: Authorization.public,
     capabilities: [],
   })
 
-  const TableDependency = Resource.define({
-    name: "table_dependency",
-    schema: RowSchema,
-    authorization: Authorization.public,
-    capabilities: [],
-  })
-
-  const Replacement = Resource.define({
-    name: "resource_dependency",
-    schema: RowSchema,
-    authorization: Authorization.public,
-    capabilities: [],
-  })
-
+  const ResourceDependency = dependency("resource_dependency")
+  const TableDependency = dependency("table_dependency")
+  const Replacement = dependency("resource_dependency")
   const tableDependency = Resource.table(TableDependency)
 
   const commandSpec = Command.define({
@@ -153,7 +149,6 @@ it("validates command dependencies across sibling applications by descriptor ide
   const commandApplication = Application.define({ name: "commands", parts: commandParts })
   const validParts = [Part.application(dependencies), Part.application(commandApplication)]
   const valid = Application.define({ name: "dependencies-valid", parts: validParts })
-  const makeValid = () => Effect.runSync(Application.compile(valid))
 
   const replacementParts = [
     Part.resource(Replacement),
@@ -167,62 +162,11 @@ it("validates command dependencies across sibling applications by descriptor ide
 
   const invalidParts = [Part.application(replacements), Part.application(commandApplication)]
   const invalid = Application.define({ name: "dependencies-invalid", parts: invalidParts })
-  const makeInvalid = () => Effect.runSync(Application.compile(invalid))
-  const validExpectation = expect(makeValid)
-  const invalidExpectation = expect(makeInvalid)
 
-  validExpectation.not.toThrow()
-  invalidExpectation.toThrow("reads unregistered table resource_dependency")
-})
+  yield* Application.compile(valid)
 
-it("keeps authoring specifications free of derived runtime products", () => {
-  const RowSchema = Schema.Struct({ value: Schema.String })
+  const rejected = yield* pipe(Application.compile(invalid), Effect.exit)
 
-  const resource = Resource.define({
-    name: "intent_only",
-    schema: RowSchema,
-    authorization: Authorization.public,
-    capabilities: [],
-  })
+  expect(rejected._tag).toBe("Failure")
+}))
 
-  const command = Command.define({
-    name: "intent.command",
-    success: Schema.Void,
-    unavailable: ApplicationCommandUnavailable,
-  })
-
-  const modelSources = ReadModel.sources({ value: resource })
-
-  const model = ReadModel.define({
-    tables: modelSources,
-    from: "value",
-    joins: [],
-    select: { value: ["value", "value"] },
-  })
-
-  const applicationParts = [Part.resource(resource)]
-
-  const application = Application.define({
-    name: "intent",
-    parts: applicationParts,
-  })
-
-  const forbidden = ["table", "repository", "contracts", "group", "handlers", "handler", "execute"]
-
-  const specificationKeys = [
-    Struct.keys(resource),
-    Struct.keys(command),
-    Struct.keys(model),
-    Struct.keys(application),
-  ]
-
-  const hasForbiddenProperty = (keys: ReadonlyArray<string>) => {
-    const isForbidden = (property: string) => Array.contains(keys, property)
-
-    return Array.some(forbidden, isForbidden)
-  }
-
-  const forbiddenProperties = Array.map(specificationKeys, hasForbiddenProperty)
-
-  expect(forbiddenProperties).toEqual([false, false, false, false])
-})

@@ -53,6 +53,8 @@ const ReportMetricAttributesSchema = Schema.Struct({
   release_policy: Schema.String,
 })
 
+interface ReportMetricAttributes extends Schema.Schema.Type<typeof ReportMetricAttributesSchema> {}
+
 export const ReportArtifactQueue = DurableQueue.make({
   name: "ReportExports.WriteArtifact",
   payload: ReportExportJobSchema,
@@ -68,6 +70,8 @@ export const ReportExportWorkflowRequestSchema = Schema.Struct({
   ...ReportExportRequestSchema.fields,
   accountId: Schema.String,
 })
+
+interface ReportExportWorkflowRequest extends Schema.Schema.Type<typeof ReportExportWorkflowRequestSchema> {}
 
 const ReportExportWorkflowErrorSchema = Schema.Union([ReportExportUnavailable, ReportArtifactConflict])
 

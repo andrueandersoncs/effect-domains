@@ -30,7 +30,7 @@ const applicationDefinition = Application.define({
   parts: [suggestionsFlagPart, checkoutApplicationPart],
 })
 
-const application = Effect.runSync(Application.compile(applicationDefinition))
+const application = pipe(Application.compile(applicationDefinition), Effect.runSync)
 const expectedFlags = [SearchSuggestions, NewCheckout]
 
 const expectedInspection = [
@@ -43,7 +43,7 @@ const expectedInspection = [
 ]
 
 it("compiles nested feature flag declarations into inspectable application metadata", () => {
-  const inspection = Effect.runSync(ApplicationInspect.describe(application))
+  const inspection = pipe(ApplicationInspect.describe(application), Effect.runSync)
 
   expect(application.featureFlags).toEqual(expectedFlags)
   expect(inspection.featureFlags).toEqual(expectedInspection)
@@ -57,7 +57,7 @@ it("compiles nested feature flag declarations into inspectable application metad
     parts: [originalPart, replacementPart],
   })
 
-  expect(() => Effect.runSync(Application.compile(duplicate))).toThrow("duplicate feature flag name new-checkout")
+  expect(() => pipe(Application.compile(duplicate), Effect.runSync)).toThrow("duplicate feature flag name new-checkout")
 })
 
 const overrides = [[SearchSuggestions, false]] as const
@@ -95,7 +95,8 @@ it.effect("enables, disables, overrides, and atomically toggles declared flags",
     const replacement = FeatureFlags.define({ name: "new-checkout", default: false })
     const unavailable = yield* pipe(FeatureFlags.isEnabled(replacement), Effect.flip)
 
-    expect(unavailable).toMatchObject({ _tag: "FeatureFlagUnavailable", name: "new-checkout" })
+    expect(unavailable._tag).toBe("FeatureFlagUnavailable")
+    expect(unavailable.name).toBe("new-checkout")
   }),
   Effect.provide(featureFlagRuntime),
 ))
@@ -112,8 +113,6 @@ it.effect("reports invalid overrides through layer acquisition", Effect.fn(
 
   const failure = yield* pipe(Layer.build(invalidRuntime), Effect.scoped, Effect.flip)
 
-  expect(failure).toMatchObject({
-    _tag: "FeatureFlagDefinitionError",
-    reason: "override references undeclared feature flag new-checkout",
-  })
+  expect(failure._tag).toBe("FeatureFlagDefinitionError")
+  expect(failure.reason).toBe("override references undeclared feature flag new-checkout")
 }))

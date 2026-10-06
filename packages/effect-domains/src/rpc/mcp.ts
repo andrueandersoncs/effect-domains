@@ -3,8 +3,8 @@ import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai"
 import { Headers, HttpServerRequest } from "effect/unstable/http"
 import { RpcGroup } from "effect/unstable/rpc"
 import type { ApplicationIR } from "../application/index.ts"
-import { compileUnaryRpc } from "./contract.ts"
-import { inProcessClient, type UnaryRpc } from "./in-process.ts"
+import { compileUnaryRpc, type RpcProcedure } from "./contract.ts"
+import { inProcessClient } from "./in-process.ts"
 
 class RpcMcpDefinitionError extends Schema.TaggedError<RpcMcpDefinitionError>()(
   "RpcMcpDefinitionError",
@@ -38,12 +38,12 @@ const toolSchema = (schema: Schema.Constraint) => pipe(
   Effect.flatMap(decodeToolJsonSchema),
 )
 
-const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["group"]) {
+const register = Effect.fn("RpcMcp.register")(function* <Rpcs extends RpcProcedure>(group: RpcGroup.RpcGroup<Rpcs>) {
   const registry = yield* McpServer.McpServer
   const procedures = group.requests.values()
 
   yield* Effect.forEach(procedures, Effect.fn("RpcMcp.compileProcedure")(function* (procedure) {
-    const compiled = compileUnaryRpc(procedure)
+    const compiled = compileUnaryRpc<RpcProcedure>(procedure)
 
     const contract = yield* Effect.fromOption(
       compiled,
@@ -60,8 +60,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
       })
     }
 
-    // SAFETY: This procedure has a unary success schema because compileUnaryRpc rejected streaming schemas above.
-    const contractGroup = RpcGroup.make(procedure as UnaryRpc)
+    const contractGroup = RpcGroup.make(procedure)
     const { client, withHandlerContext } = yield* inProcessClient(contractGroup)
     const InputSchema = Schema.Struct({ input: contract.payloadSchema })
 
@@ -81,7 +80,7 @@ const register = Effect.fn("RpcMcp.register")(function* (group: ApplicationIR["g
     const inputSchema = yield* pipe(toolSchema(InputSchema), Effect.mapError(definitionError))
     const outputSchema = yield* pipe(toolSchema(OutputSchema), Effect.mapError(definitionError))
     const tool = McpSchema.Tool.make({ name: contract._tag, inputSchema, outputSchema })
-    const withCodecContext = withHandlerContext(contract)
+    const withCodecContext = withHandlerContext(procedure)
     const decodeInput = Schema.decodeUnknownEffect(InputSchema)
     const encodeOutput = Schema.encodeUnknownEffect(OutputSchema)
     const encodeError = Schema.encodeUnknownEffect(ErrorSchema)
@@ -157,8 +156,9 @@ export const layerHttp = <App extends ApplicationIR>(options: Readonly<{
     protocols: [McpProtocol.v2025_11_25, McpProtocol.v2025_06_18, McpProtocol.v2025_03_26],
   })
 
+  // SAFETY: The group retains its precise handler requirements because Application.compile assembled these procedures.
   return pipe(
-    register(application.group),
+    register<RpcGroup.Rpcs<App["group"]>>(application.group as App["group"] & RpcGroup.RpcGroup<RpcGroup.Rpcs<App["group"]>>),
     Layer.effectDiscard,
     Layer.provide(server),
   )

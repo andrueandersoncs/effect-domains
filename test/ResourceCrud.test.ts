@@ -18,7 +18,6 @@ import { ExampleSubjectSchema } from "@effect-domains/example-support/subject"
 import { RpcTest } from "effect/unstable/rpc"
 
 const fieldReportsTable = Resource.table(FieldReportsResource)
-
 const GeneratedTodoSchema = Schema.Struct({ title: Schema.NonEmptyString, completed: Schema.Boolean })
 
 interface GeneratedTodo extends Schema.Schema.Type<typeof GeneratedTodoSchema> {}
@@ -194,7 +193,6 @@ const OrderedTodos = Resource.define({
 })
 
 const orderedTodosTable = Resource.table(OrderedTodos)
-
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
 const todoIdentifier = Struct.get<PagedTodo, "id">("id")
 const noteAuthor = ExampleSubjectSchema.make({ userId: "codec-author", tenantId: "codec-test", roles: ["editor"] })
@@ -237,7 +235,9 @@ const generatedCrudProgram = Effect.gen(function* () {
     Effect.result,
   )
 
-  expect(wrongKey).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
+  expect(wrongKey._tag).toBe("Failure")
+
+  expect(wrongKey).toHaveProperty("failure._tag", "RepositoryError")
 
   const invalidCiphertext = `${stored.body.slice(0, 20)}AAAAAAAAAAAAAAAAAAAAAA`
 
@@ -251,7 +251,9 @@ const generatedCrudProgram = Effect.gen(function* () {
     Effect.result,
   )
 
-  expect(tampered).toMatchObject({ _tag: "Failure", failure: { _tag: "RepositoryError" } })
+  expect(tampered._tag).toBe("Failure")
+
+  expect(tampered).toHaveProperty("failure._tag", "RepositoryError")
 
   const todo = yield* Resource.repository(GeneratedTodos).create({ title: "defaulted" })
 
@@ -512,8 +514,8 @@ it.effect("generated patch envelopes cannot collide with canonical field names",
 it("compiled creation inspection and input agree on implicit generation and defaults", () => {
   const parts = [Part.resource(GeneratedTodos)]
   const definition = Application.define({ name: "creation-product", parts })
-  const application = Effect.runSync(Application.compile(definition))
-  const inspection = Effect.runSync(ApplicationInspect.describe(application))
+  const application = pipe(Application.compile(definition), Effect.runSync)
+  const inspection = pipe(ApplicationInspect.describe(application), Effect.runSync)
 
   expect(inspection.resources).toMatchObject([{ creation: { defaults: { completed: false }, generated: { id: "uuidV7" }, fromSubject: {} } }])
 
@@ -539,7 +541,7 @@ it("creation configuration cannot redeclare an implicit identifier", () => {
     capabilities,
   })
 
-  const spec = Reflect.apply(Resource.define, null, [definition])
+  const spec = Resource.define(definition)
 
   expect(() => Resource.compile(spec)).toThrow()
 })
@@ -587,11 +589,15 @@ it.effect("creation plans evaluate runtime generators per call and default only 
     expect(first.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(second.at).toEqual(at)
     expect(second.summary).toBe("authored")
-    expect(second.id).not.toBe(first.id)
+
+    const generatedIdentifier = expect(second.id)
+
+    generatedIdentifier.not.toBe(first.id)
 
     const override = yield* pipe(GeneratedRecordsRepository.create(first), Effect.result)
+    const overrideFailed = Result.isFailure(override)
 
-    expect(Result.isFailure(override)).toBe(true)
+    expect(overrideFailed).toBe(true)
   }),
   Random.withSeed("generated-records"),
   Effect.provide(sqlite),
@@ -604,6 +610,8 @@ const VersionedTodoSchema = Schema.Struct({
   rank: Schema.Int,
   version: Schema.Int,
 })
+
+interface VersionedTodo extends Schema.Schema.Type<typeof VersionedTodoSchema> {}
 
 const versionedTodoCapabilities = [
   Resource.create(),
@@ -656,24 +664,35 @@ it.effect("nullable create fields default to null, version writes are guarded, a
     const patchConflictEffect = Resource.repository(VersionedTodos).patch("a", { title: "stale" }, 1)
     const patchConflict = yield* Effect.result(patchConflictEffect)
 
-    expect(patchConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
+    expect(patchConflict._tag).toBe("Failure")
+
+    expect(patchConflict).toHaveProperty("failure._tag", "VersionConflict")
+    expect(patchConflict).toMatchObject({ failure: { expectedVersion: 1 } })
 
     const updateConflictEffect = Resource.repository(VersionedTodos).update({ ...first, title: "stale update" })
     const updateConflict = yield* Effect.result(updateConflictEffect)
 
-    expect(updateConflict).toMatchObject({ _tag: "Failure", failure: { _tag: "VersionConflict", expectedVersion: 1 } })
+    expect(updateConflict._tag).toBe("Failure")
+
+    expect(updateConflict).toHaveProperty("failure._tag", "VersionConflict")
+    expect(updateConflict).toMatchObject({ failure: { expectedVersion: 1 } })
   }),
   Effect.provide(sqlite),
 ))
 
 it("rejects Boolean and Number version fields at resource definition time", () => {
-  const booleanVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Boolean })
-  const numberVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Number })
+  const BooleanVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Boolean })
+  
+  interface BooleanVersion extends Schema.Schema.Type<typeof BooleanVersionSchema> {}
+
+  const NumberVersionSchema = Schema.Struct({ id: identifier(Schema.String), version: Schema.Number })
+  
+  interface NumberVersion extends Schema.Schema.Type<typeof NumberVersionSchema> {}
 
   const booleanVersionDefinition = Resource.define({
     authorization: Authorization.public,
     name: "boolean_version",
-    schema: booleanVersionSchema,
+    schema: BooleanVersionSchema,
     version: "version",
     capabilities: [],
   })
@@ -681,7 +700,7 @@ it("rejects Boolean and Number version fields at resource definition time", () =
   const numberVersionDefinition = Resource.define({
     authorization: Authorization.public,
     name: "number_version",
-    schema: numberVersionSchema,
+    schema: NumberVersionSchema,
     version: "version",
     capabilities: [],
   })
@@ -692,6 +711,8 @@ it("rejects Boolean and Number version fields at resource definition time", () =
 
 const EnsuredTodoSchema = Schema.Struct({ id: identifier(Schema.String), title: Schema.String })
 
+interface EnsuredTodo extends Schema.Schema.Type<typeof EnsuredTodoSchema> {}
+
 const EnsuredTodos = Resource.define({
   authorization: Authorization.public,
   name: "ensured_todos",
@@ -700,8 +721,9 @@ const EnsuredTodos = Resource.define({
 })
 
 const ensuredTodosTable = Resource.table(EnsuredTodos)
-
 const ImplicitEnsuredTodoSchema = Schema.Struct({ title: Schema.String })
+
+interface ImplicitEnsuredTodo extends Schema.Schema.Type<typeof ImplicitEnsuredTodoSchema> {}
 
 const ImplicitEnsuredTodos = Resource.define({
   authorization: Authorization.public,
@@ -751,6 +773,8 @@ const ReservationSchema = Schema.Struct({
   version: Schema.Int,
 })
 
+interface Reservation extends Schema.Schema.Type<typeof ReservationSchema> {}
+
 const reservationCapabilities = [Resource.create(), Resource.transition()]
 
 const Reservations = Resource.define({
@@ -786,7 +810,10 @@ it.effect("transitions reject an invalid source state and atomically publish the
     const rejectedTransition = Resource.repository(Reservations).transition(held.id, "release", {}, confirmed.version)
     const rejected = yield* Effect.result(rejectedTransition)
 
-    expect(rejected).toMatchObject({ _tag: "Failure", failure: { _tag: "InvalidReservationTransition", actual: "confirmed", action: "release" } })
+    expect(rejected._tag).toBe("Failure")
+
+    expect(rejected).toHaveProperty("failure._tag", "InvalidReservationTransition")
+    expect(rejected).toMatchObject({ failure: { actual: "confirmed", action: "release" } })
   }),
   Effect.provide(ReservationsRuntime.handlers),
   Effect.provide(sqlite),
@@ -796,8 +823,8 @@ it.effect("transitions reject an invalid source state and atomically publish the
 it("resource inspection includes list policy, version, transitions, and implicit defaults", () => {
   const parts = [Part.resource(VersionedTodos), Part.resource(Reservations)]
   const definition = Application.define({ name: "resource-inspection", parts })
-  const application = Effect.runSync(Application.compile(definition))
-  const inspection = Effect.runSync(ApplicationInspect.describe(application))
+  const application = pipe(Application.compile(definition), Effect.runSync)
+  const inspection = pipe(ApplicationInspect.describe(application), Effect.runSync)
 
   expect(inspection.resources).toMatchObject([
     { name: "versioned_todos", creation: { defaults: { summary: null } }, list: { range: ["rank"], order: [["rank", "desc"]], limit: 2 }, version: "version" },

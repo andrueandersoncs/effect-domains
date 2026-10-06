@@ -37,7 +37,7 @@ const failures = Command.implement(failuresSpec, makeFailures)
 
 const SubjectSchema = Schema.Struct({ userId: Schema.String })
 
-type Subject = Schema.Schema.Type<typeof SubjectSchema>
+interface Subject extends Schema.Schema.Type<typeof SubjectSchema> {}
 
 const authenticatedSubject = (userId: string) => SubjectSchema.make({ userId })
 

@@ -32,7 +32,6 @@ const TypeProbe = Resource.define({
 
 const TypeProbeRepository = Resource.repository(TypeProbe)
 const TypeProbeRuntime = Resource.compile(TypeProbe)
-
 const NoPolicyProbeSchema = Schema.Struct({ id: identifier(Schema.String), value: Schema.Int })
 
 interface NoPolicyProbe extends Schema.Schema.Type<typeof NoPolicyProbeSchema> {}
@@ -58,7 +57,6 @@ const patchInput: Parameters<typeof TypeProbeRepository.patch>[1] = { title: "ch
 void createInput
 void listInput
 void patchInput
-
 undefined satisfies Parameters<typeof TypeProbeRepository.list>[0]
 
 const defaultListInput: Parameters<typeof NoPolicyProbeRepository.list>[0] = { limit: 1, cursor: "continuation" }
@@ -84,7 +82,6 @@ void defaultListPage
 void contractListInput
 void contractListPage
 void bareList
-
 void noPolicyCreate
 
 // @ts-expect-error because defaults do not make unrelated canonical fields optional.
@@ -168,6 +165,8 @@ const VersionedTypeProbeSchema = Schema.Struct({
   version: Schema.Int,
 })
 
+interface VersionedTypeProbe extends Schema.Schema.Type<typeof VersionedTypeProbeSchema> {}
+
 const versionedTypeProbeCapabilities = [Resource.create(), Resource.patch()]
 
 const VersionedTypeProbe = Resource.define({
@@ -179,7 +178,6 @@ const VersionedTypeProbe = Resource.define({
 })
 
 const VersionedTypeProbeRepository = Resource.repository(VersionedTypeProbe)
-
 const nullableCreate: Parameters<typeof VersionedTypeProbeRepository.create>[0] = { id: "row", title: "required" }
 const versionedPatch: Parameters<typeof VersionedTypeProbeRepository.patch> = ["row", { title: "changed" }, 1]
 
@@ -197,28 +195,32 @@ void suppliedVersion
 void missingExpectedVersion
 void patchedVersion
 
-const NullableGeneratedProbeSchema = Schema.Struct({
-  id: identifier(Schema.String),
-  note: Schema.NullOr(Schema.DateTimeUtc),
-})
+{
+  const NullableGeneratedProbeSchema = Schema.Struct({
+    id: identifier(Schema.String),
+    note: Schema.NullOr(Schema.DateTimeUtc),
+  })
 
-const nullableNoteGeneration = Resource.generated("now")
-const nullableGeneratedSources = Object.freeze({ note: nullableNoteGeneration })
-const nullableGeneratedCapabilities = [Resource.create({ sources: nullableGeneratedSources })]
+  interface NullableGeneratedProbe extends Schema.Schema.Type<typeof NullableGeneratedProbeSchema> {}
 
-const NullableGeneratedProbe = Resource.define({
-  authorization: Authorization.public,
-  name: "nullable_generated_probe",
-  schema: NullableGeneratedProbeSchema,
-  capabilities: nullableGeneratedCapabilities,
-})
+  const nullableNoteGeneration = Resource.generated("now")
+  const nullableGeneratedSources = Object.freeze({ note: nullableNoteGeneration })
+  const nullableGeneratedCapabilities = [Resource.create({ sources: nullableGeneratedSources })]
 
-const NullableGeneratedProbeRepository = Resource.repository(NullableGeneratedProbe)
+  const NullableGeneratedProbe = Resource.define({
+    authorization: Authorization.public,
+    name: "nullable_generated_probe",
+    schema: NullableGeneratedProbeSchema,
+    capabilities: nullableGeneratedCapabilities,
+  })
 
-// @ts-expect-error because a nullable generated field remains protected from create input.
-const generatedNullableOverride: Parameters<typeof NullableGeneratedProbeRepository.create>[0] = { id: "row", note: null }
+  const NullableGeneratedProbeRepository = Resource.repository(NullableGeneratedProbe)
 
-void generatedNullableOverride
+  // @ts-expect-error because a nullable generated field remains protected from create input.
+  const generatedNullableOverride: Parameters<typeof NullableGeneratedProbeRepository.create>[0] = { id: "row", note: null }
+
+  void generatedNullableOverride
+}
 
 const TransitionStatusSchema = Schema.Literals(["held", "confirmed"])
 
@@ -230,6 +232,8 @@ const TypeTransitions = Transitions.make({
 })
 
 const TransitionTypeProbeSchema = Schema.Struct({ id: identifier(Schema.String), status: TransitionStatusSchema, version: Schema.Int })
+
+interface TransitionTypeProbe extends Schema.Schema.Type<typeof TransitionTypeProbeSchema> {}
 
 const transitionTypeProbeCapabilities = [Resource.transition()]
 

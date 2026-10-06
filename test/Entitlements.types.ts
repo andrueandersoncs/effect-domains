@@ -5,8 +5,15 @@ import { Table } from "effect-domains/table"
 
 const ReportSchema = Schema.Struct({ id: Schema.String, tenantId: Schema.String, accountId: Schema.String })
 
+interface Report extends Schema.Schema.Type<typeof ReportSchema> {}
+
 const SubjectSchema = Schema.Struct({ tenantId: Schema.String, nullableTenantId: Schema.NullOr(Schema.String), numberId: Schema.Int })
+
+interface Subject extends Schema.Schema.Type<typeof SubjectSchema> {}
+
 const EntitlementRowSchema = Schema.Struct({ tenantId: Schema.String, active: Schema.Boolean })
+
+interface EntitlementRow extends Schema.Schema.Type<typeof EntitlementRowSchema> {}
 
 const EntitlementRows = Table.make({
   name: "entitlement_rows",

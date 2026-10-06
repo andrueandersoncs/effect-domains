@@ -6,7 +6,7 @@ import { ApplicationTelemetry } from "effect-domains/application-telemetry"
 import { CollectedSignal, decodeSignalBody, telemetryCollector } from "./telemetry-collector.ts"
 
 const applicationDefinition = Application.define({ name: "telemetry-privacy-test", parts: [] })
-const application = Effect.runSync(Application.compile(applicationDefinition))
+const application = pipe(Application.compile(applicationDefinition), Effect.runSync)
 
 class OtlpAttribute extends Schema.Class<OtlpAttribute>("OtlpAttribute")({
   key: Schema.String,

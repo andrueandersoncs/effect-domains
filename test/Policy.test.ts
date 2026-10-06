@@ -4,26 +4,25 @@ import { SqlClient } from "effect/unstable/sql"
 import { Authorization } from "effect-domains/authorization"
 import { AuthorizationSubject, AuthorizationValues } from "effect-domains/authorization-model"
 import { Entitlements } from "effect-domains/entitlements"
-import { OperandSchema, Policy, PolicyEnvironment, type Operand } from "effect-domains/policy"
+import { NextFieldSchema, OperandSchema, Policy, PolicyEnvironment, RowFieldSchema, SubjectFieldSchema } from "effect-domains/policy"
 import { PolicySql } from "effect-domains/policy-sql"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 
-const equalityPolicy = (left: Operand, right: Operand) => Policy.Schema.make({ _tag: "Equal", left, right })
-const membershipPolicy = (collection: Operand, value: Operand) => Policy.Schema.make({ _tag: "Includes", collection, value })
-const rowField = (field: string) => OperandSchema.make({ _tag: "RowField", field })
-const subjectField = (field: string) => OperandSchema.make({ _tag: "SubjectField", field })
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
+const PolicyRowSchema = Schema.Struct({ id: Schema.Int, label: Schema.NullOr(Schema.String), amount: Schema.Number })
 
-const rowId = Struct.get<Readonly<Record<string, unknown>>, "id">("id")
+interface PolicyRow extends Schema.Schema.Type<typeof PolicyRowSchema> {}
+
+const rowId = Struct.get<PolicyRow, "id">("id")
 const rowIds = Array.map(rowId)
 const hostile = "x' OR 1=1 --"
 const subject = { allowed: [null, "one", hostile], minimum: 1, role: "reader" }
 const absent = Option.none()
 const environment = new PolicyEnvironment({ subject, row: absent, next: absent })
-const label = rowField("label")
-const amount = rowField("amount")
-const minimum = subjectField("minimum")
-const allowed = subjectField("allowed")
+const label = RowFieldSchema.make({ field: "label" })
+const amount = RowFieldSchema.make({ field: "amount" })
+const minimum = SubjectFieldSchema.make({ field: "minimum" })
+const allowed = SubjectFieldSchema.make({ field: "allowed" })
 const nullLiteral = Policy.literal(null)
 const zeroLiteral = Policy.literal(0)
 const oneLiteral = Policy.literal(1)
@@ -33,20 +32,20 @@ const otherLiteral = Policy.literal("other")
 const hostileLiteral = Policy.literal(hostile)
 const trueLiteral = Policy.literal(true)
 const emptyLiteral = Policy.literal([])
-const nullable = equalityPolicy(label, nullLiteral)
-const minimumAmount = equalityPolicy(amount, minimum)
-const hostileLabel = equalityPolicy(label, hostileLiteral)
-const membership = membershipPolicy(allowed, label)
-const zeroAmount = equalityPolicy(amount, zeroLiteral)
-const twoAmount = equalityPolicy(amount, twoLiteral)
+const nullable = Policy.EqualSchema.make({ left: label, right: nullLiteral })
+const minimumAmount = Policy.EqualSchema.make({ left: amount, right: minimum })
+const hostileLabel = Policy.EqualSchema.make({ left: label, right: hostileLiteral })
+const membership = Policy.IncludesSchema.make({ collection: allowed, value: label })
+const zeroAmount = Policy.EqualSchema.make({ left: amount, right: zeroLiteral })
+const twoAmount = Policy.EqualSchema.make({ left: amount, right: twoLiteral })
 const selectedAmounts = Policy.any(zeroAmount, twoAmount)
 const combined = Policy.all(membership, selectedAmounts)
-const otherLabel = equalityPolicy(label, otherLiteral)
+const otherLabel = Policy.EqualSchema.make({ left: label, right: otherLiteral })
 const nullableOrOther = Policy.any(nullable, otherLabel)
-const differentBoolean = equalityPolicy(trueLiteral, oneLiteral)
-const differentString = equalityPolicy(textOneLiteral, oneLiteral)
-const emptyMembership = membershipPolicy(emptyLiteral, label)
-const rowKindsDiffer = equalityPolicy(label, amount)
+const differentBoolean = Policy.EqualSchema.make({ left: trueLiteral, right: oneLiteral })
+const differentString = Policy.EqualSchema.make({ left: textOneLiteral, right: oneLiteral })
+const emptyMembership = Policy.IncludesSchema.make({ collection: emptyLiteral, value: label })
+const rowKindsDiffer = Policy.EqualSchema.make({ left: label, right: amount })
 const policies = [Policy.constant(true), Policy.constant(false), Policy.all(), Policy.any(), nullable, minimumAmount, hostileLabel, membership, combined, nullableOrOther, differentBoolean, differentString, emptyMembership, rowKindsDiffer]
 
 it.effect("the same policy selects identical canonical and SQL rows including nulls and hostile literals", () => pipe(
@@ -56,7 +55,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
     yield* sql`CREATE TABLE policy_rows (id INTEGER PRIMARY KEY, label TEXT, amount REAL NOT NULL)`
     yield* sql`INSERT INTO policy_rows (id, label, amount) VALUES (1, NULL, 0), (2, 'one', 1), (3, ${hostile}, 2), (4, '1', 1), (5, 'other', 3)`
 
-    const rows = yield* sql<Readonly<Record<string, unknown>>>`SELECT * FROM policy_rows ORDER BY id`
+    const rows = yield* sql<PolicyRow>`SELECT * FROM policy_rows ORDER BY id`
 
     const verifyPolicy = Effect.fn("Policy.testParity")(function* (source: Policy) {
       const json = JSON.stringify(source)
@@ -64,7 +63,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
       const policy = yield* Schema.decodeUnknownEffect(Policy.Schema)(raw)
       const evaluate = Policy.evaluate(policy)
 
-      const visible = (row: Readonly<Record<string, unknown>>) => {
+      const visible = (row: PolicyRow) => {
         const present = Option.some(row)
 
         return pipe(new PolicyEnvironment({ subject, row: present, next: absent }), evaluate)
@@ -72,7 +71,7 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 
       const expected = yield* pipe(Effect.filter(rows, visible), Effect.map(rowIds))
       const predicate = yield* PolicySql.compile(policy)(sql, environment)
-      const actualRows = yield* sql<Readonly<Record<string, unknown>>>`SELECT id FROM policy_rows WHERE ${predicate} ORDER BY id`
+      const actualRows = yield* sql<Pick<PolicyRow, "id">>`SELECT id FROM policy_rows WHERE ${predicate} ORDER BY id`
       const actual = Array.map(actualRows, Struct.get("id"))
 
       expect(actual).toEqual(expected)
@@ -94,9 +93,9 @@ it.effect("the same policy selects identical canonical and SQL rows including nu
 ))
 
 it.effect("fold evaluation short circuits without turning missing operands or malformed syntax into grants", Effect.fn("Policy.testShortCircuit")(function* () {
-  const nextOwner = OperandSchema.make({ _tag: "NextField", field: "owner" })
+  const nextOwner = NextFieldSchema.make({ field: "owner" })
   const alice = Policy.literal("alice")
-  const missing = equalityPolicy(nextOwner, alice)
+  const missing = Policy.EqualSchema.make({ left: nextOwner, right: alice })
   const yes = Policy.constant(true)
   const no = Policy.constant(false)
   const alternative = Policy.any(yes, missing)
@@ -123,7 +122,13 @@ it.effect("fold evaluation short circuits without turning missing operands or ma
 
 it.effect("embedded subject policies apply scope and action entitlement requirements", Effect.fn("Policy.embeddedSubjectPolicies")(function* () {
   const ResourceSchema = Schema.Struct({ tenantId: Schema.String })
+  
+  interface Resource extends Schema.Schema.Type<typeof ResourceSchema> {}
+
   const SubjectSchema = Schema.Struct({ tenantId: Schema.String })
+  
+  interface Subject extends Schema.Schema.Type<typeof SubjectSchema> {}
+
   const resource = Authorization.for({ resource: ResourceSchema, subject: SubjectSchema })
   const subject = Authorization.subject(SubjectSchema)
   const scopeRequirement = subject.entitlement({ name: "scope", key: subject.subject.tenantId })
@@ -160,6 +165,9 @@ it.effect("embedded subject policies apply scope and action entitlement requirem
   expect(entitlementCalls).toContain("action")
 
   const OtherSubjectSchema = Schema.Struct({ tenantId: Schema.String })
+  
+  interface OtherSubject extends Schema.Schema.Type<typeof OtherSubjectSchema> {}
+
   const otherSubject = Authorization.subject(OtherSubjectSchema)
   const otherAccess = otherSubject.all()
   const other = otherSubject.policy(otherAccess)

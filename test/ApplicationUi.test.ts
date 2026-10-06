@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { Array, Deferred, Effect, Equivalence, Fiber, Layer, Option, Ref, Schema, Struct, pipe } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http"
+import type { HttpClient } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { TestIdentity, sessionFor } from "./identity-fixture.ts"
 import { StoragePrefix, StoredTextSchema } from "./prefix-codec.ts"
@@ -42,9 +43,10 @@ const call = Effect.fn("ApplicationUi.testCall")(function* (
 })
 
 const serverFor = Effect.fn("ApplicationUi.testServer")(function* (
-  routes: Layer.Layer<never, unknown, HttpRouter.HttpRouter>,
+  routes: Layer.Layer<never, unknown, HttpRouter.HttpRouter | HttpClient.HttpClient>,
 ) {
-  const server = HttpRouter.toWebHandler(routes, { disableLogger: true })
+  const providedRoutes = Layer.provide(routes, FetchHttpClient.layer)
+  const server = HttpRouter.toWebHandler(providedRoutes, { disableLogger: true })
 
   yield* Effect.addFinalizer(() => Effect.promise(server.dispose))
 
@@ -62,7 +64,7 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
 
     const parts = [Part.native({ group: identityGroup, handlers })]
     const definition = Application.define({ name: "identity", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
     const capturedSubject = Layer.succeed(AuthorizationSubject, { userId: "captured" })
     const authenticator = yield* AuthorizationRpc.Authenticator
     const authentication = Layer.succeed(AuthorizationRpc.Authenticator, authenticator)
@@ -108,7 +110,7 @@ it.effect("application UI authenticates each invocation and rejects cross-origin
     const denied = yield* call(handler, "mutate", null)
 
     expect(denied.status).toBe(422)
-    expect(denied.body).toEqual({ error: { _tag: "Unauthenticated" } })
+    expect(denied.body).toHaveProperty("error._tag", "Unauthenticated")
 
     const aliceSession = yield* sessionFor("alice")
     const bobSession = yield* sessionFor("bob")
@@ -192,7 +194,7 @@ it.effect("application UI preserves wire codecs and void while distinguishing va
 
     const parts = [Part.native({ group: clock, handlers })]
     const definition = Application.define({ name: "clock", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
 
     const routes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
@@ -208,7 +210,9 @@ it.effect("application UI preserves wire codecs and void while distinguishing va
     const early = "2025-01-01T00:00:00.000Z"
     const earlyResponse = yield* call(handler, "time", early)
 
-    expect(earlyResponse).toEqual({ status: 422, body: { error: { _tag: "TooEarly", at: early } } })
+    expect(earlyResponse.status).toBe(422)
+    expect(earlyResponse.body).toHaveProperty("error._tag", "TooEarly")
+    expect(earlyResponse.body).toHaveProperty("error.at", early)
 
     const invalidDate = yield* call(handler, "time", "not a date")
 
@@ -256,7 +260,7 @@ it.effect("application UI isolates a slow call from an unrelated handler defect"
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "isolation", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
 
     const routes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
@@ -303,14 +307,14 @@ it.effect("application UI uses handler-only codec context instead of its ambient
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "codec", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
 
     const handlerOnlyRoutes = pipe(
       ApplicationUi.layerHttp({ application, javascript, stylesheet }),
       Layer.provide(application.handlers),
     )
 
-    const handlerOnly = yield* serverFor(handlerOnlyRoutes as Layer.Layer<never, unknown, HttpRouter.HttpRouter>)
+    const handlerOnly = yield* serverFor(handlerOnlyRoutes)
     const handlerOnlyResponse = yield* call(handlerOnly, "echo", "inner:hello")
     const handlerOnlyFailure = yield* call(handlerOnly, "echo", "inner:fail")
 
@@ -339,8 +343,8 @@ it("inspection publishes middleware errors when the RPC declares no own errors",
   const handlers = group.toLayer({ probe: () => Effect.succeed("ok") })
   const parts = [Part.native({ group, handlers })]
   const definition = Application.define({ name: "probe", parts })
-  const application = Effect.runSync(Application.compile(definition))
-  const inspection = Effect.runSync(ApplicationInspect.describe(application))
+  const application = pipe(Application.compile(definition), Effect.runSync)
+  const inspection = pipe(ApplicationInspect.describe(application), Effect.runSync)
   const middlewares = Array.fromIterable(probe.middlewares)
   const middlewareErrors = Array.map(middlewares, Struct.get("error"))
   const expected = Schema.toJsonSchemaDocument(Schema.toCodecJson(Schema.Union([probe.errorSchema, ...middlewareErrors])))

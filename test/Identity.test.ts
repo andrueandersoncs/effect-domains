@@ -17,7 +17,9 @@ it.effect("identity rejects invalid, revoked, and expired issued sessions", () =
       Effect.result,
     )
 
-    expect(invalid).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+    expect(invalid._tag).toBe("Failure")
+
+    expect(invalid).toHaveProperty("failure._tag", "Unauthenticated")
 
     const alice = CredentialsSchema.make({ username: "alice", password })
     const session = yield* identity.login(alice)
@@ -29,7 +31,9 @@ it.effect("identity rejects invalid, revoked, and expired issued sessions", () =
 
     const revoked = yield* pipe(identity.authenticate(token), Effect.result)
 
-    expect(revoked).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+    expect(revoked._tag).toBe("Failure")
+
+    expect(revoked).toHaveProperty("failure._tag", "Unauthenticated")
 
     const bob = CredentialsSchema.make({ username: "bob", password })
     const expiring = yield* identity.login(bob)
@@ -39,7 +43,9 @@ it.effect("identity rejects invalid, revoked, and expired issued sessions", () =
     const expiringToken = Redacted.value(expiring.token)
     const expiry = yield* pipe(identity.authenticate(expiringToken), Effect.result)
 
-    expect(expiry).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+    expect(expiry._tag).toBe("Failure")
+
+    expect(expiry).toHaveProperty("failure._tag", "Unauthenticated")
   }),
   Effect.provide(TestIdentity),
 ))

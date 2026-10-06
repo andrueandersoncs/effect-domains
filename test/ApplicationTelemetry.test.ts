@@ -6,7 +6,7 @@ import { ApplicationTelemetry } from "effect-domains/application-telemetry"
 import { CollectedSignal, decodeSignalBody, telemetryCollector } from "./telemetry-collector.ts"
 
 const applicationDefinition = Application.define({ name: "telemetry-test", parts: [] })
-const application = Effect.runSync(Application.compile(applicationDefinition))
+const application = pipe(Application.compile(applicationDefinition), Effect.runSync)
 const calls = Metric.counter("telemetry.test.calls", { incremental: true })
 const pathMatches = (path: string) => (signal: CollectedSignal) => Equivalence.strictEqual<string>()(signal.path, path)
 

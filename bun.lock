@@ -7,6 +7,7 @@
       "devDependencies": {
         "@better-typescript/better-typescript": "0.4.29",
         "@effect-domains/alchemy": "workspace:*",
+        "@effect-domains/example-community-elections": "workspace:*",
         "@effect-domains/example-field-notes": "workspace:*",
         "@effect-domains/example-orders-invoices": "workspace:*",
         "@effect-domains/example-reading-list": "workspace:*",
@@ -36,6 +37,14 @@
     },
     "examples/appointment-reminders": {
       "name": "@effect-domains/example-appointment-reminders",
+      "dependencies": {
+        "@effect-domains/example-support": "workspace:*",
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+      },
+    },
+    "examples/community-elections": {
+      "name": "@effect-domains/example-community-elections",
       "dependencies": {
         "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
@@ -335,6 +344,8 @@
     "@effect-domains/application-ui": ["@effect-domains/application-ui@workspace:apps/application-ui"],
 
     "@effect-domains/example-appointment-reminders": ["@effect-domains/example-appointment-reminders@workspace:examples/appointment-reminders"],
+
+    "@effect-domains/example-community-elections": ["@effect-domains/example-community-elections@workspace:examples/community-elections"],
 
     "@effect-domains/example-editorial-calendar": ["@effect-domains/example-editorial-calendar@workspace:examples/editorial-calendar"],
 

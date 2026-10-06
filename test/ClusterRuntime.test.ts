@@ -25,10 +25,10 @@ it.effect("rejects topology drift and advances versions with compare-and-set", E
       Effect.result,
     )
 
-    expect(drift).toMatchObject({
-      _tag: "Failure",
-      failure: { _tag: "ClusterTopologyMismatch", application: "topology-test" },
-    })
+    expect(drift._tag).toBe("Failure")
+
+    expect(drift).toHaveProperty("failure._tag", "ClusterTopologyMismatch")
+    expect(drift).toHaveProperty("failure.application", "topology-test")
 
     yield* advanceClusterTopology({
       application: "topology-test",
@@ -48,9 +48,9 @@ it.effect("rejects topology drift and advances versions with compare-and-set", E
       shardGroups: ["default"],
     }), Effect.result)
 
-    expect(stale).toMatchObject({
-      _tag: "Failure",
-      failure: { _tag: "ClusterTopologyMismatch", application: "topology-test" },
-    })
+    expect(stale._tag).toBe("Failure")
+
+    expect(stale).toHaveProperty("failure._tag", "ClusterTopologyMismatch")
+    expect(stale).toHaveProperty("failure.application", "topology-test")
   }), Effect.provide(database))
 }, Effect.scoped, Effect.provide(BunServices.layer)))

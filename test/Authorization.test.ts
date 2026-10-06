@@ -32,7 +32,14 @@ const FabricatedPolicyDescriptorSchema = Schema.TaggedStruct("Policy", {
 
 const FabricatedPolicySchema = Schema.make<Schema.Codec<PolicyAuthorization>>(FabricatedPolicyDescriptorSchema.ast)
 
-const UnsafeResourceSourcesSchema = Schema.Record(Schema.String, Schema.Unknown)
+const UnsafeSubjectFieldSchema = Schema.TaggedStruct("SubjectField", { field: Schema.String })
+const UnsafeRowFieldSchema = Schema.TaggedStruct("RowField", { field: Schema.String })
+
+const UnsafeSubjectSourceSchema = Schema.TaggedStruct("Subject", {
+  operand: Schema.Union([UnsafeSubjectFieldSchema, UnsafeRowFieldSchema]),
+})
+
+const UnsafeResourceSourcesSchema = Schema.Record(Schema.String, UnsafeSubjectSourceSchema)
 
 class UnsafeResourceDefinition extends Schema.Class<UnsafeResourceDefinition>("UnsafeResourceDefinition")({
   name: Schema.String,
@@ -118,6 +125,7 @@ it.effect("subject policies snapshot allowed values and reject invalid claims an
   )
 
   expect(invalid).toBe("Forbidden")
+  // SAFETY: This deliberately bypasses static row rejection because the test exercises runtime subject-policy validation.
   expect(() => subject.policy(owned as never)).toThrow()
 }))
 
@@ -204,6 +212,7 @@ it.effect("create update patch and remove enforce current and candidate authoriz
   Effect.gen(function* () {
     yield* seed
 
+    // SAFETY: This deliberately includes a bound field because the repository must reject forged create input at runtime.
     const forged = yield* pipe(
       Resource.repository(Documents).create({ id: "5", tenantId: "a", ownerId: "bob", title: "forged" } as never),
       asAlice,
@@ -212,6 +221,7 @@ it.effect("create update patch and remove enforce current and candidate authoriz
 
     expect(forged).toBe("RepositoryError")
 
+    // SAFETY: This deliberately includes a bound tenant because the repository must reject cross-tenant create input at runtime.
     const crossTenant = yield* pipe(
       Resource.repository(Documents).create({ id: "6", tenantId: "b", title: "cross" } as never),
       asAlice,
@@ -259,15 +269,12 @@ it.effect("create update patch and remove enforce current and candidate authoriz
 ))
 
 it("rejects unsafe create subject binding definitions", () => {
-  const authorizationFrom = (authorization: unknown) => {
-    if (typeof authorization !== "string") return authorization
-
-    return Equivalence.strictEqual<string>()(authorization, "policy") ? policy : authorization
-  }
-
   const compileUnsafe = (definition: UnsafeResourceDefinition) => {
-    const authorization = authorizationFrom(definition.authorization)
-    const createCapability = new Data.Class({ _tag: "Create", sources: definition.sources })
+    const authorization = Equivalence.strictEqual<unknown>()(definition.authorization, "policy")
+      ? policy
+      : definition.authorization
+
+    const createCapability = Resource.create({ sources: definition.sources })
 
     const resourceDefinition = new Data.Class({
       name: definition.name,
@@ -276,28 +283,29 @@ it("rejects unsafe create subject binding definitions", () => {
       capabilities: [createCapability],
     })
 
-    const spec = Reflect.apply(Resource.define, null, [resourceDefinition])
+    // @ts-expect-error because the unsafe binding must also be rejected by the runtime compiler.
+    const spec = Resource.define(resourceDefinition)
 
     return Resource.compile(spec)
   }
 
   const subject = (field: string) => {
-    const operand = new Data.Class({ _tag: "SubjectField", field })
+    const operand = UnsafeSubjectFieldSchema.make({ field })
 
-    return new Data.Class({ _tag: "Subject", operand })
+    return UnsafeSubjectSourceSchema.make({ operand })
   }
 
   const userSubject = subject("userId")
   const absentSubject = subject("absent")
   const rolesSubject = subject("roles")
-  const publicSources = new Data.Class<Record<string, unknown>>({ ownerId: userSubject })
-  const denySources = new Data.Class<Record<string, unknown>>({ ownerId: userSubject })
-  const unknownTargetSources = new Data.Class<Record<string, unknown>>({ absent: userSubject })
-  const rowOperand = new Data.Class({ _tag: "RowField", field: "ownerId" })
-  const rowSubject = new Data.Class({ _tag: "Subject", operand: rowOperand })
-  const nonSubjectSources = new Data.Class<Record<string, unknown>>({ ownerId: rowSubject })
-  const unknownSubjectSources = new Data.Class<Record<string, unknown>>({ ownerId: absentSubject })
-  const incompatibleSources = new Data.Class<Record<string, unknown>>({ ownerId: rolesSubject })
+  const publicSources = UnsafeResourceSourcesSchema.make({ ownerId: userSubject })
+  const denySources = UnsafeResourceSourcesSchema.make({ ownerId: userSubject })
+  const unknownTargetSources = UnsafeResourceSourcesSchema.make({ absent: userSubject })
+  const rowOperand = UnsafeRowFieldSchema.make({ field: "ownerId" })
+  const rowSubject = UnsafeSubjectSourceSchema.make({ operand: rowOperand })
+  const nonSubjectSources = UnsafeResourceSourcesSchema.make({ ownerId: rowSubject })
+  const unknownSubjectSources = UnsafeResourceSourcesSchema.make({ ownerId: absentSubject })
+  const incompatibleSources = UnsafeResourceSourcesSchema.make({ ownerId: rolesSubject })
 
   const publicBinding = UnsafeResourceDefinition.make({
     name: "public_binding",
@@ -408,7 +416,7 @@ it("rejects nullable subject fields bound to required resource fields", () => {
     capabilities: requiredOwnerCapabilities,
   })
 
-  const spec = Reflect.apply(Resource.define, null, [definition])
+  const spec = Resource.define(definition)
 
   expect(() => Resource.compile(spec)).toThrow()
 })
@@ -506,6 +514,8 @@ const AuthorizedTransitionSchema = Schema.Struct({
   id: identifier(Schema.String),
   state: AuthorizedTransitionStatusSchema,
 })
+
+interface AuthorizedTransition extends Schema.Schema.Type<typeof AuthorizedTransitionSchema> {}
 
 const transitionPolicyDsl = Authorization.for({ resource: AuthorizedTransitionSchema, subject: SubjectSchema })
 const transitionPublisher = transitionPolicyDsl.includes(transitionPolicyDsl.subject.roles, "publisher")

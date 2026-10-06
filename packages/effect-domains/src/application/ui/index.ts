@@ -153,8 +153,8 @@ const uiResponses = Effect.fn("ApplicationUi.responses")(function* (
   return { paths, html, javascript, stylesheet, metadata }
 })
 
-const register = Effect.fn("ApplicationUi.register")(function* (
-  options: ApplicationUiLayerOptions,
+const register = Effect.fn("ApplicationUi.register")(function* <App extends ApplicationIR>(
+  options: ApplicationUiLayerOptions<App>,
 ) {
   const path = yield* uiPath(options.path ?? "/")
 

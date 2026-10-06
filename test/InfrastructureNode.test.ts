@@ -35,7 +35,7 @@ const program = Effect.scoped(Effect.gen(function* () {
   const handler = yield* ApplicationRuntime.httpEffect(
     plan.application,
     SqliteNodeRuntime.sqlClient(":memory:", { migrations: plan.database.resource.migrations }),
-    { rpc: http.rpc, mcp: http.mcp, ui: http.ui, uiAssets: { javascript, stylesheet }, telemetry: false },
+    { rpc: http.rpc, mcp: http.mcp, ui: http.ui, uiAssets: { javascript, stylesheet } },
   )
 
   const rootResponse = yield* Effect.provideService(

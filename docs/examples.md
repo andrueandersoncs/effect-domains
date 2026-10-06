@@ -4,7 +4,7 @@ description: Choose a runnable application for CRUD, authorization, migrations, 
 
 # Choose an example
 
-Each of the thirteen applications has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
+Each application has its own detailed guide beside its source. Choose a domain below, then follow its setup, CLI workflow, expected failures, and storage/authentication notes. Shared conventions live in the [example index](../examples/README.md).
 
 Run commands from the repository root after `bun install`. Run `bun run build` before serving **any** example: the shared Application UI is prebuilt once and interpreted from each application's compiled contracts. Keep demonstration servers on loopback. Protected applications accept issued credentials through `identity.login`; the example identity store is not a production authentication service.
 
@@ -52,6 +52,12 @@ The [reservation walkthrough](../examples/reservations/README.md) covers stock r
 Use this for nested application composition, tenant-scoped relations, uniqueness constraints, optimistic versions, declared transitions, and multi-record transactions. The application nests the three resources and their authored command bundle as one billing domain, then composes that module with native identity before final compilation.
 
 Follow the [orders-and-invoices guide](../examples/orders-invoices/README.md) for the complete order/line/invoice/payment sequence, expected versions, and role/tenant failures. [`application.ts`](../examples/orders-invoices/application.ts) shows the `Part.application` boundary; [`resources.ts`](../examples/orders-invoices/resources.ts) contains scoped relations and transition declarations; [`sqlite.ts`](../examples/orders-invoices/sqlite.ts) uses `Table.project` and `Command.bundle`.
+
+### Community elections
+
+Use this for confidential account-local ordered ballots and an explicit calculation rather than a generated workflow. Editors prepare and freeze a slate; members atomically replace their ranked preferences while voting is open; closure publishes aggregate vote-transfer rounds without exposing individual votes.
+
+The [community-elections guide](../examples/community-elections/README.md) covers identity, versioned slate preparation, ballot replacement, result gating, exhaustion, unresolved elimination ties, and persistence. [`store.ts`](../examples/community-elections/store.ts) retains ordered nested preference SQL, while [`tally.ts`](../examples/community-elections/tally.ts) keeps majority and elimination semantics application-owned. Neither requires a framework collection encoding or aggregate query DSL.
 
 ## Connect an MCP client
 

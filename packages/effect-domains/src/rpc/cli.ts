@@ -21,38 +21,41 @@ const causeMessage = (cause: unknown) =>
     : String(cause)
 
 const makeRpcCli = <
-  App extends ApplicationIR,
+  Rpcs extends RpcProcedure,
   Subcommands extends ReadonlyArray<Command.Command<any, any, any, any, any>>,
   ProtocolError = never,
   ProtocolRequirements = never,
 >(
   options: Readonly<{
-    application: App
+    application: ApplicationIR & Readonly<{ group: RpcGroup.RpcGroup<Rpcs> }>
     protocol: Layer.Layer<RpcClient.Protocol, ProtocolError, ProtocolRequirements>
     subcommands: Subcommands
   }>,
 ) => pipe(
   Effect.gen(function* () {
-    const procedures = options.application.group.requests.values()
+    const procedures = (
+      // SAFETY: Descriptors match because options require this exact group.
+      options.application.group as RpcGroup.RpcGroup<Rpcs>
+    ).requests.values()
 
     const subcommands = yield* Effect.forEach(procedures, Effect.fn("RpcCli.compileProcedure")(function* (procedure) {
-      const compiled = compileUnaryRpc(procedure)
+      const compiled = compileUnaryRpc<Rpcs>(procedure)
 
       const contract = yield* Effect.fromOption(
         compiled,
         () => RpcCliDefinitionError.make({ procedure: procedure._tag, reason: "only unary RPC procedures are supported" }),
       )
 
-      const inputJsonSchema = Schema.fromJsonString(contract.payloadSchema)
-      const outputSchema = Schema.fromJsonString(contract.successSchema)
-      const errorSchema = Schema.fromJsonString(contract.errorSchema)
-      const payloadTypeSchema = Schema.toType(contract.payloadSchema)
+      const inputJsonSchema = Schema.fromJsonString<typeof contract.payloadSchema>(contract.payloadSchema)
+      const outputSchema = Schema.fromJsonString<typeof contract.successSchema>(contract.successSchema)
+      const errorSchema = Schema.fromJsonString<typeof contract.errorSchema>(contract.errorSchema)
+      const payloadTypeSchema = Schema.toType<typeof contract.payloadSchema>(contract.payloadSchema)
       const voidPayload = SchemaAST.isVoid(payloadTypeSchema.ast)
-      const decodePayload = Schema.decodeUnknownEffect(contract.payloadSchema)
-      const encodePayload = Schema.encodeUnknownEffect(contract.payloadSchema)
-      const decodeJsonInput = Schema.decodeUnknownEffect(inputJsonSchema)
-      const encodeOutput = Schema.encodeUnknownEffect(outputSchema)
-      const encodeError = Schema.encodeUnknownEffect(errorSchema)
+      const decodePayload = Schema.decodeUnknownEffect<typeof contract.payloadSchema>(contract.payloadSchema)
+      const encodePayload = Schema.encodeUnknownEffect<typeof contract.payloadSchema>(contract.payloadSchema)
+      const decodeJsonInput = Schema.decodeUnknownEffect<typeof inputJsonSchema>(inputJsonSchema)
+      const encodeOutput = Schema.encodeUnknownEffect<typeof outputSchema>(outputSchema)
+      const encodeError = Schema.encodeUnknownEffect<typeof errorSchema>(errorSchema)
       const contractGroup = RpcGroup.make(contract)
 
       const decodeNoInput = Effect.fn("RpcCli.decodeNoInput")(function* () {
@@ -107,10 +110,10 @@ const makeRpcCli = <
 
     yield* Effect.forEach(options.subcommands, verifyNoSubcommandCollision)
 
-    const commands = Array.appendAll(subcommands, options.subcommands)
+    const commands = Array.appendAll<typeof subcommands[number], Subcommands[number]>(subcommands, options.subcommands)
     const root = Command.make(options.application.name)
 
-    return Array.isArrayNonEmpty(commands) ? Command.withSubcommands(root, commands) : root
+    return Array.isArrayNonEmpty(commands) ? Command.withSubcommands<typeof commands>(commands)(root) : root
   }),
   Effect.runSync,
 )

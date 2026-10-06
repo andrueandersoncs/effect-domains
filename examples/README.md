@@ -16,6 +16,7 @@ Each application solves a concrete record-keeping or operational problem. Every 
 | [support-cases](support-cases/README.md) | Triage, assign, and resolve customer cases | Sibling application composition, joined reads, and transactional history |
 | [reservations](reservations/README.md) | Hold, confirm, or release stock | `Transitions.make` and transactional inventory |
 | [orders-invoices](orders-invoices/README.md) | Build an order, issue an invoice, and record payment | Nested application composition, scoped relations, and optimistic versions |
+| [community-elections](community-elections/README.md) | Elect a coordinator with confidential ranked ballots | Atomic ordered-ballot replacement and explicit vote-transfer/tie policy |
 | [purchased-guides](purchased-guides/README.md) | Read a guide unlocked by a purchase | `Entitlements.fromTable` after row visibility |
 | [report-exports](report-exports/README.md) | Approve and publish a financial JSON report | Subscription gating, durable execution, and worker telemetry |
 | [appointment-reminders](appointment-reminders/README.md) | Schedule an application notification | Durable scheduling and deduplicated delivery |
@@ -34,7 +35,7 @@ Servers default to `http://127.0.0.1:3000`; the generated Application UI is moun
 
 ### Demonstration identity
 
-Team tasks, field notes, orders/invoices, purchased guides, report exports, and appointment reminders provide issued-session identity. Configure a protected example with its own identity database:
+Team tasks, field notes, orders/invoices, community elections, purchased guides, report exports, and appointment reminders provide issued-session identity. Configure a protected example with its own identity database:
 
 ```bash
 export EFFECT_DOMAINS_DEMO_PASSWORD='choose-a-local-bootstrap-password'

@@ -10,9 +10,15 @@ import { TasksResource } from "./resources.ts"
 class TaskReviewUnavailable extends Schema.TaggedError<TaskReviewUnavailable>()("TaskReviewUnavailable", {}) {}
 
 const TaskReviewSchema = Schema.Struct({ total: Schema.Int, completed: Schema.Int })
+
+interface TaskReview extends Schema.Schema.Type<typeof TaskReviewSchema> {}
+
 const subjectPolicy = Authorization.subject(ExampleSubjectSchema)
+const reviewScope = subjectPolicy.all()
+const reviewAuthorization = subjectPolicy.policy(reviewScope)
+
 const review = Command.family("todos.", TaskReviewUnavailable)
-  .authorized(subjectPolicy.policy(subjectPolicy.all()))
+  .authorized(reviewAuthorization)
   .define({ name: "review", success: TaskReviewSchema, dependencies: [TasksResource] })
 
 const reviewTasks = Command.implement(review, Effect.fn("TeamTasks.review")(function* (_, subject) {
@@ -22,6 +28,7 @@ const reviewTasks = Command.implement(review, Effect.fn("TeamTasks.review")(func
   if (!allowed) return yield* Forbidden.make({})
 
   const sql = yield* SqlClient.SqlClient
+
   const taskCounts = SqlSchema.findOne({
     Request: Schema.String,
     Result: TaskReviewSchema,

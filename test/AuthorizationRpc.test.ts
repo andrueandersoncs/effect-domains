@@ -45,7 +45,6 @@ const NotesRuntime = Resource.compile(Notes)
 
 const SessionsSchema = Schema.Record(Schema.String, NoteReaderSchema)
 
-interface Sessions extends Schema.Schema.Type<typeof SessionsSchema> {}
 
 const sessions = SessionsSchema.make({ "Bearer alice-session": { userId: "alice" }, "Bearer bob-session": { userId: "bob" } })
 const sessionFor = (token: string) => Record.get(sessions, token)

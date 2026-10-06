@@ -164,7 +164,7 @@ const make = <
   const frozenTransitions = Record.map(input.transitions, freezeDeclaration)
   const assignedTransitions = Struct.assign(input.transitions, frozenTransitions)
   const transitions = Object.freeze(assignedTransitions)
-  const actions = Struct.keys(transitions)
+  const actions = Struct.keys(input.transitions)
   const ActionsSchema = Schema.Literals(actions)
 
   const invalid = (action: string, key: string, actual: string) =>

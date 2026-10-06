@@ -1,18 +1,19 @@
 import { BunHttpServer, BunServices } from "@effect/platform-bun"
-import { Array, Config, Effect, Function, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
+import { Array, type Cause, Config, Effect, Function, Layer, Option, type PlatformError, Predicate, type Redacted, Schema, type Scope, Stdio, Stream, pipe } from "effect"
 import { Argument, CliError, Command } from "effect/unstable/cli"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import { type Rpc, RpcClient, RpcGroup, RpcSerialization } from "effect/unstable/rpc"
 import type { ApplicationIR } from "../index.ts"
 import { ApplicationUiAssetsError, readApplicationUiAssets } from "./ui-assets.ts"
 import { ApplicationUi } from "../ui/index.ts"
-import { ApplicationInspect } from "../inspect.ts"
+import { ApplicationInspect, type InspectionError } from "../inspect.ts"
 
 
-import type { ApplicationHttpOptions, ApplicationRuntimeOptions, Initialization, RuntimeLayer } from "../runtime.ts"
+import type { ApplicationHttpOptions, ApplicationRuntimeOptions, ApplicationUiAssetsUnavailable, Initialization, RuntimeLayer } from "../runtime.ts"
 import * as ApplicationRuntime from "../runtime.ts"
 
 import { ApplicationTelemetry } from "../telemetry/index.ts"
+import type { TelemetryOptionsError } from "../telemetry/options-error.ts"
 import { AuthorizationRpc } from "../../authorization/rpc.ts"
 import { RpcCli } from "../../rpc/cli.ts"
 import { RpcMcp } from "../../rpc/mcp.ts"
@@ -78,6 +79,7 @@ export type RunErrors<
   Routes extends RuntimeLayer,
 > =
   | ApplicationUiAssetsError
+  | ApplicationUiAssetsUnavailable | InspectionError | TelemetryOptionsError | Cause.IllegalArgumentError
   | Config.ConfigError | MigrationError | PlatformError.PlatformError | Schema.SchemaError | CliError.CliError
   | Layer.Error<ReturnType<typeof BunHttpServer.layer>> | Layer.Error<ReturnType<typeof SqliteBunRuntime.sqlClient>>
   | Layer.Error<ReturnType<typeof RpcMcp.layerHttp>> | Layer.Error<ReturnType<typeof ApplicationUi.layerHttp>>
@@ -118,11 +120,7 @@ const withApplicationRuntime = Effect.fn("ApplicationBun.withApplicationRuntime"
   const filename = yield* databaseFilename(application.name, configuredFilename)
   const database = SqliteBunRuntime.sqlClient(filename, { migrations: options.database.migrations })
 
-  return yield* ApplicationRuntime.use(application, database, {
-    services: options.services,
-    initialize: options.initialize,
-    background: options.background,
-  }, use)
+  return yield* ApplicationRuntime.use<typeof database, Services, Initialize, Background, UseSuccess, UseError, UseRequirements>(application, database, options, use)
 })
 
 const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
@@ -143,7 +141,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
 
   const uiAssets = uiEnabled ? yield* readApplicationUiAssets() : undefined
 
-  const routes = yield* ApplicationRuntime.httpLayer(application, {
+  const routes = yield* ApplicationRuntime.httpLayer<App, Routes>(application, {
     routes: options.routes,
     rpc: options.rpc,
     mcp: options.mcp,
@@ -167,7 +165,7 @@ const serveApplication = Effect.fn("ApplicationBun.serve")(function* <
   const server = telemetryDisabled ? serverBase : tracedServer
   const serving = Layer.launch(server)
 
-  return yield* pipe(withApplicationRuntime(application, options, serving), Effect.scoped)
+  return yield* pipe(withApplicationRuntime<App, Services, Initialize, Background, Effect.Success<typeof serving>, Effect.Error<typeof serving>, Effect.Services<typeof serving>>(application, options, serving), Effect.scoped)
 })
 
 
@@ -239,7 +237,7 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
   const protocol = Layer.unwrap(protocolEffect)
 
   const serveCommandHandler = Effect.fn("ApplicationBun.serveCommand")(function* () {
-    return yield* serveApplication(application, options)
+    return yield* serveApplication<App, Services, Initialize, Background, Routes>(application, options)
   })
 
   const serveCommand = Command.make("serve", {}, serveCommandHandler)
@@ -255,7 +253,7 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
   const workerHandler = Effect.fn("ApplicationBun.worker")(function* () {
     const lifetime = pipe(Effect.log(`Worker ready: ${application.name}`), Effect.andThen(Effect.never))
 
-    return yield* pipe(withApplicationRuntime(application, options, lifetime), Effect.scoped)
+    return yield* pipe(withApplicationRuntime<App, Services, Initialize, Background, never, never, never>(application, options, lifetime), Effect.scoped)
   })
 
   const workerCommand = Command.make("worker", {}, workerHandler)
@@ -264,8 +262,17 @@ const runCli = Effect.fn("ApplicationBun.runCli")(function* <
     ? [serveCommand, workerCommand, inspect]
     : [serveCommand, inspect]
 
-  const command = RpcCli.make({
-    application,
+  type AppRpcs = RpcGroup.Rpcs<App["group"]>
+  type Payload = [AppRpcs] extends [never] ? Schema.Never : AppRpcs extends { readonly payloadSchema: infer Declared extends Schema.Top } ? Declared : Schema.Never
+  type Success = [AppRpcs] extends [never] ? Schema.Never : Rpc.SuccessSchema<AppRpcs>
+  type Errors = [AppRpcs] extends [never] ? Schema.Never : AppRpcs extends { readonly errorSchema: infer Declared extends Schema.Top } ? Declared : Schema.Never
+  type Middlewares = [AppRpcs] extends [never] ? never : AppRpcs extends Rpc.Rpc<infer _Tag, infer _Payload, infer _Success, infer _Error, infer Declared, infer _Requires> ? Declared : never
+  type CliProcedure = Rpc.Rpc<Rpc.Tag<AppRpcs>, Payload, Success, Errors, Middlewares>
+  type CliApplication = ApplicationIR & Omit<App, "group"> & Readonly<{ group: RpcGroup.RpcGroup<CliProcedure> }>
+
+  // SAFETY: The concrete descriptors are exact because Application.compile assembled these procedures and middleware.
+  const command = RpcCli.make<CliProcedure, typeof subcommands, Layer.Error<typeof protocol>, Layer.Services<typeof protocol>>({
+    application: application as App & CliApplication,
     protocol,
     subcommands,
   })
@@ -282,15 +289,16 @@ export const runApplication = Effect.fn("ApplicationBun.run")(function* <
 >(
   application: App,
   options: RunOptions<Services, Initialize, Background, Routes>,
-) {
+): Effect.fn.Return<void, RunErrors<App, Services, Initialize, Background, Routes>, RunRequirements<App, Services, Initialize, Background, Routes>> {
   const telemetry = pipe(
     ApplicationTelemetry.layer(application, options.telemetry),
     Layer.provide(FetchHttpClient.layer),
   )
 
+  // SAFETY: Channels match because compiled RPC descriptors and staged service acquisition follow RunRequirements.
   return yield* pipe(
-    runCli(application, options),
+    runCli<App, Services, Initialize, Background, Routes>(application, options),
     Effect.provide(BunServices.layer),
     Effect.provide(telemetry),
-  )
+  ) as Effect.Effect<void, RunErrors<App, Services, Initialize, Background, Routes>, RunRequirements<App, Services, Initialize, Background, Routes>>
 })

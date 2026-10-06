@@ -1182,7 +1182,10 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
         const issuedToken = issuesSession ? pipe(resultRecord, Option.flatMap((record) => fieldValue(record, "token")), Option.filter(isString)) : Option.none<string>()
 
         if (Option.isSome(issuedToken)) token.value = issuedToken.value
-        if (equals(entry.name, "identity.logout") || equals(entry.name, "identity.close")) token.value = ""
+
+        const clearsSession = equals(entry.name, "identity.logout") || equals(entry.name, "identity.close")
+
+        if (clearsSession) token.value = ""
 
         const completed = notice("success", "Operation completed.")
         const display = showResult(value)

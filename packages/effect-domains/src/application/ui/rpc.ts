@@ -12,7 +12,7 @@ import {
 } from "./response.ts"
 
 import { compileUnaryRpc, type RpcProcedure } from "../../rpc/contract.ts"
-import { inProcessClient, type UnaryRpc } from "../../rpc/in-process.ts"
+import { inProcessClient } from "../../rpc/in-process.ts"
 
 export class ApplicationUiDefinitionError extends Schema.TaggedError<ApplicationUiDefinitionError>()(
   "ApplicationUiDefinitionError",
@@ -29,15 +29,9 @@ const maximumUiOperations = 1_000
 const internalResponse = Effect.succeed(applicationUiInternalResponse)
 const recoverResponseEncodingFailure = Function.constant(internalResponse)
 
-// SAFETY: The group can be narrowed because Application compilation rejects every streaming operation.
-const asUnaryGroup = (group: ApplicationIR["group"]) => group as RpcGroup.RpcGroup<UnaryRpc>
 
-// SAFETY: The procedure can be narrowed because callers invoke this only after compileUnaryRpc returns a unary contract.
-const asUnaryProcedure = (procedure: RpcProcedure) => procedure as UnaryRpc
-
-
-const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocations")(function* (
-  application: ApplicationIR,
+const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocations")(function* <App extends ApplicationIR>(
+  application: App,
 ) {
 
   if (application.group.requests.size > maximumUiOperations) {
@@ -46,11 +40,13 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
     })
   }
 
-  const unaryGroup = asUnaryGroup(application.group)
-  const { client, withHandlerContext } = yield* inProcessClient(unaryGroup)
+  // SAFETY: The group retains its precise handler requirements because Application.compile assembled these procedures.
+  const { client, withHandlerContext } = yield* inProcessClient<RpcGroup.Rpcs<App["group"]>>(
+    application.group as App["group"] & RpcGroup.RpcGroup<RpcGroup.Rpcs<App["group"]>>,
+  )
 
   const compileOperation = Effect.fn("ApplicationUi.compileOperation")(function* (procedure: RpcProcedure) {
-    const compiled = compileUnaryRpc(procedure)
+    const compiled = compileUnaryRpc<RpcProcedure>(procedure)
 
     const contract = yield* Effect.fromOption(
       compiled,
@@ -70,8 +66,7 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
     const decode = Schema.decodeUnknownEffect(contract.payloadSchema)
     const encodeResult = Schema.encodeUnknownEffect(OperationResult)
     const encodeError = Schema.encodeUnknownEffect(OperationErrorEnvelope)
-    const unaryProcedure = asUnaryProcedure(procedure)
-    const withCodecContext = withHandlerContext(unaryProcedure)
+    const withCodecContext = withHandlerContext(procedure)
 
     const respondToDeclaredFailure = Effect.fn("ApplicationUi.respondToDeclaredFailure")(function* (error: unknown) {
       const envelope = OperationErrorEnvelope.make({ error })
@@ -121,8 +116,8 @@ const compileOperationInvocations = Effect.fn("ApplicationUi.operationInvocation
   return HashMap.fromIterable(entries)
 })
 
-export const compileApplicationCall = Effect.fn("ApplicationUi.applicationCall")(function* (
-  application: ApplicationIR,
+export const compileApplicationCall = Effect.fn("ApplicationUi.applicationCall")(function* <App extends ApplicationIR>(
+  application: App,
   allowedOrigins: Option.Option<ReadonlyArray<string>>,
 ) {
   const invocations = yield* compileOperationInvocations(application)

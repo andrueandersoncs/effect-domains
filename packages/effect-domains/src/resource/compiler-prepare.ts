@@ -221,10 +221,9 @@ export const prepareResource = <
     ? withImplicitIdentifier(options.schema)
     : options.schema
 
-  const canonicalRowSchema = narrowContract<
-    Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>,
-    typeof selectedCanonicalSchema
-  >(selectedCanonicalSchema)
+  const canonicalRowSchema = Schema.make<
+    Schema.Codec<CanonicalRow, unknown, S["DecodingServices"], S["EncodingServices"]>
+  >(selectedCanonicalSchema.ast)
 
   const declaredIdentifierSchema = Record.get(options.schema.fields, table.identifier)
   const canonicalIdentifierSchema = Option.getOrElse(declaredIdentifierSchema, () => table.identifierSchema)

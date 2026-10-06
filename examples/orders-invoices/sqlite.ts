@@ -44,6 +44,8 @@ const OrderSummaryInputSchema = Schema.Struct({
   tenantId: TenantIdSchema,
 })
 
+interface OrderSummaryInput extends Schema.Schema.Type<typeof OrderSummaryInputSchema> {}
+
 const projections = {
   order: Table.project(ordersTable, [
     "id",

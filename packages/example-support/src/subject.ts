@@ -7,6 +7,8 @@ export const ExampleSubjectSchema = Schema.Struct({
   roles: Schema.Array(Schema.Literals(["reader", "editor", "admin"])),
 })
 
+interface ExampleSubject extends Schema.Schema.Type<typeof ExampleSubjectSchema> {}
+
 const subject = Authorization.subject(ExampleSubjectSchema)
 
 const readerRole = subject.includes(subject.subject.roles, "reader")

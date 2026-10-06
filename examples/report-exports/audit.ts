@@ -24,6 +24,8 @@ export const ReportExportAuditSchema = Schema.Struct({
   traceId: Schema.NullOr(Schema.NonEmptyString),
 })
 
+interface ReportExportAudit extends Schema.Schema.Type<typeof ReportExportAuditSchema> {}
+
 const ReportExportAuditList = Resource.list({
   filter: ["targetId", "action", "actorId"],
   range: ["occurredAt"],
@@ -75,11 +77,15 @@ export const appendReportExportAudit = Effect.fn("ReportExports.appendAudit")(fu
 
 const ReportAuditInputSchema = Schema.Struct({ executionId: Schema.NonEmptyString })
 
+interface ReportAuditInput extends Schema.Schema.Type<typeof ReportAuditInputSchema> {}
+
 const ReportAuditCommand = Command
   .family("ReportExport.", ReportExportUnavailable)
   .authorized(ExampleRoles.admin)
 
 const ReportAuditRowsSchema = Schema.Array(auditTable.rowSchema)
+
+interface ReportAuditRows extends Schema.Schema.Type<typeof ReportAuditRowsSchema> {}
 
 const auditTrailSpec = ReportAuditCommand.define({
   name: "AuditTrail",

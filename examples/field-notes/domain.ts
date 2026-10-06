@@ -14,3 +14,5 @@ export const FieldReportSchema = Schema.Struct({
   body: Schema.NonEmptyString,
 })
 
+interface FieldReport extends Schema.Schema.Type<typeof FieldReportSchema> {}
+

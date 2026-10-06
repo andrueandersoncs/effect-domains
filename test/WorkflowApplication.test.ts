@@ -32,7 +32,6 @@ const workflows = [exportWorkflow] as const
 const prefix = { prefix: "workflow." } as const
 const group = WorkflowProxy.toRpcGroup(workflows, prefix).middleware(Operator)
 const proxyHandlers = WorkflowProxyServer.layerRpcHandlers(workflows, prefix)
-
 const workflowParts = [Part.native({ group, handlers: proxyHandlers })]
 
 const workflowModule = Application.define({
@@ -47,7 +46,7 @@ const applicationDefinition = Application.define({
   parts: applicationParts,
 })
 
-const application = Effect.runSync(Application.compile(applicationDefinition))
+const application = pipe(Application.compile(applicationDefinition), Effect.runSync)
 
 it.effect("authorizes native workflow submissions and recovery before invoking the engine", Effect.fn("WorkflowApplication.test")(function* () {
   const executions = yield* Ref.make(0)
@@ -61,7 +60,9 @@ it.effect("authorizes native workflow submissions and recovery before invoking t
     const client = yield* RpcTest.makeClient(application.group)
     const deniedSubmission = yield* pipe(client["workflow.ExportDiscard"]({ requestId: "one" }), Effect.result)
 
-    expect(deniedSubmission).toMatchObject({ _tag: "Failure", failure: { _tag: "OperatorRequired" } })
+    expect(deniedSubmission._tag).toBe("Failure")
+
+    expect(deniedSubmission).toHaveProperty("failure._tag", "OperatorRequired")
 
     const beforeSubmission = yield* Ref.get(executions)
 
@@ -83,7 +84,9 @@ it.effect("authorizes native workflow submissions and recovery before invoking t
 
     const deniedRecovery = yield* pipe(client["workflow.ExportResume"]({ executionId }), Effect.result)
 
-    expect(deniedRecovery).toMatchObject({ _tag: "Failure", failure: { _tag: "OperatorRequired" } })
+    expect(deniedRecovery._tag).toBe("Failure")
+
+    expect(deniedRecovery).toHaveProperty("failure._tag", "OperatorRequired")
   }), Effect.provide(handlers), Effect.scoped)
 }))
 
@@ -118,7 +121,6 @@ it.effect("suspends interrupted workflow failures and resumes the same execution
     const hasSuspended = Option.isSome(suspended)
 
     expect(hasSuspended).toBe(true)
-
     yield* recoverableWorkflow.resume(executionId)
     yield* Effect.yieldNow
     yield* TestClock.adjust("100 millis")

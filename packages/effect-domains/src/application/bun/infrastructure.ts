@@ -2,7 +2,7 @@ import { Data, Effect, Equivalence, Layer, Option, Schema } from "effect"
 import type { ApplicationIR } from "../index.ts"
 import { runApplication, type RunErrors, type RunRequirements } from "./runtime.ts"
 import { ApplicationInfrastructure, type ApplicationInfrastructureError } from "../infrastructure.ts"
-import type { ApplicationHttpOptions, Initialization, RuntimeLayer } from "../runtime.ts"
+import type { ApplicationHttpOptions, ApplicationRuntimeOptions, Initialization, RuntimeLayer } from "../runtime.ts"
 import type { ApplicationInfrastructureIR } from "../../infrastructure/compiler.ts"
 import type { SqliteMigration } from "../../sqlite/migration-model.ts"
 
@@ -20,10 +20,9 @@ type InfrastructureRunOptions<
   Initialize extends Initialization = Effect.Effect<void>,
   Background extends RuntimeLayer = Layer.Layer<never, never, never>,
   Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
-> = Omit<
-  ApplicationHttpOptions<Services, Initialize, Background, Routes>,
-  "rpc" | "mcp" | "ui" | "uiAssets"
-> & Readonly<Partial<{ database: Readonly<{ filename: string }> }>>
+> = ApplicationRuntimeOptions<Services, Initialize, Background>
+  & Pick<ApplicationHttpOptions<Services, Initialize, Background, Routes>, "routes" | "telemetry">
+  & Readonly<Partial<{ database: Readonly<{ filename: string }> }>>
 
 class InfrastructureDatabaseConfigurationError extends Schema.TaggedError<InfrastructureDatabaseConfigurationError>()(
   "InfrastructureDatabaseConfigurationError",
@@ -56,7 +55,7 @@ export const runInfrastructure = Effect.fn("ApplicationBun.runInfrastructure")(f
   Routes extends RuntimeLayer = Layer.Layer<never, never, never>,
 >(
   infrastructure: ApplicationInfrastructureIR<App>,
-  options: InfrastructureRunOptions<Services, Initialize, Background, Routes> = {},
+  options: InfrastructureRunOptions<Services, Initialize, Background, Routes>,
 ) {
   const plan = yield* ApplicationInfrastructure.plan("ApplicationBun", infrastructure)
   const http = ApplicationInfrastructure.httpOptions(plan.runtime.resource)
@@ -85,11 +84,12 @@ export const runInfrastructure = Effect.fn("ApplicationBun.runInfrastructure")(f
     }),
   })
 
-  // SAFETY: Planning and run channels match because both derive from this infrastructure and these options.
-  return yield* runApplication(plan.application, {
+  // SAFETY: Channels match because this plan derives from the supplied infrastructure.
+  return yield* runApplication<App, Services, Initialize, Background, Routes>(plan.application, {
     ...options,
     ...http,
     database,
-  }) as InfrastructureRunEffect<App, Services, Initialize, Background, Routes>
+  // SAFETY: Required layers remain present because all options are copied unchanged.
+  } as Parameters<typeof runApplication<App, Services, Initialize, Background, Routes>>[1]) as InfrastructureRunEffect<App, Services, Initialize, Background, Routes>
 })
 

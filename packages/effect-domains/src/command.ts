@@ -23,10 +23,6 @@ type Handler<Payload, Success extends Schema.Constraint, Policy, Failure, Requir
   ? (input: PayloadType<Payload>, subject: SubjectType<Policy>) => Effect.Effect<Success["Type"], Failure, Requirements>
   : (input: PayloadType<Payload>) => Effect.Effect<Success["Type"], Failure, Requirements>
 
-type HandlerRequirements<Implementation> = Effect.Services<
-  Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never
->
-
 type Procedure<Name extends string, Payload extends Schema.Constraint | undefined, Success extends Schema.Constraint, Error extends Schema.Constraint, Policy> = Rpc.Rpc<
   Name,
   Codec<Payload>,
@@ -189,7 +185,7 @@ const compileCommand = <
       Spec["success"],
       Spec extends { readonly policy: infer Policy extends SubjectPolicy } ? Policy : unknown,
       Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
-      HandlerRequirements<Implementation>
+      Effect.Services<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>
     >
       & ([Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never> extends infer Failure
         ? Failure extends Tagged
@@ -279,7 +275,7 @@ const compileCommand = <
   type Invocation = Effect.Effect<
     Success["Type"],
     Effect.Error<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>,
-    HandlerRequirements<Implementation>
+    Effect.Services<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>
   >
 
   const invokeUnprotected = narrowContract<
@@ -340,7 +336,7 @@ const compileCommand = <
       (input: PayloadType<Payload>) => Effect.Effect<
         Success["Type"],
         Failure,
-        Exclude<HandlerRequirements<Implementation>, AuthorizationSubject>
+        Exclude<Effect.Services<Implementation extends (...arguments_: infer _Arguments) => infer Result ? Result : never>, AuthorizationSubject>
           | (Transaction extends true ? RepositoryStore : never)
       >,
       typeof handler

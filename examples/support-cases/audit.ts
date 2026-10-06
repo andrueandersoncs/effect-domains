@@ -25,6 +25,8 @@ export const SupportCaseAuditSchema = Schema.Struct({
   traceId: Schema.NullOr(Schema.NonEmptyString),
 })
 
+interface SupportCaseAudit extends Schema.Schema.Type<typeof SupportCaseAuditSchema> {}
+
 const SupportCaseAuditList = Resource.list({
   filter: ["targetId", "action", "actorId"],
   range: ["occurredAt"],
@@ -75,6 +77,9 @@ export const appendSupportCaseAudit = Effect.fn("SupportCases.appendAudit")(func
 })
 
 const SupportAuditInputSchema = Schema.Struct({ caseId: Schema.NonEmptyString })
+
+interface SupportAuditInput extends Schema.Schema.Type<typeof SupportAuditInputSchema> {}
+
 const supportAuditTable = Resource.table(SupportCaseAuditsResource)
 
 const SupportAuditCommand = Command
@@ -82,6 +87,8 @@ const SupportAuditCommand = Command
   .authorized(ExampleRoles.admin)
 
 const SupportAuditRowsSchema = Schema.Array(supportAuditTable.rowSchema)
+
+interface SupportAuditRows extends Schema.Schema.Type<typeof SupportAuditRowsSchema> {}
 
 const auditTrailSpec = SupportAuditCommand.define({
   name: "auditTrail",

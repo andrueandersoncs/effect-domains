@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./application": "./application.ts",
+    "./domain": "./domain.ts",
     "./migrations": "./migrations.ts"
   },
   "scripts": {

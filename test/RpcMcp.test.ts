@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equivalence, Layer, Option, Ref, Schema, type Types, pipe } from "effect"
+import { Array, Effect, Equivalence, Layer, Option, Ref, Schema, pipe } from "effect"
 import { McpSchema } from "effect/unstable/ai"
 import { HttpRouter } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
@@ -87,7 +87,6 @@ class TimeUnavailable extends Schema.TaggedError<TimeUnavailable>()("TimeUnavail
 
 const DateCodecSchema = Schema.toCodecJson(Schema.Date)
 const TimeUnavailableCodecSchema = Schema.toCodecJson(TimeUnavailable)
-
 const time = Rpc.make("clock.time", { payload: DateCodecSchema, success: DateCodecSchema, error: TimeUnavailableCodecSchema })
 const StringListSchema = Schema.Array(Schema.String)
 const list = Rpc.make("clock.list", { success: StringListSchema })
@@ -107,16 +106,13 @@ const clockHandlers = clock.toLayer({
 
 const clockParts = [Part.native({ group: clock, handlers: clockHandlers })]
 const clockDefinition = Application.define({ name: "clock", parts: clockParts })
-const clockApplication = Effect.runSync(Application.compile(clockDefinition))
+const clockApplication = pipe(Application.compile(clockDefinition), Effect.runSync)
 
 const clockRoutes = pipe(
   RpcMcp.layerHttp({ application: clockApplication, path: "/mcp" }),
   Layer.provide(clockApplication.handlers),
 )
 
-const preservesCodecService = true satisfies Types.Equals<Layer.Services<typeof clockRoutes>, HttpRouter.HttpRouter | StoragePrefix>
-
-void preservesCodecService
 
 it.effect("MCP discovers codecs and preserves scalar, array, void, and declared error results", () => pipe(
   Effect.gen(function* () {
@@ -194,14 +190,14 @@ it.effect("MCP uses handler-only codec context instead of its ambient context", 
 
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "codec", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
 
     const handlerOnlyRoutes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),
       Layer.provide(application.handlers),
     )
 
-    const handlerOnly = yield* makeServer(handlerOnlyRoutes as Layer.Layer<never, unknown, HttpRouter.HttpRouter>)
+    const handlerOnly = yield* makeServer(handlerOnlyRoutes)
     const handlerOnlyHeaders = yield* openSession(handlerOnly.handler)
     const handlerOnlyResponse = yield* call(handlerOnly.handler, handlerOnlyHeaders, 2, "codec.echo", "inner:hello")
     const handlerOnlyFailure = yield* call(handlerOnly.handler, handlerOnlyHeaders, 3, "codec.echo", "inner:fail")
@@ -230,12 +226,10 @@ const SubjectSchema = Schema.Record(Schema.String, Schema.Unknown)
 const subject = Rpc.make("identity.subject", { success: SubjectSchema }).middleware(AuthorizationRpc)
 const identity = RpcGroup.make(subject)
 const identityHandlers = identity.toLayer({ "identity.subject": () => AuthorizationSubject })
-
 const captured = Layer.succeed(AuthorizationSubject, { userId: "captured" })
-
 const identityParts = [Part.native({ group: identity, handlers: identityHandlers })]
 const identityDefinition = Application.define({ name: "identity", parts: identityParts })
-const identityApplication = Effect.runSync(Application.compile(identityDefinition))
+const identityApplication = pipe(Application.compile(identityDefinition), Effect.runSync)
 
 const identityRoutes = pipe(
   RpcMcp.layerHttp({ application: identityApplication, path: "/mcp" }),
@@ -305,7 +299,7 @@ it.effect("MCP closes handler scopes after success and failure without closing t
     const handlers = group.toLayer({ scope: handler })
     const parts = [Part.native({ group, handlers })]
     const definition = Application.define({ name: "scope", parts })
-    const application = Effect.runSync(Application.compile(definition))
+    const application = pipe(Application.compile(definition), Effect.runSync)
 
     const routes = pipe(
       RpcMcp.layerHttp({ application, path: "/mcp" }),

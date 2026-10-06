@@ -32,6 +32,8 @@ export const FinancialReportLineSchema = Schema.Struct({
   amountMinor: PositiveMoneyMinorSchema,
 })
 
+interface FinancialReportLine extends Schema.Schema.Type<typeof FinancialReportLineSchema> {}
+
 export const ReportingPeriodSchema = Schema.Struct({
   startsAt: Schema.DateTimeUtc,
   endsAt: Schema.DateTimeUtc,
@@ -44,6 +46,8 @@ export const ReportingPeriodSchema = Schema.Struct({
     : { path: ["endsAt"], issue: "reporting period must end after it starts" }
 }))
 
+interface ReportingPeriod extends Schema.Schema.Type<typeof ReportingPeriodSchema> {}
+
 export const ReportReleasePolicySchema = Schema.Literals([
   "automatic",
   "operatorApproval",
@@ -55,6 +59,8 @@ export const FinancialReportSchema = Schema.Struct({
   currency: CurrencyCodeSchema,
   releasePolicy: ReportReleasePolicySchema,
 })
+
+interface FinancialReport extends Schema.Schema.Type<typeof FinancialReportSchema> {}
 
 export const ReportExportRequestSchema = Schema.Struct({
   report: FinancialReportSchema,
@@ -73,6 +79,8 @@ export const ReportArtifactSchema = Schema.Struct({
   totalCreditMinor: MoneyMinorSchema,
 })
 
+interface ReportArtifact extends Schema.Schema.Type<typeof ReportArtifactSchema> {}
+
 export class ReportArtifactConflict extends Schema.TaggedError<ReportArtifactConflict>()(
   "ReportArtifactConflict",
   {
@@ -90,13 +98,19 @@ export const ReportExportJobSchema = Schema.Struct({
   contents: Schema.String,
 })
 
+export interface ReportExportJob extends Schema.Schema.Type<typeof ReportExportJobSchema> {}
+
 export const ReportReleaseSchema = Schema.Struct({
   releasedBy: Schema.NonEmptyString,
 })
 
+interface ReportRelease extends Schema.Schema.Type<typeof ReportReleaseSchema> {}
+
 export const ReportExportExecutionInputSchema = Schema.Struct({
   executionId: Schema.String,
 })
+
+interface ReportExportExecutionInput extends Schema.Schema.Type<typeof ReportExportExecutionInputSchema> {}
 
 export const ReportExportExecutionStatusSchema = Schema.Literals([
   "accepted",
@@ -147,11 +161,15 @@ export const ReportExportRunnerStatusSchema = Schema.Struct({
   weight: Schema.Finite,
 })
 
+interface ReportExportRunnerStatus extends Schema.Schema.Type<typeof ReportExportRunnerStatusSchema> {}
+
 export const ReportExportStatusSchema = Schema.Struct({
   activeEntities: SafeIntSchema,
   shuttingDown: Schema.Boolean,
   runners: Schema.Array(ReportExportRunnerStatusSchema),
 })
+
+interface ReportExportStatus extends Schema.Schema.Type<typeof ReportExportStatusSchema> {}
 
 export class ReportExportUnavailable extends Schema.TaggedError<ReportExportUnavailable>()(
   "ReportExportUnavailable",
@@ -176,7 +194,3 @@ export const ReportExportOperatorErrorsSchema = Schema.Union([
 export interface ReportExportRequest extends Schema.Schema.Type<typeof ReportExportRequestSchema> {}
 export interface ReportExportJob extends Schema.Schema.Type<typeof ReportExportJobSchema> {}
 
-interface FinancialReportLine extends Schema.Schema.Type<typeof FinancialReportLineSchema> {}
-interface ReportingPeriod extends Schema.Schema.Type<typeof ReportingPeriodSchema> {}
-interface ReportArtifact extends Schema.Schema.Type<typeof ReportArtifactSchema> {}
-interface ReportRelease extends Schema.Schema.Type<typeof ReportReleaseSchema> {}

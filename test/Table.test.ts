@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Array, DateTime, Effect, Equivalence, Function, Option, Schema, Struct, flow, pipe } from "effect"
-import { identifier } from "effect-domains/domain"
+import { identifier, type StructSchema } from "effect-domains/domain"
 import { Table } from "effect-domains/table"
 import { GreaterThan, GreaterThanOrEqualTo, LessThan, LessThanOrEqualTo, OneOf, MinLength, MaxLength } from "effect-domains/table-check-model"
 import { TableField } from "effect-domains/physical-table-field"
@@ -154,7 +154,7 @@ describe("Table", () => {
 
       storedInsertExpectation.not.toHaveProperty("id")
       expect(decodedInsert).toEqual(insert)
-      expect(typeof storedDate.date).toBe("string")
+      expect(storedDate.date).toBeTypeOf("string")
 
       const decodedDateMillis = decodedDate.date.getTime()
       const expectedDateMillis = Date.parse("2025-01-02T00:00:00.000Z")
@@ -206,20 +206,21 @@ describe("Table", () => {
       })
 
       const invalidOrdered = OrderedFieldsSchema.make({ lower: 4, upper: 1 })
+      const rejectsInvalid = Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) })
 
       const invalidInsert = pipe(
         Schema.decodeUnknownEffect(Ordered.insertSchema)(invalidOrdered),
-        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        rejectsInvalid,
       )
 
       const invalidPersistedRow = pipe(
         Schema.decodeUnknownEffect(Ordered.rowSchema)(invalidRow),
-        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        rejectsInvalid,
       )
 
       const invalidStorageRow = pipe(
         Schema.encodeUnknownEffect(Ordered.storageSchema)(invalidRow),
-        Effect.match({ onFailure: Function.constant(true), onSuccess: Function.constant(false) }),
+        rejectsInvalid,
       )
 
       const failures = yield* Effect.all([invalidInsert, invalidPersistedRow, invalidStorageRow])
@@ -237,21 +238,21 @@ describe("Table", () => {
 
       const active = Array.findFirst(snapshot.fields, named("active"))
       const quantity = Array.findFirst(snapshot.fields, named("quantity"))
+      const booleanCheck = OneOf.make({ values: [0, 1] })
+      const minimumQuantity = GreaterThanOrEqualTo.make({ value: 1 })
+      const maximumQuantity = LessThanOrEqualTo.make({ value: 99 })
 
       expect(active).toMatchObject({
         value: {
           scalar: "integer",
-          checks: [{ _tag: "OneOf", values: [0, 1] }],
+          checks: [booleanCheck],
         },
       })
 
       expect(quantity).toMatchObject({
         value: {
           scalar: "integer",
-          checks: [
-            { _tag: "GreaterThanOrEqualTo", value: 1 },
-            { _tag: "LessThanOrEqualTo", value: 99 },
-          ],
+          checks: [minimumQuantity, maximumQuantity],
         },
       })
     }))
@@ -288,12 +289,15 @@ describe("Table", () => {
 
     const compiled = Table.make({ name: "algebra", schema: AlgebraSchema })
     const fields = Array.drop(compiled.fields, 1)
+    const enumerationCheck = OneOf.make({ values: ["first", "second"] })
+    const numericCheck = OneOf.make({ values: [1, 2.5] })
+    const booleanCheck = OneOf.make({ values: [0, 1] })
 
     expect(fields).toMatchObject([
-      { scalar: "string", nullable: true, checks: [{ _tag: "OneOf", values: ["first", "second"] }] },
-      { scalar: "number", checks: [{ _tag: "OneOf", values: [1, 2.5] }] },
+      { scalar: "string", nullable: true, checks: [enumerationCheck] },
+      { scalar: "number", checks: [numericCheck] },
       { scalar: "string" },
-      { scalar: "integer", checks: [{ _tag: "OneOf", values: [0, 1] }] },
+      { scalar: "integer", checks: [booleanCheck] },
       { scalar: "string" },
       { scalar: "string" },
       { scalar: "integer", nullable: true },
@@ -311,7 +315,12 @@ describe("Table", () => {
   it.effect("derives relation names and expands scoped foreign keys against unique tuples", () =>
     Effect.sync(() => {
       const ParentSchema = Schema.Struct({ tenantId: Schema.String, code: Schema.String })
+      
+      interface Parent extends Schema.Schema.Type<typeof ParentSchema> {}
+
       const ChildSchema = Schema.Struct({ tenantId: Schema.String, parentId: Schema.String })
+      
+      interface Child extends Schema.Schema.Type<typeof ChildSchema> {}
 
       const parent = Table.make({
         name: "scoped_parents",
@@ -453,12 +462,18 @@ describe("Table", () => {
 
       interface NullableIdentifierTable extends Schema.Schema.Type<typeof NullableIdentifierTableSchema> {}
 
-      expect(() => Table.make({ name: "ambiguous", schema: AmbiguousSchema })).toThrow()
-      expect(() => Table.make({ name: "optional", schema: OptionalSchema })).toThrow()
-      expect(() => Table.make({ name: "option", schema: OptionSchema })).toThrow()
-      expect(() => Table.make({ name: "nested", schema: NestedSchema })).toThrow()
-      expect(() => Table.make({ name: "cyclic", schema: CyclicSchema })).toThrow()
-      expect(() => Table.make({ name: "nullable_identifier", schema: NullableIdentifierTableSchema })).toThrow()
+      const invalidDefinitions = [
+        { name: "ambiguous", schema: AmbiguousSchema },
+        { name: "optional", schema: OptionalSchema },
+        { name: "option", schema: OptionSchema },
+        { name: "nested", schema: NestedSchema },
+        { name: "cyclic", schema: CyclicSchema },
+        { name: "nullable_identifier", schema: NullableIdentifierTableSchema },
+      ]
+
+      Array.forEach(invalidDefinitions, (definition) => {
+        expect(() => Table.make<string, StructSchema>(definition)).toThrow()
+      })
 
     }))
 
@@ -468,6 +483,8 @@ describe("Table", () => {
         id: identifier(Schema.String),
         active: Schema.Boolean,
       })
+      
+      interface ProjectionEvents extends Schema.Schema.Type<typeof ProjectionEventsSchema> {}
 
       const Events = Table.make({
         name: "projection_events",

@@ -14,3 +14,5 @@ export const TaskSchema = Schema.Struct({
   ownerId: Schema.String,
 })
 
+interface Task extends Schema.Schema.Type<typeof TaskSchema> {}
+

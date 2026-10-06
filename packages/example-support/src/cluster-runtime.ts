@@ -73,6 +73,8 @@ const ClusterTopologySchema = Schema.Struct({
   shardGroups: Schema.Array(Schema.String),
 })
 
+interface ClusterTopology extends Schema.Schema.Type<typeof ClusterTopologySchema> {}
+
 const stringArrayToJson = flow(Array.sort(Order.String), JSON.stringify)
 
 const topologyMismatch = (

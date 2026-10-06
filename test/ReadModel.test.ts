@@ -18,15 +18,18 @@ const JobSchema = Schema.Struct({
   technicianId: Schema.NullOr(Schema.String), "is.urgent": Schema.Boolean,
 })
 
+interface Job extends Schema.Schema.Type<typeof JobSchema> {}
+
 const TechnicianSchema = Schema.Struct({
   id: identifier(Schema.String), tenant: Schema.String, localId: Schema.String,
   name: StoredTextSchema, onCall: Schema.NullOr(Schema.Boolean),
 })
 
+interface Technician extends Schema.Schema.Type<typeof TechnicianSchema> {}
+
 const Jobs = Table.make({ name: "jobs.work", schema: JobSchema })
 const Technicians = Table.make({ name: 'people"records', schema: TechnicianSchema })
 const database = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
-
 const jobListSources = ReadModel.sources({ job: Jobs })
 
 const JobListModel = ReadModel.define({
@@ -91,7 +94,7 @@ it.effect("decodes composite left joins without losing booleans, service codecs,
     const query = SqlSchema.findAll({
       Request: Schema.Void,
       Result: view.schema,
-      execute: () => sql<Readonly<Record<string, unknown>>>`${view.select(sql)} ORDER BY ${view.column(sql, ["base.jobs", "id"])} ASC`,
+      execute: () => sql<Schema.Codec.Encoded<typeof view.schema>>`${view.select(sql)} ORDER BY ${view.column(sql, ["base.jobs", "id"])} ASC`,
     })
 
     const original = yield* query(undefined)
@@ -190,7 +193,7 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
 
     yield* Effect.sync(() => Reflect.set(select.value, "1", "id"))
 
-    const rows = yield* sql<Readonly<Record<string, unknown>>>`${view.select(sql)}`
+    const rows = yield* sql<Schema.Codec.Encoded<typeof view.schema>>`${view.select(sql)}`
     const RowsSchema = Schema.Array(view.schema)
     const decoded = yield* Schema.decodeUnknownEffect(RowsSchema)(rows)
 
@@ -202,8 +205,8 @@ it.effect("snapshots selections so caller mutation cannot redirect a compiled re
 it("rejects ambiguous or disconnected joins rather than silently changing result cardinality", () => {
   const base = new Data.Class({ tables: { j: Jobs, t: Technicians }, from: "j", select: { id: ["j", "id"] } })
   const join = new Data.Class({ kind: "inner", table: "t", on: [{ left: ["j", "technicianId"], right: ["t", "localId"] }] })
-  const define = (definition: unknown) => Reflect.apply(ReadModel.define, null, [definition])
-  const compile = Function.flow(define, ReadModel.compile)
+  // @ts-expect-error because malformed definitions intentionally cross the typed input boundary.
+  const compile: (definition: unknown) => unknown = Function.flow(ReadModel.define, ReadModel.compile)
   const unknownSelection = new Data.Class({ ...base, joins: [join], select: { unknown: ["t", "missing"] } })
   const emptyJoin = new Data.Class({ ...base, joins: [{ ...join, on: [] }] })
   const disconnectedJoin = new Data.Class({ ...base, joins: [{ ...join, on: [{ left: ["t", "id"], right: ["t", "localId"] }] }] })
@@ -221,6 +224,8 @@ it("rejects ambiguous or disconnected joins rather than silently changing result
 
 it("rejects a command whose read-model source is absent or replaced by a same-named definition", () => {
   const PersonSchema = Schema.Struct({ name: Schema.String })
+  
+  interface Person extends Schema.Schema.Type<typeof PersonSchema> {}
 
   const People = Resource.define({
     name: "people",
@@ -250,9 +255,11 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
   const missingParts = [Part.command(commands)]
   const missing = Application.define({ name: "missing", parts: missingParts })
 
-  expect(() => Effect.runSync(Application.compile(missing))).toThrow()
+  expect(() => pipe(Application.compile(missing), Effect.runSync)).toThrow()
 
   const WrongPersonSchema = Schema.Struct({ name: Schema.Int })
+  
+  interface WrongPerson extends Schema.Schema.Type<typeof WrongPersonSchema> {}
 
   const WrongPeople = Resource.define({
     name: "people",
@@ -264,7 +271,7 @@ it("rejects a command whose read-model source is absent or replaced by a same-na
   const mismatchParts = [Part.resource(WrongPeople), Part.command(commands)]
   const mismatch = Application.define({ name: "mismatch", parts: mismatchParts })
 
-  expect(() => Effect.runSync(Application.compile(mismatch))).toThrow()
+  expect(() => pipe(Application.compile(mismatch), Effect.runSync)).toThrow()
 })
 
 it("rejects left projections when stored null has application-defined decoding semantics", () => {
@@ -277,6 +284,9 @@ it("rejects left projections when stored null has application-defined decoding s
   }))
 
   const PersonSchema = Schema.Struct({ id: identifier(Schema.String), name: StoredNameSchema })
+  
+  interface Person extends Schema.Schema.Type<typeof PersonSchema> {}
+
   const People = Table.make({ name: "optional_people", schema: PersonSchema })
   const sources = ReadModel.sources({ j: Jobs, p: People })
 

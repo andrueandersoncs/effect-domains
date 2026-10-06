@@ -236,7 +236,14 @@ const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
     typeof CanonicalPageSchema.EncodingServices
   >>(CanonicalPageSchema.ast)
 
-  const decodeRows = Schema.decodeUnknownEffect(Schema.Array(view.schema))
+  const rowSchema = Schema.make<Schema.Codec<
+    View["schema"]["Type"],
+    View["schema"]["Encoded"],
+    View["schema"]["DecodingServices"],
+    View["schema"]["EncodingServices"]
+  >>(view.schema.ast)
+
+  const decodeRows = Schema.decodeUnknownEffect(Schema.Array(rowSchema))
 
   const execute = Effect.fn("ReadModel.page")(function* (
     input: ViewListRequest<View, Filter, Range>,
@@ -271,11 +278,6 @@ const compileReadModelPage = <const Spec extends ReadModelPageSpec>(
 
     return yield* listPlan.page(prepared, rows, decodeRows)
   })
-
-  type HandlerRequirements =
-    | SqlClient.SqlClient
-    | View["schema"]["DecodingServices"]
-    | View["schema"]["EncodingServices"]
 
   const frozenDependencies = Object.freeze([view])
 

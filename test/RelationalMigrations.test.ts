@@ -1,9 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Function, Schema, pipe } from "effect"
+import { Array, Effect, Function, Option, Schema, pipe } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Table } from "effect-domains/table"
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
-
 import { sqliteMigrationStore, SqliteMigrations } from "effect-domains/sqlite-migrations"
 
 const sqlite = SqliteBunRuntime.sqlClient(":memory:", { migrations: [] })
@@ -113,7 +112,6 @@ const relationalLifecycle = Effect.fn("SqliteMigrations.relationalLifecycle")(fu
   const indexedRows = yield* sql`SELECT id FROM relational_children`
 
   expect(indexedRows).toEqual([{ id: "child-1" }])
-
   yield* sql`DROP INDEX relational_child_parent_idx`
   yield* sql`CREATE INDEX relational_child_parent_idx ON relational_children (label)`
 
@@ -210,11 +208,14 @@ const initialIndexes = Effect.fn("SqliteMigrations.initialIndexes")(function* ()
   })
 
   const initial = SqliteMigrations.initial({ id: "001", tables: [table] })
+  const tableStep = pipe(initial.steps, Array.get(0), Option.getOrThrow)
+  const indexStep = pipe(initial.steps, Array.get(1), Option.getOrThrow)
 
-  expect(initial.steps).toMatchObject([
-    { _tag: "SqliteCreateTable", table: "initial_indexes" },
-    { _tag: "SqliteCreateIndex", table: "initial_indexes", name: "initial_label_idx" },
-  ])
+  expect(tableStep._tag).toBe("SqliteCreateTable")
+  expect(tableStep).toMatchObject({ table: "initial_indexes" })
+  expect(indexStep._tag).toBe("SqliteCreateIndex")
+  expect(indexStep).toMatchObject({ table: "initial_indexes", name: "initial_label_idx" })
+  expect(initial.steps).toHaveLength(2)
 
   const store = sqliteMigrationStore(sql, [initial])
 

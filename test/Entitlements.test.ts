@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equivalence, Option, Predicate, Record, Ref, Schema, pipe } from "effect"
+import { Array, Effect, Equivalence, Option, Record, Ref, Schema, pipe } from "effect"
 import { Headers } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
 import { SqlClient } from "effect/unstable/sql"
@@ -14,7 +14,13 @@ import { prepareTables } from "./prepare-tables.ts"
 
 const equals = Equivalence.strictEqual<unknown>()
 const SubjectSchema = Schema.Struct({ userId: Schema.String, tenantId: Schema.String })
+
+interface Subject extends Schema.Schema.Type<typeof SubjectSchema> {}
+
 const ReportSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, title: Schema.String })
+
+interface Report extends Schema.Schema.Type<typeof ReportSchema> {}
+
 const p = Authorization.for({ resource: ReportSchema, subject: SubjectSchema })
 const scope = p.eq(p.row.tenantId, p.subject.tenantId)
 const access = p.all()
@@ -44,52 +50,7 @@ const accountReportsTable = Resource.table(AccountReports)
 const grants = Entitlements.for(accountReportsTable)
 const activeReport = grants.eq(grants.row.title, "active")
 
-const WindowSchema = Schema.Struct({
-  id: identifier(Schema.String),
-  tenantId: Schema.String,
-  status: Schema.Literals(["active", "canceled"]),
-  validUntil: Schema.DateTimeUtc,
-  graceUntil: Schema.NullOr(Schema.DateTimeUtc),
-})
-
-const AccessWindows = Resource.define({
-  name: "access_windows",
-  schema: WindowSchema,
-  authorization: Authorization.public,
-  capabilities: [],
-})
-
-const accessWindowsTable = Resource.table(AccessWindows)
-const windowGrants = Entitlements.for(accessWindowsTable)
-const beforeValidityEnd = windowGrants.lt(windowGrants.now, windowGrants.row.validUntil)
-const canceledWindow = windowGrants.eq(windowGrants.row.status, "canceled")
-const beforeGraceEnd = windowGrants.lt(windowGrants.now, windowGrants.row.graceUntil)
-const canceledWithinGrace = windowGrants.all(canceledWindow, beforeGraceEnd)
-const windowGrant = windowGrants.any(beforeValidityEnd, canceledWithinGrace)
-
 const AccountReportsRuntime = Resource.compile(AccountReports)
-
-const WriteSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, visible: Schema.Boolean })
-const w = Authorization.for({ resource: WriteSchema, subject: SubjectSchema })
-const writeAccess = w.all()
-const readable = w.eq(w.row.visible, true)
-const publish = w.entitlement({ name: "publish_reports", key: w.subject.tenantId })
-const readGrant = w.entitlement({ name: "read_reports", key: w.row.tenantId })
-
-const paidWritePolicy = w.policy({
-  scope: writeAccess,
-  allow: { read: readable, create: writeAccess },
-  require: { create: [publish], read: [readGrant] },
-})
-
-const paidWriteCapabilities = [Resource.create()]
-
-const PaidWrites = Resource.define({
-  name: "paid_writes",
-  schema: WriteSchema,
-  authorization: paidWritePolicy,
-  capabilities: paidWriteCapabilities,
-})
 
 const s = Authorization.subject(SubjectSchema)
 const aliceOnly = s.eq(s.subject.userId, "alice")
@@ -104,7 +65,6 @@ const denied = Entitlements.of({ has: () => Effect.succeed(false) })
 const admitted = Entitlements.of({ has: () => Effect.succeed(true) })
 
 const purchasedReportsTable = Resource.table(PurchasedReports)
-const paidWritesTable = Resource.table(PaidWrites)
 
 const reportSubscriptionSource = new Entitlements.Source({
   name: "reports.subscription",
@@ -115,19 +75,7 @@ const reportSubscriptionSource = new Entitlements.Source({
   grant: activeReport,
 })
 
-const accessWindowSource = new Entitlements.Source({
-  name: "reports.window",
-  table: accessWindowsTable,
-  subject: SubjectSchema,
-  key: "id",
-  scope: { tenantId: "tenantId" },
-  grant: windowGrant,
-})
-
-const accessWindowEntitlements = Entitlements.fromTable(accessWindowSource)
-
 const tableEntitlements = Entitlements.fromTables([reportSubscriptionSource])
-
 
 it.effect("table entitlement resolvers grant matching records, deny misses, and ignore unknown names", () => pipe(
   Effect.gen(function* () {
@@ -153,29 +101,67 @@ it.effect("table entitlement resolvers grant matching records, deny misses, and 
   Effect.provide(sqlite),
 ))
 
-it.effect("grant expressions compose time ordering with cancellation grace", () => pipe(
-  Effect.gen(function* () {
-    yield* prepareTables([accessWindowsTable])
+it.effect("grant expressions compose time ordering with cancellation grace", () => {
+  const WindowSchema = Schema.Struct({
+    id: identifier(Schema.String),
+    tenantId: Schema.String,
+    status: Schema.Literals(["active", "canceled"]),
+    validUntil: Schema.DateTimeUtc,
+    graceUntil: Schema.NullOr(Schema.DateTimeUtc),
+  })
 
-    const sql = yield* SqlClient.SqlClient
+  interface Window extends Schema.Schema.Type<typeof WindowSchema> {}
 
-    yield* sql`INSERT INTO access_windows (id, tenantId, status, validUntil, graceUntil) VALUES
-      ('active', 'a', 'active', '2099-01-01T00:00:00.000Z', NULL),
-      ('grace', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'),
-      ('expired', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '1900-01-02T00:00:00.000Z')`
+  const AccessWindows = Resource.define({
+    name: "access_windows",
+    schema: WindowSchema,
+    authorization: Authorization.public,
+    capabilities: [],
+  })
 
-    const entitlements = yield* Entitlements
-    const active = yield* entitlements.has({ name: "reports.window", key: "active", subject: alice })
-    const grace = yield* entitlements.has({ name: "reports.window", key: "grace", subject: alice })
-    const expired = yield* entitlements.has({ name: "reports.window", key: "expired", subject: alice })
+  const accessWindowsTable = Resource.table(AccessWindows)
+  const windowGrants = Entitlements.for(accessWindowsTable)
+  const beforeValidityEnd = windowGrants.lt(windowGrants.now, windowGrants.row.validUntil)
+  const canceledWindow = windowGrants.eq(windowGrants.row.status, "canceled")
+  const beforeGraceEnd = windowGrants.lt(windowGrants.now, windowGrants.row.graceUntil)
+  const canceledWithinGrace = windowGrants.all(canceledWindow, beforeGraceEnd)
+  const windowGrant = windowGrants.any(beforeValidityEnd, canceledWithinGrace)
 
-    expect(active).toBe(true)
-    expect(grace).toBe(true)
-    expect(expired).toBe(false)
-  }),
-  Effect.provide(accessWindowEntitlements),
-  Effect.provide(sqlite),
-))
+  const accessWindowSource = new Entitlements.Source({
+    name: "reports.window",
+    table: accessWindowsTable,
+    subject: SubjectSchema,
+    key: "id",
+    scope: { tenantId: "tenantId" },
+    grant: windowGrant,
+  })
+
+  const accessWindowEntitlements = Entitlements.fromTable(accessWindowSource)
+
+  return pipe(
+    Effect.gen(function* () {
+      yield* prepareTables([accessWindowsTable])
+
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`INSERT INTO access_windows (id, tenantId, status, validUntil, graceUntil) VALUES
+        ('active', 'a', 'active', '2099-01-01T00:00:00.000Z', NULL),
+        ('grace', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'),
+        ('expired', 'a', 'canceled', '1900-01-01T00:00:00.000Z', '1900-01-02T00:00:00.000Z')`
+
+      const entitlements = yield* Entitlements
+      const active = yield* entitlements.has({ name: "reports.window", key: "active", subject: alice })
+      const grace = yield* entitlements.has({ name: "reports.window", key: "grace", subject: alice })
+      const expired = yield* entitlements.has({ name: "reports.window", key: "expired", subject: alice })
+
+      expect(active).toBe(true)
+      expect(grace).toBe(true)
+      expect(expired).toBe(false)
+    }),
+    Effect.provide(accessWindowEntitlements),
+    Effect.provide(sqlite),
+  )
+})
 
 it.effect("account gates reject empty lists, distinguish resolver outages, and observe revocation", () => pipe(
   Effect.gen(function* () {
@@ -247,48 +233,90 @@ it.effect("purchase gates preserve hidden rows and pagination without filtering 
   }), Effect.provide(sqlite),
 ))
 
-it.effect("denied writes and entitlement revocation during a write leave no partial state", () => pipe(
-  Effect.gen(function* () {
-    yield* prepareTables([paidWritesTable])
+it.effect("denied writes and entitlement revocation during a write leave no partial state", () => {
+  const WriteSchema = Schema.Struct({ id: identifier(Schema.String), tenantId: Schema.String, visible: Schema.Boolean })
 
-    const deniedInput = WriteSchema.make({ id: "denied", tenantId: "a", visible: true })
-    const deniedWrite = yield* pipe(Resource.repository(PaidWrites).create(deniedInput), asAlice, Effect.provideService(Entitlements, denied), Effect.flip)
+  interface Write extends Schema.Schema.Type<typeof WriteSchema> {}
 
-    expect(deniedWrite._tag).toBe("EntitlementRequired")
+  const w = Authorization.for({ resource: WriteSchema, subject: SubjectSchema })
+  const writeAccess = w.all()
+  const readable = w.eq(w.row.visible, true)
+  const publish = w.entitlement({ name: "publish_reports", key: w.subject.tenantId })
+  const readGrant = w.entitlement({ name: "read_reports", key: w.row.tenantId })
 
-    const unreadableInput = WriteSchema.make({ id: "unreadable", tenantId: "a", visible: false })
-    const unreadable = yield* pipe(Resource.repository(PaidWrites).create(unreadableInput), asAlice, Effect.provideService(Entitlements, admitted), Effect.flip)
+  const paidWritePolicy = w.policy({
+    scope: writeAccess,
+    allow: { read: readable, create: writeAccess },
+    require: { create: [publish], read: [readGrant] },
+  })
 
-    expect(unreadable._tag).toBe("Forbidden")
+  const paidWriteCapabilities = [Resource.create()]
 
-    const sql = yield* SqlClient.SqlClient
+  const PaidWrites = Resource.define({
+    name: "paid_writes",
+    schema: WriteSchema,
+    authorization: paidWritePolicy,
+    capabilities: paidWriteCapabilities,
+  })
 
-    yield* sql`CREATE TABLE grants (active INTEGER NOT NULL)`
-    yield* sql`INSERT INTO grants VALUES (1)`
-    yield* sql`CREATE TRIGGER revoke_after_insert AFTER INSERT ON paid_writes BEGIN UPDATE grants SET active = 0; END`
+  const paidWritesTable = Resource.table(PaidWrites)
 
-    const currentGrant = Entitlements.of({
-      has: Effect.fn("Entitlements.test.currentGrant")(function* () {
-        const rows = yield* pipe(sql<{ readonly active: number }>`SELECT active FROM grants WHERE active = 1`, Effect.mapError(() => EntitlementUnavailable.make({})))
+  return pipe(
+    Effect.gen(function* () {
+      yield* prepareTables([paidWritesTable])
 
-        return rows.length > 0
-      }),
-    })
+      const createFailure = Effect.fn("Entitlements.test.createFailure")(function* (
+        input: Write,
+        entitlements: typeof denied,
+      ) {
+        return yield* pipe(
+          Resource.repository(PaidWrites).create(input),
+          asAlice,
+          Effect.provideService(Entitlements, entitlements),
+          Effect.flip,
+        )
+      })
 
-    const revokedInput = WriteSchema.make({ id: "revoked", tenantId: "a", visible: true })
-    const revokedWrite = yield* pipe(Resource.repository(PaidWrites).create(revokedInput), asAlice, Effect.provideService(Entitlements, currentGrant), Effect.flip)
+      const deniedInput = WriteSchema.make({ id: "denied", tenantId: "a", visible: true })
+      const deniedWrite = yield* createFailure(deniedInput, denied)
 
-    expect(revokedWrite._tag).toBe("EntitlementRequired")
+      expect(deniedWrite._tag).toBe("EntitlementRequired")
 
-    const rows = yield* sql`SELECT id FROM paid_writes`
+      const unreadableInput = WriteSchema.make({ id: "unreadable", tenantId: "a", visible: false })
+      const unreadable = yield* createFailure(unreadableInput, admitted)
 
-    expect(rows).toEqual([])
+      expect(unreadable._tag).toBe("Forbidden")
 
-    const grants = yield* sql`SELECT active FROM grants`
+      const sql = yield* SqlClient.SqlClient
 
-    expect(grants).toEqual([{ active: 1 }])
-  }), Effect.provide(sqlite),
-))
+      yield* sql`CREATE TABLE grants (active INTEGER NOT NULL)`
+      yield* sql`INSERT INTO grants VALUES (1)`
+      yield* sql`CREATE TRIGGER revoke_after_insert AFTER INSERT ON paid_writes BEGIN UPDATE grants SET active = 0; END`
+
+      const currentGrant = Entitlements.of({
+        has: Effect.fn("Entitlements.test.currentGrant")(function* () {
+          const rows = yield* pipe(sql<{ readonly active: number }>`SELECT active FROM grants WHERE active = 1`, Effect.mapError(() => EntitlementUnavailable.make({})))
+
+          return rows.length > 0
+        }),
+      })
+
+      const revokedInput = WriteSchema.make({ id: "revoked", tenantId: "a", visible: true })
+      const revokedWrite = yield* createFailure(revokedInput, currentGrant)
+
+      expect(revokedWrite._tag).toBe("EntitlementRequired")
+
+      const rows = yield* sql`SELECT id FROM paid_writes`
+
+      expect(rows).toEqual([])
+
+      const grants = yield* sql`SELECT active FROM grants`
+
+      expect(grants).toEqual([{ active: 1 }])
+    }),
+    Effect.provide(sqlite),
+  )
+})
 
 it.effect("standalone and subject policies enforce requirements after ordinary subject permission", () => pipe(
   Effect.gen(function* () {
@@ -335,8 +363,11 @@ it.effect("entitlement declarations validate phases and snapshot mutable inputs"
     const allowed = yield* pipe(Authorization.requireSubject(policy), asAlice, Effect.provideService(Entitlements, resolver))
 
     expect(allowed).toEqual(alice)
+    // SAFETY: The requirement intentionally bypasses its constructor because runtime policy validation must reject an empty entitlement name.
     expect(() => p.policy({ scope, allow: { read: access }, require: { read: [{ name: "", key: p.subject.tenantId } as never] } })).toThrow()
+    // SAFETY: The row-key requirement intentionally violates create-phase typing because runtime validation must reject an unavailable current row.
     expect(() => p.policy({ scope, allow: { create: access }, require: { create: [purchase as never] } })).toThrow()
+    // SAFETY: The resource requirement intentionally violates subject-only typing because runtime validation must reject a row-dependent subject policy.
     expect(() => s.policy(subjectAccess, { require: [purchase as never] })).toThrow()
   }),
 ))
@@ -365,7 +396,7 @@ it.effect("RPC gates isolate request identity and return typed entitlement error
     expect(alicePage).toEqual({ items: [], nextCursor: null })
     expect(bobFailure._tag).toBe("EntitlementRequired")
 
-    if (Predicate.isTagged(bobFailure, "EntitlementRequired")) expect(bobFailure.entitlement).toBe("report_exports")
+    expect(bobFailure).toMatchObject({ entitlement: "report_exports" })
   }),
   Effect.provide(AccountReportsRuntime.handlers),
   Effect.provide(AuthorizationRpc.layer),

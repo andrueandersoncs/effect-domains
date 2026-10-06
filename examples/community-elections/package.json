@@ -1,0 +1,22 @@
+{
+  "name": "@effect-domains/example-community-elections",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./application": "./application.ts",
+    "./domain": "./domain.ts",
+    "./migrations": "./migrations.ts",
+    "./tally": "./tally.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "better-typescript --files '*.ts'",
+    "start": "bun run main.ts",
+    "serve": "bun run main.ts serve"
+  },
+  "dependencies": {
+    "@effect-domains/example-support": "workspace:*",
+    "effect": "catalog:",
+    "effect-domains": "workspace:*"
+  }
+}

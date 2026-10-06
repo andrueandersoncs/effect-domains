@@ -149,19 +149,24 @@ export const makeResourceContractSchemas = <
     onSome: Function.constant(versionedErrorsSchema),
   })
 
-  const errorSchema = narrowContract<
-    Auth extends { readonly _tag: "Public" } ? typeof PublicResourceErrorSchema : typeof ResourceErrorSchema,
-    typeof selectedErrorSchema
-  >(selectedErrorSchema)
+  const errorSchema = Schema.make<Schema.Codec<
+    | (Auth extends { readonly _tag: "Public" } ? typeof PublicResourceErrorSchema.Type : typeof ResourceErrorSchema.Type)
+    | (Version extends string ? typeof VersionConflict.Type : never),
+    | (Auth extends { readonly _tag: "Public" } ? typeof PublicResourceErrorSchema.Encoded : typeof ResourceErrorSchema.Encoded)
+    | (Version extends string ? typeof VersionConflict.Encoded : never)
+  >>(selectedErrorSchema.ast)
 
   type TransitionError = Transition extends { readonly Error: infer Declared extends Schema.Top } ? Declared : typeof Schema.Never
 
   const declaredTransitionErrors = Option.map(transitionOption, Struct.get("Error"))
   const selectedTransitionErrorSchema = Option.getOrElse(declaredTransitionErrors, Function.constant(Schema.Never))
 
-  const declaredTransitionErrorSchema = narrowContract<TransitionError, typeof selectedTransitionErrorSchema>(
-    selectedTransitionErrorSchema,
-  )
+  const declaredTransitionErrorSchema = Schema.make<Schema.Codec<
+    TransitionError["Type"],
+    TransitionError["Encoded"],
+    TransitionError["DecodingServices"],
+    TransitionError["EncodingServices"]
+  >>(selectedTransitionErrorSchema.ast)
 
   const transitionErrorSchema = Schema.Union([errorSchema, declaredTransitionErrorSchema])
 

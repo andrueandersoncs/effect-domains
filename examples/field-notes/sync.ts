@@ -19,12 +19,16 @@ export const SyncedNoteSchema = Schema.Struct({
   conflictsObserved: Schema.Natural,
 })
 
+interface SyncedNote extends Schema.Schema.Type<typeof SyncedNoteSchema> {}
+
 const NoteEditSchema = Schema.Struct({
   noteId: Schema.NonEmptyString,
   title: Schema.NonEmptyString,
   revision: Schema.Natural,
   replicaId: Schema.NonEmptyString,
 })
+
+interface NoteEdit extends Schema.Schema.Type<typeof NoteEditSchema> {}
 
 export const SyncedNoteEvents = EventGroup.empty.add({
   tag: "NoteEdited",
@@ -35,15 +39,13 @@ export const SyncedNoteEvents = EventGroup.empty.add({
 
 export const SyncedNoteEventLog = EventLog.schema(SyncedNoteEvents)
 
-type NoteEdit = typeof NoteEditSchema.Type
-
 class SyncedNoteProjection extends Context.Service<SyncedNoteProjection, {
-  readonly apply: (edit: NoteEdit, conflictsObserved: number) => Effect.Effect<typeof SyncedNoteSchema.Type>
-  readonly find: (noteId: string) => Effect.Effect<Option.Option<typeof SyncedNoteSchema.Type>>
+  readonly apply: (edit: NoteEdit, conflictsObserved: number) => Effect.Effect<SyncedNote>
+  readonly find: (noteId: string) => Effect.Effect<Option.Option<SyncedNote>>
   readonly clear: Effect.Effect<void>
 }>()("@effect-domains/example-field-notes/SyncedNoteProjection") {}
 
-const materializeNote = (note: typeof SyncedNoteSchema.Type) => SyncedNoteSchema.make({
+const materializeNote = (note: SyncedNote) => SyncedNoteSchema.make({
   noteId: note.noteId,
   title: note.title,
   revision: note.revision,
@@ -65,7 +67,7 @@ const projectionService = Effect.gen(function* () {
   `
 
   const find = Effect.fn("FieldNotes.Sync.find")(function* (noteId: string) {
-    const rows = yield* database<Readonly<typeof SyncedNoteSchema.Type>>`
+    const rows = yield* database<Readonly<SyncedNote>>`
       SELECT noteId, title, revision, replicaId, conflictsObserved
       FROM synced_note_projection
       WHERE noteId = ${noteId}

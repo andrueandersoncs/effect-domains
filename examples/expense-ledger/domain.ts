@@ -52,6 +52,8 @@ export const ExpenseTotalSchema = Schema.Struct({
   totalMinor: PositiveSafeIntSchema,
 })
 
+interface ExpenseTotal extends Schema.Schema.Type<typeof ExpenseTotalSchema> {}
+
 export class ExpenseNotFound extends Schema.TaggedError<ExpenseNotFound>()(
   "ExpenseNotFound",
   { id: ExpenseIdSchema },

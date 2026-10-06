@@ -85,10 +85,10 @@ it.effect("persists cancellation before dispatch and rejects cancellation after 
 
     expect(writeStarted).toBe(true)
 
-    expect(rejected).toMatchObject({
-      _tag: "Failure",
-      failure: { _tag: "ReportExportCancellationRejected", status: "writing" },
-    })
+    expect(rejected._tag).toBe("Failure")
+
+    expect(rejected).toHaveProperty("failure._tag", "ReportExportCancellationRejected")
+    expect(rejected).toMatchObject({ failure: { status: "writing" } })
   }), Effect.provide(storeLayer))
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
@@ -104,7 +104,6 @@ it.effect("writes artifacts idempotently and rejects conflicting content", Effec
   const repeated = yield* write
 
   expect(repeated).toEqual(first)
-
   yield* fileSystem.remove(first.artifactPath)
 
   const reconciled = yield* write
@@ -117,10 +116,10 @@ it.effect("writes artifacts idempotently and rejects conflicting content", Effec
 
   const conflict = yield* pipe(write, Effect.result)
 
-  expect(conflict).toMatchObject({
-    _tag: "Failure",
-    failure: { _tag: "ReportArtifactConflict", path: first.artifactPath },
-  })
+  expect(conflict._tag).toBe("Failure")
+
+  expect(conflict).toHaveProperty("failure._tag", "ReportArtifactConflict")
+  expect(conflict).toMatchObject({ failure: { path: first.artifactPath } })
 }, Effect.scoped, Effect.provide(BunServices.layer)))
 
 it.effect("keeps privileged report-export audit evidence durable, idempotent, and authorized", Effect.fn(
@@ -167,14 +166,18 @@ it.effect("keeps privileged report-export audit evidence durable, idempotent, an
         Effect.result,
       )
 
-      expect(anonymous).toMatchObject({ _tag: "Failure", failure: { _tag: "Unauthenticated" } })
+      expect(anonymous._tag).toBe("Failure")
+
+      expect(anonymous).toHaveProperty("failure._tag", "Unauthenticated")
 
       const denied = yield* pipe(
         client["ReportExport.AuditTrail"]({ executionId: "export-1" }, { headers: readerSession }),
         Effect.result,
       )
 
-      expect(denied).toMatchObject({ _tag: "Failure", failure: { _tag: "Forbidden" } })
+      expect(denied._tag).toBe("Failure")
+
+      expect(denied).toHaveProperty("failure._tag", "Forbidden")
 
       const audit = yield* client["ReportExport.AuditTrail"](
         { executionId: "export-1" },

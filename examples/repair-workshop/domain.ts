@@ -10,11 +10,15 @@ export const CustomerSchema = Schema.Struct({
   name: Schema.NonEmptyString,
 })
 
+interface Customer extends Schema.Schema.Type<typeof CustomerSchema> {}
+
 export const TechnicianSchema = Schema.Struct({
   id: WorkshopIdSchema,
   name: Schema.NonEmptyString,
   onCall: Schema.Boolean,
 })
+
+interface Technician extends Schema.Schema.Type<typeof TechnicianSchema> {}
 
 export const RepairJobSchema = Schema.Struct({
   customerId: Schema.NonEmptyString,
@@ -24,6 +28,8 @@ export const RepairJobSchema = Schema.Struct({
   status: RepairStatusSchema,
   technicianId: Schema.NullOr(Schema.NonEmptyString),
 })
+
+interface RepairJob extends Schema.Schema.Type<typeof RepairJobSchema> {}
 
 // Repairs only move forward because a ready job is handed back, never re-queued.
 export const RepairJobTransitions = Transitions.make({

@@ -2,12 +2,12 @@
 
 Effect Domains derives tables, codecs, repositories, RPC contracts, HTTP dispatch, and JSON CLI inputs from canonical Effect Schemas. Applications choose which resource operations to expose and supply business policy.
 
-The repository root is a private Bun workspace. `packages/effect-domains` is the framework library; `packages/example-support` holds verified example identity and database-isolation helpers; `packages/example-web` supplies optional native-client, request, page, form, and session helpers for the thirteen examples. `apps/admin` is the separately built generic admin. After `bun install`, run `bun run build` to prebuild both admin and example assets; runtime serves those files without compiling them.
+The repository root is a private Bun workspace. `packages/effect-domains` is the framework library; `packages/example-support` supplies shared example identity and database-isolation helpers; `apps/application-ui` is the generated browser interpreter used by the applications. After `bun install`, run `bun run build` to prebuild its assets; runtime serves those files without compiling them.
 
 ## Declare an application
 
 ```ts
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Application, Part } from "effect-domains/application"
 import { Authorization } from "effect-domains/authorization"
 import { Resource } from "effect-domains/resource"
@@ -25,10 +25,10 @@ const Books = Resource.define({
   capabilities: Resource.crud(),
 })
 
-export const Catalog = Application.compile(Application.define({
+export const Catalog = Effect.runSync(Application.compile(Application.define({
   name: "catalog",
   parts: [Part.resource(Books)],
-}))
+})))
 ```
 
 An application definition contains explicit `Part.resource`, `Part.command`, `Part.native`, and `Part.application` values. `Application.compile` flattens nested resources and rejects duplicate tables or RPC names. `Resource.compile(Books)` derives the UUIDv7 key, SQL columns, and selected `books.*` RPCs; `Resource.table(Books)` and `Resource.repository(Books)` expose the typed local products.
@@ -37,7 +37,7 @@ An application definition contains explicit `Part.resource`, `Part.command`, `Pa
 
 ```ts
 import { Effect, pipe } from "effect"
-import { ApplicationBun } from "effect-domains/application-bun"
+import * as ApplicationBun from "effect-domains/application-bun"
 import { SqliteMigrations } from "effect-domains/sqlite-migrations"
 import initial from "./migrations/001_initial.json" with { type: "json" }
 
@@ -45,13 +45,13 @@ const program = Effect.gen(function* () {
   const migrations = yield* SqliteMigrations.decodeHistory([initial])
   yield* ApplicationBun.runApplication(Catalog, {
     database: { migrations },
-    admin: true,
+    ui: true,
   })
 })
-pipe(program, ApplicationBun.runMain)
+pipe(program, ApplicationBun.runMain, Effect.runSync)
 ```
 
-Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `admin: true` is opt-in; the [applications' shared admin guide](examples/README.md#generated-admin) covers its generated UI and browser boundary. Start with [reading-list](examples/reading-list/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
+Pass `database: { migrations, filename }` to choose a database file, `services` only when handlers need authored services, and `initialize` only for startup work. The imported artifact must describe this application's tables; use `SqliteMigrations.initial` to author fresh history as described below. `ui: true` opts into the [generated Application UI](docs/reference/runtime.md#generated-application-ui). Start with [reading-list](examples/reading-list/README.md); the [reservation application](examples/reservations/application.ts) adds explicit business commands.
 
 Adding a supported scalar field to `BookSchema` changes the derived table, repository input/output, RPC codecs, and JSON CLI inputs without per-layer field edits. Every nonempty managed database requires reviewed migration history, including fresh databases; startup never bootstraps or adopts tables outside that history.
 
@@ -146,7 +146,7 @@ The closed `Policy` AST supports constants, total scalar equality, collection me
 
 [`effect-domains/identity`](packages/effect-domains/src/identity/index.ts) defines credential/session schemas and the runtime-provided `IdentityRuntime` interface. [`effect-domains/identity-rpc`](packages/effect-domains/src/identity/rpc.ts) supplies native `IdentityRpcs` and `IdentityHandlers` for `identity.login`, `identity.current`, and `identity.logout`. The optional [example implementation](packages/example-support/src/identity.ts) verifies Argon2id passwords, issues random expiring credentials, stores only token digests in a separate SQLite database, and checks current account state and revocation on every call. Its configured bootstrap accounts are not a complete production identity provider. See the [example setup](examples/README.md) for required password configuration and real CLI login.
 
-All thirteen browser applications use scoped native `RpcClient` instances bound to their existing contracts, not handwritten envelopes or wire DTOs. The optional [shared helpers](packages/example-web/src/) handle keyed request ownership, cursor pages, explicit form codecs, and in-memory login/logout/expiry. Session changes clear protected data and drafts; replaced requests cannot publish late successes or failures. Applications still choose their refresh targets, authorization, and business transitions.
+Every example serves the shared generated Application UI over its compiled `ApplicationIR`, rather than authoring a separate browser state machine or wire DTOs. Operation forms, resource reads, declared filters, and cursor paging derive from inspection; presentation remains display-only configuration. Login and signup retain the issued bearer only in memory, and logout or account closure clears it. Applications still own authorization and business transitions.
 
 ## Storage conventions
 
@@ -190,9 +190,9 @@ bun run reservations reservations.get --help
 
 The example is loopback-only and unauthenticated. Its [guide](examples/reservations/README.md) covers release, confirmation, configuration, and migration history. The [validation record](docs/wiki/validation-strategy.md#reservation-slice) separates exercised behavior from unresolved framework questions.
 
-The authenticated [orders/invoices walkthrough](examples/orders-invoices/README.md) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Follow its password, private identity-database, and login setup before running billing commands. Mutations remain authored transactions; generated reads stay tenant-scoped. Its [example-local nested projection helper](examples/orders-invoices/projection.ts) derives JSON field selection and physical storage codecs without becoming a relation planner.
+The authenticated [orders/invoices walkthrough](examples/orders-invoices/README.md) adds composite foreign keys, tenant-local uniqueness, managed secondary indexes, and explicit optimistic versions. Follow its password, private identity-database, and login setup before running billing commands. Mutations remain authored transactions; generated reads stay tenant-scoped. [`Table.project`](packages/effect-domains/src/table/index.ts) supplies nested JSON field selection and physical storage codecs without becoming a relation planner.
 
-All thirteen [example applications](examples/README.md) have standalone guides: reading lists, expense tracking, team tasks, field notes, editorial planning, equipment records, joined repair boards, support cases, stock reservations, billing, purchased guides, financial report exports, and appointment notifications. Each has persistent SQLite storage, an HTTP server, a generated CLI, and local inspection. Configure the services required by its guide, run `bun run <example>:server`, and use `bun run <example> --help` in another terminal. [Support cases](examples/support-cases/README.md) combine a second joined board with optimistic transitions and an authored nested event history; [task rules](examples/team-tasks/resources.ts) demonstrate tenant/owner scope and completion locks; [field-note rules](examples/field-notes/resources.ts) demonstrate reader/editor/admin permissions separately from encrypted text storage. Protected examples start signed out and use verified credentials rather than public bearer constants.
+All fourteen [example applications](examples/README.md) have standalone guides: reading lists, expense tracking, team tasks, field notes, editorial planning, equipment records, joined repair boards, support cases, stock reservations, billing, confidential ranked-choice elections, purchased guides, financial report exports, and appointment notifications. Each has persistent SQLite storage, an HTTP server, a generated CLI, and local inspection. Configure the services required by its guide, run `bun run <example>:server`, and use `bun run <example> --help` in another terminal. [Community elections](examples/community-elections/README.md) keep ordered ballots and vote-transfer policy authored while reusing generated infrastructure; [support cases](examples/support-cases/README.md) combine joined reads with transactional nested history. Protected examples start signed out and use verified credentials rather than public bearer constants.
 
 ## Escape hatches and documentation
 

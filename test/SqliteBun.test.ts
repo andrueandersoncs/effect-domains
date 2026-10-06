@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest"
 import { mkdtempDisposableSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
 import { BunServices } from "@effect/platform-bun"
 
 import {
@@ -32,7 +31,6 @@ import {
 } from "effect-domains/repository-store"
 
 import { Policy } from "effect-domains/policy"
-
 import { SqliteBunRuntime } from "effect-domains/sqlite-bun"
 import { Table } from "effect-domains/table"
 import { SqlClient, SqlSchema } from "effect/unstable/sql"
@@ -96,7 +94,7 @@ describe("Bun SQLite tables and authored operations", () => {
       const db = yield* SqlClient.SqlClient
       const insert = db.insert(user)
 
-      return yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Schema.Codec.Encoded<typeof UserSchema>>`
         INSERT INTO ${db(Users.name)} ${insert}
         RETURNING *
       `
@@ -109,7 +107,7 @@ describe("Bun SQLite tables and authored operations", () => {
     execute: Effect.fn("FindUser.implementation")(function* (id) {
       const db = yield* SqlClient.SqlClient
 
-      return yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Schema.Codec.Encoded<typeof UserSchema>>`
         SELECT * FROM ${db(Users.name)}
         WHERE ${db(Users.identifier)} = ${id}
         LIMIT 1
@@ -125,7 +123,7 @@ describe("Bun SQLite tables and authored operations", () => {
       const identifier = user[Users.identifier]
       const changes = db.update(user, [Users.identifier])
 
-      return yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Schema.Codec.Encoded<typeof UserSchema>>`
         UPDATE ${db(Users.name)}
         SET ${changes}
         WHERE ${db(Users.identifier)} = ${identifier}
@@ -142,7 +140,7 @@ describe("Bun SQLite tables and authored operations", () => {
     const db = yield* SqlClient.SqlClient
     const encodedId = yield* encodeUserId(id)
 
-    const rows = yield* db<Readonly<Record<string, unknown>>>`
+    const rows = yield* db<Pick<Schema.Codec.Encoded<typeof UserSchema>, "id">>`
       DELETE FROM ${db(Users.name)}
       WHERE ${db(Users.identifier)} = ${encodedId}
       RETURNING ${db(Users.identifier)}
@@ -171,6 +169,8 @@ describe("Bun SQLite tables and authored operations", () => {
     label: Schema.String,
     rank: Schema.Int,
   })
+  
+  interface StoreRow extends Schema.Schema.Type<typeof StoreRowSchema> {}
 
   const StoreRows = Table.make({
     name: "store_rows",
@@ -190,7 +190,7 @@ describe("Bun SQLite tables and authored operations", () => {
     execute: Effect.fn("CreateArticle.implementation")(function* (article) {
       const db = yield* SqlClient.SqlClient
 
-      return yield* db<Readonly<Record<string, unknown>>>`
+      return yield* db<Schema.Codec.Encoded<typeof Articles.rowSchema>>`
         INSERT INTO ${db(Articles.name)} ${db.insert(article)}
         RETURNING *
       `
@@ -406,10 +406,8 @@ describe("Bun SQLite tables and authored operations", () => {
         expect(isUniqueViolation).toBe(true)
 
         if (isUniqueViolation) {
-          expect(result.failure).toMatchObject({
-            _tag: "UniqueViolation",
-            resource: "store_rows",
-          })
+          expect(result.failure._tag).toBe("UniqueViolation")
+          expect(result.failure).toMatchObject({ resource: "store_rows" })
 
           const failureAssertion = expect(result.failure)
 
@@ -421,13 +419,10 @@ describe("Bun SQLite tables and authored operations", () => {
         const insertingDuplicateIdRow = store.insert(StoreRows, duplicateIdRow)
         const primaryKey = yield* Effect.result(insertingDuplicateIdRow)
 
-        expect(primaryKey).toMatchObject({
-          _tag: "Failure",
-          failure: {
-            _tag: "UniqueViolation",
-            resource: "store_rows",
-          },
-        })
+        expect(primaryKey._tag).toBe("Failure")
+
+        expect(primaryKey).toHaveProperty("failure._tag", "UniqueViolation")
+        expect(primaryKey).toMatchObject({ failure: { resource: "store_rows" } })
       }),
       Effect.provide(adapter),
     )
@@ -459,10 +454,9 @@ describe("Bun SQLite tables and authored operations", () => {
 
     const result = yield* Effect.result(protectedQuery)
 
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { _tag: "PrivateDatabaseConflict" },
-    })
+    expect(result._tag).toBe("Failure")
+
+    expect(result).toHaveProperty("failure._tag", "PrivateDatabaseConflict")
   })
 
   const privateIdentityClient = SqliteBunRuntime.privateClient({
