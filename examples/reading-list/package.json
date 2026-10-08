@@ -9,13 +9,18 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript --files '*.ts'",
+    "lint": "better-typescript --files '**/*.ts'",
     "start": "bun run main.ts",
-    "serve": "bun run main.ts serve"
+    "serve": "bun run main.ts serve",
+    "acceptance": "bun run acceptance/main.ts"
   },
   "dependencies": {
     "@effect-domains/alchemy": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "playwright": "1.64.0"
   }
 }

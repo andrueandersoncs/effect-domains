@@ -2,7 +2,7 @@
 
 ## Status and Scope Authority
 
-**Accepted direction; not an implemented acceptance framework.** On 2026-10-08, the user approved the integration proposal and explicitly required the entire end goal to be documented so that implementation slices cannot replace it. This page is the canonical design and full-completion contract for that direction. The [research agenda](research-agenda.md#story-driven-product-and-acceptance-direction) records its relationship to the wider project; the [verification record](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility) records the bounded initial observations.
+**Accepted direction; Slice A implemented, full framework open.** On 2026-10-08, the user approved the integration proposal and explicitly required the entire end goal to be documented so that implementation slices cannot replace it. This page is the canonical design and full-completion contract for that direction. The [research agenda](research-agenda.md#story-driven-product-and-acceptance-direction) records its relationship to the wider project; the [Slice A verification record](validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) records implemented behavior and remaining gaps. The earlier [feasibility record](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility) remains historical evidence.
 
 The objective is a declarative product-specification and acceptance-testing layer over `ApplicationIR`: reusable product intent and approved requirements guide implementation and real-browser QA, while Effect Schemas supply authoritative data and operation contracts. The result is requirement-linked execution evidence, not a model-generated success narrative.
 
@@ -221,7 +221,7 @@ Retain reviewed replay or executable regression artifacts for recurring checks, 
 
 ## Full-completion Ledger
 
-**All entries are open for implementation.** Accepted design and the small feasibility probe are not completion of any end-to-end entry. A later change must update individual entries with implementation links, exercised evidence, remaining gaps, and any approved amendment. Do not replace this ledger with a list of finished slices.
+**All twelve entries remain open for full completion.** The application-owned Reading List runner advances the bounded subsets below; neither its passing run nor the earlier feasibility probe closes a full-system entry. Required outcomes and closing gates are unchanged. Updates must retain implementation links, exercised evidence, remaining gaps, and any approved amendment. Do not replace this ledger with a list of finished slices.
 
 | ID | Required full-system outcome | Evidence required before closing |
 | --- | --- | --- |
@@ -239,6 +239,26 @@ Retain reviewed replay or executable regression artifacts for recurring checks, 
 | SDA-12 | Verifier reliability and maintained operating contract | Deliberately defective scenarios measure false acceptance and other outcomes; configuration/model limits, authoring, execution, evidence inspection, and failure handling are documented and exercised |
 
 Full completion requires every entry to satisfy its evidence gate, together in the declared supported scope. This does not promise universal correctness, every arbitrary Effect Schema, every UI, or all production domains. Supported capabilities and explicit unsupported outcomes must be honest; deferring a required capability keeps its entry open rather than redefining the scope without approval.
+
+### Slice A implementation progress — 2026-10-08
+
+The [approved declarative catalog](../../examples/reading-list/acceptance/catalog.ts), [Effect service contracts](../../examples/reading-list/acceptance/model.ts), and [runner](../../examples/reading-list/acceptance/runner.ts) are application-owned. The [dated verification record](validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) identifies the exact build, successful real-Jev run and model-free browser replay, rejected controls, preserved failures, and failed lint check. No scope amendment or gate closure is claimed.
+
+| ID | Exercised Slice A subset | Responsibilities still open |
+| --- | --- | --- |
+| SDA-01 | Runtime-validated approved/revisioned/provenance-bearing actors, needs, capabilities, requirements, contextual stories, shared obligations, non-goals, open decisions, and scenario/text-fixture references | Materially different domains, reusable parameterized contexts and complete concept vocabulary, and approval/revision workflows |
+| SDA-02 | [Bindings](../../examples/reading-list/acceptance/catalog.ts) to real `ApplicationIR` operations/resources, native payload schemas, fixture actors, and named evaluator revisions; missing/incompatible references fail | Ambiguous/imported and obsolete references across composed applications, richer fixture/codec bindings |
+| SDA-03 | [Owned fixtures](../../examples/reading-list/acceptance/fixture.ts): fresh SQLite/server/browser context per scenario, real public actor, sentinel/target preparation, scoped shutdown/removal; repeated exploration/replay | Protected ordinary actors, controlled clocks, related preconditions and authorization |
+| SDA-04 | [Browser adapter](../../examples/reading-list/acceptance/browser.ts) uses individual generated controls and loaded identity-bearing lists; real guards refuse unknown, altered/wrong-target, and consumed stale actions | Custom-UI binding, related/repeated collection controls, disabled/racing-target coverage |
+| SDA-05 | [Real Jev adapter](../../examples/reading-list/acceptance/jev.ts), bounded offered actions, raw probability evidence, confidence guard, action/deadline/no-progress limits; a strict-confidence run stops before execution | Held-out confidence/option-order/model-version calibration and exercised deadline/no-progress cases |
+| SDA-06 | [Native generation](../../examples/reading-list/acceptance/inputs.ts) excludes optional forbidden `Never` fields without changing contracts, then uses native encoding/validation; sample/null/omitted/min/max/below/above/fractional strategies and named semantic text fixture | Correlated/contextual/service-dependent/custom-check/recursive shapes beyond the explicitly supported Reading List operations |
+| SDA-07 | [Independent evaluators](../../examples/reading-list/acceptance/evaluation.ts) match exact native values and identities after reload, distinguish rejection from no mutation, and separately verify the unrelated fixture; defective and missing-evidence controls | Authorization, history, qualitative review, temporal/sequence/concurrent obligations |
+| SDA-08 | [Private local evidence](../../examples/reading-list/acceptance/evidence.ts) records every criterion, exact candidates, hashes/revisions/configuration, browser/model trace, screenshots and failures; missing/stale/subset evidence cannot pass | General production-data redaction/access/retention services, cross-consumer staleness and impact views |
+| SDA-09 | Adaptive current-view actions and actual captured-trace replay against fresh applications; only fixture identity is rebound, stale contracts/actions refuse, source failure evidence remains | Semantics-preserving locator repair and recurring regression lifecycle across supported domains; no automatic repair is implemented |
+| SDA-10 | Catalog relationships and per-run coverage are serialized for inspection; no product query/view implementation is claimed | Implementation/QA/documentation/change-impact consumer queries and outcome validation |
+| SDA-11 | Application-owned narrow Effect services avoid a premature reusable framework | Support Cases, evidence-backed shared extraction, stable general authoring/runtime interfaces and escape hatches |
+| SDA-12 | [Operating guide](../../examples/reading-list/README.md#story-driven-browser-acceptance), bounded deliberately defective evaluator controls, false-acceptance/rejection and blocked/inconclusive counts, confidence/stale/overwrite handling | Live injected mutants, history deletion, held-out calibration, general evidence policy and full lint/check acceptance |
+
 
 ## Slice Sequence and Anti-narrowing Rules
 
@@ -272,11 +292,22 @@ Never relabel a hard-coded journey, mocked decision model, incomplete evaluator,
 
 The [2026-10-08 feasibility record](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility) establishes schema-derived sample acceptance, real-browser input rejection, one generated-input create/reload path, and a direct arbitrary-derivation limitation. It does not exercise a Jev API call, automated story interpretation, independent criterion evaluation, actor isolation, durable evidence storage, regression repair, or the reusable acceptance framework.
 
+The [implemented Slice A record](validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) now establishes real Jev navigation, native operation-aware generation, isolated application/browser execution, independent requirement evaluation, deliberately defective controls, private durable artifacts, and actual replay. This is internally guided functional QA, not discoverability evaluation or proof of a validated reader benefit.
+
+Bounded decisions made for this slice:
+
+- Authoring uses inspectable application-owned Effect Schemas with stable IDs/revisions and approved provenance; scenario input strategies and semantic text sources are declarative. Named authored Effect evaluators own semantics. Do not extract a package before Support Cases supplies evidence.
+- Generate from the actual native operation AST. Omit only optional forbidden `Never` properties from the generator; retain native checks and validate/encode every candidate against the untouched operation contract. Apply creation defaults from compiled metadata, not from an invented canonical-input requirement.
+- Use mechanically derived operation IDs, JSON-pointer input paths, inclusion controls, resource/row identities, and loaded/unfiltered/complete-list observations. Jev chooses offered actions; one action enters the exact native payload through its individual fields. No whole-payload JSON journey or fixed action script substitutes for browser decisions.
+- Use real Jev `jev-1.13.0`, confidence 0.55, 30 actions, a 180-second scenario deadline and 30-second model-call timeout. These settings are uncalibrated; retained uncertainty is an outcome, not a reason to lower the gate.
+- Store private local JSON/screenshots/logs, exact source/native/catalog/bundle hashes and revisions, and executed/unexecuted traces. Replay requires matching contracts and preserves recorded failure; stale payloads/targets are not repaired automatically. General retention/redaction and locator repair remain open.
+
+
 The following decisions remain open without changing the required responsibilities:
 
 - Final authoring syntax, revision/reference representation, package placement, and the extraction boundary after the two slices.
 - The smallest inspectable vocabulary for parameterized observations and assertions, with named authored Effect evaluators for semantic cases rather than a general workflow language.
-- Operation-aware arbitrary derivation for forbidden fields, custom checks, recursive inputs, and captured codec services; supported shapes and explicit unsupported failures.
+- Operation-aware generation beyond the resolved optional-forbidden-field case: custom checks, recursive/correlated inputs, and captured codec services; supported shapes and explicit unsupported failures.
 - Concrete browser binding/collection-path syntax and the boundary between internally guided functional execution and discoverability evaluation.
 - Model versions, confidence thresholds, candidate budgets, deadlines, and held-out datasets for calibration; no universal threshold is assumed.
 - Evidence persistence format, artifact lifecycle, access/redaction policy, and reproducible replay/regression representation.

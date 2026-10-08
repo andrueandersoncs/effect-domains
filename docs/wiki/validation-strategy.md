@@ -32,6 +32,84 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-10-08: Reading List story-driven acceptance — Slice A
+
+Implemented the application-owned [declarative catalog](../../examples/reading-list/acceptance/catalog.ts), [Effect service interfaces](../../examples/reading-list/acceptance/model.ts), [runner](../../examples/reading-list/acceptance/runner.ts), [native input strategies](../../examples/reading-list/acceptance/inputs.ts), [real Jev adapter](../../examples/reading-list/acceptance/jev.ts), [browser adapter](../../examples/reading-list/acceptance/browser.ts), [independent evaluators](../../examples/reading-list/acceptance/evaluation.ts), and [private evidence persistence](../../examples/reading-list/acceptance/evidence.ts). The [operating guide](../../examples/reading-list/README.md#story-driven-browser-acceptance) documents authoring, setup, execution, inspection, replay, failure handling, and limits. [Per-gate progress](story-driven-acceptance.md#slice-a-implementation-progress-2026-10-08) advances SDA-01–SDA-09 and SDA-12; **all SDA-01–SDA-12 remain open**. No scope amendment, framework extraction, or discoverability claim.
+
+Executed from the repository root against actual application subprocesses and Chromium:
+
+```bash
+bun run build
+bun run reading-list:acceptance --output data/acceptance/slice-a-20261008-exploration-6
+TYPESAFE_API_KEY= bun run reading-list:acceptance \
+  --replay data/acceptance/slice-a-20261008-exploration-6/run.json \
+  --output data/acceptance/slice-a-20261008-replay-1
+```
+
+Exploration ran **2026-10-08T16:20:00.411Z–16:20:17.623Z**. It retained **39 real Jev decisions/actions**, resolving to `jev-1.13.0`, with observed confidence **0.71–1.00** at the unchanged **0.55** gate. Replay ran **16:21:51.736Z–16:21:59.823Z**, retained **39 actual browser actions**, and made **zero model decisions**, with the API key explicitly empty. Both exited **0**, passed every independently evaluated criterion below, and recorded `fullSystemCompletion: false`, `ledger.closed: []`.
+
+| Scenario | Concrete native rating case | HTTP | Passing criteria |
+| --- | --- | --- | --- |
+| `create-sample` | Absent in seed-42 structural sample; native default null | 200 | RL-CREATE, RL-RELOAD, RL-PRESERVE |
+| `create-null` | Explicit null | 200 | RL-CREATE, RL-RELOAD, RL-PRESERVE |
+| `create-omitted` | Explicit omission strategy; native default null | 200 | RL-CREATE, RL-RELOAD, RL-PRESERVE |
+| `rating-minimum` | 1 | 200 | RL-RATING, RL-RELOAD, RL-PRESERVE |
+| `rating-maximum` | 5 | 200 | RL-RATING, RL-RELOAD, RL-PRESERVE |
+| `rating-null` | Null | 200 | RL-RATING, RL-RELOAD, RL-PRESERVE |
+| `rating-below` | 0 | 400 | RL-REJECT, RL-PRESERVE |
+| `rating-above` | 6 | 400 | RL-REJECT, RL-PRESERVE |
+| `rating-fractional` | 1.5 | 400 | RL-REJECT, RL-PRESERVE |
+
+There are **nine scenarios and 24 per-requirement results** per run. All nine have actual reload observations from loaded, unfiltered, complete identity-bearing lists. Rejection checks compare every row/field by identity rather than merely observing an error or preserved target. Each scenario independently checks the unrelated sentinel; accepted updates retain the planned target's other values. Ratings on planned books are valid native operations: no finished-only policy was added.
+
+Exact identity retained in both `run.json` files:
+
+| Identity | Recorded value |
+| --- | --- |
+| Application/source/bundle/manifest build SHA-256 | `4ca85403ff591a732753d67557ae01d8cf7c3fd79ce4e83ee4dcdb5ba74aae25` |
+| Native contract SHA-256 | `62211a7d6604fb54837638d29430ac6d56475b5bfad545eb221efee2e6abb2ae` |
+| Catalog SHA-256 | `157c7afaea2aa081f8563206a4e2141f8031af3deac0afa57510a68d03289fe9` |
+| Catalog/story/requirement/scenario/evaluator revisions | `1` |
+| Fixture revision | `isolated-reading-list@1` |
+| Runtime | Bun `1.4.0`, Effect `4.0.0-rc.112`, Playwright `1.64.0`, Chromium |
+| Browser isolation | Fresh context per scenario; viewport `1280 × 900` |
+| Generation | Base seed `42`, scenario seeds `42` through `50`; recorded concrete candidates |
+| Harness limits | Confidence `0.55`, actions `30`, scenario deadline `180s`, model-call timeout `30s` |
+
+[Fixture acquisition](../../examples/reading-list/acceptance/fixture.ts) owns temporary SQLite files and loopback servers, seeds actual native operations, and scopes shutdown/deletion. Feature execution is through individual generated form controls and actual browser reload, not fixture API mutation or complete-payload JSON. The [UI bindings](../../apps/application-ui/src/client.ts) mechanically expose operation/input/inclusion/resource/row/cell identities and loaded-view state without copying application validation. Managed Chromium also opened the application directly; actual create and rejected-fractional reload screenshots were inspected at `exploration-6/create-sample/step-4.png` and `exploration-6/rating-fractional/step-5.png`.
+
+The forbidden-field gap is resolved for supported native object inputs: arbitrary construction excludes **only optional `Never` fields**, retains native field checks, and then validates/encodes against the original operation schema. `books.create` still forbids `id`; no contract, canonical schema, or server rule was weakened. Native compiled creation metadata supplies omitted nullable defaults. Meaningful title/author text comes from a named declarative fixture referencing the existing documented book; the other structural fields and strategies are native-schema driven. This does not turn random strings into semantic product evidence.
+
+**Verifier reliability:** `exploration-6/verifier.json` labels its evidence as *deliberately constructed observation controls, not browser or model execution*. The production evaluators exercised **24 controls / 83 criterion results**: four clean controls, eleven defects, eight missing-evidence controls, and one interruption control. Observed false acceptance **0**, false rejection **0**, unexpected statuses **0**; four criterion results correctly blocked and 26 correctly inconclusive. Defects include wrong native omitted defaults, success without write, lost reload, replacement/wrong identity, unrelated mutation/deletion, and rejected operations that mutate/delete/add rows. Clean and loaded-view/baseline/submission/reload controls prevent an absent observation from passing. Reading List has no history ledger; history deletion and live injected application mutants are not covered.
+
+**Truthful failure and replay controls:**
+
+- `bun run reading-list:acceptance --minimum-confidence 1 --output data/acceptance/slice-a-20261008-confidence-stop` exited **1**: nine real decisions retained, zero actions executed, zero submissions, all 24 criteria **blocked**. This exercises uncertainty handling, not threshold calibration.
+- Model-free replay of that failure into `data/acceptance/slice-a-20261008-confidence-replay` also exited **1** with all 24 criteria blocked. It did not execute the originally unexecuted choices or reinterpret them using the default lower threshold.
+- Replay of `data/acceptance/slice-a-20261008-exploration-5/run.json` into `data/acceptance/slice-a-20261008-stale-replay` exited **1** with “Replay is stale against application, catalog, evaluator, browser bindings, or native contracts; no semantic repair is automatic.”
+- Reusing `data/acceptance/slice-a-20261008-exploration-6` exited **1** with “Output already contains run.json; choose a fresh directory to preserve previous evidence.”
+- Actual browser guard smoke rejected an altered wrong-target action, unknown choice, and consumed stale choice. Tagged failures are retained in `data/acceptance/slice-a-guard-smoke/guards.json`.
+- Earlier exploration directories `slice-a-20261008-exploration-1` through `-5` remain intact. Initial runs exposed an incorrect omitted-native-input evaluator assumption, genuine confidence blocks, and invalid verifier fixture identifiers. Fixes used actual native defaults/UUID requirements and clearer bounded action/input-source semantics; no lowered confidence threshold, altered native contract, mocked model, or discarded failure substitutes for the final evidence.
+
+Artifacts live under the ignored private local `data/acceptance/` directory, not in Git. Each scenario retains JSON, before/step screenshots, server logs, model requests/responses/distributions, and executed/unexecuted actions; every result has requirement/scenario/evaluator IDs and revisions, assertion basis, explanation, and evidence references. Source and replay directories must be retained together. API keys are absent from retained requests. General export, production-data redaction, access control, retention automation, and semantic locator repair remain unimplemented.
+
+**Checks exercised:**
+
+| Check | Observed result |
+| --- | --- |
+| `bun run test` | 190 tests passed across 40 files |
+| `bun --bun vitest run examples/reading-list/acceptance --maxWorkers=4` after final verifier cleanup | 22 tests passed across three files |
+| `bun run typecheck` | All workspace and root typechecks passed |
+| `bun run build` | Passed |
+| `bun run docs:build` | Passed |
+| Prettier manifest check | Passed |
+| `bun run --filter @effect-domains/application-ui lint` | Passed |
+| `bun run --filter @effect-domains/example-reading-list lint` | **Failed: 2,079 diagnostics across 64 rules in the new acceptance implementation** |
+
+Final Reading List lint stdout/stderr, rule counts and parsed diagnostics are retained in `data/acceptance/slice-a-checks/reading-list-lint.json`. These are not attributed to the earlier unchanged classifier issue and are not suppressed or excluded. Full lint/check acceptance is **not** claimed.
+
+Remaining responsibilities are explicit in every ledger row: protected actors, related/custom UI, service-dependent/correlated generation, history, temporal/concurrent and qualitative obligations, held-out model calibration, product consumer queries, Support Cases/shared extraction, general evidence governance/repair, and outstanding lint. This run establishes bounded internally guided Reading List functional conformance, not full-system completion or validated user benefit.
+
 ### 2026-10-08: Story-driven acceptance feasibility
 
 The integration investigation read both originating story discussions and current Jev documentation, then used disposable Bun probes and an isolated Reading List server (`READING_LIST_DB=:memory:`, `PORT=33147`) to exercise existing schema/browser seams. This is feasibility evidence for the [accepted design](story-driven-acceptance.md), not implementation of that design.

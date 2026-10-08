@@ -639,6 +639,25 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     return { node, included, value }
   }
 
+
+  const payloadPath = (name: string) => `/${name.replace(/~/g, "~0").replace(/\//g, "~1")}`
+
+  const bindControl = (control: FormControl, path: string): FormControl => {
+    control.node.dataset.fieldPath = path
+
+    const input = control.node.querySelector<HTMLElement>(":scope > input, :scope > select, :scope > textarea")
+    const inclusion = control.node.querySelector<HTMLElement>(":scope > .admin-optional > input")
+
+    if (input) input.dataset.inputPath = path
+
+    if (inclusion) {
+      inclusion.dataset.inclusionPath = path
+      inclusion.setAttribute("aria-label", `Include ${path}`)
+    }
+
+    return control
+  }
+
   const jsonControl = (name: string, initial: Option.Option<unknown>, mandatory: boolean): FormControl => {
     const label = namedElement("label", "admin-field admin-field-wide", "")
     const fieldLabel = namedElement("span", "admin-field-label", name)
@@ -763,7 +782,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     })
   }
 
-  const formControl = (name: string, raw: JsonSchema, document: SchemaDocument, mandatory: boolean, initial: Option.Option<unknown>, ancestors: HashSet.HashSet<JsonSchema>): Option.Option<FormControl> => {
+  const formControl = (name: string, raw: JsonSchema, document: SchemaDocument, mandatory: boolean, initial: Option.Option<unknown>, ancestors: HashSet.HashSet<JsonSchema>, path: string = payloadPath(name)): Option.Option<FormControl> => {
     const schema = resolveSchema(raw, document)
 
     if (hasEmptyNot(schema)) return Option.none()
@@ -775,7 +794,12 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     const circular = HashSet.has(ancestors, schema)
     const recursiveObject = objectWithProperties && circular
 
-    if (recursiveObject) return pipe(jsonControl(name, initial, mandatory), Option.some)
+    if (recursiveObject) {
+      const control = jsonControl(name, initial, mandatory)
+      const bound = bindControl(control, path)
+
+      return Option.some(bound)
+    }
 
     if (objectWithProperties) {
       const fieldset = namedElement("fieldset", "admin-fieldset", "")
@@ -792,7 +816,8 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
         const childSchema = pipe(Option.some(child), Option.filter(isJsonSchema))
         const childInitial = pipe(initial, Option.filter(isRecords), Option.flatMap(Record.get(key)))
         const required = isRequired(schema, key)
-        const control = pipe(childSchema, Option.flatMap((value) => formControl(key, value, document, required, childInitial, nested)))
+        const childPath = `${path}${payloadPath(key)}`
+        const control = pipe(childSchema, Option.flatMap((value) => formControl(key, value, document, required, childInitial, nested, childPath)))
         const named = (control: FormControl) => FormEntry.make({ name: key, control })
 
         return pipe(control, Option.map(named))
@@ -816,7 +841,10 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
         return Effect.map(entries, Record.fromEntries)
       })
 
-      return pipe(inclusionControl(fieldset, mandatory, value), Option.some)
+      const control = inclusionControl(fieldset, mandatory, value)
+      const bound = bindControl(control, path)
+
+      return Option.some(bound)
     }
 
     const nullType = pipe(type, Option.contains("null"))
@@ -827,14 +855,19 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     const constant = pipe(Option.fromUndefinedOr(schema.const), Option.isSome)
     const absent = Option.isNone(type)
     const json = Array.some([nullType, arrayType, anyOf, oneOf, allOf, constant, absent], Function.identity)
+    const control = json ? jsonControl(name, initial, mandatory) : scalarControl(name, schema, initial, mandatory)
+    const bound = bindControl(control, path)
 
-    return json ? pipe(jsonControl(name, initial, mandatory), Option.some) : pipe(scalarControl(name, schema, initial, mandatory), Option.some)
+    return Option.some(bound)
   }
 
   const generatedForm = (entry: Operation, initial: Option.Option<unknown>) => {
     const rawSchema = pipe(Option.fromUndefinedOr(entry.input.schema), Option.getOrElse(Record.empty<string, unknown>))
     const schema = resolveSchema(rawSchema, entry.input)
     const form = namedElement("form", "admin-form", "")
+
+    form.dataset.operation = entry.name
+
     const fields = namedElement("div", "admin-fields", "")
     const object = pipe(schemaType(schema), Option.contains("object"))
     const properties = pipe(Option.fromNullishOr(schema.properties), Option.filter(isRecords))
@@ -890,6 +923,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
     const submit = namedElement("button", "admin-button admin-button-primary", "Run")
 
     submit.type = "submit"
+    submit.dataset.action = "submit"
     form.append(fields, fallback, submit)
 
     const input = () => {
@@ -1017,6 +1051,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
       const loading = notice("loading", "Loading rows…")
 
       result.replaceChildren(loading)
+      result.dataset.loaded = "false"
 
       const selected = Array.filter(filters, selectedEntry)
       const entries = yield* Effect.forEach(selected, entryValue)
@@ -1047,6 +1082,29 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
       const inferredColumns = pipe(page.items, Array.filter(isRecords), Array.flatMap(Record.keys), Array.dedupe)
       const columns = pipe(configuredColumns, Option.orElse(Function.constant(storageColumns)), Option.getOrElse(Function.constant(inferredColumns)))
       const table = namedElement("table", "admin-table", "")
+      const unfiltered = Record.isEmptyRecord(filter)
+      const firstPage = Option.isNone(cursor)
+      const lastPage = Option.isNone(page.nextCursor)
+      const complete = firstPage && lastPage
+
+      table.dataset.resource = resource.name
+      table.dataset.operation = entry.value.name
+      table.dataset.loaded = "true"
+      table.dataset.unfiltered = String(unfiltered)
+      table.dataset.complete = String(complete)
+      table.dataset.requestInput = JSON.stringify(payload)
+
+      const identifier = Option.flatMap(stored, flow(Struct.get("identifier"), Option.fromUndefinedOr))
+
+      Option.match(identifier, {
+        onNone: Function.constant(table),
+        onSome: (name) => {
+          table.dataset.identifier = name
+
+          return table
+        },
+      })
+
       const tableHead = emptyElement("thead")
       const headerRow = emptyElement("tr")
 
@@ -1067,10 +1125,24 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
       const appendRow = (row: unknown) => {
         const tableRow = emptyElement("tr")
 
+        Option.match(identifier, {
+          onNone: Function.constant(tableRow),
+          onSome: (name) => {
+            const hasIdentity = isRecords(row) && Record.has(row, name)
+
+            if (hasIdentity) tableRow.dataset.rowIdentity = JSON.stringify(row[name])
+
+            return tableRow
+          },
+        })
+
         const appendValue = (column: string) => {
           const value = isRecords(row) ? pipe(fieldValue(row, column), Option.getOrElse(Function.constant(null))) : row
           const text = textFor(value)
           const cell = namedElement("td", "", text)
+
+          cell.dataset.column = column
+          cell.dataset.value = JSON.stringify(value)
 
           tableRow.append(cell)
 
@@ -1124,6 +1196,8 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
         paging.append(back, next)
         result.replaceChildren(table, paging)
       } else result.replaceChildren(table)
+
+      result.dataset.loaded = "true"
 
       apply.disabled = false
     })
@@ -1232,6 +1306,8 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
 
         resourceButton.type = "button"
 
+        if (Array.contains(resource.operations, "list")) resourceButton.dataset.operation = `${resource.name}.list`
+
         const onResourceClick: EventListener = () => {
           const list = Array.contains(resource.operations, "list")
           const fallback = Array.head(resource.operations)
@@ -1260,6 +1336,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
             const button = namedElement("button", "admin-nav-operation", buttonLabel)
 
             button.type = "button"
+            button.dataset.operation = `${resource.name}.${name}`
 
             const onOperationClick: EventListener = () => {
               const list = equals(name, "list")
@@ -1304,6 +1381,7 @@ const mount = Effect.fn("ApplicationUi.mount")(function* (root: HTMLElement) {
           const button = namedElement("button", "admin-nav-resource", label)
 
           button.type = "button"
+          button.dataset.operation = entry.name
 
           const onCommandClick: EventListener = () => pipe(renderOperation(entry, noResource), selectUiEffect)
 

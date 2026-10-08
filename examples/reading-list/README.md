@@ -11,19 +11,19 @@ export const ReadingListResource = Resource.define({
   authorization: Authorization.public,
   name: "books",
   schema: ReadingListBookSchema,
-  capabilities: Resource.capabilities(
+  capabilities: [
     Resource.get(),
     Resource.list({ filter: ["status", "format"], limit: 25 }),
     Resource.create(),
     Resource.update(),
     Resource.remove(),
-  ),
+  ],
 })
 ```
 
 The specification is author intent only. `Resource.compile` derives the five `books.*` RPCs, table, UUIDv7 identifier, schemas, repository, and handlers; the application compiler contributes those products to one `ApplicationIR`.
 
-The generated Application UI consumes that `ApplicationIR` directly. Inspection supplies the five operations, nullable input shapes, `status` and `format` filters, and cursor-page contract. The example supplies only display title and description in `main.ts`; it has no resource-specific browser state machine or form codec.
+The generated Application UI consumes that `ApplicationIR` directly. Inspection supplies the five operations, nullable input shapes, `status` and `format` filters, and cursor-page contract. The example supplies only display title and description in `infrastructure.ts`; it has no resource-specific browser state machine or form codec.
 
 ## Run it
 
@@ -117,7 +117,7 @@ Remove has a void result, not a deleted book. The following get exits nonzero wi
 
 ## Use the Application UI or MCP
 
-At `/`, select the Books resource to list rows with declared status/format filters and cursor navigation. Select an operation to run generated create, get, update, patch, or remove forms; complete JSON input remains available for the full canonical payload.
+At `/`, select the Books resource to list rows with declared status/format filters and cursor navigation. Select an operation to run generated create, get, update, or remove forms; complete JSON input remains available for the full canonical payload.
 
 The Streamable HTTP MCP endpoint is `http://127.0.0.1:3000/mcp`; for example, `books.list` accepts `{"input":{"filter":{"status":"planned"}}}` and returns its page under `structuredContent.result`. See [shared MCP conventions](../README.md#mcp-server).
 
@@ -137,6 +137,33 @@ bun run reading-list --help
 ```
 
 This is a public local register, not a private account service: there is no login, per-reader ownership, reading-history ledger, or concurrent-edit version check.
+
+## Story-driven browser acceptance
+
+The application-owned [catalog](acceptance/catalog.ts) declares approved reader stories, shared requirement IDs, scenario strategies, native operation/resource references, and a named semantic text fixture. [Effect services](acceptance/model.ts) separate browser execution, Jev decisions, independent evaluation, and evidence retention. This implements [Slice A](../../docs/wiki/story-driven-acceptance.md#slice-a-reading-list), not the full SDA-01–SDA-12 framework.
+
+Install Chromium once with `bunx playwright install chromium` from `examples/reading-list`. Then run from the repository root, with `TYPESAFE_API_KEY` in the environment or the untracked root `.env`:
+
+```bash
+bun run build
+bun run reading-list:acceptance --output data/acceptance/reading-list-review
+bun run reading-list:acceptance --replay data/acceptance/reading-list-review/run.json
+bun run reading-list:acceptance --help
+```
+
+Use a fresh output directory: existing `run.json` is never overwritten. The runner starts the actual Reading List application on fresh loopback ports with owned temporary SQLite databases, seeds an unrelated sentinel and an update target where needed, and opens a fresh Chromium context for each scenario. It does not use your existing application database or require a separately running server. Feature actions use individual generated controls, including enum selects, optional-field inclusion, and nullable JSON-value textareas; they do not use the complete-payload JSON fallback or direct API mutation.
+
+Nine scenarios cover native arbitrary creation, explicit null, omitted creation rating, update ratings at both native boundaries, nullable update, and rejection below/above the range and at a fractional value. Update targets remain planned: finished status is not a rating policy. Native creation metadata supplies omitted-field defaults. Structural sampling is separate from meaningful title/author text supplied by the documented book fixture; the runner does not claim that arbitrary strings prove a useful reader outcome.
+
+Jev `jev-1.13.0` selects currently available semantic actions, with `cannot-proceed` always available. Exact field entries are one bounded payload action over the actual controls, not independent model guesses about equivalent field order. Defaults are confidence **0.55**, **30** actions, a **180-second** scenario deadline, a **30-second** model-call timeout, and seed **42**. These are operating choices, not held-out calibration. Low confidence stops without executing the selected action or falling back to the first option. Model failure, missing evidence, and incomplete criteria cannot become a pass.
+
+Each output directory contains `run.json`, `verifier.json`, and per-scenario JSON, before/step screenshots, and server logs. Results identify the requirement/scenario/evaluator revisions, assertion basis, evidence references, exact candidates, native validation, application/source/bundle hashes, and actual model requests, responses, probability distributions, and executed/unexecuted actions. API keys are not retained. Directories/JSON use private local permissions; screenshots/logs contain only isolated public fixture data. This is not a general production-data redaction or remote evidence service. Retain source and replay directories together, and delete only run-owned artifact directories when no longer needed.
+
+Replay reuses the captured concrete payloads and action trace without Jev, rebinding only the fresh update fixture identity. It rejects stale application/catalog/evaluator/binding hashes, missing coverage, altered payload actions, and unavailable targets; an originally unexecuted action stays unexecuted. There is no automatic locator or semantic repair.
+
+Acceptance is determined independently by creation/value/identity, reload, rating, all-row rejection preservation, and sentinel evaluators. Deliberately constructed defective observation controls exercise the same evaluators: no write despite success, lost reload, replacement/wrong identity, unrelated mutation/deletion, and rejected attempts that still mutate. These are labeled verifier controls, not injected live application faults or model narratives.
+
+Exit **0** means every declared Slice A scenario/requirement and verifier control matched its expected outcome. Exit **1** means blocked/inconclusive/failing execution, a prerequisite/evidence failure, or stale replay. Inspect the individual results rather than treating action completion as acceptance. Authorization, history, custom/related UIs, service-dependent generation, temporal/concurrent obligations, model calibration, consumer queries, and the Support Cases slice remain open. The [verification record](../../docs/wiki/validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) also records the outstanding acceptance-workspace lint diagnostics; full lint/check acceptance is not claimed.
 
 ## Full-stack OpenTelemetry
 

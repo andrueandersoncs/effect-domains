@@ -21,6 +21,8 @@ Reading List is the smallest full-stack observability walkthrough. Report Export
 
 For any example, `bun run <application> --help` lists its commands and `bun run <application> inspect` describes its contracts without starting the server.
 
+Reading List also has a runnable [story-driven browser acceptance command](../examples/reading-list/README.md#story-driven-browser-acceptance): `bun run reading-list:acceptance`. It uses native operation schemas, real Jev choices, isolated application fixtures, individual generated controls, and independent requirement evidence. This is internally guided functional QA for Slice A; it does not establish discoverability or close the [full acceptance ledger](wiki/story-driven-acceptance.md#full-completion-ledger).
+
 ## Go beyond generated CRUD
 
 ### Expense ledger
