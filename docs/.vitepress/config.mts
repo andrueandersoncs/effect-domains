@@ -56,6 +56,7 @@ export default defineConfig({
           { text: "Design thesis", link: "/wiki/thesis" },
           { text: "Detailed framework contract", link: "/wiki/tables-and-queries" },
           { text: "Research agenda", link: "/wiki/research-agenda" },
+          { text: "Story-driven acceptance: full design", link: "/wiki/story-driven-acceptance" },
           { text: "Verification record", link: "/wiki/validation-strategy" },
         ],
       },

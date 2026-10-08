@@ -12,6 +12,7 @@ Current framework source keeps shared authoring modules at the [`src/` root](../
 - [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, declared joined projections, explicit identity groups/grants, imported migrations, and native execution composition.
 - [Validation Strategy](validation-strategy.md) — slice criteria, [account/group/permission lifecycle evidence](validation-strategy.md#2026-09-25-account-group-and-permission-lifecycle), native browser/Cluster evidence, synchronization slices, prior validation, and dated evidence limits.
 - [Research Agenda](research-agenda.md) — current framework contract, bounded identity/group boundary, join/dependency slice, remaining evidence, and the linked actionable work queue.
+- [Story-driven Product Specification and Acceptance](story-driven-acceptance.md) — accepted full-system design, product relationships, Jev/browser execution, input generation, evidence contracts, and completion gates that slices cannot narrow.
 
 ## Wiki Operations and Sources
 
@@ -27,6 +28,8 @@ Current framework source keeps shared authoring modules at the [`src/` root](../
 Files under `raw/` are immutable source material. Maintained pages synthesize them and cite implementation evidence close to claims. Current implementation links use the workspace layout; dated verification records retain their original dates and observations.
 
 ## Current Status
+
+The accepted [story-driven product and acceptance direction](story-driven-acceptance.md) adds an external declarative product model and requirement-linked real-browser verification over `ApplicationIR`, not testing metadata in canonical domain schemas. Its full-completion ledger remains authoritative across implementation slices; the initial Reading List probe establishes only bounded feasibility, not an implemented acceptance runner or Jev integration. ([Scope authority](story-driven-acceptance.md#status-and-scope-authority); [completion ledger](story-driven-acceptance.md#full-completion-ledger); [feasibility evidence](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility))
 
 The current explicit compiler architecture cleanly separates intent from derived runtime values. `Resource.define`, `Command.define`, `ReadModel.define`, and `Application.define` produce inspectable syntax; `Resource.compile` and shared folds derive synchronous runtime products, while `Application.compile` returns a typed Effect yielding the authoritative `ApplicationIR`. Application modules execute compilation explicitly at their composition boundary, and every adapter consumes the resulting IR. Exact Resource identities survive composition, and the superseded Operation, SqliteView, and implicit application/resource constructors remain deleted. ([Implemented contract](research-agenda.md#implemented-contract); [architecture](tables-and-queries.md); [verification](validation-strategy.md#2026-09-14-explicit-compiler-architecture-cutover))
 

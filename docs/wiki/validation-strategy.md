@@ -12,6 +12,8 @@ Each materially different slice should include branded values, a meaningful tran
 
 Link implementation and regressions, distinguish authored policy from generated machinery, and date live observations. A successful scenario establishes only its exercised contract. Historical verification is retained as historical evidence when the interface changes. This reporting rule is wiki analysis based on the thesis evaluation criteria.
 
+For [story-driven acceptance](story-driven-acceptance.md), every slice must map its exercised subset to the canonical [full-completion ledger](story-driven-acceptance.md#full-completion-ledger), identify unexercised responsibilities, and retain independent requirement-linked evidence. A successful browser path, generated inputs, or a closed slice never substitutes for full-system completion; scope reductions require an explicit human-approved amendment.
+
 ## Reservation Slice
 
 The [reservation application](../../examples/reservations/README.md) has branded SKU and reservation identifiers, positive quantities, and explicit `held → confirmed | released` transitions. Canonical models contain no transport or persistence mapping annotations beyond intrinsic identity. ([Domain](../../examples/reservations/domain.ts))
@@ -29,6 +31,16 @@ Sources: [resources](../../examples/reservations/resources.ts), [application](..
 The slice removes duplicate storage schemas, ordinary read/query plumbing, initial DDL, and per-operation HTTP/CLI binding; stock effects and transaction boundaries remain authored. It is an SQLite-only result, and generated JSON CLI commands are not evidence that generated CLIs replace domain-specific CLI design. ([Reservation regressions](../../test/Reservations.test.ts); [CLI regressions](../../test/RpcCli.test.ts))
 
 ## Verification Record
+
+### 2026-10-08: Story-driven acceptance feasibility
+
+The integration investigation read both originating story discussions and current Jev documentation, then used disposable Bun probes and an isolated Reading List server (`READING_LIST_DB=:memory:`, `PORT=33147`) to exercise existing schema/browser seams. This is feasibility evidence for the [accepted design](story-driven-acceptance.md), not implementation of that design.
+
+With the installed Effect **4.0.0-rc.112**, `Schema.toArbitrary(ReadingListBookSchema)` and `effect/testing/FastCheck` generated **12** samples using seed **42**. Every sample decoded successfully against the application's native `books.create` payload schema. Direct arbitrary derivation from the compiled JSON operation payload failed with `Unsupported AST Never` at `["id"]`; inspection represents that forbidden field as `{ "not": {} }`. This establishes a need for operation-aware generation rather than blindly sampling every compiled payload or substituting a Resource schema for every command. ([Dependency version](../../package.json); [book schema](../../examples/reading-list/domain.ts); [creation fold](../../packages/effect-domains/src/resource/creation.ts); [JSON RPC contract](../../packages/effect-domains/src/rpc/contract.ts))
+
+Real Chromium interaction submitted an empty title through the generated form. The server returned HTTP **400** with `Invalid input for books.create: Expected a value with a length of at least 1` at `["title"]`. A generated candidate was then submitted through the UI's complete-JSON control, created successfully, and remained visible by identity and values in the loaded book list after browser reload. DOM inspection and screenshots showed no native `minlength` constraint on the title input and a JSON textarea for nullable rating. Server validation remained authoritative despite the missing browser affordance. ([Generated controls](../../apps/application-ui/src/client.ts); [UI contract](tables-and-queries.md#commands-applications-and-application-ui))
+
+The database was in memory: the reload observation does not establish persistence across process restart. The probe did not execute Jev, a product catalog, automated story evaluation, negative rating cases, preservation invariants, ordinary actor isolation, or durable evidence/replay. No integration tests or production source were changed. The smoke server and managed browser tabs were stopped; the generation probes ran inline without retained script files.
 
 ### 2026-09-30: Ranked-choice election SQLite slice
 
