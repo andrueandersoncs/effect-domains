@@ -12,7 +12,7 @@ Current framework source keeps shared authoring modules at the [`src/` root](../
 - [Tables and Queries](tables-and-queries.md) — resource authorization, bounded lists, declared joined projections, explicit identity groups/grants, imported migrations, and native execution composition.
 - [Validation Strategy](validation-strategy.md) — slice criteria, [account/group/permission lifecycle evidence](validation-strategy.md#2026-09-25-account-group-and-permission-lifecycle), native browser/Cluster evidence, synchronization slices, prior validation, and dated evidence limits.
 - [Research Agenda](research-agenda.md) — current framework contract, bounded identity/group boundary, join/dependency slice, remaining evidence, and the linked actionable work queue.
-- [Story-driven Product Specification and Acceptance](story-driven-acceptance.md) — accepted full-system design, product relationships, Jev/browser execution, input generation, evidence contracts, and completion gates that slices cannot narrow.
+- [Story-driven Product Specification and Acceptance](story-driven-acceptance.md) — accepted full-system design, product/Jev/browser/evidence contracts, authoritative completion gates, and the [dependency-ordered implementation plan](story-driven-acceptance.md#implementation-plan) with work packages, checks, and exit evidence.
 
 ## Wiki Operations and Sources
 

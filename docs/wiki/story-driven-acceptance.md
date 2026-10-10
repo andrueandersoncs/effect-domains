@@ -288,6 +288,198 @@ Each slice/task record must contain:
 
 Never relabel a hard-coded journey, mocked decision model, incomplete evaluator, JSON-only shortcut, or narrative pass as the full system. A complete-JSON browser control is a legitimate existing UI path, but evidence through it does not establish coverage of individual generated controls. A stub or smoke artifact does not become the final public interface.
 
+## Implementation Plan
+
+**Recorded 2026-10-10. Execution plan under the unchanged accepted scope; not implementation evidence or a scope amendment.** The [full-completion ledger](#full-completion-ledger) remains the closing authority. This section replaces the chat-only next-step recommendation with claimable work packages. Every package is pending; **AP-01 is the ready frontier**. Mark a package complete only with its linked code, commands, runtime artifacts, and remaining limitations.
+
+Package IDs identify planned outcomes, not a second issue tracker. Use the existing [GitHub work queue](https://github.com/andrueandersoncs/effect-domains/issues/12) for implementation issue ownership/status and link those issues to their packages here. This page owns the dependency/acceptance breakdown and evidence synthesis. This documentation update creates or claims no implementation issue.
+
+### Baseline and constraints
+
+- [Slice A evidence](validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) records nine scenarios, 24 independent results, real Jev/browser execution and model-free replay. Its new acceptance implementation has 2,079 lint diagnostics; that failure is known evidence, not a check to rerun merely to confirm it.
+- The [current scenario contract](../../examples/reading-list/acceptance/model.ts) binds one operation and rating-specific strategies. [Generation/replay](../../examples/reading-list/acceptance/inputs.ts) currently equates `expected: accepted/rejected` with native schema validity. That is sufficient for the declared rating cases, but **cannot represent native-valid business-policy denials**. AP-05 must separate structural validity from operation outcome before Support Cases denial scenarios.
+- [Support Cases resources](../../examples/support-cases/resources.ts) and its lifecycle commands are public. Assignment requires a real on-duty agent and transitions use an expected version; [the implementations](../../examples/support-cases/sqlite.ts) append event/audit records transactionally. Only [the audit command](../../examples/support-cases/audit.ts) requires the existing admin role. Do not reinterpret an assigned agent as an authenticated subject or add authorization to public commands.
+- Final authoring stays declarative. Native contracts, generated/trusted fields, state transitions, and business policies remain authoritative; semantics-changing input sources/assertions stay named application-owned Effect implementations. No hard-coded journey, mocked model, whole-payload JSON shortcut, silent repair, lowered assertion, or lint exclusion counts as completion.
+- One acceptance integration owner owns shared contracts and integration. A task's claimant is its implementation/review owner; record the claimant in the linked implementation issue before changing code. Exported changes require references and complete caller migration. Preserve old evidence, remove obsolete code at cutover, and add no compatibility aliases.
+
+### Dependency-ordered work packages
+
+Dependencies are completion prerequisites, not scheduling estimates. AP-02/AP-03 can proceed independently once AP-01 stabilizes the contracts; AP-08/AP-09 and the post-extraction coverage packages are independent where their listed prerequisites allow.
+
+| Package | Depends on | Observable outcome | Gates advanced |
+| --- | --- | --- | --- |
+| AP-01 | Existing Slice A | Catalog/service-contract lint cleanup with complete caller migration | SDA-01, SDA-02, SDA-12 |
+| AP-02 | AP-01 | Native generation and evaluator lint cleanup without changed acceptance semantics | SDA-06, SDA-07, SDA-12 |
+| AP-03 | AP-01 | Effect-native browser/model/fixture/evidence boundaries | SDA-03, SDA-04, SDA-05, SDA-08, SDA-12 |
+| AP-04 | AP-02, AP-03 | Clean Slice A integration and fresh real exploration/replay | SDA-08, SDA-09, SDA-12 |
+| AP-05 | AP-04 | Evidence-backed Support Cases declarations, context sources, and outcome contract | SDA-01, SDA-02, SDA-03, SDA-06 |
+| AP-06 | AP-05 | Runnable real-browser Support Cases multi-step goal | SDA-03, SDA-04, SDA-05, SDA-06, SDA-07, SDA-08, SDA-09 |
+| AP-07 | AP-06 | Native-valid denials, protected audit access, and history/preservation proof | SDA-02, SDA-03, SDA-07, SDA-08, SDA-09, SDA-12 |
+| AP-08 | AP-07 | Live defective implementations and execution-failure controls | SDA-04, SDA-05, SDA-07, SDA-12 |
+| AP-09 | AP-06 | Held-out model/option-order/confidence assessment | SDA-05, SDA-12 |
+| AP-10 | AP-07 | Shared Effect responsibilities proved by both applications | SDA-11 |
+| AP-11 | AP-10 | Product queries and implementation/QA/documentation consumers | SDA-08, SDA-10 |
+| AP-12 | AP-10 | Complete supported product relationships, approval/revisions, and binding failures | SDA-01, SDA-02 |
+| AP-13 | AP-10 | Declared native generation/codec support matrix | SDA-02, SDA-06 |
+| AP-14 | AP-10 | Custom/collection UI binding and semantics-preserving locator repair | SDA-04, SDA-09 |
+| AP-15 | AP-10 | Applicable temporal/concurrent and qualitative obligations | SDA-03, SDA-07 |
+| AP-16 | AP-07 | Evidence access, redaction, retention, and export contract | SDA-08, SDA-12 |
+| AP-17 | AP-08, AP-09, AP-11–AP-16 | Individual full-system closing-gate review | SDA-01–SDA-12 |
+
+### AP-01 — Catalog and service contracts
+
+**Targets:** [model.ts](../../examples/reading-list/acceptance/model.ts), [catalog.ts](../../examples/reading-list/acceptance/catalog.ts), `catalog.test.ts`, and referenced callers needed for an atomic public-contract change.
+
+Use existing Effect schema constructors, Option/error/service conventions and immutable collection patterns. Preserve approved relationships, native references, revisions, scoped requirements and exact serialized candidate values. A lint-driven representation change is not permission to change a story or requirement. Keep the native-valid business-denial extension in AP-05 rather than smuggling it into cleanup.
+
+**Exit evidence:** relevant file diagnostics are resolved; catalog regressions and workspace typechecking pass; invalid/missing bindings still reject. Migrate every caller of any changed exported symbol in this package. Do not replace behavior tests with source-text, forwarding, or incidental-format assertions.
+
+### AP-02 — Native inputs and independent evaluators
+
+**Targets:** [inputs.ts](../../examples/reading-list/acceptance/inputs.ts), [evaluation.ts](../../examples/reading-list/acceptance/evaluation.ts), `inputs.test.ts`, `evaluation.test.ts`.
+
+Refactor against native schemas and existing Effect patterns, retaining optional-forbidden-field exclusion, native validation/encoding, implicit creation defaults, exact identity/reload checks, all-row rejection preservation, and separate sentinel results. No contract weakening or new business rule.
+
+**Exit evidence:** focused input/evaluator tests pass; resolved diagnostics are recorded; the existing labeled verifier controls retain their expected pass/fail/blocked/inconclusive meaning. Exercise any behaviorally changed generation/evaluation path, not just compilation.
+
+### AP-03 — External boundaries
+
+**Targets:** [browser.ts](../../examples/reading-list/acceptance/browser.ts), [jev.ts](../../examples/reading-list/acceptance/jev.ts), [fixture.ts](../../examples/reading-list/acceptance/fixture.ts), [evidence.ts](../../examples/reading-list/acceptance/evidence.ts).
+
+Keep Promise/process/browser interop inside narrow scoped Effect boundaries. Preserve real Jev calls, offered-action validation, exact individual field entry, actual HTTP/reload observations, private artifacts, owned-server/database cleanup, and credential exclusion. Do not trade stricter typing for copied native schemas or fake browser results.
+
+**Exit evidence:** changed real boundary paths are smoked; wrong/unknown/consumed targets refuse; cancellation/failure leaves no owned server or temporary database behind; model responses and executed/unexecuted actions remain attributable. Relevant diagnostics and type errors are resolved.
+
+### AP-04 — Slice A integration checkpoint
+
+**Targets:** [runner.ts](../../examples/reading-list/acceptance/runner.ts), [main.ts](../../examples/reading-list/acceptance/main.ts), both Reading List/root package manifests, the operating guide and verification record.
+
+Finish orchestration/CLI lint cleanup and integrate AP-01–AP-03. Require zero new acceptance-workspace lint diagnostics, passing types/tests, all declared Slice A criteria passing in real exploration and fresh browser replay, and faithful blocked/stale/overwrite outcomes. Do not repeatedly rerun failed model decisions until a convenient pass appears; retain each attempt and diagnose its actual cause. Existing unrelated repository lint issues remain separate.
+
+Run from the repository root, using fresh output directories:
+
+```bash
+bun run --filter @effect-domains/example-reading-list lint
+bun run typecheck
+bun run test
+bun run build
+bun run reading-list:acceptance --output data/acceptance/ap-04-exploration
+TYPESAFE_API_KEY= bun run reading-list:acceptance \
+  --replay data/acceptance/ap-04-exploration/run.json \
+  --output data/acceptance/ap-04-replay
+bun run docs:build
+```
+
+**Exit evidence:** link exact new build/catalog/native hashes, model configuration, every criterion, verifier counts, cleanup observations, command exits, and remaining gates. Source changes intentionally make the old build's replay stale; never overwrite or rewrite that evidence. No test-count target or full-repository lint-pass claim substitutes for actual results.
+
+### AP-05 — Support Cases contract/probe checkpoint
+
+**Targets:** planned application-owned `examples/support-cases/acceptance/`; existing [application.ts](../../examples/support-cases/application.ts), [domain.ts](../../examples/support-cases/domain.ts), [contracts.ts](../../examples/support-cases/contracts.ts), [main.ts](../../examples/support-cases/main.ts), [board.ts](../../examples/support-cases/board.ts), [audit.ts](../../examples/support-cases/audit.ts); only the necessary acceptance contract/caller changes.
+
+Run `bun run support-cases inspect` and a disposable native-codec/fixture probe. Record exact bindings for `support.openCase`, `support.advanceCase`, `support.caseDetail`, `support.board`, and `support.auditTrail`. Prove DateTime wire handling and typed contextual sources for customer/agent IDs, captured case identity, and current/stale versions.
+
+Resolve three design questions with that evidence before the wider implementation: a declarative goal with a bounded operation set rather than a fixed action script; named typed context sources rather than model-invented IDs/versions; and **independent native input validity and expected operation outcome**. Prove both native-invalid input and native-valid policy-denied input are representable. Keep assertion semantics application-owned and migrate any changed Reading List callers cleanly.
+
+**Exit evidence:** runtime-validated declarations, actual codec/probe outputs, an explicit supported/unsupported statement, and documented real public/admin actor setup. Verify how credentials are supplied and masked/omitted from screenshots, model inputs, network evidence and logs before authenticated scenarios. Do not add policies to solve harness limitations.
+
+### AP-06 — Support Cases multi-step browser goal
+
+**Targets:** the application-owned catalog, contextual input providers, fixture/browser/evaluator/evidence modules and CLI under `examples/support-cases/acceptance/`, plus package scripts and operating documentation. Preserve the narrow responsibility boundaries already exercised by Reading List; no general framework extraction yet.
+
+Prepare a real customer, on-duty/off-duty agents and unrelated case/history fixtures. Through actual generated controls, open a case, triage, assign an on-duty agent, resolve and reopen it. Jev chooses current offered actions within the approved goal; native schemas and declared context sources supply payloads. Independently assert case identity, versions, assignment/clearing, ordered event history, joined customer/agent values and preservation after reload. Read hidden audit obligations through an explicitly scoped authorized probe, not model narration.
+
+**Required new command:** deliver `bun run support-cases:acceptance` with fresh output and model-free replay options. It is a deliverable of this package, **not an existing command**.
+
+**Exit evidence:** a successful actual multi-step exploration and fresh replay, independent per-requirement results, raw model decisions, native input/output evidence, before/after screenshots and owned-resource cleanup. Reading List remains runnable with its original obligations.
+
+### AP-07 — Denial, audit authorization and history
+
+**Targets:** Support Cases scenario/input/actor bindings and evaluators; the existing native policies in [sqlite.ts](../../examples/support-cases/sqlite.ts) and [audit.ts](../../examples/support-cases/audit.ts) are references, not policies to rewrite.
+
+Exercise native-valid stale-version, off-duty, missing-assignment and disallowed-transition attempts with otherwise appropriate context. Assert the applicable native failure and unchanged case/version, complete event/audit history and unrelated fixtures. Separately exercise the audit command with the real admin binding and denied unauthenticated/non-admin bindings. Do not report a policy denial as a schema failure or claim public lifecycle commands are protected.
+
+**Exit evidence:** successful/denied scenarios and their replays preserve distinct native validity/outcome fields; every criterion has its own result. No credential enters model-visible or retained evidence. Exact history entries/identities remain observable, including hidden obligations; incomplete pages or unavailable probes are inconclusive, not passes.
+
+### AP-08 — Live reliability and failure controls
+
+**Targets:** acceptance-owned fixture/implementation layers and browser/scenario/evaluator controls for both applications. Inject faults only into isolated owned test applications; do not add production fault switches.
+
+Exercise actual success-without-write, lost-after-reload, wrong-target/unrelated mutation, denied-but-mutating operation and history deletion through the real model/browser path. Use real native contracts with explicitly labeled defective implementations, not mocked Jev or fabricated browser observations. Also exercise actual deadline/no-progress and disabled/racing-target outcomes.
+
+**Exit evidence:** clean controls pass, each live defect fails the affected criterion, missing/blocked evidence cannot pass, and counts distinguish false acceptance/rejection from action completion and uncertainty. Retain the mutation/build identity and source/replay failure history. Observed zero false acceptance on this finite corpus is not a universal reliability claim.
+
+### AP-09 — Model calibration checkpoint
+
+**Targets:** a reviewed held-out decision corpus for both applications, the Jev adapter/configuration and calibration evidence; do not reuse the acceptance journeys as the entire calibration set.
+
+Record independently reviewed intended actions/unsafe choices, vary option order and relevant model version, and call real Jev on those held-out states. Measure action selection and confidence against the labels. Report abstention, blocked decisions, unsafe selection and task completion separately.
+
+**Exit evidence:** reproducible corpus/configuration/results and an explicit decision about operating thresholds, budgets and reassessment triggers. Keep the current threshold until evidence justifies a change; semantic acceptance is never delegated to confidence. Human decisions on changed product obligations remain approval checkpoints.
+
+### AP-10 — Evidence-backed shared extraction
+
+**Targets:** the proven common portions of both application-owned runners and their callers. Decide and record package placement/public exports from actual dependencies before moving code; AP-11–AP-15 target those resulting public modules.
+
+Extract only shared catalog/binding validation, orchestration, browser/model service interfaces, evidence and replay responsibilities demonstrated by both applications. Keep policy assertions, actor/fixture sources, hidden-state probes and semantics-changing transforms explicit application seams. Migrate all consumers and remove copied/obsolete implementations; no legacy aliases or generalized workflow DSL.
+
+**Exit evidence:** both applications run through the same documented stable responsibilities, pass real exploration/replay and their negative criteria, and retain escape hatches for the distinct business obligations. Public exports and every consuming workspace declare their dependencies. Record what did **not** generalize.
+
+### AP-11 — Product queries and real consumers
+
+**Targets:** the shared approved catalog/evidence query interface from AP-10, both catalogs/run readers, and actual CLI/documentation/QA consumers.
+
+Implement requirement-to-scenario/evaluator/build coverage, implementation versus tested-conformance views, stale/missing/blocked/inconclusive evidence, and dependency-based change-impact candidates. Keep native contract references and approval/revisions in one source; do not create a second documentation catalog.
+
+**Exit evidence:** actual consumers query both applications, expose untested and stale obligations after controlled revision/build changes, and never label a passing subset as full completion or conformance as validated user benefit. Unrecorded cross-feature effects remain a limitation, not a “no impact” result.
+
+### AP-12 — Product model and binding completeness
+
+**Targets:** AP-10's public declaration/binding schemas, both authored catalogs and imported-catalog validation.
+
+Audit the complete supported concept vocabulary and scoped shared/parameterized obligations against SDA-01. Finish provenance/approval/revision handling. Exercise native operation/resource/fixture/evaluator references across composed applications, including missing, ambiguous, incompatible and obsolete imports.
+
+**Exit evidence:** materially different declarations retain relationships and approval history without copied native contracts; invalid/imported bindings reject with actionable reasons. Record the supported revision/import representation and every remaining unsupported responsibility.
+
+### AP-13 — Generation and captured-codec coverage
+
+**Targets:** AP-10's native binding/input-source interpreter and application-owned providers; select concrete existing codec-dependent application contracts during a documented probe before implementation.
+
+Build a declared support matrix for open-ended, nullable/defaulted, contextual/correlated, recursive/custom-check and service-dependent shapes required by SDA-06. Use exact native validation/encoding and runtime-provided codec services. Unsupported or exhausted generation reports a limitation; it cannot fall back to an unrelated Resource schema or fake coverage.
+
+**Exit evidence:** concrete generated values traverse their actual browser controls and real operations with native decode/encode agreement; valid and isolated invalid cases retain provenance. No generated/trusted field leaks into input. Explicit typed semantic sources remain separate from mechanical sampling.
+
+### AP-14 — UI binding and semantics-preserving repair
+
+**Targets:** AP-10's browser binding seam, generated UI where mechanical metadata is needed, and a concrete custom-UI/related or repeated-collection surface selected by a runnable probe.
+
+Exercise locator/path/identity bindings on the actual supported surfaces, including stale/disabled/racing targets. Add locator repair only when it preserves the original requirement, target and observation scope; changed semantics require approval.
+
+**Exit evidence:** a changed locator can be repaired and replayed without skipping any criterion, while wrong targets or missing required history remain failures/inconclusive. Preserve the original failure, repair provenance, and re-exercised evidence. Custom UI is covered by an explicit binding, not a global selector heuristic.
+
+### AP-15 — Temporal, concurrent and qualitative obligations
+
+**Targets:** application-owned declarations, controlled fixture clock/world where required, scoped observers and the shared result model. Choose concrete applicable requirements from existing domain policy; do not invent business rules to obtain a demonstration.
+
+Exercise an actual concurrent version race and applicable sequence/time obligations with independent state/history observations. For qualitative requirements, separately record an approved review rubric, actual review evidence and `model assessment` versus executable assertion basis; do not relabel deterministic CRUD conformance as user benefit.
+
+**Exit evidence:** deterministic controlled-world observations where needed, complete competing outcomes and preservation, and truthful unresolved/qualitative results. A missing applicable policy or approval is a named prerequisite for that case, not a reason to close SDA-07.
+
+### AP-16 — Evidence governance
+
+**Targets:** both fixture/actor bindings, evidence persistence/readers and operating documentation; preserve AP-05/AP-07 credential protection while implementing the broader contract.
+
+Resolve access, redaction, retention/deletion and export rules for declared evidence classes before exposing protected application data or a remote evidence consumer. Choose conservative local-only handling until those policies exist; this is not permission to omit the full responsibility.
+
+**Exit evidence:** real authenticated synthetic fixtures prove credentials/private unrelated records cannot leak through JSON, screenshots, logs or exports; authorized consumers can inspect permitted evidence; retention/deletion behavior is exercised. Preserve required source/failure/replay lineage without retaining secrets.
+
+### AP-17 — Full-completion review
+
+**Targets:** each SDA-01–SDA-12 ledger row, operating/authoring docs, dependency declarations, current code and verification record.
+
+Evaluate every required full-system outcome and closing gate separately against the supported scope and exact current evidence. Run relevant lint/types/tests/builds and real scenarios; review unresolved generator/UI/actor/temporal/consumer/calibration/governance responsibilities. Neither completed work packages nor two passing slices automatically close a gate.
+
+**Exit evidence:** individually justified closures, or explicit open/blocked entries with missing evidence and claimable next work. Full-system completion requires all gates together; failures, unavailable approval and unsupported required capabilities remain visible. Narrowing accepted scope still requires a human-approved amendment.
+
 ## Current Evidence and Open Design Decisions
 
 The [2026-10-08 feasibility record](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility) establishes schema-derived sample acceptance, real-browser input rejection, one generated-input create/reload path, and a direct arbitrary-derivation limitation. It does not exercise a Jev API call, automated story interpretation, independent criterion evaluation, actor isolation, durable evidence storage, regression repair, or the reusable acceptance framework.

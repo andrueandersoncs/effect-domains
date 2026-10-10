@@ -115,6 +115,8 @@ The design's [SDA-01–SDA-12 completion ledger](story-driven-acceptance.md#full
 
 The [Slice A record](validation-strategy.md#2026-10-08-reading-list-story-driven-acceptance-slice-a) now demonstrates an application-owned declarative Effect runner, real Jev decisions and individual browser controls, native operation-aware generation, independent evaluators, private evidence, and actual replay. Optional forbidden-field arbitrary generation is resolved without weakening the native contract. The [earlier feasibility record](validation-strategy.md#2026-10-08-story-driven-acceptance-feasibility) remains historical. Support Cases, reusable extraction, general input/UI/evaluation responsibilities, consumer queries, calibration, and full lint acceptance remain open; the [per-gate ledger](story-driven-acceptance.md#slice-a-implementation-progress-2026-10-08) retains these gaps and final API/package decisions.
 
+The [implementation plan](story-driven-acceptance.md#implementation-plan) records the pending execution packages and their prerequisites: clean Slice A, prove Support Cases, exercise live reliability/calibration, then extract only shared responsibilities and finish the unmet consumer/input/UI/evaluation/governance gates. AP-01 is the ready frontier. This planning record adds no implementation evidence, closes no SDA gate, and leaves the accepted end goal unchanged.
+
 ## Remaining Evidence
 
 The actionable queue is [GitHub issue #12](https://github.com/andrueandersoncs/effect-domains/issues/12). Individual issues own scope, dependencies, state, and acceptance criteria; this page remains the synthesis of why the evidence matters and records the conclusion after each issue closes.
