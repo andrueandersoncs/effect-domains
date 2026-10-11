@@ -5,7 +5,8 @@
   "exports": {
     "./application": "./application.ts",
     "./infrastructure": "./infrastructure.ts",
-    "./migrations": "./migrations.ts"
+    "./migrations": "./migrations.ts",
+    "./acceptance/definition": "./acceptance/definition.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
@@ -15,12 +16,12 @@
     "acceptance": "bun run acceptance/main.ts"
   },
   "dependencies": {
+    "@effect-domains/acceptance": "workspace:*",
     "@effect-domains/alchemy": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "playwright": "1.64.0"
+    "@effect/vitest": "catalog:"
   }
 }

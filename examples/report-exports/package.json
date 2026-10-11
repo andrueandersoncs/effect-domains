@@ -10,18 +10,24 @@
     "./migrations": "./migrations.ts",
     "./output": "./output.ts",
     "./workflow": "./workflow.ts",
-    "./writer": "./writer.ts"
+    "./writer": "./writer.ts",
+    "./acceptance/definition": "./acceptance/definition.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript --files '*.ts'",
+    "lint": "better-typescript --files '**/*.ts'",
     "start": "bun run main.ts",
     "serve": "bun run main.ts serve",
-    "worker": "bun run main.ts worker"
+    "worker": "bun run main.ts worker",
+    "acceptance": "bun run acceptance/main.ts"
   },
   "dependencies": {
+    "@effect-domains/acceptance": "workspace:*",
     "@effect-domains/example-support": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:"
   }
 }

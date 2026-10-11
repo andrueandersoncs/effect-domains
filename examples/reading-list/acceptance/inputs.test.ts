@@ -1,164 +1,192 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
-import { RatingSchema } from "../domain.ts"
-import { makeCandidate, replayCandidate, resolveOperation, sampleOperation } from "./inputs.ts"
-import { PayloadSchema, type Payload, type Scenario } from "./model.ts"
+import { Array, Context, Effect, Equal, Function, Option, Record, Schema, Struct, flow, pipe } from "effect"
+import { inputLayer } from "@effect-domains/acceptance/inputs"
+import { type Candidate, Catalog, InputCandidates, PreparedFixture, type Payload, type Scenario } from "@effect-domains/acceptance/model"
+import { ReadingListApplication } from "../application.ts"
+import { BookFormatSchema, ReadingStatusSchema } from "../domain.ts"
+import { readingListCatalog } from "./catalog.ts"
 
-const scenario = (strategy: Scenario["strategy"], operation = "books.create"): Scenario => ({
-  id: `input-${operation}-${strategy}`,
-  revision: "1",
-  provenance: "native-input regression",
-  approval: "approved",
-  story: "input-regression",
-  operation,
-  resource: "books",
-  fixture: "isolated-reading-list",
-  actor: "public-reader",
-  goal: "Exercise the exact native operation contract",
-  strategy,
-  expected: ["below", "above", "fractional"].includes(strategy) || (strategy === "omitted" && operation === "books.update") ? "rejected" : "accepted",
-  requirements: [],
-  reload: false,
+const seed = 20261010
+
+const isStatus = Schema.is(ReadingStatusSchema)
+
+const isFormat = Schema.is(BookFormatSchema)
+
+const sentinel: Payload = {
+  id: "01890a5d-ac96-774b-bcce-b302099a8056",
+  title: "Unrelated fixture — preserve me",
+  author: "Fixture author",
+  status: "reading",
+  format: "hardcover",
+  rating: 4,
+  notes: "Sentinel revision 1",
+}
+
+const target: Payload = {
+  id: "01890a5d-ac96-774b-bcce-b302099a8057",
+  title: "A fixture title",
+  author: "A fixture author",
+  status: "planned",
+  format: "ebook",
+  rating: 3,
+  notes: "Preserve this fixture note",
+}
+
+const freshTarget: Payload = {
+  id: "01890a5d-ac96-7c4b-8cce-b302099a8058",
+  title: "A fresh fixture title",
+  author: "A fresh fixture author",
+  status: "planned",
+  format: "audiobook",
+  rating: null,
+  notes: null,
+}
+
+const targetFacts = (row: Payload): Payload => ({
+  sentinel,
+  "sentinel.id": sentinel.id,
+  target: row,
+  "target.id": row.id,
+  "target.title": row.title,
+  "target.author": row.author,
+  "target.status": row.status,
+  "target.format": row.format,
+  "target.notes": row.notes,
+  "target.rating": row.rating,
 })
 
-it.effect("create generation omits optional Never without weakening the original native codec", () => Effect.gen(function* () {
-  const operation = yield* resolveOperation("books.create")
-  const candidates = yield* sampleOperation("books.create", 20261008, 32)
-  expect(candidates).toHaveLength(32)
-  for (const candidate of candidates) {
-    expect(Object.hasOwn(candidate.input, "id")).toBe(false)
-    expect(candidate.omittedFields).toContain("id")
-    expect(candidate.valid).toBe(true)
-    const decoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(candidate.input)
-    expect(decoded).toEqual(candidate.decoded)
-    const suppliedId = yield* Schema.decodeUnknownEffect(operation.payloadSchema)({ ...candidate.input, id: "forbidden" }).pipe(Effect.result)
-    expect(suppliedId._tag).toBe("Failure")
-  }
-  const repeated = yield* sampleOperation("books.create", 20261008, 32)
-  expect(repeated).toEqual(candidates)
-}))
+const createFacts: Payload = { sentinel, "sentinel.id": sentinel.id }
 
-it.effect("rating boundaries and null satisfy the exact native codec while rejection candidates remain invalid", () => Effect.gen(function* () {
-  const operation = yield* resolveOperation("books.create")
-  const minimum = yield* makeCandidate(scenario("minimum"), 11)
-  const maximum = yield* makeCandidate(scenario("maximum"), 11)
-  expect(minimum.input.rating).toBe(1)
-  expect(maximum.input.rating).toBe(5)
-  expect(Schema.is(RatingSchema)(minimum.input.rating)).toBe(true)
-  expect(Schema.is(RatingSchema)(maximum.input.rating)).toBe(true)
-  const nullable = yield* makeCandidate(scenario("null"), 11)
-  expect(nullable.input.rating).toBe(null)
-  expect(nullable.valid).toBe(true)
-  yield* Schema.decodeUnknownEffect(operation.payloadSchema)(nullable.input)
+const fixtureWith = (binding: string) => (facts: Payload) => PreparedFixture.make({
+  binding,
+  revision: "isolated-reading-list@2",
+  url: "http://127.0.0.1/",
+  actor: "public-reader",
+  facts,
+  tracked: [],
+})
 
-  for (const strategy of ["below", "above", "fractional"] as const) {
-    const candidate = yield* makeCandidate(scenario(strategy), 11)
-    const decoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(candidate.input).pipe(Effect.result)
-    expect(decoded._tag).toBe("Failure")
-    expect(candidate.valid).toBe(false)
-    expect(candidate.decoded).toBeUndefined()
-    expect(Schema.is(RatingSchema)(candidate.input.rating)).toBe(false)
-  }
-}))
+const createFixture = fixtureWith("isolated-reading-list")(createFacts)
 
-it.effect("create omission is native-valid and preserves omitted nullable fields through encoding and replay", () => Effect.gen(function* () {
-  const declaration = scenario("omitted")
-  const operation = yield* resolveOperation("books.create")
-  const candidate = yield* makeCandidate(declaration, 11)
-  expect(candidate.valid).toBe(true)
-  expect(Object.hasOwn(candidate.input, "rating")).toBe(false)
-  expect(candidate.omittedFields).toContain("rating")
-  const decoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(candidate.input)
-  const encoded = yield* Schema.decodeUnknownEffect(PayloadSchema)(yield* Schema.encodeUnknownEffect(operation.payloadSchema)(decoded))
-  expect(Object.hasOwn(encoded, "rating")).toBe(false)
-  const replayed = yield* replayCandidate(declaration, candidate)
-  expect(replayed.valid).toBe(true)
-  expect(replayed.input).toEqual(candidate.input)
-  expect(Object.hasOwn(replayed.input, "rating")).toBe(false)
+const targetFixtureOf = flow(targetFacts, fixtureWith("isolated-reading-list-target"))
 
-  const { notes: _notes, ...withoutNullableFields } = candidate.input
-  const omittedDecoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(withoutNullableFields)
-  const omittedEncoded = yield* Schema.decodeUnknownEffect(PayloadSchema)(yield* Schema.encodeUnknownEffect(operation.payloadSchema)(omittedDecoded))
-  expect(Object.hasOwn(omittedEncoded, "rating")).toBe(false)
-  expect(Object.hasOwn(omittedEncoded, "notes")).toBe(false)
-}))
+const targetFixture = targetFixtureOf(target)
 
-it.effect("update binds every unchanged field and identity to the complete fixture target", () => Effect.gen(function* () {
-  const sampled = yield* sampleOperation("books.update", 18, 1)
-  const target: Payload = {
-    ...sampled[0]!.input,
-    title: "A fixture title",
-    author: "A fixture author",
-    status: "reading",
-    format: "hardcover",
-    rating: null,
-    notes: "Preserve this fixture note",
-  }
-  const operation = yield* resolveOperation("books.update")
-  for (const strategy of ["sample", "maximum", "above", "omitted"] as const) {
-    const candidate = yield* makeCandidate(scenario(strategy, "books.update"), 18, target)
-    const { rating: _targetRating, ...unchangedTarget } = target
-    const { rating: _candidateRating, ...unchangedCandidate } = candidate.input
-    expect(unchangedCandidate).toEqual(unchangedTarget)
-    expect(candidate.input.id).toBe(target.id)
-    expect(candidate.valid).toBe(strategy === "sample" || strategy === "maximum")
-    const decoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(candidate.input).pipe(Effect.result)
-    expect(decoded._tag).toBe(candidate.valid ? "Success" : "Failure")
-  }
-  expect(target.rating).toBe(null)
-  const missing = yield* makeCandidate(scenario("maximum", "books.update"), 18).pipe(Effect.result)
-  expect(missing._tag).toBe("Failure")
-  if (missing._tag === "Failure") expect(missing.failure.boundary).toBe("inputs.fixture")
-}))
+const freshFixture = targetFixtureOf(freshTarget)
 
-it.effect("unresolved operations and unsupported strategy bindings fail explicitly", () => Effect.gen(function* () {
-  const unknown = yield* resolveOperation("books.missing").pipe(Effect.result)
-  expect(unknown._tag).toBe("Failure")
-  if (unknown._tag === "Failure") expect(unknown.failure.boundary).toBe("inputs.operation")
-  const unsupported = yield* sampleOperation("books.remove", 1, 1).pipe(Effect.result)
-  expect(unsupported._tag).toBe("Failure")
-  if (unsupported._tag === "Failure") expect(unsupported.failure.boundary).toBe("inputs.unsupported")
-  const empty = yield* sampleOperation("books.create", 1, 0).pipe(Effect.result)
-  expect(empty._tag).toBe("Failure")
-  if (empty._tag === "Failure") expect(empty.failure.boundary).toBe("inputs.unsupported")
-}))
+const decodedCatalog = Schema.decodeUnknownEffect(Catalog)(readingListCatalog)
 
-it.effect("concrete update replay rebinds only identity and retains recorded values and provenance", () => Effect.gen(function* () {
-  const targets = yield* sampleOperation("books.update", 62, 2)
-  const originalTarget = targets[0]!.input
-  const freshTarget = targets[1]!.input
-  for (const strategy of ["maximum", "above"] as const) {
-    const declaration = scenario(strategy, "books.update")
-    const recorded = yield* makeCandidate(declaration, 63, originalTarget)
-    const replayed = yield* replayCandidate(declaration, recorded, freshTarget)
-    expect(replayed.input).toEqual({ ...recorded.input, id: freshTarget.id })
-    expect(replayed.source).toBe(recorded.source)
-    expect(replayed.seed).toBe(recorded.seed)
-    expect(replayed.strategy).toBe(recorded.strategy)
-    expect(replayed.valid).toBe(recorded.valid)
-    const operation = yield* resolveOperation("books.update")
-    const decoded = yield* Schema.decodeUnknownEffect(operation.payloadSchema)(replayed.input).pipe(Effect.result)
-    expect(decoded._tag).toBe(replayed.valid ? "Success" : "Failure")
-  }
-}))
+const withId = (id: string) => (scenario: Scenario) => Equal.equals(scenario.id, id)
 
-it.effect("create replay rejects forbidden identity and records with the wrong native validity", () => Effect.gen(function* () {
-  const declaration = scenario("above")
-  const recorded = yield* makeCandidate(declaration, 71)
-  const replayed = yield* replayCandidate(declaration, recorded)
-  expect(replayed.input).toEqual(recorded.input)
-  const suppliedId = yield* replayCandidate(declaration, {
-    ...recorded, input: { ...recorded.input, id: "forbidden" },
-  }).pipe(Effect.result)
-  expect(suppliedId._tag).toBe("Failure")
-  const validRating = yield* replayCandidate(declaration, {
-    ...recorded, input: { ...recorded.input, rating: null },
-  }).pipe(Effect.result)
-  expect(validRating._tag).toBe("Failure")
-  const wrongField = yield* replayCandidate(declaration, {
-    ...recorded, input: { ...recorded.input, title: "" },
-  }).pipe(Effect.result)
-  expect(wrongField._tag).toBe("Failure")
-  const wrongMetadata = yield* replayCandidate(declaration, { ...recorded, valid: true }).pipe(Effect.result)
-  expect(wrongMetadata._tag).toBe("Failure")
-}))
+const resolvedFor = (fixture: PreparedFixture) => Effect.fn("ReadingListInputsTest.resolved")(function* (id: string) {
+  const inputs = yield* InputCandidates
+  const catalog = yield* decodedCatalog
+  const scenario = yield* pipe(catalog.scenarios, Array.findFirst(withId(id)), Effect.fromOption)
+  const candidates = yield* inputs.resolve(scenario, fixture, [], catalog.textFixtures, seed)
+
+  return yield* pipe(candidates, Array.head, Effect.fromOption)
+})
+
+const ratingOf = (candidate: Candidate) => Record.get(candidate.input, "rating")
+
+const withoutRating = (candidate: Candidate) => Record.remove(candidate.input, "rating")
+
+const targetWithoutRating = Record.remove(target, "rating")
+
+const expectedValidRatings = Array.map([1, 5, null], Option.some)
+
+const expectedInvalidRatings = Array.map([0, 6, 1.5], Option.some)
+
+const ratingStrategiesTest = Effect.gen(function* () {
+  const resolve = resolvedFor(targetFixture)
+  const valid = yield* Effect.forEach(["rating-minimum", "rating-maximum", "rating-null"], resolve)
+  const invalid = yield* Effect.forEach(["rating-below", "rating-above", "rating-fractional"], resolve)
+  const validRatings = Array.map(valid, ratingOf)
+  const invalidRatings = Array.map(invalid, ratingOf)
+  const validities = Array.map([...valid, ...invalid], Struct.get("validity"))
+  const retained = Array.map([...valid, ...invalid], withoutRating)
+  const expectedRetained = Array.replicate(targetWithoutRating, 6)
+  const valids = Array.replicate("native-valid", 3)
+  const invalids = Array.replicate("native-invalid", 3)
+  const minimum = yield* pipe(valid, Array.head, Effect.fromOption)
+  const above = yield* pipe(invalid, Array.get(1), Effect.fromOption)
+
+  expect(validRatings).toEqual(expectedValidRatings)
+  expect(invalidRatings).toEqual(expectedInvalidRatings)
+  expect(validities).toEqual([...valids, ...invalids])
+  expect(retained).toEqual(expectedRetained)
+  expect(minimum.nativeValidation).toMatch(/^accepted by the exact native books\.update codec/)
+  expect(minimum.provenance).toContain("id ← fixture isolated-reading-list-target@isolated-reading-list@2 fact target.id")
+  expect(minimum.provenance).toContain("rating ← native minimum of books.update.rating bounds 1..5")
+  expect(above.nativeValidation).toMatch(/^rejected by the exact native books\.update codec: /)
+  expect(above.input).toEqual({ ...target, rating: 6 })
+})
+
+const hasRating = (candidate: Candidate) => Record.has(candidate.input, "rating")
+
+const hasIdentity = (candidate: Candidate) => Record.has(candidate.input, "id")
+
+const createCandidatesTest = Effect.gen(function* () {
+  const resolve = resolvedFor(createFixture)
+  const sampled = yield* resolve("create-sample")
+  const nulled = yield* resolve("create-null")
+  const omitted = yield* resolve("create-omitted")
+  const created = [sampled, nulled, omitted]
+  const identities = Array.map(created, hasIdentity)
+  const titles = Array.map(created, flow(Struct.get("input"), Struct.get("title")))
+  const authors = Array.map(created, flow(Struct.get("input"), Struct.get("author")))
+  const statuses = Array.map(created, flow(Struct.get("input"), Struct.get("status"), isStatus))
+  const formats = Array.map(created, flow(Struct.get("input"), Struct.get("format"), isFormat))
+  const validities = Array.map(created, Struct.get("validity"))
+  const ratings = Array.map(created, hasRating)
+  const nullRating = ratingOf(nulled)
+  const omittedKeys = Record.keys(omitted.input)
+  const expectedTitles = Array.replicate("The Dispossessed", 3)
+  const expectedAuthors = Array.replicate("Ursula K. Le Guin", 3)
+  const expectedValidities = Array.replicate("native-valid", 3)
+  const expectedNull = Option.some(null)
+
+  expect(identities).toEqual([false, false, false])
+  expect(titles).toEqual(expectedTitles)
+  expect(authors).toEqual(expectedAuthors)
+  expect(statuses).toEqual([true, true, true])
+  expect(formats).toEqual([true, true, true])
+  expect(validities).toEqual(expectedValidities)
+  expect(ratings).toEqual([true, true, false])
+  expect(nullRating).toEqual(expectedNull)
+  expect(omittedKeys).toEqual(["title", "author", "status", "format", "notes"])
+  expect(sampled.provenance).toContain("title ← text documented-book-text@1.title")
+  expect(sampled.provenance).toContain("status ← native whole-payload sample of books.create")
+  expect(sampled.provenance).toContain("format ← native whole-payload sample of books.create")
+})
+
+const replayTest = Effect.gen(function* () {
+  const inputs = yield* InputCandidates
+  const catalog = yield* decodedCatalog
+  const scenario = yield* pipe(catalog.scenarios, Array.findFirst(withId("rating-above")), Effect.fromOption)
+  const recorded = yield* resolvedFor(targetFixture)("rating-above")
+  const replayed = yield* inputs.replay(scenario, [recorded], freshFixture, [], catalog.textFixtures)
+  const candidate = yield* pipe(replayed, Array.head, Effect.fromOption)
+
+  expect(candidate.input).toEqual({ ...freshTarget, rating: 6 })
+  expect(candidate.validity).toBe("native-invalid")
+  expect(candidate.provenance).toContain("rating ← recorded native sample")
+})
+
+const codecServices = Context.empty()
+
+const readingListInputs = inputLayer(ReadingListApplication, codecServices)
+
+const provided = <A, E>(test: Effect.Effect<A, E, InputCandidates>) => Effect.provide(test, readingListInputs)
+
+const ratingStrategies = provided(ratingStrategiesTest)
+
+const createCandidates = provided(createCandidatesTest)
+
+const replay = provided(replayTest)
+
+it.effect("rating bounds and null resolve native-valid while below, above, and fractional stay raw and native-invalid", Function.constant(ratingStrategies))
+
+it.effect("create candidates carry approved text and native values, never an identity, and omission drops the rating", Function.constant(createCandidates))
+
+it.effect("rating replay rebinds fixture facts and keeps the recorded native value", Function.constant(replay))

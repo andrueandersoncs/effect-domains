@@ -104,6 +104,10 @@ The first three calls return the selected row (the remove call returns the delet
 
 This is a local expense register. It does not implement double-entry accounting, exchange rates, reimbursement review, taxes, production identity, or a payment-provider workflow.
 
+## Story-driven browser acceptance
+
+`bun run expense-ledger:acceptance` runs this application's [acceptance catalog](acceptance/catalog.ts) through the shared [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance) tooling against an isolated server seeded with two expenses. It is a generation-matrix slice: one expense is recorded with its date taken from the fixture period, approved merchant text, and category, amount, and currency drawn from one native whole-payload sample; a lowercase currency is rejected by the native pattern (HTTP 400); and totals with the fixture period reversed are refused by the handler with `InvalidExpenseDateRange` (HTTP 422). Generic round-trip evaluators check the declared outcome, a lossless native round trip, exclusion of the server-generated id, and an unchanged reloaded Expenses view for refusals. See the [acceptance guide](../../docs/guides/acceptance.md) for options, replay, and evidence handling.
+
 ## Read next
 
 - [Expense schemas and declared failures](domain.ts)

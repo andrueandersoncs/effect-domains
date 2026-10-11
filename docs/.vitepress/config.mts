@@ -38,6 +38,7 @@ export default defineConfig({
           { text: "Define a resource", link: "/guides/define-a-resource" },
           { text: "Restrict access", link: "/guides/authorization" },
           { text: "Change a stored schema", link: "/guides/migrations" },
+          { text: "Run story-driven acceptance", link: "/guides/acceptance" },
         ],
       },
       {

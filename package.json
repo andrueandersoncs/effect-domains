@@ -43,6 +43,7 @@
     "report-exports": "bun run examples/report-exports/main.ts",
     "report-exports:server": "bun run examples/report-exports/main.ts serve",
     "report-exports:worker": "bun run examples/report-exports/main.ts worker",
+    "report-exports:acceptance": "bun run examples/report-exports/acceptance/main.ts",
     "appointment-reminders": "bun run examples/appointment-reminders/main.ts",
     "appointment-reminders:server": "bun run examples/appointment-reminders/main.ts serve",
     "appointment-reminders:worker": "bun run examples/appointment-reminders/main.ts worker",
@@ -53,6 +54,7 @@
     "reading-list:acceptance": "bun run examples/reading-list/acceptance/main.ts",
     "expense-ledger:server": "bun run examples/expense-ledger/main.ts serve",
     "expense-ledger": "bun run examples/expense-ledger/main.ts",
+    "expense-ledger:acceptance": "bun run examples/expense-ledger/acceptance/main.ts",
     "team-tasks:server": "bun run examples/team-tasks/main.ts serve",
     "team-tasks": "bun run examples/team-tasks/main.ts",
     "field-notes:server": "bun run examples/field-notes/main.ts serve",
@@ -63,7 +65,11 @@
     "repair-workshop:server": "bun run examples/repair-workshop/main.ts serve",
     "support-cases": "bun run examples/support-cases/main.ts",
     "support-cases:server": "bun run examples/support-cases/main.ts serve",
-    "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts"
+    "support-cases:acceptance": "bun run examples/support-cases/acceptance/main.ts",
+    "editorial-calendar:seed-v1": "bun run examples/editorial-calendar/seed-v1.ts",
+    "acceptance:calibrate": "bun run packages/effect-domains-acceptance/src/calibrate.ts",
+    "acceptance:evidence": "bun run packages/effect-domains-acceptance/src/evidence-cli.ts",
+    "acceptance:query": "bun run apps/acceptance-console/query.ts"
   },
   "devDependencies": {
     "@better-typescript/better-typescript": "0.4.29",

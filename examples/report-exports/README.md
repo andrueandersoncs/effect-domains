@@ -148,6 +148,10 @@ The application database defaults to `data/report-exports.sqlite`; execution sto
 
 `EFFECT_DOMAINS_DEMO_PASSWORD` is required at every server start and `REPORT_EXPORTS_IDENTITY_DB` defaults to `data/report-exports-identity.sqlite`; configure it separately from `REPORT_EXPORTS_DB` and `REPORT_EXPORTS_EXECUTION_DB`.
 
+## Story-driven browser acceptance
+
+`bun run report-exports:acceptance` runs this application's [acceptance catalog](acceptance/catalog.ts) through the shared [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance) tooling. Each scenario starts an isolated topology—the server as a cluster client plus one owned worker process—with private application, execution, and identity stores, a generated demo password, and sessions for the editor `alice` and the reader `bob` held only by the harness. Scenarios cover a `GenerateDiscard` request whose nested report header and `lines` array come from one native whole-payload sample (entered through the generated fieldsets and JSON textarea), a reversed reporting period rejected by the native codec (HTTP 400), the reader refused with `Forbidden`, and a `Generate` request whose eventual completion is watched through an authorized status probe until `Succeeded` with a hashed, immutable artifact within a declared deadline. Acceptance of the request is never treated as completion. See the [acceptance guide](../../docs/guides/acceptance.md) for options, replay, and evidence handling.
+
 ## Full-stack OpenTelemetry and business metrics
 
 The runner exports OTLP traces, metrics, and correlated logs as `report-exports`. The same configuration covers CLI inspection, HTTP, initialization, outbox relay, and the long-lived worker. Start the local stack and point every process at its OTLP/HTTP receiver:

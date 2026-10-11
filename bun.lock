@@ -28,6 +28,17 @@
         "vue": "3.5.42",
       },
     },
+    "apps/acceptance-console": {
+      "name": "@effect-domains/acceptance-console",
+      "dependencies": {
+        "@effect-domains/acceptance": "workspace:*",
+        "@effect-domains/example-expense-ledger": "workspace:*",
+        "@effect-domains/example-reading-list": "workspace:*",
+        "@effect-domains/example-report-exports": "workspace:*",
+        "@effect-domains/example-support-cases": "workspace:*",
+        "effect": "catalog:",
+      },
+    },
     "apps/application-ui": {
       "name": "@effect-domains/application-ui",
       "version": "0.1.0",
@@ -71,8 +82,12 @@
     "examples/expense-ledger": {
       "name": "@effect-domains/example-expense-ledger",
       "dependencies": {
+        "@effect-domains/acceptance": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
       },
     },
     "examples/field-notes": {
@@ -102,13 +117,13 @@
     "examples/reading-list": {
       "name": "@effect-domains/example-reading-list",
       "dependencies": {
+        "@effect-domains/acceptance": "workspace:*",
         "@effect-domains/alchemy": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
-        "playwright": "1.64.0",
       },
     },
     "examples/repair-workshop": {
@@ -121,9 +136,13 @@
     "examples/report-exports": {
       "name": "@effect-domains/example-report-exports",
       "dependencies": {
+        "@effect-domains/acceptance": "workspace:*",
         "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
       },
     },
     "examples/reservations": {
@@ -136,9 +155,13 @@
     "examples/support-cases": {
       "name": "@effect-domains/example-support-cases",
       "dependencies": {
+        "@effect-domains/acceptance": "workspace:*",
         "@effect-domains/example-support": "workspace:*",
         "effect": "catalog:",
         "effect-domains": "workspace:*",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
       },
     },
     "examples/team-tasks": {
@@ -161,6 +184,17 @@
       },
       "peerDependencies": {
         "typescript": "^7",
+      },
+    },
+    "packages/effect-domains-acceptance": {
+      "name": "@effect-domains/acceptance",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-domains": "workspace:*",
+        "playwright": "1.64.0",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
       },
     },
     "packages/effect-domains-alchemy": {
@@ -342,6 +376,10 @@
     "@docsearch/js": ["@docsearch/js@3.8.2", "", { "dependencies": { "@docsearch/react": "3.8.2", "preact": "^10.0.0" } }, "sha512-Q5wY66qHn0SwA7Taa0aDbHiJvaFJLOJyHmooQ7y8hlwwQLQ/5WwCcoX0g7ii04Qi2DJlHsd0XXzJ8Ypw9+9YmQ=="],
 
     "@docsearch/react": ["@docsearch/react@3.8.2", "", { "dependencies": { "@algolia/autocomplete-core": "1.17.7", "@algolia/autocomplete-preset-algolia": "1.17.7", "@docsearch/css": "3.8.2", "algoliasearch": "^5.14.2" }, "peerDependencies": { "@types/react": ">= 16.8.0 < 19.0.0", "react": ">= 16.8.0 < 19.0.0", "react-dom": ">= 16.8.0 < 19.0.0", "search-insights": ">= 1 < 3" }, "optionalPeers": ["@types/react", "react", "react-dom", "search-insights"] }, "sha512-xCRrJQlTt8N9GU0DG4ptwHRkfnSnD/YpdeaXe02iKfqs97TkZJv60yE+1eq/tjPcVnTW8dP5qLP7itifFVV5eg=="],
+
+    "@effect-domains/acceptance": ["@effect-domains/acceptance@workspace:packages/effect-domains-acceptance"],
+
+    "@effect-domains/acceptance-console": ["@effect-domains/acceptance-console@workspace:apps/acceptance-console"],
 
     "@effect-domains/alchemy": ["@effect-domains/alchemy@workspace:packages/effect-domains-alchemy"],
 

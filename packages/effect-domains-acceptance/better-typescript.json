@@ -1,0 +1,19 @@
+{
+  "commands": [
+    {
+      "type": "add_exclusions",
+      "files": "test/Authorization.test.ts",
+      "rules": "no-mutation"
+    },
+    {
+      "type": "add_exclusions",
+      "files": "test/Entitlements.test.ts",
+      "rules": "no-mutation"
+    },
+    {
+      "type": "add_exclusions",
+      "files": "test/ReadModel.test.ts",
+      "rules": "no-mutation"
+    }
+  ]
+}

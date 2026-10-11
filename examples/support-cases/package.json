@@ -5,17 +5,23 @@
   "exports": {
     "./application": "./application.ts",
     "./domain": "./domain.ts",
-    "./migrations": "./migrations.ts"
+    "./migrations": "./migrations.ts",
+    "./acceptance/definition": "./acceptance/definition.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "lint": "better-typescript --files '*.ts'",
+    "lint": "better-typescript --files '**/*.ts'",
     "start": "bun run main.ts",
-    "serve": "bun run main.ts serve"
+    "serve": "bun run main.ts serve",
+    "acceptance": "bun run acceptance/main.ts"
   },
   "dependencies": {
+    "@effect-domains/acceptance": "workspace:*",
     "@effect-domains/example-support": "workspace:*",
     "effect": "catalog:",
     "effect-domains": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:"
   }
 }
