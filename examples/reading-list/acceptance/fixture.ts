@@ -4,8 +4,6 @@ import { AcceptanceError, Candidate, FixtureRuntime, PayloadSchema, PreparedFixt
 import { ServerSpec, call, serve } from "@effect-domains/acceptance/server"
 import { ReadingListBookSchema } from "../domain.ts"
 
-const revision = "isolated-reading-list@2"
-
 const createBinding = "isolated-reading-list"
 
 const targetBinding = "isolated-reading-list-target"
@@ -127,7 +125,7 @@ const prepare = Effect.fn("ReadingListAcceptance.fixture.prepare")(function* (sc
   const tracked = Array.prepend(targetIds, sentinel.row.id)
   const prepared = fixtureFacts(sentinel, target)
 
-  return PreparedFixture.make({ binding: scenario.fixture, revision, url, actor: binding, facts: prepared, tracked })
+  return PreparedFixture.make({ binding: scenario.fixture, url, actor: binding, facts: prepared, tracked })
 })
 
 const unsupportedProbe = (target: ProbeTarget) => `The Reading List fixture implements no probes; ${target.probe} is unsupported`
@@ -138,7 +136,7 @@ const direct = Effect.fn("ReadingListAcceptance.fixture.direct")(function* (fixt
   const at = yield* now
   const response = yield* call(fixture.url, candidate.operation, candidate.input, anonymous)
 
-  return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at, exchange: Option.none(), feedback: Option.none() })
+  return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at })
 })
 
 // The application is public because the slice grants every operation to anonymous readers, so no session or secret exists.
@@ -150,6 +148,6 @@ const noSecrets = Effect.succeed(retained)
 
 const secrets = Function.constant(noSecrets)
 
-const runtime = FixtureRuntime.of({ revision, bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
+const runtime = FixtureRuntime.of({ bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
 
 export const fixtureLayer = Layer.succeed(FixtureRuntime, runtime)

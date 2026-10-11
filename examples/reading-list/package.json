@@ -5,8 +5,7 @@
   "exports": {
     "./application": "./application.ts",
     "./infrastructure": "./infrastructure.ts",
-    "./migrations": "./migrations.ts",
-    "./acceptance/definition": "./acceptance/definition.ts"
+    "./migrations": "./migrations.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

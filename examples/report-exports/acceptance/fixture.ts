@@ -1,14 +1,11 @@
 import { Database } from "bun:sqlite"
-import { Array, DateTime, Effect, Equal, Function, HashMap, Layer, Option, Redacted, Ref, Schema, String as Text, Struct, flow, pipe } from "effect"
-import { createHash, randomBytes } from "node:crypto"
-import { realpath } from "node:fs/promises"
-import { join, sep } from "node:path"
+import { Array, DateTime, Effect, Equal, Function, HashMap, Layer, Option, Redacted, Ref, Schema, flow, pipe } from "effect"
+import { randomBytes } from "node:crypto"
+import { join } from "node:path"
 import { AcceptanceError, Candidate, FixtureRuntime, PayloadSchema, PreparedFixture, ProbeRecord, ProbeTarget, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
-import { CallResponse, ServerSpec, call, serve, startWorker } from "@effect-domains/acceptance/server"
+import { ServerSpec, call, serve, startWorker } from "@effect-domains/acceptance/server"
 
 type Token = Redacted.Redacted<string>
-
-const revision = "isolated-report-exports@2"
 
 const binding = "acme-exports"
 
@@ -18,9 +15,7 @@ const actors = ["editor-session", "reader-session"]
 
 const storedExports = "stored-exports"
 
-const exportStatus = "export-status"
-
-const probes = [storedExports, exportStatus]
+const probes = [storedExports]
 
 const tenantFact = "tenant.id"
 
@@ -30,24 +25,18 @@ const tenant = "acme"
 
 const operation = "ReportExport.GenerateDiscard"
 
-const pollOperation = "ReportExport.Poll"
-
 const TokenSchema = Schema.Redacted(Schema.String)
 
 const ActorTokenSchema = Schema.Option(TokenSchema)
 
 const IdentifiersSchema = Schema.Array(Schema.String)
 
-/** What the fixture keeps per prepared application because probes need the operator session, the private stores, and the executions that existed before the scenario. */
+/** What the fixture keeps per prepared application because probes need the private store and sessions are secrets. */
 class Credentials extends Schema.Class<Credentials>("Credentials")({
   password: TokenSchema,
   editor: TokenSchema,
-  admin: TokenSchema,
   actor: ActorTokenSchema,
   database: Schema.String,
-  output: Schema.String,
-  artifacts: Schema.String,
-  prepared: IdentifiersSchema,
 }) {}
 
 const LoginSchema = Schema.Struct({ token: Schema.String })
@@ -58,31 +47,9 @@ const StoredRequestSchema = Schema.fromJsonString(Schema.Unknown)
 
 const StoredExportSchema = Schema.Struct({ id: Schema.String, request: StoredRequestSchema })
 
-interface StoredExport extends Schema.Schema.Type<typeof StoredExportSchema> {}
+export interface StoredExport extends Schema.Schema.Type<typeof StoredExportSchema> {}
 
-const StoredExportsSchema = Schema.Array(StoredExportSchema)
-
-const ExecutionIdSchema = Schema.Struct({ id: Schema.String })
-
-interface ExecutionId extends Schema.Schema.Type<typeof ExecutionIdSchema> {}
-
-const ExecutionIdsSchema = Schema.Array(ExecutionIdSchema)
-
-const ArtifactNamedSchema = Schema.Struct({ _tag: Schema.Literal("Succeeded"), artifactPath: Schema.String })
-
-interface ArtifactNamed extends Schema.Schema.Type<typeof ArtifactNamedSchema> {}
-
-/** No execution of the subject appeared since preparation, because the watched request has not reached the store yet. */
-export const UndiscoveredSchema = Schema.TaggedStruct("Undiscovered", {})
-
-/** Several executions appeared since preparation, because the probe must report rather than guess which one the scenario created. */
-const AmbiguousSchema = Schema.TaggedStruct("Ambiguous", { executions: IdentifiersSchema })
-
-/** The returned artifact path resolves outside the private output directory, because such a path is reported, never opened. */
-export const OutsideArtifactSchema = Schema.TaggedStruct("Outside", { path: Schema.String })
-
-/** The artifact bytes as read (text and SHA-256) and the path of the copy retained with the scenario evidence. */
-export const RetainedArtifactSchema = Schema.TaggedStruct("Retained", { path: Schema.String, content: Schema.String, sha256: Schema.String, retained: Schema.String })
+export const StoredExportsSchema = Schema.Array(StoredExportSchema)
 
 const ServerEnvironmentSchema = Schema.Record(Schema.String, Schema.String)
 
@@ -173,7 +140,7 @@ const requireKnown = (known: ReadonlyArray<string>, kind: string, name: string) 
 
 const missingCredentials = fixtureError("Fixture credentials are not available; the fixture was released or never prepared")
 
-const unsupportedProbe = (target: ProbeTarget) => `The Report Exports fixture implements only ${storedExports} and ${exportStatus}; ${target.probe} is unsupported`
+const unsupportedProbe = (target: ProbeTarget) => `The Report Exports fixture implements only ${storedExports}; ${target.probe} is unsupported`
 
 const now = Effect.map(DateTime.now, DateTime.formatIso)
 
@@ -187,8 +154,6 @@ const loginActor = (url: string, password: Token, editor: Token) => (username: s
 
 const storedExportsQuery = "SELECT id, request FROM report_export_executions WHERE \"tenantId\" = ? ORDER BY id"
 
-const executionIdsQuery = "SELECT id FROM report_export_executions WHERE \"tenantId\" = ? ORDER BY id"
-
 const readOnly = { readonly: true }
 
 const openDatabase = (path: string) => Effect.try({ try: () => new Database(path, readOnly), catch: describeFailure })
@@ -198,8 +163,6 @@ const closeDatabase = (database: Database) => Effect.sync(() => database.close()
 const selectRows = (query: string, subject: string) => (database: Database) => Effect.try({ try: () => database.query(query).all(subject), catch: describeFailure })
 
 const decodeExports = flow(Schema.decodeUnknownEffect(StoredExportsSchema), Effect.mapError(describeFailure))
-
-const decodeExecutionIds = flow(Schema.decodeUnknownEffect(ExecutionIdsSchema), Effect.mapError(describeFailure))
 
 const readRows = (path: string, query: string, subject: string) => {
   const opened = openDatabase(path)
@@ -217,134 +180,6 @@ const readStoredExports = Effect.fn("ReportExportsAcceptance.fixture.storedExpor
   const decoded: ReadonlyArray<StoredExport> = yield* decodeExports(rows)
 
   return decoded
-})
-
-// Execution ids are discovered in the store because the operator poll needs an id and the application publishes no list of executions.
-const readExecutionIds = Effect.fn("ReportExportsAcceptance.fixture.executionIds")(function* (path: string, subject: string) {
-  const rows = yield* readRows(path, executionIdsQuery, subject)
-  const decoded: ReadonlyArray<ExecutionId> = yield* decodeExecutionIds(rows)
-
-  return Array.map(decoded, Struct.get("id"))
-})
-
-const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
-
-const utf8 = new TextDecoder()
-
-const resolvedPath = (path: string) => Effect.tryPromise({ try: () => realpath(path), catch: describeFailure })
-
-const readBytes = (path: string) => Effect.tryPromise({ try: () => Bun.file(path).bytes(), catch: describeFailure })
-
-const storeBytes = (path: string, bytes: Uint8Array) => pipe(
-  Effect.tryPromise({ try: () => Bun.write(path, bytes), catch: describeFailure }),
-  Effect.asVoid,
-)
-
-/**
- * Reads the immutable artifact only inside the fixture's private output directory because a returned path elsewhere is itself a defect to
- * report, never a file to open; the bytes are hashed and a copy named by execution and hash is retained with the scenario evidence.
- */
-const retainArtifact = (stored: Credentials, executionId: string) => Effect.fn("ReportExportsAcceptance.fixture.retainArtifact")(function* (succeeded: ArtifactNamed) {
-  const output = yield* resolvedPath(stored.output)
-  const resolved = yield* resolvedPath(succeeded.artifactPath)
-  const inside = Text.startsWith(`${output}${sep}`)(resolved)
-  const outside = OutsideArtifactSchema.make({ path: resolved })
-
-  if (!inside) return PayloadSchema.make(outside)
-
-  const bytes = yield* readBytes(resolved)
-  const sha256 = sha256Of(bytes)
-  const content = utf8.decode(bytes)
-  const retained = join(stored.artifacts, `artifact-${executionId}-${sha256}.json`)
-
-  yield* storeBytes(retained, bytes)
-
-  const evidence = RetainedArtifactSchema.make({ path: resolved, content, sha256, retained })
-
-  return PayloadSchema.make(evidence)
-})
-
-const decodePayload = Schema.decodeUnknownOption(PayloadSchema)
-
-const decodeSucceeded = Schema.decodeUnknownOption(ArtifactNamedSchema)
-
-const withExecution = (result: Payload, executionId: string) => (artifact: Option.Option<Payload>) => Option.match(artifact, {
-  onNone: () => PayloadSchema.make({ ...result, executionId }),
-  onSome: (evidence) => PayloadSchema.make({ ...result, executionId, artifact: evidence }),
-})
-
-// A succeeded poll carries the artifact evidence beside the poll fields because the evaluator must judge the bytes the result names.
-const polledResult = (stored: Credentials, executionId: string) => Effect.fn("ReportExportsAcceptance.fixture.polledResult")(function* (result: Payload) {
-  const succeeded = decodeSucceeded(result)
-  const retaining = Option.map(succeeded, retainArtifact(stored, executionId))
-  const artifact = yield* Effect.transposeOption(retaining)
-
-  return withExecution(result, executionId)(artifact)
-})
-
-const statusRecord = (target: ProbeTarget, at: string, response: CallResponse) => (result: Option.Option<Payload>) => ProbeRecord.make({
-  probe: target.probe,
-  phase: target.phase,
-  subject: target.subject,
-  actor: "fixture-admin-poll",
-  at,
-  status: response.status,
-  result,
-  error: response.error,
-})
-
-const pollExecution = Effect.fn("ReportExportsAcceptance.fixture.pollExecution")(function* (url: string, stored: Credentials, target: ProbeTarget, executionId: string) {
-  const input = PayloadSchema.make({ executionId })
-  const admin = Option.some(stored.admin)
-  const response = yield* call(url, pollOperation, input, admin)
-  const at = yield* now
-  const answered = Equal.equals(response.status, 200)
-  const decoded = Option.flatMap(response.result, decodePayload)
-  const result = Option.filter(decoded, Function.constant(answered))
-  const composing = Option.map(result, polledResult(stored, executionId))
-  const composed = yield* Effect.transposeOption(composing)
-
-  return statusRecord(target, at, response)(composed)
-})
-
-const storeRecord = (target: ProbeTarget, at: string) => (result: Payload) => ProbeRecord.make({ probe: target.probe, phase: target.phase, subject: target.subject, actor: "fixture-store-probe", at, status: 200, result: Option.some(result), error: Option.none() })
-
-const discoveredRecord = Effect.fn("ReportExportsAcceptance.fixture.discoveredRecord")(function* (target: ProbeTarget, result: Payload) {
-  const at = yield* now
-
-  return storeRecord(target, at)(result)
-})
-
-const undiscovered = UndiscoveredSchema.make({})
-
-const undiscoveredResult = PayloadSchema.make(undiscovered)
-
-const ambiguousStatus = (executions: ReadonlyArray<string>) => AmbiguousSchema.make({ executions })
-
-const ambiguous = flow(ambiguousStatus, PayloadSchema.make)
-
-const discoveredStatus = (fixture: PreparedFixture, stored: Credentials, target: ProbeTarget) => (executions: Array.NonEmptyReadonlyArray<string>) => {
-  const others = Array.tailNonEmpty(executions)
-  const single = Array.isReadonlyArrayEmpty(others)
-  const first = Array.headNonEmpty(executions)
-  const several = ambiguous(executions)
-
-  return single ? pollExecution(fixture.url, stored, target, first) : discoveredRecord(target, several)
-}
-
-/**
- * Observes the one execution of the subject tenant that did not exist when the fixture was prepared, through the documented operator poll,
- * because acceptance of a generation request is not its completion; zero or several new executions are reported, never guessed between.
- */
-const observeExportStatus = Effect.fn("ReportExportsAcceptance.fixture.exportStatus")(function* (fixture: PreparedFixture, stored: Credentials, target: ProbeTarget) {
-  const ids = yield* readExecutionIds(stored.database, target.subject)
-  const fresh = Array.difference(ids, stored.prepared)
-  const none = discoveredRecord(target, undiscoveredResult)
-
-  return yield* Array.match(fresh, {
-    onEmpty: Function.constant(none),
-    onNonEmpty: discoveredStatus(fixture, stored, target),
-  })
 })
 
 const observeStoredExports = Effect.fn("ReportExportsAcceptance.fixture.observeStoredExports")(function* (stored: Credentials, target: ProbeTarget) {
@@ -380,7 +215,6 @@ const runtime = Effect.fn("ReportExportsAcceptance.fixture.runtime")(function* (
     yield* startWorker(spec, directory, workerEnvironment(password))
 
     const editor = yield* login(url, "alice", password)
-    const admin = yield* login(url, "admin", password)
     const editorToken = Option.some(editor)
 
     yield* expect(url, operation, seededExport, editorToken)
@@ -393,14 +227,12 @@ const runtime = Effect.fn("ReportExportsAcceptance.fixture.runtime")(function* (
     })
 
     const database = applicationDatabase(directory)
-    const output = outputDirectory(directory)
-    const prepared = yield* readExecutionIds(database, tenant)
-    const stored = Credentials.make({ password, editor, admin, actor: actorToken, database, output, artifacts, prepared })
+    const stored = Credentials.make({ password, editor, actor: actorToken, database })
     const remembered = remember(url, stored)
 
     yield* Effect.acquireRelease(remembered, forget(url))
 
-    return PreparedFixture.make({ binding: scenario.fixture, revision, url, actor, facts: { [tenantFact]: tenant }, tracked: [tenant] })
+    return PreparedFixture.make({ binding: scenario.fixture, url, actor, facts: { [tenantFact]: tenant }, tracked: [tenant] })
   })
 
   const session = Effect.fn("ReportExportsAcceptance.fixture.session")(function* (fixture: PreparedFixture) {
@@ -413,17 +245,13 @@ const runtime = Effect.fn("ReportExportsAcceptance.fixture.runtime")(function* (
     const stored = yield* credentials(fixture)
     const actorTokens = Option.toArray(stored.actor)
     const issued = Array.prepend(actorTokens, stored.editor)
-    const operated = Array.prepend(issued, stored.admin)
 
-    return Array.prepend(operated, stored.password)
+    return Array.prepend(issued, stored.password)
   })
 
   const probe = Effect.fn("ReportExportsAcceptance.fixture.probe")(function* (fixture: PreparedFixture, target: ProbeTarget) {
     const stored = yield* credentials(fixture)
-    const watched = Equal.equals(target.probe, exportStatus)
     const listed = Equal.equals(target.probe, storedExports)
-
-    if (watched) return yield* observeExportStatus(fixture, stored, target)
 
     if (listed) return yield* observeStoredExports(stored, target)
 
@@ -435,10 +263,10 @@ const runtime = Effect.fn("ReportExportsAcceptance.fixture.runtime")(function* (
     const at = yield* now
     const response = yield* call(fixture.url, candidate.operation, candidate.input, stored.actor)
 
-    return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at, exchange: Option.none(), feedback: Option.none() })
+    return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at })
   })
 
-  return FixtureRuntime.of({ revision, bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
+  return FixtureRuntime.of({ bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
 })
 
 const runtimeEffect = runtime()

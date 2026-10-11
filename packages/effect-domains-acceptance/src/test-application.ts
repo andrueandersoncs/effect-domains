@@ -33,4 +33,7 @@ const compiled = Application.compile(definition)
 // The test application compiles synchronously because it is a pure definition without services.
 const testApplication = Effect.runSync(compiled)
 
-export { testApplication as TestApplication }
+/** Observes a resource through its generated list operation, the convention every test catalog uses. */
+const listOperation = (resource: string) => `${resource}.list`
+
+export { testApplication as TestApplication, listOperation }

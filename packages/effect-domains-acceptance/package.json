@@ -5,20 +5,13 @@
   "exports": {
     "./model": "./src/model.ts",
     "./catalog": "./src/catalog.ts",
-    "./obligations": "./src/obligations.ts",
     "./inputs": "./src/inputs.ts",
     "./browser": "./src/browser.ts",
     "./decision": "./src/decision.ts",
     "./evidence": "./src/evidence.ts",
     "./server": "./src/server.ts",
     "./runner": "./src/runner.ts",
-    "./faults": "./src/faults.ts",
-    "./cli": "./src/cli.ts",
-    "./query": "./src/query.ts",
-    "./query-cli": "./src/query-cli.ts",
-    "./governance": "./src/governance.ts",
-    "./roundtrip": "./src/roundtrip.ts",
-    "./surface": "./src/surface.ts"
+    "./cli": "./src/cli.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

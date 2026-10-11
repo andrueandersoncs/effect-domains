@@ -10,8 +10,7 @@
     "./migrations": "./migrations.ts",
     "./output": "./output.ts",
     "./workflow": "./workflow.ts",
-    "./writer": "./writer.ts",
-    "./acceptance/definition": "./acceptance/definition.ts"
+    "./writer": "./writer.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

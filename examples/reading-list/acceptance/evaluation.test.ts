@@ -1,28 +1,21 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equal, Function, Option, Record, Schema, String, Struct, flow, pipe } from "effect"
-import { BoundRequirement, Candidate, EvaluationContext, InputCase, Observation, PayloadSchema, PreparedFixture, RequirementEvaluation, type RequirementResult, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
-import { evaluationLayer, evaluatorRevisions, verifyDefects, VerifierReport } from "./evaluation.ts"
-
-type VerifiedCase = VerifierReport["cases"][number]
+import { Array, Effect, Equal, Function, Option, String, flow, pipe } from "effect"
+import { Candidate, EvaluationContext, InputCase, Observation, PayloadSchema, PreparedFixture, Requirement, RequirementEvaluation, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
+import { evaluationLayer, evaluatorNames } from "./evaluation.ts"
 
 const sentinel = PayloadSchema.make({ id: "018e0000-0000-7000-8000-000000000001", title: "Keep this book", author: "Fixture", status: "planned", format: "paperback", rating: null, notes: "Keep this note" })
 const target = PayloadSchema.make({ id: "018e0000-0000-7000-8000-000000000002", title: "Change this rating", author: "Fixture", status: "reading", format: "ebook", rating: 2, notes: null })
 const another = PayloadSchema.make({ ...sentinel, id: "018e0000-0000-7000-8000-000000000003", title: "Another book" })
 const input = PayloadSchema.make({ title: "A new book", author: "Actual input", status: "finished", format: "hardcover", rating: 5, notes: null })
 const created = PayloadSchema.make({ id: "018e0000-0000-7000-8000-000000000004", ...input })
-const evaluatorNames = Record.keys(evaluatorRevisions)
 const noValue = Option.none<unknown>()
 const createFacts = PayloadSchema.make({ sentinel, "sentinel.id": sentinel.id })
 const targetFacts = PayloadSchema.make({ ...createFacts, target, "target.id": target.id })
 
-const requirement = (evaluator: string) => BoundRequirement.make({
-  reference: "arbitrary-requirement-id",
+const requirement = (evaluator: string) => Requirement.make({
   id: "arbitrary-requirement-id",
-  revision: "requirement-revision",
   text: "This narrative is deliberately not an oracle.",
   evaluator,
-  evaluatorRevision: "evaluator-revision",
-  category: "behavior",
 })
 
 const testView = (reloaded: boolean) => (rows: Observation["rows"]) => Observation.make({ operation: "books.list", resource: "books", loaded: true, unfiltered: true, complete: true, rows, reloaded, screenshot: Option.none() })
@@ -43,9 +36,6 @@ const subjectCase = (operation: string, accepted: boolean) => InputCase.make({
 
 const scenarioFor = (inputCase: InputCase) => Scenario.make({
   id: "scenario-id",
-  revision: "scenario-revision",
-  provenance: "test scenario",
-  approval: "approved",
   story: "test-story",
   actor: "reader",
   fixture: "fixture-binding",
@@ -56,9 +46,6 @@ const scenarioFor = (inputCase: InputCase) => Scenario.make({
   observations: ["books"],
   probes: [],
   requirements: ["arbitrary-requirement-id"],
-  assessments: [],
-  concurrency: Option.none(),
-  watch: Option.none(),
   reload: true,
 })
 
@@ -70,7 +57,6 @@ const candidateFor = (inputCase: InputCase, submitted: Payload) => Candidate.mak
   sources: inputCase.fields,
   validity: inputCase.validity,
   nativeValidation: "explicit test input",
-  provenance: "explicit test input",
   seed: 42,
 })
 
@@ -82,8 +68,6 @@ const responded = (operation: string, submitted: Payload, status: number, result
   result,
   error,
   at: "2026-10-10T12:00:00.000Z",
-  exchange: Option.none(),
-  feedback: Option.none(),
 })
 
 const succeeded = (operation: string, submitted: Payload, result: unknown) => {
@@ -94,16 +78,14 @@ const succeeded = (operation: string, submitted: Payload, result: unknown) => {
 
 const contextFor = (inputCase: InputCase, facts: Payload, submitted: Payload, submission: Submission, before: Observation, after: Observation) => EvaluationContext.make({
   scenario: scenarioFor(inputCase),
-  fixture: PreparedFixture.make({ binding: "fixture-binding", revision: "fixture-revision", url: "about:blank", actor: "public-reader", facts, tracked: [] }),
+  fixture: PreparedFixture.make({ binding: "fixture-binding", url: "about:blank", actor: "public-reader", facts, tracked: [] }),
   candidates: [candidateFor(inputCase, submitted)],
   submissions: [submission],
   before: [before],
   after: [after],
   probes: [],
-  directProbe: Option.none(),
+  directProbes: [],
   interruption: Option.none(),
-  barrier: Option.none(),
-  watch: Option.none(),
   evidence: ["before.json", "public-browser-submission.json", "after-reload.json"],
 })
 
@@ -131,72 +113,6 @@ const statusOf = Effect.fn("EvaluationTest.statusOf")(function* (name: string, c
 
 const statusesOf = (context: EvaluationContext) => (name: string) => statusOf(name, context)
 const statusesFor = (name: string) => (context: EvaluationContext) => statusOf(name, context)
-const ofKind = (kind: VerifiedCase["kind"]) => (control: VerifiedCase) => Equal.equals(control.kind, kind)
-const failingCount = (control: VerifiedCase) => Array.length(control.expectedFailingCriteria)
-const sum = (total: number, value: number) => total + value
-const isPositive = (value: number) => value > 0
-const isCaseReference = String.startsWith("#/cases/")
-
-const expectedFailingStatuses = (control: VerifiedCase) => {
-  const named = (result: RequirementResult) => Array.contains(control.expectedFailingCriteria, result.evaluator)
-  const failing = Array.filter(control.results, named)
-
-  return Array.map(failing, Struct.get("status"))
-}
-
-const evidenceProblems = (control: VerifiedCase) => {
-  const scenarioMismatch = (result: RequirementResult) => !Equal.equals(result.scenario, control.observations.scenario.id)
-  const evidenceMismatch = (result: RequirementResult) => !Equal.equals(result.evidence, control.observations.evidence)
-  const referenceMismatch = (result: RequirementResult) => !Array.every(result.evidence, isCaseReference)
-  const scenarios = Array.countBy(control.results, scenarioMismatch)
-  const evidence = Array.countBy(control.results, evidenceMismatch)
-  const references = Array.countBy(control.results, referenceMismatch)
-
-  return scenarios + evidence + references
-}
-
-const constructedLabel = (control: VerifiedCase) => Array.map(control.observations.candidates, Struct.get("provenance"))
-
-const encodeReport = Schema.encodeEffect(VerifierReport)
-const decodeReport = Schema.decodeUnknownEffect(Schema.fromJsonString(VerifierReport))
-
-const verifierTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const defects = Array.filter(report.cases, ofKind("defect"))
-  const cleanControls = Array.filter(report.cases, ofKind("clean-control"))
-  const failingCriteria = Array.map(defects, failingCount)
-  const failingStatuses = Array.flatMap(defects, expectedFailingStatuses)
-  const expectedFailingCount = Array.reduce(failingCriteria, 0, sum)
-  const expectedFailures = Array.replicate("fail", expectedFailingCount)
-  const everyDefectFails = Array.every(failingCriteria, isPositive)
-  const cleanStatuses = pipe(cleanControls, Array.flatMap(Struct.get("results")), Array.map(Struct.get("status")))
-  const cleanCount = Array.length(cleanStatuses)
-  const expectedPasses = Array.replicate("pass", cleanCount)
-  const misattributed = pipe(report.cases, Array.map(evidenceProblems), Array.reduce(0, sum))
-  const labels = pipe(report.cases, Array.flatMap(constructedLabel), Array.dedupe)
-  const reportedCases = Array.length(report.cases)
-  const encoded = yield* encodeReport(report)
-  const json = JSON.stringify(encoded)
-  const decoded = yield* decodeReport(json)
-  const decodedCases = Array.length(decoded.cases)
-
-  expect(report.summary.cases).toBe(24)
-  expect(report.summary.criteria).toBe(83)
-  expect(report.summary.falseAcceptance).toBe(0)
-  expect(report.summary.falseRejection).toBe(0)
-  expect(report.summary.unexpectedStatuses).toBe(0)
-  expect(report.summary.blocked).toBeGreaterThan(0)
-  expect(report.summary.inconclusive).toBeGreaterThan(0)
-  expect(report.summary.missingEvidenceControls).toBeGreaterThan(0)
-  expect(report.evidenceSource).toBe("deliberately constructed observation controls; not browser or model execution")
-  expect(labels).toEqual(["deliberately constructed observation control; not browser or model execution"])
-  expect(everyDefectFails).toBe(true)
-  expect(failingStatuses).toEqual(expectedFailures)
-  expect(cleanStatuses).toEqual(expectedPasses)
-  expect(misattributed).toBe(0)
-  expect(decoded.summary).toEqual(report.summary)
-  expect(decodedCases).toBe(reportedCases)
-})
 
 const updateCase = subjectCase("books.update", true)
 
@@ -359,21 +275,18 @@ const defaultsTest = Effect.gen(function* () {
   expect(invalidVerdict).toBe("blocked")
 })
 
-const revisionsTest = Effect.gen(function* () {
+const namesTest = Effect.gen(function* () {
   const names = Array.sort(evaluatorNames, String.Order)
-  const revisions = Record.values(evaluatorRevisions)
-  const firstRevisions = Array.every(revisions, Equal.equals("1"))
   const service = yield* RequirementEvaluation
   const unknownCriterion = requirement("not-an-evaluator")
   const unknown = yield* pipe(service.evaluate(unknownCriterion, createContext), Effect.flip)
 
   expect(names).toEqual(["accepted-rating", "created-values", "rejection-unchanged", "reload-visible", "sentinel-unchanged"])
-  expect(firstRevisions).toBe(true)
   expect(unknown.boundary).toBe("requirement-evaluation")
 })
 
 const withEvaluation = Effect.provide(evaluationLayer)
-const providedRevisionsTest = withEvaluation(revisionsTest)
+const providedNamesTest = withEvaluation(namesTest)
 const providedRatingTest = withEvaluation(ratingTest)
 const providedCreationTest = withEvaluation(creationTest)
 const providedRejectionTest = withEvaluation(rejectionTest)
@@ -385,8 +298,7 @@ const providedSubmissionBindingTest = withEvaluation(submissionBindingTest)
 const providedReloadIdentityTest = withEvaluation(reloadIdentityTest)
 const providedDefaultsTest = withEvaluation(defaultsTest)
 
-it.effect("clean and deliberately defective evidence is measured by the production evaluators", Function.constant(verifierTest))
-it.effect("the five evaluators are published at revision 1 and unknown evaluators fail evaluation", Function.constant(providedRevisionsTest))
+it.effect("the five evaluators are published and unknown evaluators fail evaluation", Function.constant(providedNamesTest))
 it.effect("accepted ratings are checked on the exact update target", Function.constant(providedRatingTest))
 it.effect("creation cannot pass by matching display values on an existing identity or trusting a success response", Function.constant(providedCreationTest))
 it.effect("rejection compares every field of every identity regardless of ordering", Function.constant(providedRejectionTest))

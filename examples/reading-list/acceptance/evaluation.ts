@@ -1,6 +1,6 @@
 import { Array, Effect, Equal, Function, HashMap, HashSet, Layer, Number, Option, Predicate, Record, Result, Schema, String, Struct, flow, pipe } from "effect"
 import type { ParseOptions } from "effect/SchemaAST"
-import { AcceptanceError, AssertionBasisSchema, BoundRequirement, Candidate, EvaluationContext, InputCase, LiteralSourceSchema, Observation, PayloadSchema, PreparedFixture, RequirementEvaluation, RequirementResult, ResultStatusSchema, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
+import { AcceptanceError, Candidate, EvaluationContext, InputCase, Observation, PayloadSchema, type Requirement, RequirementEvaluation, RequirementResult, ResultStatusSchema, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
 import { ReadingListApplication } from "../application.ts"
 import { ReadingListBookSchema } from "../domain.ts"
 
@@ -27,8 +27,6 @@ class Subject extends Schema.Class<Subject>("Subject")({
   sentinel: PayloadSchema,
   decoded: DecodedSchema,
 }) {}
-
-type Evaluator = (subject: Subject) => Assertion
 
 const operations = pipe(ReadingListApplication.group.requests.values(), Array.fromIterable)
 
@@ -271,7 +269,7 @@ const compareRow = (subject: Subject) => (row: Payload) => {
     : Assertion.make({ status: "fail", explanation: `Book ${book} differs from the concrete candidate in: ${listed}.` })
 }
 
-const acceptedValues: Evaluator = (subject) => {
+const acceptedValues = (subject: Subject): Assertion => {
   const problem = acceptedProblem(subject)
   const row = expectedRow(subject, subject.after)
   const verdict = Result.match(row, { onFailure: Function.identity, onSuccess: compareRow(subject) })
@@ -279,9 +277,9 @@ const acceptedValues: Evaluator = (subject) => {
   return Option.getOrElse(problem, Function.constant(verdict))
 }
 
-const createdValues: Evaluator = (subject) => isCreating(subject) ? acceptedValues(subject) : notCreation
+const createdValues = (subject: Subject) => isCreating(subject) ? acceptedValues(subject) : notCreation
 
-const reloadVisible: Evaluator = (subject) => {
+const reloadVisible = (subject: Subject): Assertion => {
   const unidentified = pipe(subject, createdIdentity, Option.isNone)
   const identityMissing = isCreating(subject) && unidentified
 
@@ -298,7 +296,7 @@ const unchangedIn = (rows: ReadonlyArray<Payload>) => (row: Payload) => {
   return Option.exists(observed, Equal.equals(row))
 }
 
-const rejectedAttempt: Evaluator = (subject) => {
+const rejectedAttempt = (subject: Subject): Assertion => {
   const { submission } = subject
   const rejected = Equal.equals(subject.input.outcome.kind, "rejected")
   const target = isUpdating(subject) ? targetRow(subject, subject.before) : Result.succeed(subject.sentinel)
@@ -329,7 +327,7 @@ const rejectedAttempt: Evaluator = (subject) => {
   return Result.isFailure(target) ? target.failure : Option.getOrElse(problem, Function.constant(preservedRejection))
 }
 
-const sentinelUnchanged: Evaluator = (subject) => {
+const sentinelUnchanged = (subject: Subject): Assertion => {
   const after = rowById(subject.after.rows)(subject.sentinel.id)
   const preserved = Option.exists(after, Equal.equals(subject.sentinel))
   const sentinel = describeRow(subject.sentinel)
@@ -339,7 +337,7 @@ const sentinelUnchanged: Evaluator = (subject) => {
     : Assertion.make({ status: "fail", explanation: `Sentinel ${sentinel} was mutated or deleted.` })
 }
 
-const evaluators = HashMap.make<ReadonlyArray<readonly [string, Evaluator]>>(
+const evaluators = HashMap.make(
   ["created-values", createdValues],
   ["reload-visible", reloadVisible],
   ["accepted-rating", acceptedValues],
@@ -347,7 +345,7 @@ const evaluators = HashMap.make<ReadonlyArray<readonly [string, Evaluator]>>(
   ["sentinel-unchanged", sentinelUnchanged],
 )
 
-export const evaluatorRevisions: Readonly<Record<string, string>> = pipe(evaluators, HashMap.map(Function.constant("1")), Record.fromEntries)
+export const evaluatorNames = pipe(evaluators, HashMap.keys, Array.fromIterable)
 
 const withDecoded = (subject: Subject) => (decoded: unknown) => Subject.make({ ...subject, decoded: Option.some(decoded) })
 
@@ -364,20 +362,16 @@ const revalidate = Effect.fn("ReadingListAcceptance.revalidate")(function* (subj
   return pipe(decoded, Result.map(withDecoded(subject)), Result.mapError(nativeRejection))
 })
 
-const resultFor = (requirement: BoundRequirement, context: EvaluationContext) => (verdict: Assertion) => RequirementResult.make({
-  requirement: requirement.reference,
-  requirementRevision: requirement.revision,
+const resultFor = (requirement: Requirement, context: EvaluationContext) => (verdict: Assertion) => RequirementResult.make({
+  requirement: requirement.id,
   scenario: context.scenario.id,
-  scenarioRevision: context.scenario.revision,
   evaluator: requirement.evaluator,
-  evaluatorRevision: requirement.evaluatorRevision,
-  basis: "executable assertion",
   status: verdict.status,
   explanation: verdict.explanation,
   evidence: context.evidence,
 })
 
-const evaluate = Effect.fn("ReadingListAcceptance.evaluate")(function* (requirement: BoundRequirement, context: EvaluationContext) {
+const evaluate = Effect.fn("ReadingListAcceptance.evaluate")(function* (requirement: Requirement, context: EvaluationContext) {
   const evaluator = HashMap.get(evaluators, requirement.evaluator)
   const report = resultFor(requirement, context)
 
@@ -399,366 +393,3 @@ const evaluate = Effect.fn("ReadingListAcceptance.evaluate")(function* (requirem
 const evaluationService = RequirementEvaluation.of({ evaluate })
 
 export const evaluationLayer = Layer.succeed(RequirementEvaluation, evaluationService)
-
-const ControlKindSchema = Schema.Literals(["defect", "clean-control", "missing-evidence-control", "blocked-control"])
-const ExpectedStatusesSchema = Schema.Record(Schema.String, ResultStatusSchema)
-const NamesSchema = Schema.Array(Schema.String)
-const ResultsSchema = Schema.Array(RequirementResult)
-
-type ExpectedStatuses = typeof ExpectedStatusesSchema.Type
-
-class DefectCase extends Schema.Class<DefectCase>("DefectCase")({
-  id: Schema.String,
-  kind: ControlKindSchema,
-  context: EvaluationContext,
-  expectedStatuses: ExpectedStatusesSchema,
-}) {}
-
-class VerifierCase extends Schema.Class<VerifierCase>("VerifierCase")({
-  id: Schema.String,
-  kind: ControlKindSchema,
-  expectedFailingCriteria: NamesSchema,
-  expectedStatuses: ExpectedStatusesSchema,
-  observations: EvaluationContext,
-  results: ResultsSchema,
-  falseAcceptance: Schema.Number,
-  falseRejection: Schema.Number,
-  unexpectedStatuses: Schema.Number,
-  blocked: Schema.Number,
-  inconclusive: Schema.Number,
-}) {}
-
-class VerifierSummary extends Schema.Class<VerifierSummary>("VerifierSummary")({
-  cases: Schema.Number,
-  criteria: Schema.Number,
-  falseAcceptance: Schema.Number,
-  falseRejection: Schema.Number,
-  unexpectedStatuses: Schema.Number,
-  blocked: Schema.Number,
-  inconclusive: Schema.Number,
-  missingEvidenceControls: Schema.Number,
-}) {}
-
-const VerifierCasesSchema = Schema.Array(VerifierCase)
-
-export class VerifierReport extends Schema.Class<VerifierReport>("VerifierReport")({
-  revision: Schema.String,
-  basis: AssertionBasisSchema,
-  evidenceSource: Schema.String,
-  cases: VerifierCasesSchema,
-  summary: VerifierSummary,
-}) {}
-
-const sentinelId = "018e0000-0000-7000-8000-000000000001"
-const targetId = "018e0000-0000-7000-8000-000000000002"
-const sentinel = PayloadSchema.make({ id: sentinelId, title: "Unrelated book", author: "Fixture author", status: "planned", format: "paperback", rating: null, notes: "Preserve me" })
-const target = PayloadSchema.make({ id: targetId, title: "Target book", author: "Target author", status: "reading", format: "ebook", rating: 2, notes: null })
-const other = PayloadSchema.make({ ...sentinel, id: "018e0000-0000-7000-8000-000000000003", title: "Another unrelated book" })
-const input = PayloadSchema.make({ title: "Concrete submitted book", author: "Submitted author", status: "finished", format: "hardcover", rating: 5, notes: "Concrete note" })
-const created = PayloadSchema.make({ id: "018e0000-0000-7000-8000-000000000004", ...input })
-const replacedCreated = PayloadSchema.make({ ...created, id: "018e0000-0000-7000-8000-000000000005" })
-const updateInput = PayloadSchema.make({ ...target, rating: 5 })
-const rejectedInput = PayloadSchema.make({ ...target, rating: 6 })
-const omittedInput = PayloadSchema.make({ title: input.title, author: input.author, status: input.status, format: input.format })
-const omittedCreated = PayloadSchema.make({ ...omittedInput, id: "omitted-created-identity", rating: null, notes: null })
-const wrongDefaults = PayloadSchema.make({ ...omittedCreated, rating: 1, notes: "Incorrect default" })
-const wrongTarget = PayloadSchema.make({ ...other, rating: 5 })
-const corruptedSentinel = PayloadSchema.make({ ...sentinel, notes: "Corrupted" })
-const changedOther = PayloadSchema.make({ ...other, notes: "Changed" })
-const controlLabel = "deliberately constructed verifier control"
-const controlProvenance = "deliberately constructed observation control; not browser or model execution"
-const controlInput = "control"
-
-const observation = (reloaded: boolean) => (rows: ReadonlyArray<Payload>) => Observation.make({ operation: "books.list", resource: "books", loaded: true, unfiltered: true, complete: true, rows, reloaded, screenshot: Option.none() })
-const view = observation(false)
-const reloadedView = observation(true)
-const literalSource = (value: unknown) => LiteralSourceSchema.make({ source: "literal", value })
-const acceptedOutcome: InputCase["outcome"] = { kind: "accepted" }
-const rejectedOutcome: InputCase["outcome"] = { kind: "rejected" }
-
-// Control inputs declare literal sources because the constructed payload is the whole provenance of a verifier control.
-const controlCase = (operation: string, submitted: Payload, accepted: boolean) => InputCase.make({
-  id: controlInput,
-  operation,
-  description: controlLabel,
-  fields: Record.map(submitted, literalSource),
-  validity: accepted ? "native-valid" : "native-invalid",
-  outcome: accepted ? acceptedOutcome : rejectedOutcome,
-})
-
-const scenario = (inputCase: InputCase) => Scenario.make({
-  id: `verifier/${inputCase.operation}/${inputCase.outcome.kind}`,
-  revision: "1",
-  provenance: "deterministic verifier evidence control",
-  approval: "approved",
-  story: "verifier-reliability",
-  actor: "reader",
-  fixture: "verifier-fixture",
-  goal: "Exercise the production requirement assertions against an explicit observation control.",
-  operations: [inputCase.operation],
-  inputs: [inputCase],
-  required: [inputCase.id],
-  observations: ["books"],
-  probes: [],
-  requirements: [],
-  assessments: [],
-  concurrency: Option.none(),
-  watch: Option.none(),
-  reload: true,
-})
-
-const controlCandidate = (inputCase: InputCase, submitted: Payload) => Candidate.make({
-  inputCase: inputCase.id,
-  operation: inputCase.operation,
-  description: inputCase.description,
-  input: submitted,
-  sources: inputCase.fields,
-  validity: inputCase.validity,
-  nativeValidation: controlLabel,
-  provenance: controlProvenance,
-  seed: 0,
-})
-
-const controlResponse = (operation: string, submitted: Payload, status: number, result: Option.Option<unknown>, error: Option.Option<unknown>) => Submission.make({
-  inputCase: controlInput,
-  operation,
-  input: submitted,
-  status,
-  result,
-  error,
-  at: "2026-10-10T00:00:00.000Z",
-  exchange: Option.none(),
-  feedback: Option.none(),
-})
-
-const noValue = Option.none<unknown>()
-
-const controlSuccess = (operation: string, submitted: Payload, result: unknown) => {
-  const value = Option.some(result)
-
-  return controlResponse(operation, submitted, 200, value, noValue)
-}
-
-const createFacts = PayloadSchema.make({ sentinel, "sentinel.id": sentinelId })
-const targetFacts = PayloadSchema.make({ ...createFacts, target, "target.id": targetId })
-const controlFixture = (facts: Payload, tracked: ReadonlyArray<string>) => PreparedFixture.make({ binding: "verifier-fixture", revision: "verifier-control", url: "about:blank", actor: "public-reader", facts, tracked })
-const createFixture = controlFixture(createFacts, [sentinelId])
-const targetFixture = controlFixture(targetFacts, [sentinelId, targetId])
-
-const controlContext = (inputCase: InputCase, fixture: PreparedFixture, submitted: Payload, submission: Submission, before: Observation, after: Observation) => EvaluationContext.make({
-  scenario: scenario(inputCase),
-  fixture,
-  candidates: [controlCandidate(inputCase, submitted)],
-  submissions: [submission],
-  before: [before],
-  after: [after],
-  probes: [],
-  directProbe: Option.none(),
-  interruption: Option.none(),
-  barrier: Option.none(),
-  watch: Option.none(),
-  evidence: [],
-})
-
-const createCase = controlCase("books.create", input, true)
-const createBefore = view([sentinel, other])
-const createAfter = reloadedView([sentinel, other, created])
-const createSubmission = controlSuccess("books.create", input, created)
-const create = controlContext(createCase, createFixture, input, createSubmission, createBefore, createAfter)
-
-const updateCase = controlCase("books.update", updateInput, true)
-const updateBefore = view([sentinel, target, other])
-const updateAfter = reloadedView([sentinel, updateInput, other])
-const updateSubmission = controlSuccess("books.update", updateInput, updateInput)
-const update = controlContext(updateCase, targetFixture, updateInput, updateSubmission, updateBefore, updateAfter)
-
-const rejectedCase = controlCase("books.update", rejectedInput, false)
-const rejectedAfter = reloadedView(updateBefore.rows)
-const rejectionError = Option.some("Invalid input for books.update")
-const rejectedResponse = controlResponse("books.update", rejectedInput, 400, noValue, rejectionError)
-const rejected = controlContext(rejectedCase, targetFixture, rejectedInput, rejectedResponse, updateBefore, rejectedAfter)
-
-const omittedCase = controlCase("books.create", omittedInput, true)
-const omittedAfter = reloadedView([...createBefore.rows, omittedCreated])
-const omittedSubmission = controlSuccess("books.create", omittedInput, omittedCreated)
-const omitted = controlContext(omittedCase, createFixture, omittedInput, omittedSubmission, createBefore, omittedAfter)
-
-const withAfter = (context: EvaluationContext) => (after: Observation) => EvaluationContext.make({ ...context, after: [after] })
-const withBefore = (context: EvaluationContext) => (before: Observation) => EvaluationContext.make({ ...context, before: [before] })
-const reloadedAfter = (context: EvaluationContext) => flow(reloadedView, withAfter(context))
-
-const failing: Status = "fail"
-const inconclusive: Status = "inconclusive"
-const blocked: Status = "blocked"
-const createPass = ExpectedStatusesSchema.make({ "created-values": "pass", "reload-visible": "pass", "accepted-rating": "pass", "sentinel-unchanged": "pass" })
-const updatePass = ExpectedStatusesSchema.make({ "reload-visible": "pass", "accepted-rating": "pass", "sentinel-unchanged": "pass" })
-const rejectedPass = ExpectedStatusesSchema.make({ "rejection-unchanged": "pass", "sentinel-unchanged": "pass" })
-const absent = ExpectedStatusesSchema.make({ "created-values": "fail", "reload-visible": "fail", "accepted-rating": "fail", "sentinel-unchanged": "pass" })
-const incomplete = Record.map(createPass, Function.constant(inconclusive))
-const interrupted = Record.map(createPass, Function.constant(blocked))
-const updateLost = pipe(updatePass, Record.set("reload-visible", failing), Record.set("accepted-rating", failing))
-const sentinelLost = Record.set(createPass, "sentinel-unchanged", failing)
-const rejectionLost = Record.set(rejectedPass, "rejection-unchanged", failing)
-const reloadMissing = Record.set(createPass, "reload-visible", inconclusive)
-
-const wrongOmittedDefaults = reloadedAfter(omitted)([...createBefore.rows, wrongDefaults])
-const successWithoutWrite = reloadedAfter(create)(createBefore.rows)
-const lostAfterReload = reloadedAfter(update)(updateBefore.rows)
-const replacedCreatedIdentity = reloadedAfter(create)([sentinel, other, replacedCreated])
-const wrongTargetUpdate = reloadedAfter(update)([sentinel, target, wrongTarget])
-const unrelatedMutation = reloadedAfter(create)([corruptedSentinel, other, created])
-const unrelatedDeletion = reloadedAfter(create)([other, created])
-const rejectedTargetMutation = reloadedAfter(rejected)([sentinel, rejectedInput, other])
-const rejectedUnrelatedMutation = reloadedAfter(rejected)([sentinel, target, changedOther])
-const rejectedUnrelatedDeletion = reloadedAfter(rejected)([sentinel, target])
-const rejectedExtraRow = reloadedAfter(rejected)([...updateBefore.rows, created])
-const unloadedAfter = Observation.make({ ...createAfter, loaded: false, rows: [] })
-const filteredAfter = Observation.make({ ...createAfter, unfiltered: false })
-const foreignAfter = Observation.make({ ...createAfter, operation: "another-resource.list", resource: "another-resource" })
-const unloadedBefore = Observation.make({ ...createBefore, loaded: false })
-const sentinelessBefore = view([other])
-const unreloadedAfter = Observation.make({ ...createAfter, reloaded: false })
-const missingLoadedView = withAfter(create)(unloadedAfter)
-const filteredView = withAfter(create)(filteredAfter)
-const wrongResourceView = withAfter(create)(foreignAfter)
-const missingBeforeView = withBefore(create)(unloadedBefore)
-const missingSentinelBaseline = withBefore(create)(sentinelessBefore)
-const missingSubmission = EvaluationContext.make({ ...create, submissions: [] })
-const missingReload = withAfter(create)(unreloadedAfter)
-// The create result omits its identity because a 2xx result without an id is how an uncaptured creation reaches the evaluators.
-const identitylessSubmission = controlSuccess("books.create", input, input)
-const missingCreatedIdentity = EvaluationContext.make({ ...create, submissions: [identitylessSubmission] })
-const interruptedBeforeSubmission = EvaluationContext.make({ ...create, submissions: [], interruption: Option.some("No enabled submit action") })
-
-const verifierCases = [
-  DefectCase.make({ id: "clean-create", kind: "clean-control", context: create, expectedStatuses: createPass }),
-  DefectCase.make({ id: "clean-update", kind: "clean-control", context: update, expectedStatuses: updatePass }),
-  DefectCase.make({ id: "clean-rejection", kind: "clean-control", context: rejected, expectedStatuses: rejectedPass }),
-  DefectCase.make({ id: "clean-omitted-create", kind: "clean-control", context: omitted, expectedStatuses: createPass }),
-  DefectCase.make({ id: "wrong-omitted-defaults", kind: "defect", context: wrongOmittedDefaults, expectedStatuses: absent }),
-  DefectCase.make({ id: "success-without-write", kind: "defect", context: successWithoutWrite, expectedStatuses: absent }),
-  DefectCase.make({ id: "lost-after-reload", kind: "defect", context: lostAfterReload, expectedStatuses: updateLost }),
-  DefectCase.make({ id: "replaced-created-identity", kind: "defect", context: replacedCreatedIdentity, expectedStatuses: absent }),
-  DefectCase.make({ id: "wrong-target", kind: "defect", context: wrongTargetUpdate, expectedStatuses: updateLost }),
-  DefectCase.make({ id: "unrelated-mutation", kind: "defect", context: unrelatedMutation, expectedStatuses: sentinelLost }),
-  DefectCase.make({ id: "unrelated-deletion", kind: "defect", context: unrelatedDeletion, expectedStatuses: sentinelLost }),
-  DefectCase.make({ id: "rejected-target-mutation", kind: "defect", context: rejectedTargetMutation, expectedStatuses: rejectionLost }),
-  DefectCase.make({ id: "rejected-unrelated-mutation", kind: "defect", context: rejectedUnrelatedMutation, expectedStatuses: rejectionLost }),
-  DefectCase.make({ id: "rejected-unrelated-deletion", kind: "defect", context: rejectedUnrelatedDeletion, expectedStatuses: rejectionLost }),
-  DefectCase.make({ id: "rejected-extra-row", kind: "defect", context: rejectedExtraRow, expectedStatuses: rejectionLost }),
-  DefectCase.make({ id: "missing-loaded-view", kind: "missing-evidence-control", context: missingLoadedView, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "filtered-view", kind: "missing-evidence-control", context: filteredView, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "wrong-resource-view", kind: "missing-evidence-control", context: wrongResourceView, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "missing-before-view", kind: "missing-evidence-control", context: missingBeforeView, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "missing-sentinel-baseline", kind: "missing-evidence-control", context: missingSentinelBaseline, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "missing-submission", kind: "missing-evidence-control", context: missingSubmission, expectedStatuses: incomplete }),
-  DefectCase.make({ id: "missing-reload", kind: "missing-evidence-control", context: missingReload, expectedStatuses: reloadMissing }),
-  DefectCase.make({ id: "missing-created-identity", kind: "missing-evidence-control", context: missingCreatedIdentity, expectedStatuses: reloadMissing }),
-  DefectCase.make({ id: "interrupted-before-submission", kind: "blocked-control", context: interruptedBeforeSubmission, expectedStatuses: interrupted }),
-]
-
-const preservationEvaluators = ["sentinel-unchanged", "rejection-unchanged"]
-
-const criterion = (name: string) => {
-  const preservation = Array.contains(preservationEvaluators, name)
-
-  return BoundRequirement.make({
-    reference: `verifier-criterion/${name}`,
-    id: `verifier-criterion/${name}`,
-    revision: "1",
-    text: `Verify ${name} against the supplied concrete evidence.`,
-    evaluator: name,
-    evaluatorRevision: "1",
-    category: preservation ? "preservation" : "behavior",
-  })
-}
-
-const withStatus = (status: Status) => (result: RequirementResult) => Equal.equals(result.status, status)
-const isFailing = (status: Status) => Equal.equals(status, "fail")
-const expectedOf = (statuses: ExpectedStatuses) => (result: RequirementResult) => Record.get(statuses, result.evaluator)
-
-const falselyAccepted = (statuses: ExpectedStatuses) => (result: RequirementResult) => {
-  const passed = Equal.equals(result.status, "pass")
-  const expected = expectedOf(statuses)(result)
-  const expectedPass = Option.contains(expected, "pass")
-  const unexpectedPass = !expectedPass
-
-  return passed && unexpectedPass
-}
-
-const falselyRejected = (statuses: ExpectedStatuses) => (result: RequirementResult) => {
-  const failed = Equal.equals(result.status, "fail")
-  const expected = expectedOf(statuses)(result)
-  const expectedPass = Option.contains(expected, "pass")
-
-  return failed && expectedPass
-}
-
-const unexpected = (statuses: ExpectedStatuses) => (result: RequirementResult) => {
-  const expected = expectedOf(statuses)(result)
-
-  return !Option.contains(expected, result.status)
-}
-
-const evaluateWith = (context: EvaluationContext) => Effect.fn("ReadingListAcceptance.verifyCriterion")(function* (name: string) {
-  const service = yield* RequirementEvaluation
-  const requirement = criterion(name)
-
-  return yield* service.evaluate(requirement, context)
-})
-
-const verifyCase = Effect.fn("ReadingListAcceptance.verifyDefect")(function* (defect: DefectCase, index: number) {
-  const submitted = Array.isReadonlyArrayNonEmpty(defect.context.submissions)
-  const observed = [`#/cases/${index}/observations/before`, `#/cases/${index}/observations/after`, `#/cases/${index}/observations/candidates`]
-  const submission = submitted ? Array.of(`#/cases/${index}/observations/submissions`) : Array.empty<string>()
-  const evidence = Array.appendAll(observed, submission)
-  const identified = Scenario.make({ ...defect.context.scenario, id: `verifier/${defect.id}` })
-  const context = EvaluationContext.make({ ...defect.context, scenario: identified, evidence })
-  const names = Record.keys(defect.expectedStatuses)
-  const results = yield* Effect.forEach(names, evaluateWith(context))
-  const failingCriteria = Record.filter(defect.expectedStatuses, isFailing)
-
-  return VerifierCase.make({
-    id: defect.id,
-    kind: defect.kind,
-    expectedFailingCriteria: Record.keys(failingCriteria),
-    expectedStatuses: defect.expectedStatuses,
-    observations: context,
-    results,
-    falseAcceptance: Array.countBy(results, falselyAccepted(defect.expectedStatuses)),
-    falseRejection: Array.countBy(results, falselyRejected(defect.expectedStatuses)),
-    unexpectedStatuses: Array.countBy(results, unexpected(defect.expectedStatuses)),
-    blocked: Array.countBy(results, withStatus("blocked")),
-    inconclusive: Array.countBy(results, withStatus("inconclusive")),
-  })
-})
-
-type CountKey = "falseAcceptance" | "falseRejection" | "unexpectedStatuses" | "blocked" | "inconclusive"
-
-const total = (cases: ReadonlyArray<VerifierCase>, key: CountKey) => pipe(cases, Array.map(Struct.get(key)), Number.sumAll)
-const criteriaOf = (verified: VerifierCase) => Array.length(verified.results)
-const isMissingEvidenceControl = (verified: VerifierCase) => Equal.equals(verified.kind, "missing-evidence-control")
-
-export const verifyDefects = Effect.fn("ReadingListAcceptance.verifyDefects")(function* () {
-  const cases = yield* Effect.forEach(verifierCases, verifyCase)
-  const criteria = pipe(cases, Array.map(criteriaOf), Number.sumAll)
-
-  const summary = VerifierSummary.make({
-    cases: Array.length(cases),
-    criteria,
-    falseAcceptance: total(cases, "falseAcceptance"),
-    falseRejection: total(cases, "falseRejection"),
-    unexpectedStatuses: total(cases, "unexpectedStatuses"),
-    blocked: total(cases, "blocked"),
-    inconclusive: total(cases, "inconclusive"),
-    missingEvidenceControls: Array.countBy(cases, isMissingEvidenceControl),
-  })
-
-  return VerifierReport.make({
-    revision: "1",
-    basis: "executable assertion",
-    evidenceSource: "deliberately constructed observation controls; not browser or model execution",
-    cases,
-    summary,
-  })
-}, Effect.provide(evaluationLayer))()

@@ -1,219 +1,115 @@
 import { expect, it } from "@effect/vitest"
-import { Array, Effect, Equal, Function, Option, Order, Predicate, Record, Schema, Struct, flow, pipe } from "effect"
-import { evaluationLayer, evaluatorRevisions, verifyDefects, VerifierReport } from "./evaluation.ts"
-import { BoundRequirement, EvaluationContext, RequirementEvaluation, type RequirementResult, Submission } from "@effect-domains/acceptance/model"
+import { Array, Effect, Equal, Function, Option, Schema, pipe } from "effect"
+import { EvaluationContext, Observation, PayloadSchema, PreparedFixture, ProbeRecord, Requirement, RequirementEvaluation, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
+import { VersionConflict } from "effect-domains/repository-store"
+import { supportCasesCatalog } from "./catalog.ts"
+import { evaluationLayer } from "./evaluation.ts"
 
-type VerifiedCase = VerifierReport["cases"][number]
+const customerId = "acme"
+const onDutyAgent = "dana"
+const offDutyAgent = "omar"
+const targetId = "0192a000-0000-7000-8000-000000000002"
+const unrelatedId = "0192a000-0000-7000-8000-000000000003"
+const at = "2026-10-10T10:00:00.000Z"
+const targetCase = PayloadSchema.make({ id: targetId, customerId, subject: "Invoice totals disagree", priority: "normal", status: "triaged", assignedAgentId: null, openedAt: "2026-10-02T09:00:00.000Z", version: 2 })
+const assignedTarget = PayloadSchema.make({ ...targetCase, status: "assigned", assignedAgentId: onDutyAgent, version: 3 })
+const unrelatedCase = PayloadSchema.make({ id: unrelatedId, customerId, subject: "Printer queue stalls", priority: "low", status: "triaged", assignedAgentId: null, openedAt: "2026-10-01T09:00:00.000Z", version: 2 })
+const customers = [PayloadSchema.make({ id: customerId, name: "Acme Industries" })]
+const agents = [PayloadSchema.make({ id: onDutyAgent, name: "Dana Ortiz", onDuty: true }), PayloadSchema.make({ id: offDutyAgent, name: "Omar Haddad", onDuty: false })]
 
-const ofKind = (kind: VerifiedCase["kind"]) => (control: VerifiedCase) => Equal.equals(control.kind, kind)
-const byCaseId = (id: string) => (control: VerifiedCase) => Equal.equals(control.id, id)
-const sum = (total: number, value: number) => total + value
-const failingCount = (control: VerifiedCase) => Array.length(control.expectedFailingCriteria)
-const isPositive = (value: number) => value > 0
-const verdictEntry = (result: RequirementResult) => [result.evaluator, result.status] as const
+const event = (id: string, caseId: string, kind: string, occurredAt: string) => PayloadSchema.make({ id, caseId, kind, agentId: null, note: null, occurredAt })
 
-const expectedFailingStatuses = (control: VerifiedCase) => {
-  const named = (result: RequirementResult) => Array.contains(control.expectedFailingCriteria, result.evaluator)
-  const failing = Array.filter(control.results, named)
+const events = [
+  event("0192a000-0000-7000-8000-000000000101", unrelatedId, "opened", "2026-10-01T09:00:00.000Z"),
+  event("0192a000-0000-7000-8000-000000000201", targetId, "opened", "2026-10-02T09:00:00.000Z"),
+  event("0192a000-0000-7000-8000-000000000202", targetId, "triaged", "2026-10-02T09:05:00.000Z"),
+]
 
-  return Array.map(failing, Struct.get("status"))
-}
+const auditRow = (caseId: string, version: number, action: string) => PayloadSchema.make({ id: `support-case:${caseId}:${version}`, occurredAt: at, action, outcome: "succeeded", actorId: "public-api", targetId: caseId, traceId: null })
+const targetAudit = [auditRow(targetId, 1, "open"), auditRow(targetId, 2, "triage")]
+const unrelatedAudit = [auditRow(unrelatedId, 1, "open"), auditRow(unrelatedId, 2, "triage")]
 
-const verdicts = (control: VerifiedCase) => pipe(control.results, Array.map(verdictEntry), Record.fromEntries)
-const verifiedCase = (report: VerifierReport, id: string) => pipe(report.cases, Array.findFirst(byCaseId(id)), Effect.fromOption)
-const encodeReport = Schema.encodeEffect(VerifierReport)
-const decodeReport = Schema.decodeUnknownEffect(Schema.fromJsonString(VerifierReport))
+const view = (resource: string, rows: ReadonlyArray<Payload>) => Observation.make({ operation: `${resource}.list`, resource, loaded: true, unfiltered: true, complete: true, rows, reloaded: true, screenshot: Option.none() })
 
-const verifierTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const defects = Array.filter(report.cases, ofKind("defect"))
-  const cleanControls = Array.filter(report.cases, ofKind("clean-control"))
-  const failingCriteria = Array.map(defects, failingCount)
-  const failingStatuses = Array.flatMap(defects, expectedFailingStatuses)
-  const expectedFailingCount = Array.reduce(failingCriteria, 0, sum)
-  const expectedFailures = Array.replicate("fail", expectedFailingCount)
-  const everyDefectFails = Array.every(failingCriteria, isPositive)
-  const cleanResults = Array.flatMap(cleanControls, Struct.get("results"))
-  const cleanStatuses = Array.map(cleanResults, Struct.get("status"))
-  const cleanCount = Array.length(cleanStatuses)
-  const expectedPasses = Array.replicate("pass", cleanCount)
-  const cleanEvaluators = pipe(cleanResults, Array.map(Struct.get("evaluator")), Array.dedupe, Array.sort(Order.String))
-  const evaluatorNames = pipe(evaluatorRevisions, Record.keys, Array.sort(Order.String))
-  const caseCount = Array.length(report.cases)
-  const encoded = yield* encodeReport(report)
-  const json = JSON.stringify(encoded)
-  const decoded = yield* decodeReport(json)
+const views = (cases: ReadonlyArray<Payload>) => [
+  view("support_cases", cases),
+  view("support_case_events", events),
+  view("support_agents", agents),
+  view("support_customers", customers),
+]
 
-  expect(report.summary.falseAcceptance).toBe(0)
-  expect(report.summary.falseRejection).toBe(0)
-  expect(report.summary.unexpectedStatuses).toBe(0)
-  expect(report.summary.cases).toBe(caseCount)
-  expect(report.summary.blocked).toBeGreaterThan(0)
-  expect(report.summary.inconclusive).toBeGreaterThan(0)
-  expect(report.summary.missingEvidenceControls).toBeGreaterThan(0)
-  expect(report.evidenceSource).toBe("deliberately constructed observation controls; not browser or model execution")
-  expect(everyDefectFails).toBe(true)
-  expect(failingStatuses).toEqual(expectedFailures)
-  expect(cleanStatuses).toEqual(expectedPasses)
-  expect(cleanEvaluators).toEqual(evaluatorNames)
-  expect(decoded.summary).toEqual(report.summary)
+const auditProbe = (phase: string, subject: string, records: ReadonlyArray<Payload>) => ProbeRecord.make({ probe: "audit-trail", phase, subject, actor: "fixture-admin-probe", at, status: 200, result: Option.some(records), error: Option.none() })
+
+const probes = [
+  auditProbe("before", targetId, targetAudit),
+  auditProbe("after", targetId, targetAudit),
+  auditProbe("before", unrelatedId, unrelatedAudit),
+  auditProbe("after", unrelatedId, unrelatedAudit),
+]
+
+const staleInput = PayloadSchema.make({ caseId: targetId, expectedVersion: 1, action: "assign", assignedAgentId: onDutyAgent })
+const conflict = VersionConflict.make({ resource: "support_cases", key: targetId, expectedVersion: 1 })
+const staleSubmission = Submission.make({ inputCase: "stale-assign", operation: "support.advanceCase", input: staleInput, status: 422, result: Option.none(), error: Option.some(conflict), at })
+const fixture = PreparedFixture.make({ binding: "support-target-triaged", url: "http://127.0.0.1:0", actor: "public-operator", facts: { "customer.id": customerId, "target.id": targetId, "target.version": 2 }, tracked: [targetId, unrelatedId] })
+const decodeScenario = Schema.decodeUnknownEffect(Scenario)
+const isStale = (scenario: typeof Scenario.Encoded) => Equal.equals(scenario.id, "stale-version-denied")
+
+const staleContext = Effect.gen(function* () {
+  const declared = yield* pipe(supportCasesCatalog.scenarios, Array.findFirst(isStale), Effect.fromOption)
+  const scenario = yield* decodeScenario(declared)
+  const unchanged = [unrelatedCase, targetCase]
+
+  return EvaluationContext.make({ scenario, fixture, candidates: [], submissions: [staleSubmission], before: views(unchanged), after: views(unchanged), probes, directProbes: [], interruption: Option.none(), evidence: [] })
 })
 
-const explicitVerdictTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const uncleared = yield* verifiedCase(report, "assignment-not-cleared")
-  const wrongJoin = yield* verifiedCase(report, "wrong-join")
-  const wrongTag = yield* verifiedCase(report, "wrong-denial-tag")
-  const directAllowed = yield* verifiedCase(report, "direct-probe-allowed")
-  const missingProbe = yield* verifiedCase(report, "missing-detail-probe")
-  const interrupted = yield* verifiedCase(report, "interrupted-before-submission")
-  const priorHistory = yield* verifiedCase(report, "pre-existing-subject-event")
-  const unclearedVerdicts = verdicts(uncleared)
-  const wrongJoinVerdicts = verdicts(wrongJoin)
-  const wrongTagVerdicts = verdicts(wrongTag)
-  const directVerdicts = verdicts(directAllowed)
-  const missingProbeVerdicts = verdicts(missingProbe)
-  const priorHistoryVerdicts = verdicts(priorHistory)
-  const interruptedStatuses = pipe(interrupted.results, Array.map(Struct.get("status")), Array.dedupe)
-
-  expect(unclearedVerdicts).toEqual({ "opened-case": "pass", "lifecycle-transitions": "fail", "ordered-history": "pass", "history-chronology": "pass", "joined-detail": "pass", "audit-recorded": "pass", "unrelated-unchanged": "pass" })
-  expect(wrongJoinVerdicts).toMatchObject({ "joined-detail": "fail", "lifecycle-transitions": "pass" })
-  expect(wrongTagVerdicts).toEqual({ "denied-unchanged": "fail", "unrelated-unchanged": "fail" })
-  expect(directVerdicts).toEqual({ "audit-denied": "fail", "unrelated-unchanged": "pass" })
-  expect(missingProbeVerdicts).toMatchObject({ "joined-detail": "inconclusive", "audit-recorded": "pass" })
-  expect(priorHistoryVerdicts).toMatchObject({ "ordered-history": "fail", "joined-detail": "pass" })
-  expect(interruptedStatuses).toEqual(["blocked"])
-})
-
-const evaluatorRevisionEntry = (result: RequirementResult) => [result.evaluator, result.evaluatorRevision] as const
-const isPassing = (status: RequirementResult["status"]) => Equal.equals(status, "pass")
-const deviations = flow(verdicts, Record.filter(Predicate.not(isPassing)))
-
-const preparedSubjectTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const clean = yield* verifiedCase(report, "clean-prepared-desk")
-  const historyDeleted = yield* verifiedCase(report, "prepared-prior-history-deleted")
-  const auditTruncated = yield* verifiedCase(report, "prepared-prior-audit-truncated")
-  const startMismatch = yield* verifiedCase(report, "prepared-start-mismatch")
-  const startUnobserved = yield* verifiedCase(report, "prepared-start-unobserved")
-  const cleanRevisions = pipe(clean.results, Array.map(evaluatorRevisionEntry), Record.fromEntries)
-  const cleanVerdicts = verdicts(clean)
-  const historyDeviations = deviations(historyDeleted)
-  const auditDeviations = deviations(auditTruncated)
-  const mismatchDeviations = deviations(startMismatch)
-  const unobservedDeviations = deviations(startUnobserved)
-  const controlsWithResults = [historyDeleted, auditTruncated, startMismatch, startUnobserved]
-  const evaluatedNames = Array.map(controlsWithResults, flow(verdicts, Record.keys))
-  const cleanNames = Record.keys(cleanVerdicts)
-  const expectedNames = Array.replicate(cleanNames, 4)
-
-  expect(clean.observations.scenario.id).toBe("desk-triage-assign")
-  expect(cleanVerdicts).toEqual({ "lifecycle-transitions": "pass", "ordered-history": "pass", "history-chronology": "pass", "joined-detail": "pass", "audit-recorded": "pass", "unrelated-unchanged": "pass" })
-  expect(cleanRevisions).toEqual({ "lifecycle-transitions": "2", "ordered-history": "2", "history-chronology": "1", "joined-detail": "2", "audit-recorded": "2", "unrelated-unchanged": "1" })
-  expect(evaluatedNames).toEqual(expectedNames)
-  expect(historyDeviations).toEqual({ "ordered-history": "fail", "unrelated-unchanged": "fail" })
-  expect(auditDeviations).toEqual({ "audit-recorded": "fail" })
-  expect(mismatchDeviations).toEqual({ "lifecycle-transitions": "fail" })
-  expect(unobservedDeviations).toEqual({ "lifecycle-transitions": "inconclusive" })
-})
-
-const byEvaluator = (evaluator: string) => (result: RequirementResult) => Equal.equals(result.evaluator, evaluator)
-const raceSettled = { "history-chronology": "pass", "unrelated-unchanged": "pass" }
-
-const verdictsFor = (report: VerifierReport) => Effect.fn("SupportEvaluationTest.verdicts")(function* (id: string) {
-  const control = yield* verifiedCase(report, id)
-
-  return verdicts(control)
-})
-
-const deviationsFor = (report: VerifierReport) => Effect.fn("SupportEvaluationTest.deviations")(function* (id: string) {
-  const control = yield* verifiedCase(report, id)
-
-  return deviations(control)
-})
-
-const raceVerdictTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const verdictsOf = verdictsFor(report)
-  const singleWinner = yield* verifiedCase(report, "clean-race-single-winner")
-  const singleWinnerVerdicts = verdicts(singleWinner)
-  const twoAccepted = yield* verdictsOf("race-two-accepted")
-  const bothDenied = yield* verdictsOf("race-both-denied")
-  const loserPersisted = yield* verdictsOf("race-loser-agent-persisted")
-  const missingLoser = yield* verdictsOf("race-missing-loser-submission")
-  const missingExchange = yield* verdictsOf("race-missing-loser-exchange")
-  const sequential = yield* verdictsOf("race-sequential-exchanges")
-  const unbarriered = yield* verdictsOf("race-missing-barrier")
-  const transitionRefusal = yield* verifiedCase(report, "clean-race-transition-refusal")
-  const undocumented = yield* verdictsOf("race-undocumented-refusal")
-  const transitionWin = yield* pipe(transitionRefusal.results, Array.findFirst(byEvaluator("single-winner")), Effect.fromOption)
-  const transitionVerdicts = verdicts(transitionRefusal)
-  const winning = yield* pipe(singleWinner.results, Array.findFirst(byEvaluator("single-winner")), Effect.fromOption)
-
-  expect(singleWinner.observations.scenario.id).toBe("race-round-1")
-  expect(singleWinnerVerdicts).toEqual({ "single-winner": "pass", ...raceSettled })
-  expect(twoAccepted).toEqual({ "single-winner": "fail", ...raceSettled })
-  expect(bothDenied).toEqual({ "single-winner": "fail", ...raceSettled })
-  expect(loserPersisted).toEqual({ "single-winner": "fail", ...raceSettled })
-  expect(missingLoser).toEqual({ "single-winner": "inconclusive", "history-chronology": "inconclusive", "unrelated-unchanged": "inconclusive" })
-  expect(missingExchange).toEqual({ "single-winner": "inconclusive", ...raceSettled })
-  expect(sequential).toEqual({ "single-winner": "inconclusive", ...raceSettled })
-  expect(unbarriered).toEqual({ "single-winner": "inconclusive", ...raceSettled })
-  expect(transitionVerdicts).toEqual({ "single-winner": "pass", ...raceSettled })
-  expect(transitionWin.explanation).toContain("The loser was refused with InvalidSupportCaseTransition")
-  expect(undocumented).toEqual({ "single-winner": "fail", "history-chronology": "fail", "unrelated-unchanged": "fail" })
-  expect(winning.explanation).toContain("lane first assign-first (agent agent-grace) sent 2026-10-10T10:01:00.010Z, answered 2026-10-10T10:01:00.060Z: accepted (HTTP 200)")
-  expect(winning.explanation).toContain("lane second assign-second (agent agent-erin) sent 2026-10-10T10:01:00.015Z, answered 2026-10-10T10:01:00.070Z: denied VersionConflict (HTTP 422)")
-})
-
-const chronologyVerdictTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const deviationsOf = deviationsFor(report)
-  const detailOutOfOrder = yield* deviationsOf("detail-history-out-of-order")
-  const reordered = yield* deviationsOf("reordered-history")
-  const backdated = yield* deviationsOf("prepared-event-before-prior-history")
-  const unwritten = yield* verdictsFor(report)("success-without-write")
-
-  expect(detailOutOfOrder).toEqual({ "history-chronology": "fail" })
-  expect(reordered).toEqual({ "ordered-history": "fail", "history-chronology": "fail" })
-  expect(backdated).toEqual({ "ordered-history": "fail", "history-chronology": "fail" })
-  expect(unwritten).toMatchObject({ "history-chronology": "inconclusive" })
-})
-
-const requirement = (evaluator: string) => BoundRequirement.make({
-  reference: "test-requirement",
-  id: "test-requirement",
-  revision: "1",
-  text: "This narrative is deliberately not an oracle.",
-  evaluator,
-  evaluatorRevision: "1",
-  category: "behavior",
-})
-
+const requirement = (id: string, evaluator: string) => Requirement.make({ id, text: "This narrative is deliberately not an oracle.", evaluator })
+const denied = requirement("SC-DENY", "denied-unchanged")
+const preserved = requirement("SC-PRESERVE", "unrelated-unchanged")
+const unknown = requirement("SC-UNKNOWN", "not-an-evaluator")
 const withServerError = (submission: Submission) => Submission.make({ ...submission, status: 500, error: Option.some("Internal server error") })
-const deniedCriterion = requirement("denied-unchanged")
-const unknownCriterion = requirement("not-an-evaluator")
+
+const cleanDenialTest = Effect.gen(function* () {
+  const service = yield* RequirementEvaluation
+  const context = yield* staleContext
+  const deny = yield* service.evaluate(denied, context)
+  const preserve = yield* service.evaluate(preserved, context)
+
+  expect(deny.status).toBe("pass")
+  expect(deny.requirement).toBe("SC-DENY")
+  expect(deny.scenario).toBe("stale-version-denied")
+  expect(preserve.status).toBe("pass")
+})
+
+const mutatedDenialTest = Effect.gen(function* () {
+  const service = yield* RequirementEvaluation
+  const clean = yield* staleContext
+  const mutated = [unrelatedCase, assignedTarget]
+  const after = views(mutated)
+  const context = EvaluationContext.make({ ...clean, after })
+  const deny = yield* service.evaluate(denied, context)
+
+  expect(deny.status).toBe("fail")
+})
 
 const serverErrorTest = Effect.gen(function* () {
-  const report = yield* verifyDefects
-  const clean = yield* verifiedCase(report, "clean-stale-version-denial")
-  const failed = Array.map(clean.observations.submissions, withServerError)
-  const context = EvaluationContext.make({ ...clean.observations, submissions: failed })
   const service = yield* RequirementEvaluation
-  const result = yield* service.evaluate(deniedCriterion, context)
-  const unknownEvaluation = service.evaluate(unknownCriterion, context)
-  const unknown = yield* Effect.flip(unknownEvaluation)
+  const clean = yield* staleContext
+  const submissions = Array.map(clean.submissions, withServerError)
+  const context = EvaluationContext.make({ ...clean, submissions })
+  const result = yield* service.evaluate(denied, context)
+  const unknownEvaluation = service.evaluate(unknown, clean)
+  const failure = yield* Effect.flip(unknownEvaluation)
 
   expect(result.status).toBe("inconclusive")
-  expect(result.basis).toBe("executable assertion")
-  expect(unknown.boundary).toBe("requirement-evaluation")
+  expect(failure.boundary).toBe("requirement-evaluation")
 })
 
-const providedServerErrorTest = Effect.provide(serverErrorTest, evaluationLayer)
+const provided = <A, E>(test: Effect.Effect<A, E, RequirementEvaluation>) => Effect.provide(test, evaluationLayer)
 
-it.effect("verifier controls have no false or unexpected verdicts", Function.constant(verifierTest))
-it.effect("named defects produce their exact verdicts", Function.constant(explicitVerdictTest))
-it.effect("server errors are inconclusive and unknown evaluators fail evaluation", Function.constant(providedServerErrorTest))
-it.effect("prepared subject cases keep their prior history and audit and start from their observed state", Function.constant(preparedSubjectTest))
-it.effect("a version race passes only with one overlapping winner, fails on two or no winners, and is inconclusive without loser or timing evidence", Function.constant(raceVerdictTest))
-it.effect("out-of-order or backdated history fails the chronology contract and an unobserved case leaves it inconclusive", Function.constant(chronologyVerdictTest))
+const cleanDenial = provided(cleanDenialTest)
+const mutatedDenial = provided(mutatedDenialTest)
+const serverError = provided(serverErrorTest)
+
+it.effect("a declared denial that changes nothing passes denial and preservation", Function.constant(cleanDenial))
+it.effect("a denial that still changes the case fails", Function.constant(mutatedDenial))
+it.effect("server errors are inconclusive and unknown evaluators fail evaluation", Function.constant(serverError))

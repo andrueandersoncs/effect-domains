@@ -121,9 +121,14 @@ bun run support-cases support.board --input-json '{"filter":{"status":"open"}}'
 
 ## Story-driven browser acceptance
 
-The application-owned [catalog](acceptance/catalog.ts) declares operator, administrator, reader, and visitor actors; lifecycle, refusal, audit, and competing-assignment stories; requirements SC-OPEN through SC-AUDIT-DENY plus SC-CHRONOLOGY and SC-RACE; and thirteen scenarios, including three version-race rounds in which the loser of a same-version race may be refused with either documented refusal (`VersionConflict` or `InvalidSupportCaseTransition`; transition refusals take precedence, as documented above). Each scenario names a bounded operation set and input cases whose fields come from typed sources—fixture facts, values captured from earlier accepted results (case identity and current or stale version), the approved `case-report` text, literals, or native samples—together with their **native validity** and **expected outcome** (accepted, a declared native denial `_tag`, contended between acceptance and declared refusals, or rejection of native-invalid input). Validation rejects fields outside the native payload, failure tags the native operation (including its authorization middleware) does not declare, unknown fixture facts, and incoherent validity/outcome pairs. This implements [Slice B](../../docs/wiki/story-driven-acceptance.md#slice-b-support-cases), not the full SDA framework.
+The application-owned [catalog](acceptance/catalog.ts) declares operator, administrator, reader, and visitor actors and nine scenarios:
 
-The catalog, [fixture](acceptance/fixture.ts) (seeding, actor sessions, facts, case-detail and audit-trail probes), [evaluators](acceptance/evaluation.ts), and the acceptance definition in [`main.ts`](acceptance/main.ts) stay application-owned. The browser surface, Jev adapter, typed input resolver, evidence store, owned server process, runner, and command line come from the shared [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance) workspace package.
+- a full case lifecycle;
+- four policy denials: stale version, off-duty agent, missing assignment, and disallowed transition;
+- an invalid-version rejection;
+- audit access as administrator, reader, and visitor.
+
+The catalog, [fixture](acceptance/fixture.ts) (seeding, actor sessions, facts, case-detail and audit probes), and [evaluators](acceptance/evaluation.ts) are application-owned. Everything else comes from [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance). See the [acceptance guide](../../docs/guides/acceptance.md).
 
 ```bash
 bun run build
@@ -132,11 +137,22 @@ TYPESAFE_API_KEY= bun run support-cases:acceptance \
   --replay data/acceptance/support-cases-review/run.json --output data/acceptance/support-cases-replay
 ```
 
-Every scenario starts the real application on a fresh loopback port with its own application **and identity** databases (`SUPPORT_CASES_DB`, `SUPPORT_CASES_IDENTITY_DB`) and a per-fixture random demo password, seeds customers, on-duty/off-duty agents, an unrelated sentinel case with history and audit, and—where declared—an open or triaged target case through the public API. Administrator and reader sessions are obtained by the harness, typed into the in-memory token field, and never sent to Jev or retained; a final scan fails the run if any password, token, or API key appears in any retained file. Lifecycle commands are public in this application, so the operator binding carries no credentials.
+Each scenario starts the real application on a fresh loopback port with its own application **and identity** databases (`SUPPORT_CASES_DB`, `SUPPORT_CASES_IDENTITY_DB`) and a random demo password. It seeds customers, on- and off-duty agents, an unrelated sentinel case with history and audit, and, where declared, a target case. Administrator and reader sessions are obtained by the harness and never sent to Jev or retained. A final scan fails the run if a password, token, or API key appears in any retained file.
 
-The application also serves an authored **support desk** at `/desk` ([`desk.ts`](desk.ts)): a custom triage page over `support.board`, `support_agents.list`, and `support.advanceCase` that offers only the transitions the native graph allows for each row and submits commands from its own row data. The `desk-triage-assign` scenario runs through it via the explicit binding in [`acceptance/desk.ts`](acceptance/desk.ts): presentation-class locators for rows, triggers, controls, and refresh, plus the semantics each must keep (role, accessible name, `data-*` attributes), the `data-case-id` row identity that must equal the rendered id column, and the source of every input field. After a presentation-only refactor of the desk, `--replay PATH/run.json --repair-locators` retains the failing strict attempt in `<output>-strict-attempt` and repairs each recorded desk action only onto the single offered action with identical semantics, recording every repair; `--fault desk-wrong-target` (rotated row identities) proves a repair onto another case is refused.
+The evaluators check:
 
-Jev chooses among currently offered navigation, exact candidate entry, submission, observation, and reload actions; the decision state lists completed submissions and the remaining declared inputs with their expected response, never success judgments. Before/after views of cases, history, agents, and customers are captured through their generated lists; case-detail probes after each accepted command and administrator audit probes are explicitly scoped hidden-state observations, and audit scenarios also make a direct server-enforcement probe with the same actor binding. Twelve independent evaluators decode results with the native success schemas, use the native transition graph and creation defaults, and report pass, fail, blocked, or inconclusive per requirement; a deliberately constructed verifier corpus exercises them. Replay rebinds only fixture and captured identities, re-checks literal and text values, keeps native samples, and refuses stale builds or changed actions.
+| Requirement | Check |
+| --- | --- |
+| `SC-OPEN` | The case was opened with its values |
+| `SC-LIFECYCLE` | Every transition followed the native graph |
+| `SC-HISTORY` | The history is ordered |
+| `SC-JOIN` | The joined case detail matches |
+| `SC-AUDIT` | An audit record exists per change |
+| `SC-PRESERVE` | Unrelated records are untouched |
+| `SC-DENY` | A denial with the declared failure tag changes nothing |
+| `SC-REJECT` | Invalid input is rejected |
+| `SC-AUDIT-READ` | Administrators can read the audit |
+| `SC-AUDIT-DENY` | Readers and visitors are refused, both in the UI and by a direct server call |
 
 ## Follow the implementation
 

@@ -3,8 +3,6 @@ import { join } from "node:path"
 import { AcceptanceError, Candidate, FixtureRuntime, PayloadSchema, PreparedFixture, ProbeTarget, Scenario, Submission, type Payload } from "@effect-domains/acceptance/model"
 import { type Secret, ServerSpec, call, serve } from "@effect-domains/acceptance/server"
 
-const revision = "isolated-expense-ledger@1"
-
 const binding = "expense-period"
 
 const bindings = [binding]
@@ -80,7 +78,7 @@ const prepare = Effect.fn("ExpenseLedgerAcceptance.fixture.prepare")(function* (
   const { url } = yield* serve(served, serverEnvironment)
   const tracked = yield* Effect.forEach(seededExpenses, (input) => recordExpense(url, input))
 
-  return PreparedFixture.make({ binding: scenario.fixture, revision, url, actor, facts: periodFacts, tracked })
+  return PreparedFixture.make({ binding: scenario.fixture, url, actor, facts: periodFacts, tracked })
 })
 
 const unsupportedProbe = (target: ProbeTarget) => `The Expense Ledger fixture implements no probes; ${target.probe} is unsupported`
@@ -91,7 +89,7 @@ const direct = Effect.fn("ExpenseLedgerAcceptance.fixture.direct")(function* (fi
   const at = yield* now
   const response = yield* call(fixture.url, candidate.operation, candidate.input, anonymous)
 
-  return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at, exchange: Option.none(), feedback: Option.none() })
+  return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at })
 })
 
 // The ledger is public because every expense operation is granted to anonymous callers, so no session or secret exists.
@@ -103,6 +101,6 @@ const noSecrets = Effect.succeed(retained)
 
 const secrets = Function.constant(noSecrets)
 
-const runtime = FixtureRuntime.of({ revision, bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
+const runtime = FixtureRuntime.of({ bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
 
 export const fixtureLayer = Layer.succeed(FixtureRuntime, runtime)

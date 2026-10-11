@@ -6,15 +6,13 @@ import { ServerSpec, call, serve } from "@effect-domains/acceptance/server"
 
 type Token = Redacted.Redacted<string>
 
-const revision = "isolated-support-cases@3"
-
 const bindings = ["support-baseline", "support-target-open", "support-target-triaged"]
 
 const actors = ["public-operator", "admin-session", "reader-session", "anonymous"]
 
 const probes = ["case-detail", "audit-trail"]
 
-const facts = ["customer.id", "customer.name", "agent.on-duty.id", "agent.on-duty.name", "agent.second-on-duty.id", "agent.second-on-duty.name", "agent.off-duty.id", "sentinel.case.id", "target.id", "target.version", "application.database"]
+const facts = ["customer.id", "customer.name", "agent.on-duty.id", "agent.on-duty.name", "agent.off-duty.id", "sentinel.case.id", "target.id", "target.version"]
 
 const TokenSchema = Schema.Redacted(Schema.String)
 
@@ -92,7 +90,6 @@ const customers = [
 
 const agents = [
   PayloadSchema.make({ id: "dana", name: "Dana Ortiz", onDuty: true }),
-  PayloadSchema.make({ id: "erin", name: "Erin Walsh", onDuty: true }),
   PayloadSchema.make({ id: "omar", name: "Omar Haddad", onDuty: false }),
 ]
 
@@ -154,18 +151,14 @@ type Facts = typeof FactsSchema.Type
 
 const withTarget = (known: Facts) => (row: CaseRow) => FactsSchema.make({ ...known, "target.id": row.id, "target.version": row.version })
 
-// The database path is an explicit fact because acceptance-owned history faults edit the isolated store directly.
-const fixtureFacts = (sentinel: CaseRow, target: Option.Option<CaseRow>, directory: string) => {
+const fixtureFacts = (sentinel: CaseRow, target: Option.Option<CaseRow>) => {
   const known = FactsSchema.make({
     "customer.id": "acme",
     "customer.name": "Acme Industries",
     "agent.on-duty.id": "dana",
     "agent.on-duty.name": "Dana Ortiz",
-    "agent.second-on-duty.id": "erin",
-    "agent.second-on-duty.name": "Erin Walsh",
     "agent.off-duty.id": "omar",
     "sentinel.case.id": sentinel.id,
-    "application.database": applicationDatabase(directory),
   })
 
   return Option.match(target, { onNone: Function.constant(known), onSome: withTarget(known) })
@@ -202,7 +195,7 @@ const runtime = Effect.fn("SupportAcceptance.fixture.runtime")(function* () {
     const generated = generatePassword()
     const password = Redacted.make(generated)
     const spec = ServerSpec.make({ application: "support-cases", entry: "examples/support-cases/main.ts", prefix: "support-cases-acceptance-", artifacts })
-    const { url, directory } = yield* serve(spec, serverEnvironment(password))
+    const { url } = yield* serve(spec, serverEnvironment(password))
 
     yield* Effect.forEach(customers, seedEntity(url, "support_customers.create"))
     yield* Effect.forEach(agents, seedEntity(url, "support_agents.create"))
@@ -224,9 +217,9 @@ const runtime = Effect.fn("SupportAcceptance.fixture.runtime")(function* () {
 
     const targetIds = pipe(target, Option.map(Struct.get("id")), Option.toArray)
     const tracked = Array.prepend(targetIds, sentinel.id)
-    const prepared = fixtureFacts(sentinel, target, directory)
+    const prepared = fixtureFacts(sentinel, target)
 
-    return PreparedFixture.make({ binding: scenario.fixture, revision, url, actor: binding, facts: prepared, tracked })
+    return PreparedFixture.make({ binding: scenario.fixture, url, actor: binding, facts: prepared, tracked })
   })
 
   const session = Effect.fn("SupportAcceptance.fixture.session")(function* (fixture: PreparedFixture) {
@@ -261,10 +254,10 @@ const runtime = Effect.fn("SupportAcceptance.fixture.runtime")(function* () {
     const at = yield* now
     const response = yield* call(fixture.url, candidate.operation, candidate.input, stored.actor)
 
-    return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at, exchange: Option.none(), feedback: Option.none() })
+    return Submission.make({ inputCase: candidate.inputCase, operation: candidate.operation, input: candidate.input, status: response.status, result: response.result, error: response.error, at })
   })
 
-  return FixtureRuntime.of({ revision, bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
+  return FixtureRuntime.of({ bindings, actors, facts, probes, prepare, probe, direct, session, secrets })
 })
 
 const runtimeEffect = runtime()

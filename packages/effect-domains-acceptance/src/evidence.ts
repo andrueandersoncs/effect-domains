@@ -1,11 +1,11 @@
-import { Array, Effect, Equal, Layer, Order, Predicate, Redacted, Schema, String as Text, Struct, flow, pipe } from "effect"
+import { Array, Effect, Layer, Order, Predicate, Redacted, Schema, String as Text, flow, pipe } from "effect"
 import { ApplicationInspect } from "effect-domains/application-inspect"
 import { createHash } from "node:crypto"
 import type { Dirent, MakeDirectoryOptions, WriteFileOptions } from "node:fs"
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises"
 import { join, relative } from "node:path"
 import type { ApplicationIR } from "effect-domains/application"
-import { AcceptanceError, BuildIdentity, Catalog, type CatalogImport, FileHashSchema, ImportedCatalogSchema, RunEvidence } from "./model.ts"
+import { AcceptanceError, BuildIdentity, type Catalog, FileHashSchema, RunEvidence } from "./model.ts"
 
 const hashedSourceExtension = /\.(ts|json|html|css)$/
 
@@ -17,7 +17,7 @@ const ApplicationSchema = Schema.declare(isApplication)
 
 const PathsSchema = Schema.Array(Schema.String)
 
-/** Paths are repo-relative because the build identity must not depend on the checkout location. */
+/** Paths are repo-relative because the build identity must not depend on the checkout location; `builtRoots` hold bundled outputs. */
 export class EvidenceIdentity extends Schema.Class<EvidenceIdentity>("EvidenceIdentity")({
   name: Schema.NonEmptyString,
   application: ApplicationSchema,
@@ -26,6 +26,8 @@ export class EvidenceIdentity extends Schema.Class<EvidenceIdentity>("EvidenceId
   files: PathsSchema,
   effect: Schema.NonEmptyString,
 }) {}
+
+type FileHash = typeof FileHashSchema.Type
 
 const directoryOptions: MakeDirectoryOptions = { recursive: true, mode: 0o700 }
 
@@ -43,9 +45,9 @@ const describeBuildFailure = flow(String, buildError)
 
 const asEvidenceFailure = (error: AcceptanceError) => evidenceError(error.message)
 
-export const sha256 = (content: string | Uint8Array) => createHash("sha256").update(content).digest("hex")
+const sha256 = (content: string | Uint8Array) => createHash("sha256").update(content).digest("hex")
 
-export const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
+const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
 
 const directory = Effect.fn("Acceptance.evidence.directory")(function* (path: string) {
   yield* Effect.tryPromise({ try: () => mkdir(path, directoryOptions), catch: describeEvidenceFailure })
@@ -94,50 +96,37 @@ const hashFile = (root: string) => Effect.fn("Acceptance.evidence.hashFile")(fun
   return FileHashSchema.make({ path, sha256: digest })
 })
 
-const ledgerLine = (file: typeof FileHashSchema.Type) => `${file.path}\0${file.sha256}\n`
+const manifestLine = (file: FileHash) => `${file.path}\0${file.sha256}\n`
 
-const importedBy = (catalog: typeof Catalog.Encoded) => (candidate: typeof Catalog.Encoded) => {
-  const pins = (entry: typeof CatalogImport.Encoded) => Equal.equals(entry.catalog, candidate.id) && Equal.equals(entry.revision, candidate.revision)
+const manifestHash = (files: ReadonlyArray<FileHash>) => pipe(files, Array.map(manifestLine), Array.join(""), sha256)
 
-  return Array.some(catalog.imports, pins)
-}
+const hashedFiles = (root: string) => Effect.fn("Acceptance.evidence.hashedFiles")(function* (groups: ReadonlyArray<ReadonlyArray<string>>) {
+  const sorted = pipe(groups, Array.flatten, Array.sort(Order.String))
 
-const importedCatalog = (imported: typeof Catalog.Encoded) => {
-  const encoded = JSON.stringify(imported)
-  const digest = sha256(encoded)
+  return yield* Effect.forEach(sorted, hashFile(root))
+})
 
-  return ImportedCatalogSchema.make({ id: imported.id, revision: imported.revision, sha256: digest })
-}
-
-const importOrder = Order.mapInput(Order.String, (imported: typeof ImportedCatalogSchema.Type) => `${imported.id}@${imported.revision}`)
-
-const imported = (catalog: typeof Catalog.Encoded, imports: ReadonlyArray<typeof Catalog.Encoded>) => pipe(imports, Array.filter(importedBy(catalog)), Array.map(importedCatalog), Array.sort(importOrder))
-
-/** The catalog hash covers the root catalog and the exact content of every resolved import because a pinned revision alone cannot detect an edited import. */
-const identify = (identity: EvidenceIdentity) => Effect.fn("Acceptance.evidence.identify")(function* (catalog: typeof Catalog.Encoded, imports: ReadonlyArray<typeof Catalog.Encoded>) {
+/** Sources, bundles, the catalog, and the native contracts are hashed separately because a replay is stale when any of them changes. */
+const identify = (identity: EvidenceIdentity) => Effect.fn("Acceptance.evidence.identify")(function* (catalog: typeof Catalog.Encoded) {
   const inspection = yield* pipe(ApplicationInspect.describe(identity.application), Effect.mapError(describeBuildFailure))
   const root = new URL("../../../", import.meta.url).pathname
   const walkedPaths = Array.map(identity.walkedRoots, under(root))
   const builtPaths = Array.map(identity.builtRoots, under(root))
+  const listed = Array.map(identity.files, under(root))
   const walked = yield* Effect.forEach(walkedPaths, filesUnder(hashedSourceExtension))
   const built = yield* Effect.forEach(builtPaths, filesUnder(anyFile))
-  const listed = Array.map(identity.files, under(root))
-  const sources = Array.flatten(walked)
-  const outputs = Array.flatten(built)
-  const discovered = Array.appendAll(sources, outputs)
-  const all = Array.appendAll(discovered, listed)
-  const sorted = Array.sort(all, Order.String)
-  const files = yield* Effect.forEach(sorted, hashFile(root))
-  const ledger = pipe(files, Array.map(ledgerLine), Array.join(""))
-  const importedCatalogs = imported(catalog, imports)
-  const catalogJson = JSON.stringify([catalog, importedCatalogs])
+  const sourceGroups = Array.append(walked, listed)
+  const sources = yield* hashedFiles(root)(sourceGroups)
+  const bundles = yield* hashedFiles(root)(built)
+  const files = pipe(sources, Array.appendAll(bundles))
+  const catalogJson = JSON.stringify(catalog)
   const inspectionJson = JSON.stringify(inspection)
 
   return BuildIdentity.make({
     application: identity.name,
-    sha256: sha256(ledger),
+    sourceHash: manifestHash(sources),
+    bundleHash: manifestHash(bundles),
     files,
-    importedCatalogs,
     catalogHash: sha256(catalogJson),
     nativeContractsHash: sha256(inspectionJson),
     nativeContracts: inspection,
@@ -160,6 +149,7 @@ const retainedFile = (root: string, secrets: ReadonlyArray<Buffer>) => Effect.fn
 
 const nonEmptySecret = flow(Redacted.value<string>, Text.isNonEmpty)
 
+/** Every retained file under the run directory that contains a secret, by relative path, because a leaked credential fails the run. */
 const scan = Effect.fn("Acceptance.evidence.scan")(function* (path: string, secrets: ReadonlyArray<Redacted.Redacted<string>>) {
   const needles = pipe(secrets, Array.filter(nonEmptySecret), Array.map(secretBytes))
   const retained = yield* pipe(filesUnder(anyFile)(path), Effect.mapError(asEvidenceFailure))

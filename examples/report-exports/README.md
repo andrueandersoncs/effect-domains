@@ -150,7 +150,13 @@ The application database defaults to `data/report-exports.sqlite`; execution sto
 
 ## Story-driven browser acceptance
 
-`bun run report-exports:acceptance` runs this application's [acceptance catalog](acceptance/catalog.ts) through the shared [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance) tooling. Each scenario starts an isolated topology—the server as a cluster client plus one owned worker process—with private application, execution, and identity stores, a generated demo password, and sessions for the editor `alice` and the reader `bob` held only by the harness. Scenarios cover a `GenerateDiscard` request whose nested report header and `lines` array come from one native whole-payload sample (entered through the generated fieldsets and JSON textarea), a reversed reporting period rejected by the native codec (HTTP 400), the reader refused with `Forbidden`, and a `Generate` request whose eventual completion is watched through an authorized status probe until `Succeeded` with a hashed, immutable artifact within a declared deadline. Acceptance of the request is never treated as completion. See the [acceptance guide](../../docs/guides/acceptance.md) for options, replay, and evidence handling.
+`bun run report-exports:acceptance` runs this application's [acceptance catalog](acceptance/catalog.ts) through the shared [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance) tooling ([guide](../../docs/guides/acceptance.md)). It has three scenarios:
+
+- a whole-payload native sample of a nested export request is accepted, and the stored request contains every submitted value with no generated fields;
+- a reversed reporting period is rejected;
+- the reader `bob` is denied with `Forbidden`.
+
+Rejected and denied scenarios must leave the stored exports unchanged.
 
 ## Full-stack OpenTelemetry and business metrics
 

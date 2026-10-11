@@ -119,7 +119,7 @@ const otherPrefix = Context.make(WirePrefix, { value: "other:" })
 
 const noServices = Context.empty()
 
-const fixture = PreparedFixture.make({ binding: "ratings", revision: "test@1", url: "http://127.0.0.1/", actor: "rater", facts: {}, tracked: [] })
+const fixture = PreparedFixture.make({ binding: "ratings", url: "http://127.0.0.1/", actor: "rater", facts: {}, tracked: [] })
 
 const note: FieldSource = { source: "literal", value: "Read twice" }
 
@@ -164,9 +164,6 @@ const scoreCase = (strategy: Strategy, validity: InputCase["validity"]) => {
 
 const scenarioOf = (input: InputCase) => Scenario.make({
   id: input.id,
-  revision: "1",
-  provenance: "test",
-  approval: "approved",
   story: "rate",
   actor: "rater",
   fixture: "ratings",
@@ -177,10 +174,7 @@ const scenarioOf = (input: InputCase) => Scenario.make({
   observations: [],
   probes: [],
   requirements: [],
-  assessments: [],
   reload: false,
-  concurrency: Option.none(),
-  watch: Option.none(),
 })
 
 const noCandidate = AcceptanceError.make({ boundary: "test", message: "The declared case resolved no candidate" })
@@ -188,7 +182,7 @@ const noCandidate = AcceptanceError.make({ boundary: "test", message: "The decla
 const candidateWith = (seed: number) => Effect.fn("InputsTest.candidateWith")(function* (input: InputCase) {
   const inputs = yield* InputCandidates
   const scenario = scenarioOf(input)
-  const candidates = yield* inputs.resolve(scenario, fixture, [], [], seed)
+  const candidates = yield* inputs.resolve(scenario, fixture, [], seed)
 
   return yield* pipe(candidates, Array.head, Effect.fromOption, Effect.mapError(Function.constant(noCandidate)))
 })
@@ -297,7 +291,6 @@ const correlatedTest = Effect.gen(function* () {
   expect(allOrdered).toBe(true)
   expect(late.starts).toBe(500)
   expect(late.ends).toBeGreaterThan(500)
-  expect(lateCandidate.provenance).toContain("ends ← native whole-payload sample of periods.plan")
   expect(exhausted.boundary).toBe("inputs.exhausted")
   expect(exhausted.message).toContain("200 seeded attempts")
   expect(reversed.validity).toBe("native-invalid")
@@ -369,14 +362,12 @@ const forgedNote = noteCase("note-forged", { title: sampled, id: forgedId }, "na
 
 const decodeNote = Schema.decodeUnknownEffect(NoteSchema)
 
-const isTitled = (recorded: Note) => Text.isNonEmpty(recorded.title)
-
 const generatedFieldTest = Effect.gen(function* () {
   const candidate = yield* resolveGenerated(sampledNote)
   const forged = yield* resolveGenerated(forgedNote)
   const fields = Record.keys(candidate.input)
   const decoded = yield* decodeNote(candidate.input)
-  const titled = isTitled(decoded)
+  const titled = Text.isNonEmpty(decoded.title)
 
   expect(fields).toEqual(["title"])
   expect(titled).toBe(true)
@@ -437,7 +428,7 @@ const generationLayer = inputLayer(GenerationApplication, wirePrefix)
 const replayed = Effect.fn("InputsTest.replayed")(function* (recorded: Candidate) {
   const inputs = yield* InputCandidates
 
-  return yield* inputs.replay(replayScenario, [recorded], fixture, [], [])
+  return yield* inputs.replay(replayScenario, [recorded], fixture, [])
 }, Effect.provide(generationLayer))
 
 const replayTest = Effect.gen(function* () {

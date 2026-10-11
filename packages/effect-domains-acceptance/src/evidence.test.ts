@@ -43,31 +43,27 @@ const roundTripTest = Effect.gen(function* () {
   expect(leaks).toEqual(["leaked.json"])
 })
 
-const catalog = { id: "c", revision: "1", provenance: "test", approval: "approved" as const, imports: [{ alias: "shared", catalog: "shared", revision: "1" }], approvals: [], actors: [], contexts: [], needs: [], capabilities: [], features: [], textFixtures: [], rubrics: [], requirements: [], stories: [], scenarios: [] }
+const catalog = { id: "c", actors: [], requirements: [], stories: [], scenarios: [] }
 
-const shared = { ...catalog, id: "shared", imports: [], provenance: "shared obligations" }
-
-// The edited import keeps its revision because the build identity must notice content changes a revision bump would otherwise announce.
-const editedShared = { ...shared, provenance: "shared obligations, silently edited" }
-
-const unrelated = { ...shared, id: "unrelated" }
+const editedCatalog = { ...catalog, id: "edited" }
 
 const identifyTest = Effect.gen(function* () {
   const evidence = yield* RunEvidence
-  const build = yield* evidence.identify(catalog, [unrelated, shared])
-  const reordered = yield* evidence.identify(catalog, [shared])
-  const edited = yield* evidence.identify(catalog, [editedShared, unrelated])
+  const build = yield* evidence.identify(catalog)
+  const again = yield* evidence.identify(catalog)
+  const edited = yield* evidence.identify(editedCatalog)
   const paths = Array.map(build.files, Struct.get("path"))
-  const imported = Array.map(build.importedCatalogs, Struct.get("id"))
   const unchangedHash = Equal.equals(edited.catalogHash, build.catalogHash)
+  const sharedHash = Equal.equals(build.sourceHash, build.bundleHash)
 
   expect(build.application).toBe("acceptance-test")
   expect(build.effect).toBe("4.0.0-rc.112")
   expect(paths).toEqual(["packages/effect-domains-acceptance/package.json", "packages/effect-domains-acceptance/tsconfig.json"])
-  expect(imported).toEqual(["shared"])
-  expect(reordered.catalogHash).toBe(build.catalogHash)
+  expect(again.catalogHash).toBe(build.catalogHash)
   expect(unchangedHash).toBe(false)
-  expect(edited.sha256).toBe(build.sha256)
+  expect(edited.sourceHash).toBe(build.sourceHash)
+  expect(edited.bundleHash).toBe(build.bundleHash)
+  expect(sharedHash).toBe(false)
 })
 
 const layer = evidenceLayer(identity)
@@ -78,4 +74,4 @@ const roundTrip = provided(roundTripTest)
 const identified = provided(identifyTest)
 
 it.effect("saved evidence reads back encoded and retained secrets are reported by relative path", Function.constant(roundTrip))
-it.effect("the build identity hashes the declared files and covers exactly the pinned imports' content", Function.constant(identified))
+it.effect("the build identity hashes sources, bundles, and the catalog separately", Function.constant(identified))

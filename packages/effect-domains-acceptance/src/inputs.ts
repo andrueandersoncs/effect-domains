@@ -11,7 +11,6 @@ import {
   PayloadSchema,
   PreparedFixture,
   Submission,
-  TextFixture,
   ValiditySchema,
   type CapturedSource,
   type FieldSource,
@@ -21,7 +20,6 @@ import {
   NativeStrategySchema,
   type Payload,
   type Scenario,
-  type TextSource,
 } from "./model.ts"
 
 type NativeOperations = ReadonlyArray<NativeOperation>
@@ -50,18 +48,15 @@ class NumericBounds extends Schema.Class<NumericBounds>("NumericBounds")({
 }) {}
 
 const SubmissionsSchema = Schema.Array(Submission)
-const TextFixturesSchema = Schema.Array(TextFixture)
 
 class Sources extends Schema.Class<Sources>("Sources")({
   fixture: PreparedFixture,
   submissions: SubmissionsSchema,
-  textFixtures: TextFixturesSchema,
 }) {}
 
 class ResolvedField extends Schema.Class<ResolvedField>("ResolvedField")({
   field: Schema.String,
   value: Schema.Unknown,
-  provenance: Schema.String,
 }) {}
 
 type FieldResolution = Effect.Effect<Option.Option<ResolvedField>, AcceptanceError>
@@ -70,11 +65,6 @@ const ResolvedFieldsSchema = Schema.Array(ResolvedField)
 
 class Resolution extends Schema.Class<Resolution>("Resolution")({
   fields: ResolvedFieldsSchema,
-}) {}
-
-class Captured extends Schema.Class<Captured>("Captured")({
-  submission: Submission,
-  value: Schema.Unknown,
 }) {}
 
 class Validation extends Schema.Class<Validation>("Validation")({
@@ -101,7 +91,7 @@ const withTag = (name: string) => (request: NativeOperation): boolean => Equal.e
 
 const namedField = (name: string) => (field: SchemaAST.PropertySignature): boolean => Equal.equals(field.name, name)
 
-const withId = (id: string) => (declaration: InputCase | TextFixture): boolean => Equal.equals(declaration.id, id)
+const withId = (id: string) => (declaration: InputCase): boolean => Equal.equals(declaration.id, id)
 
 const isUnencoded = (ast: SchemaAST.AST) => Predicate.isUndefined(ast.encoding)
 
@@ -117,8 +107,6 @@ const propertyType = (name: string) => Function.flow(propertySignature(name), Op
 const fieldValue = (resolved: ResolvedField): readonly [string, unknown] => [resolved.field, resolved.value]
 
 const payloadOf = (resolution: Resolution): Payload => pipe(resolution.fields, Array.map(fieldValue), Record.fromEntries)
-
-const provenanceOf = (resolution: Resolution) => pipe(resolution.fields, Array.map(Struct.get("provenance")), Array.join("; "))
 
 const toResolution = (fields: ReadonlyArray<ResolvedField>) => Resolution.make({ fields })
 
@@ -142,8 +130,6 @@ const resolveOperation = (operations: NativeOperations) => Effect.fn("Acceptance
   return single.value
 })
 
-const offsetText = (offset: number) => Equal.equals(offset, 0) ? "" : ` offset ${offset}`
-
 const shift = (offset: number) => (value: number) => value + offset
 
 const withOffset = (boundary: string, where: string, offset: number) => (value: unknown) => {
@@ -157,16 +143,14 @@ const withOffset = (boundary: string, where: string, offset: number) => (value: 
 
 const fixtureField = (sources: Sources, field: string) => Effect.fn("Acceptance.fixtureField")(function* (source: FixtureSource) {
   const fact = Record.get(sources.fixture.facts, source.fact)
-  const prepared = `${sources.fixture.binding}@${sources.fixture.revision}`
   const where = `Fixture fact ${source.fact} for ${field}`
 
   if (Option.isNone(fact)) {
-    return yield* fail("inputs.fixture", `${where} is not prepared by ${prepared}`)
+    return yield* fail("inputs.fixture", `${where} is not prepared by fixture ${sources.fixture.binding}`)
   }
 
   const value = yield* withOffset("inputs.fixture", where, source.offset)(fact.value)
-  const provenance = `${field} ← fixture ${prepared} fact ${source.fact}${offsetText(source.offset)}`
-  const resolved = ResolvedField.make({ field, value, provenance })
+  const resolved = ResolvedField.make({ field, value })
 
   return Option.some(resolved)
 })
@@ -177,19 +161,15 @@ const isSuccessful = (submission: Submission) => {
   return reached && submission.status < 300
 }
 
-const captureOf = (submission: Submission) => (value: unknown) => Captured.make({ submission, value })
-
 const capturedFrom = (name: string) => (submission: Submission) => {
   const successful = isSuccessful(submission)
 
-  const value = pipe(
+  return pipe(
     submission.result,
     Option.filter(isPayload),
     Option.flatMap(Record.get(name)),
     Option.filter(Function.constant(successful)),
   )
-
-  return Option.map(value, captureOf(submission))
 }
 
 // An unresolvable capture is not an error because the producing submission may simply not have happened yet.
@@ -200,35 +180,14 @@ const capturedField = (sources: Sources, field: string) => Effect.fn("Acceptance
     return Option.none<ResolvedField>()
   }
 
-  const { submission } = latest.value
-  const value = yield* withOffset("inputs.captured", `Captured ${source.field} for ${field}`, source.offset)(latest.value.value)
-  const origin = `${submission.operation} result of ${submission.inputCase} at ${submission.at}`
-  const provenance = `${field} ← captured ${source.field} from ${origin}${offsetText(source.offset)}`
-  const resolved = ResolvedField.make({ field, value, provenance })
-
-  return Option.some(resolved)
-})
-
-const textField = (sources: Sources, field: string) => Effect.fn("Acceptance.textField")(function* (source: TextSource) {
-  const fixture = Array.findFirst(sources.textFixtures, withId(source.fixture))
-  const value = pipe(fixture, Option.map(Struct.get("values")), Option.flatMap(Record.get(source.field)))
-
-  if (Option.isNone(fixture)) {
-    return yield* fail("inputs.fixture", `Unavailable text fixture ${source.fixture} for ${field}`)
-  }
-
-  if (Option.isNone(value)) {
-    return yield* fail("inputs.fixture", `Text fixture ${source.fixture} has no value ${source.field} for ${field}`)
-  }
-
-  const provenance = `${field} ← text ${fixture.value.id}@${fixture.value.revision}.${source.field} (${fixture.value.provenance})`
-  const resolved = ResolvedField.make({ field, value: value.value, provenance })
+  const value = yield* withOffset("inputs.captured", `Captured ${source.field} for ${field}`, source.offset)(latest.value)
+  const resolved = ResolvedField.make({ field, value })
 
   return Option.some(resolved)
 })
 
 const literalField = (field: string) => (source: Extract<FieldSource, { readonly source: "literal" }>): FieldResolution =>
-  pipe(ResolvedField.make({ field, value: source.value, provenance: `${field} ← declared literal` }), present)
+  pipe(ResolvedField.make({ field, value: source.value }), present)
 
 const isNativeSource = Schema.is(NativeSourceSchema)
 
@@ -372,7 +331,6 @@ const depthOf = (value: unknown): number => {
 }
 
 class SampledPayload extends Schema.Class<SampledPayload>("SampledPayload")({
-  attempt: Schema.Int,
   values: PayloadSchema,
 }) {}
 
@@ -400,7 +358,7 @@ const unsatisfied = (error: Schema.SchemaError) => {
 
 // A native-invalid case keeps its first encodable sample because its declared values, not the sample, carry the violation the browser must submit.
 const attemptSample = (operation: NativeOperation, services: CodecServices, fields: ReadonlyArray<string>, fixed: Payload, validity: InputCase["validity"]) =>
-  Effect.fn("Acceptance.attemptSample")(function* (sample: unknown, index: number): Effect.fn.Return<Attempt> {
+  Effect.fn("Acceptance.attemptSample")(function* (sample: unknown): Effect.fn.Return<Attempt> {
     const depth = depthOf(sample)
     const deep = depth > maximumDepth
 
@@ -419,7 +377,7 @@ const attemptSample = (operation: NativeOperation, services: CodecServices, fiel
     if (!complete) return Result.fail("the sample omits a declared optional field")
 
     const values = pickFields(encoded.success, fields)
-    const sampled = SampledPayload.make({ attempt: index + 1, values })
+    const sampled = SampledPayload.make({ values })
     const accepted = Result.succeed(sampled)
     const merged = Record.union(fixed, values, Function.identity)
     const invalid = Equal.equals(validity, "native-invalid")
@@ -433,11 +391,7 @@ const attemptSample = (operation: NativeOperation, services: CodecServices, fiel
 
 const lastProblem = (attempts: ReadonlyArray<Attempt>) => pipe(attempts, Array.getFailures, Array.last, Option.getOrElse(Function.constant("no sample was drawn")))
 
-const sampledField = (operation: NativeOperation, seed: number, sampled: SampledPayload) => ([field, value]: readonly [string, unknown]) => {
-  const provenance = `${field} ← native whole-payload sample of ${operation._tag} (seed ${seed}, attempt ${sampled.attempt} of ${sampleAttempts}, generated/trusted members excluded)`
-
-  return ResolvedField.make({ field, value, provenance })
-}
+const sampledField = ([field, value]: readonly [string, unknown]) => ResolvedField.make({ field, value })
 
 /**
  * Samples every `native sample` field from one decoded value of the whole caller payload because struct-level and
@@ -467,7 +421,7 @@ const sampleWhole = (operation: NativeOperation, services: CodecServices, validi
     }
 
     const entries = Record.toEntries(chosen.value.values)
-    const sampledFields = Array.map(entries, sampledField(operation, seed, chosen.value))
+    const sampledFields = Array.map(entries, sampledField)
 
     return pipe(resolution.fields, Array.appendAll(sampledFields), toResolution)
   })
@@ -624,8 +578,7 @@ const boundPick = (strategy: BoundedStrategy): (bounds: NumericBounds) => number
 const boundedValue = (operation: NativeOperation, field: string) => Effect.fn("Acceptance.boundedValue")(function* (strategy: BoundedStrategy) {
   const bounds = yield* numericBounds(operation, field)
   const value = boundPick(strategy)(bounds)
-  const provenance = `${field} ← native ${strategy} of ${operation._tag}.${field} bounds ${bounds.minimum}..${bounds.maximum}`
-  const resolved = ResolvedField.make({ field, value, provenance })
+  const resolved = ResolvedField.make({ field, value })
 
   return Option.some(resolved)
 })
@@ -640,8 +593,7 @@ const nullableOf = (operation: NativeOperation, field: string) => () => {
 const nullValue = (operation: NativeOperation, field: string) => Effect.fn("Acceptance.nullValue")(function* () {
   yield* pipe(nullableOf(operation, field)(), Effect.fromResult, Effect.mapError(inputError("inputs.unsupported")))
 
-  const provenance = `${field} ← native null of nullable ${operation._tag}.${field}`
-  const resolved = ResolvedField.make({ field, value: null, provenance })
+  const resolved = ResolvedField.make({ field, value: null })
 
   return Option.some(resolved)
 })
@@ -684,9 +636,6 @@ export const nativeStrategyProblem = (operation: NativeOperation, field: string)
   Result.getFailure,
 )
 
-/** Whether the interpreter can apply a native strategy to a payload field because coverage reports may list only strategies a scenario could declare. */
-export const nativeStrategyApplies = (operation: NativeOperation, field: string) => Function.flow(nativeStrategyProblem(operation, field), Option.isNone)
-
 const failureReason = (failure: Option.Option<Schema.SchemaError>) => Option.match(failure, { onNone: Function.constant("the field codec failed without a schema issue"), onSome: describe })
 
 const fieldDecoding = (value: unknown) => (ast: SchemaAST.AST): Option.Option<string> => {
@@ -715,7 +664,6 @@ const resolveSource = (operation: NativeOperation, sources: Sources, field: stri
   Match.discriminatorsExhaustive("source")({
     fixture: fixtureField(sources, field),
     captured: capturedField(sources, field),
-    text: textField(sources, field),
     literal: literalField(field),
     native: nativeField(operation, field),
   }),
@@ -799,7 +747,6 @@ const resolveCase = (operations: NativeOperations, services: CodecServices, sour
     sources: input.fields,
     validity: validation.validity,
     nativeValidation: validation.nativeValidation,
-    provenance: provenanceOf(resolution),
     seed: caseSeed,
   })
 
@@ -810,7 +757,6 @@ const resolve = (operations: NativeOperations, services: CodecServices) => Effec
   scenario: Scenario,
   fixture: PreparedFixture,
   submissions: ReadonlyArray<Submission>,
-  textFixtures: ReadonlyArray<TextFixture>,
   seed: number,
 ) {
   const integral = Number.isSafeInteger(seed)
@@ -819,48 +765,34 @@ const resolve = (operations: NativeOperations, services: CodecServices) => Effec
     return yield* fail("inputs.unsupported", `Candidate resolution requires an integer seed; received ${seed}`)
   }
 
-  const sources = Sources.make({ fixture, submissions, textFixtures })
+  const sources = Sources.make({ fixture, submissions })
   const candidates = yield* Effect.forEach(scenario.inputs, resolveCase(operations, services, sources, seed))
 
   return Array.getSomes(candidates)
 })
 
-const recordedValue = (field: string, provenance: string) => (value: unknown) =>
-  pipe(ResolvedField.make({ field, value, provenance }), present)
+const recordedValue = (field: string) => (value: unknown) =>
+  pipe(ResolvedField.make({ field, value }), present)
 
-const recordedField = (recorded: Candidate, field: string, provenance: string): FieldResolution => {
+const recordedNative = (recorded: Candidate, field: string) => () => {
   const value = Record.get(recorded.input, field)
   const missing = fail("inputs.replay", `Recorded candidate ${recorded.inputCase} has no concrete ${field}`)
 
-  return Option.match(value, { onNone: Function.constant(missing), onSome: recordedValue(field, provenance) })
+  return Option.match(value, { onNone: Function.constant(missing), onSome: recordedValue(field) })
 }
-
-const recordedNative = (recorded: Candidate, field: string) => () =>
-  recordedField(recorded, field, `${field} ← recorded native sample (seed ${recorded.seed})`)
-
-const asReplayError = (error: AcceptanceError) => AcceptanceError.make({ boundary: "inputs.replay", message: error.message })
-
-// A text source the replay cannot re-derive is a replay disagreement because the recorded value can no longer be tied to its declaration.
-const replayedText = (sources: Sources, field: string) => (source: TextSource): FieldResolution =>
-  pipe(source, textField(sources, field), Effect.mapError(asReplayError))
 
 // Native values are replayed concretely because the recorded sample is the evidence; every declared value comes from the fresh run and is compared afterwards.
 const replayField = (operation: NativeOperation, sources: Sources, recorded: Candidate) => (source: FieldSource, field: string): FieldResolution => pipe(
   Match.value(source),
   Match.discriminators("source")({
     native: recordedNative(recorded, field),
-    text: replayedText(sources, field),
   }),
   Match.orElse(resolveSource(operation, sources, field)),
 )
 
-const isDeclaredValue = (source: FieldSource) => {
-  const literal = Equal.equals(source.source, "literal")
+const isLiteral = (source: FieldSource) => Equal.equals(source.source, "literal")
 
-  return literal || Equal.equals(source.source, "text")
-}
-
-const declaredValueFields = (fields: InputCase["fields"]) => pipe(fields, Record.filter(isDeclaredValue), Record.keys)
+const literalFields = (fields: InputCase["fields"]) => pipe(fields, Record.filter(isLiteral), Record.keys)
 
 const sameField = (left: Payload, right: Payload) => (field: string) => {
   const leftValue = Record.get(left, field)
@@ -899,10 +831,10 @@ const replayCandidate = (operations: NativeOperations, services: CodecServices, 
     return yield* fail("inputs.replay", `Replayed ${recorded.inputCase} is ${validation.validity} but was recorded ${recorded.validity}: ${validation.nativeValidation}`)
   }
 
-  const declaredValuesHold = pipe(declared.value.fields, declaredValueFields, Array.every(sameField(validation.input, recorded.input)))
+  const literalsHold = pipe(declared.value.fields, literalFields, Array.every(sameField(validation.input, recorded.input)))
 
-  if (!declaredValuesHold) {
-    return yield* fail("inputs.replay", `Recorded candidate ${recorded.inputCase} carries a literal or text value other than its declared source`)
+  if (!literalsHold) {
+    return yield* fail("inputs.replay", `Recorded candidate ${recorded.inputCase} carries a literal value other than its declared source`)
   }
 
   const candidate = Candidate.make({
@@ -913,7 +845,6 @@ const replayCandidate = (operations: NativeOperations, services: CodecServices, 
     sources: declared.value.fields,
     validity: validation.validity,
     nativeValidation: validation.nativeValidation,
-    provenance: provenanceOf(resolution.value),
     seed: recorded.seed,
   })
 
@@ -925,9 +856,8 @@ const replay = (operations: NativeOperations, services: CodecServices) => Effect
   recorded: ReadonlyArray<Candidate>,
   fixture: PreparedFixture,
   submissions: ReadonlyArray<Submission>,
-  textFixtures: ReadonlyArray<TextFixture>,
 ) {
-  const sources = Sources.make({ fixture, submissions, textFixtures })
+  const sources = Sources.make({ fixture, submissions })
   const candidates = yield* Effect.forEach(recorded, replayCandidate(operations, services, scenario, sources))
 
   return Array.getSomes(candidates)

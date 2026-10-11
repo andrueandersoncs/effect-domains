@@ -140,30 +140,34 @@ This is a public local register, not a private account service: there is no logi
 
 ## Story-driven browser acceptance
 
-The application-owned [catalog](acceptance/catalog.ts) declares approved reader stories, shared requirement IDs, one declared input case per scenario with typed field sources (fixture facts, approved text, native strategies), native operation/resource references, and a named semantic text fixture. The [fixture](acceptance/fixture.ts) and [evaluators](acceptance/evaluation.ts) are application-owned; the shared runner, browser surface, Jev adapter, native input resolution, evidence, and CLI come from [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance). This implements [Slice A](../../docs/wiki/story-driven-acceptance.md#slice-a-reading-list), not the full SDA-01–SDA-12 framework.
+The application-owned [catalog](acceptance/catalog.ts) declares reader stories, requirements, and nine scenarios bound to `books.create` and `books.update`. The [fixture](acceptance/fixture.ts) and [evaluators](acceptance/evaluation.ts) are also application-owned. The runner, browser surface, Jev adapter, input generation, evidence, and CLI come from [`@effect-domains/acceptance`](../../packages/effect-domains-acceptance). See the [acceptance guide](../../docs/guides/acceptance.md).
 
 Install Chromium once with `bunx playwright install chromium` from `packages/effect-domains-acceptance`. Then run from the repository root, with `TYPESAFE_API_KEY` in the environment or the untracked root `.env`:
 
 ```bash
 bun run build
 bun run reading-list:acceptance --output data/acceptance/reading-list-review
-bun run reading-list:acceptance --replay data/acceptance/reading-list-review/run.json
+TYPESAFE_API_KEY= bun run reading-list:acceptance --replay data/acceptance/reading-list-review/run.json --output data/acceptance/reading-list-replay
 bun run reading-list:acceptance --help
 ```
 
-Use a fresh output directory: existing `run.json` is never overwritten. The runner starts the actual Reading List application on fresh loopback ports with owned temporary SQLite databases, seeds an unrelated sentinel and an update target where needed, and opens a fresh Chromium context for each scenario. It does not use your existing application database or require a separately running server. Feature actions use individual generated controls, including enum selects, optional-field inclusion, and nullable JSON-value textareas; they do not use the complete-payload JSON fallback or direct API mutation.
+Each scenario gets its own instance of the application: fresh loopback ports, owned temporary SQLite databases, an unrelated sentinel book, an update target where needed, and a fresh Chromium context. Your application database is not touched. Feature actions go through the individual generated controls, not the JSON fallback or direct API calls.
 
-Nine scenarios cover creation with a native sample, explicit null, and omitted rating, update ratings at both native boundaries, nullable update, and rejection below/above the range and at a fractional value. Creation takes title/author from the documented book fixture and native samples for status, format, and notes; updates take every other field from the prepared planned target's fixture facts. Update targets remain planned: finished status is not a rating policy. Native creation metadata supplies omitted-field defaults. The runner does not claim that arbitrary strings prove a useful reader outcome.
+The nine scenarios cover:
 
-Jev `jev-1.13.0` selects currently available semantic actions, with `cannot-proceed` always available. Exact field entries are one bounded payload action over the actual controls, not independent model guesses about equivalent field order. Defaults are confidence **0.55**, **30** actions, a **180-second** scenario deadline, a **30-second** model-call timeout, and seed **42**, kept after the [held-out calibration](../../docs/wiki/validation-strategy.md#2026-10-10-held-out-decision-calibration-ap-09) (reviewed corpus in [`acceptance/calibration.json`](acceptance/calibration.json)). Low confidence stops without executing the selected action or falling back to the first option. Model failure, missing evidence, and incomplete criteria cannot become a pass.
+- creation with a native sample, an explicit null rating, and an omitted rating;
+- rating updates at both native boundaries, and a null rating;
+- rejection below and above the range and at a fractional value.
 
-Each output directory contains `run.json`, `verifier.json`, and per-scenario JSON, before/step screenshots, and server logs, plus an ownership marker and sealed `lineage.json`. Results identify the requirement/scenario/evaluator revisions, assertion basis, evidence references, exact candidates, native validation, application/source/bundle hashes, and actual model requests, responses, probability distributions, and executed/unexecuted actions. API keys are not retained, and the run fails if any secret appears in retained bytes. Inspect, export, and prune evidence with `bun run acceptance:evidence` under the `reading-list-evidence@1` policy, and query coverage with `bun run acceptance:query`; see the [acceptance guide](../../docs/guides/acceptance.md).
+The evaluators check:
 
-Replay reuses the captured concrete native values and action trace without Jev, re-resolving fixture facts (the fresh target identity and fields) and approved text. It rejects stale application/catalog/evaluator/binding hashes, missing coverage, altered payload actions, and unavailable targets; an originally unexecuted action stays unexecuted. Reading List has no authored custom surface, so `--repair-locators` has nothing to repair.
+- `RL-CREATE`: the created values and identity;
+- `RL-RELOAD`: the book is still visible after a reload;
+- `RL-RATING`: accepted ratings are stored;
+- `RL-REJECT`: rejected ratings change nothing;
+- `RL-PRESERVE`: the sentinel book is untouched.
 
-Acceptance is determined independently by creation/value/identity, reload, rating, all-row rejection preservation, and sentinel evaluators. Deliberately constructed defective observation controls exercise the same evaluators, and `bun run reading-list:acceptance --faults` injects live defects through an acceptance-owned proxy (success without write, lost after reload, wrong target, rejected-but-mutating, unrelated mutation) plus deadline, action-limit, racing-target, and disabled-submit controls. The approved `rating-rejection-clarity` rubric is assessed by the model against the rejection feedback; its pass or fail is reported as a non-gating model assessment, never as an executable assertion.
-
-Exit **0** means every declared scenario/requirement and verifier control matched its expected outcome. Exit **1** means blocked/inconclusive/failing execution, a prerequisite/evidence failure, a stale replay, or an evidence leak. Inspect the individual results rather than treating action completion as acceptance. The authored catalog is decoded at runtime; a declaration that is `proposed` or lacks an approval for its current revision is reported as not contract-ready. The [completion ledger](../../docs/wiki/story-driven-acceptance.md#closing-gate-review-ap-17-2026-10-11) records which design gates remain open.
+Jev only chooses among the actions currently offered. Below the confidence gate (0.55), the scenario stops instead of guessing. Each run writes `run.json`, a JSON file per scenario, screenshots, and server logs. Replay re-runs the recorded values and actions without the model and refuses a changed build or catalog. Exit **0** means every requirement passed.
 
 ## Full-stack OpenTelemetry
 

@@ -32,7 +32,7 @@ export const SupportAgentSchema = Schema.Struct({
   onDuty: Schema.Boolean,
 })
 
-interface SupportAgent extends Schema.Schema.Type<typeof SupportAgentSchema> {}
+export interface SupportAgent extends Schema.Schema.Type<typeof SupportAgentSchema> {}
 
 export const SupportCaseSchema = Schema.Struct({
   customerId: Schema.NonEmptyString,

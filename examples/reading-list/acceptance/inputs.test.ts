@@ -59,7 +59,6 @@ const createFacts: Payload = { sentinel, "sentinel.id": sentinel.id }
 
 const fixtureWith = (binding: string) => (facts: Payload) => PreparedFixture.make({
   binding,
-  revision: "isolated-reading-list@2",
   url: "http://127.0.0.1/",
   actor: "public-reader",
   facts,
@@ -82,7 +81,7 @@ const resolvedFor = (fixture: PreparedFixture) => Effect.fn("ReadingListInputsTe
   const inputs = yield* InputCandidates
   const catalog = yield* decodedCatalog
   const scenario = yield* pipe(catalog.scenarios, Array.findFirst(withId(id)), Effect.fromOption)
-  const candidates = yield* inputs.resolve(scenario, fixture, [], catalog.textFixtures, seed)
+  const candidates = yield* inputs.resolve(scenario, fixture, [], seed)
 
   return yield* pipe(candidates, Array.head, Effect.fromOption)
 })
@@ -116,8 +115,6 @@ const ratingStrategiesTest = Effect.gen(function* () {
   expect(validities).toEqual([...valids, ...invalids])
   expect(retained).toEqual(expectedRetained)
   expect(minimum.nativeValidation).toMatch(/^accepted by the exact native books\.update codec/)
-  expect(minimum.provenance).toContain("id ← fixture isolated-reading-list-target@isolated-reading-list@2 fact target.id")
-  expect(minimum.provenance).toContain("rating ← native minimum of books.update.rating bounds 1..5")
   expect(above.nativeValidation).toMatch(/^rejected by the exact native books\.update codec: /)
   expect(above.input).toEqual({ ...target, rating: 6 })
 })
@@ -155,9 +152,6 @@ const createCandidatesTest = Effect.gen(function* () {
   expect(ratings).toEqual([true, true, false])
   expect(nullRating).toEqual(expectedNull)
   expect(omittedKeys).toEqual(["title", "author", "status", "format", "notes"])
-  expect(sampled.provenance).toContain("title ← text documented-book-text@1.title")
-  expect(sampled.provenance).toContain("status ← native whole-payload sample of books.create")
-  expect(sampled.provenance).toContain("format ← native whole-payload sample of books.create")
 })
 
 const replayTest = Effect.gen(function* () {
@@ -165,12 +159,11 @@ const replayTest = Effect.gen(function* () {
   const catalog = yield* decodedCatalog
   const scenario = yield* pipe(catalog.scenarios, Array.findFirst(withId("rating-above")), Effect.fromOption)
   const recorded = yield* resolvedFor(targetFixture)("rating-above")
-  const replayed = yield* inputs.replay(scenario, [recorded], freshFixture, [], catalog.textFixtures)
+  const replayed = yield* inputs.replay(scenario, [recorded], freshFixture, [])
   const candidate = yield* pipe(replayed, Array.head, Effect.fromOption)
 
   expect(candidate.input).toEqual({ ...freshTarget, rating: 6 })
   expect(candidate.validity).toBe("native-invalid")
-  expect(candidate.provenance).toContain("rating ← recorded native sample")
 })
 
 const codecServices = Context.empty()
@@ -187,6 +180,6 @@ const replay = provided(replayTest)
 
 it.effect("rating bounds and null resolve native-valid while below, above, and fractional stay raw and native-invalid", Function.constant(ratingStrategies))
 
-it.effect("create candidates carry approved text and native values, never an identity, and omission drops the rating", Function.constant(createCandidates))
+it.effect("create candidates carry literal text and native values, never an identity, and omission drops the rating", Function.constant(createCandidates))
 
 it.effect("rating replay rebinds fixture facts and keeps the recorded native value", Function.constant(replay))

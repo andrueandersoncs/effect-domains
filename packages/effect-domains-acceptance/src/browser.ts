@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
-import { Array, DateTime, Effect, Equal, FiberSet, Function, HashMap, Layer, Option, Order, Predicate, Record, Redacted, Ref, Result, Schema, String as Text, Struct, Tuple, flow, pipe } from "effect"
-import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response, type Route } from "playwright"
-import { AcceptanceError, Action, BrowserSurface, Candidate, CustomTarget, type ElementSemantics, Exchange, LocatorCheck, LocatorRepair, Observation, Offer, PayloadSchema, RequestGate, type RowIdentity, Submission, TargetPart, type Payload } from "./model.ts"
-import { type ActionBinding, ColumnBinding, type ControlBinding, SurfaceBinding, SurfaceRow, appliesTo, byEntryKey, canonical, composePayload, consistentRow, controlText, identityFieldOf, openTarget, refreshTarget, rowTarget, sameCanonical, targetText } from "./surface.ts"
+import { Array, DateTime, Effect, Equal, FiberSet, Function, HashMap, Layer, Option, Order, Predicate, Record, Redacted, Ref, Result, Schema, Struct, Tuple, flow, pipe } from "effect"
+import { chromium, type Browser, type BrowserContext, type Locator, type Request, type Response } from "playwright"
+import { AcceptanceError, Action, BrowserSurface, Candidate, Observation, Offer, PayloadSchema, Submission, type Payload } from "./model.ts"
 
 const timeout = 7_000
 // Submissions wait longer than navigation because a native operation may legitimately complete its work before it answers.
@@ -21,10 +20,7 @@ const navigationAlert = ".admin-content > [role='alert']"
 const navigationReady = ".admin-content table[data-loaded='true'], .admin-content form.admin-form button[data-action='submit']:not(:disabled), .admin-content [role='alert']"
 const submissionReady = ".admin-content table[data-loaded='true'], .admin-operation-result pre.admin-result, .admin-operation-result [role='alert']"
 
-const OptionalSurfaceSchema = Schema.Option(SurfaceBinding)
-
-/** The scenario's custom surface travels with the target because only the runner knows which explicit binding a scenario executes through. */
-export class BrowserTarget extends Schema.Class<BrowserTarget>("BrowserTarget")({ url: Schema.String, artifacts: Schema.String, surface: OptionalSurfaceSchema }) {}
+export class BrowserTarget extends Schema.Class<BrowserTarget>("BrowserTarget")({ url: Schema.String, artifacts: Schema.String }) {}
 
 class PublicCall extends Schema.Class<PublicCall>("PublicCall")({ operation: Schema.String, input: PayloadSchema }) {}
 
@@ -103,8 +99,7 @@ class Table extends Schema.Class<Table>("Table")({
   rows: RowsSchema,
 }) {}
 
-/** `shown` is the result region's rendered text because qualitative review judges exactly what the user saw, including refusal alerts. */
-class OperationResult extends Schema.Class<OperationResult>("OperationResult")({ success: Schema.Boolean, text: Schema.String, alert: Schema.Boolean, shown: Schema.String }) {}
+class OperationResult extends Schema.Class<OperationResult>("OperationResult")({ success: Schema.Boolean, text: Schema.String, alert: Schema.Boolean }) {}
 
 const NavigationJsonSchema = Schema.fromJsonString(NavigationEntry)
 const NavigationSchema = Schema.Array(NavigationJsonSchema)
@@ -142,69 +137,7 @@ const OptionalCandidateSchema = Schema.Option(Candidate)
 
 class Offered extends Schema.Class<Offered>("Offered")({ action: Action, offer: Offer, candidate: OptionalCandidateSchema }) {}
 
-class ElementState extends Schema.Class<ElementState>("ElementState")({ count: Schema.Int, visible: Schema.Boolean, enabled: Schema.Boolean }) {}
-
-const ElementStateJsonSchema = Schema.fromJsonString(ElementState)
-const OptionValuesSchema = Schema.Array(Schema.String)
-
-class ControlState extends Schema.Class<ControlState>("ControlState")({
-  name: Schema.String,
-  count: Schema.Int,
-  visible: Schema.Boolean,
-  enabled: Schema.Boolean,
-  options: OptionValuesSchema,
-}) {}
-
-const ControlStateJsonSchema = Schema.fromJsonString(ControlState)
-const ControlStatesSchema = Schema.Array(ControlStateJsonSchema)
-
-class RowActionState extends Schema.Class<RowActionState>("RowActionState")({ id: Schema.String, trigger: ElementStateJsonSchema, controls: ControlStatesSchema }) {}
-
-const CellValueSchema = Schema.NullOr(Schema.String)
-
-class ScannedCell extends Schema.Class<ScannedCell>("ScannedCell")({ column: Schema.String, value: CellValueSchema }) {}
-
-const ScannedCellJsonSchema = Schema.fromJsonString(ScannedCell)
-const RowActionStateJsonSchema = Schema.fromJsonString(RowActionState)
-const ScannedCellsSchema = Schema.Array(ScannedCellJsonSchema)
-const RowActionStatesSchema = Schema.Array(RowActionStateJsonSchema)
-
-class ScannedRow extends Schema.Class<ScannedRow>("ScannedRow")({ identity: Schema.String, cells: ScannedCellsSchema, actions: RowActionStatesSchema }) {}
-
-const ScannedRowJsonSchema = Schema.fromJsonString(ScannedRow)
-const ScannedRowsSchema = Schema.Array(ScannedRowJsonSchema)
-
-/** The custom surface as rendered: where the page is, whether it settled, its refresh control, and every bound row with its controls' states. */
-class SurfaceScan extends Schema.Class<SurfaceScan>("SurfaceScan")({ path: Schema.String, ready: Schema.Boolean, refresh: ElementStateJsonSchema, rows: ScannedRowsSchema }) {}
-
-const SurfaceScanJsonSchema = Schema.fromJsonString(SurfaceScan)
-
-class ProbeControl extends Schema.Class<ProbeControl>("ProbeControl")({ name: Schema.String, locator: Schema.String }) {}
-
-const ProbeControlsSchema = Schema.Array(ProbeControl)
-
-class ProbeAction extends Schema.Class<ProbeAction>("ProbeAction")({ id: Schema.String, trigger: Schema.String, controls: ProbeControlsSchema }) {}
-
-const ProbeColumnsSchema = Schema.Array(ColumnBinding)
-const ProbeActionsSchema = Schema.Array(ProbeAction)
-
-/** Only the declared locators cross into the page because the binding's semantics are judged in this process. */
-class SurfaceProbe extends Schema.Class<SurfaceProbe>("SurfaceProbe")({
-  ready: Schema.String,
-  row: Schema.String,
-  identity: Schema.String,
-  columns: ProbeColumnsSchema,
-  refresh: Schema.String,
-  actions: ProbeActionsSchema,
-}) {}
-
-type ProbeDeclaration = typeof SurfaceProbe.Encoded
-
-class SurfaceTurn extends Schema.Class<SurfaceTurn>("SurfaceTurn")({ binding: SurfaceBinding, scan: SurfaceScan }) {}
-
-const OptionalSurfaceTurnSchema = Schema.Option(SurfaceTurn)
-
-class Turn extends Schema.Class<Turn>("Turn")({ offer: Offer, current: Rendered, listed: Listing, surface: OptionalSurfaceTurnSchema, snapshot: Schema.String }) {}
+class Turn extends Schema.Class<Turn>("Turn")({ offer: Offer, current: Rendered, listed: Listing, snapshot: Schema.String }) {}
 
 const HarnessFailureSchema = Schema.Struct({ _tag: Schema.String, message: Schema.String, response: Schema.Unknown })
 
@@ -324,7 +257,7 @@ const captureRendered = () => {
     const text = output?.textContent ?? ""
     const alerted = Boolean(alert)
 
-    return JSON.stringify({ success, text, alert: alerted, shown: node.innerText })
+    return JSON.stringify({ success, text, alert: alerted })
   }
 
   const navigationNodes = document.querySelectorAll<HTMLButtonElement>(".admin-nav button[data-operation]")
@@ -342,76 +275,6 @@ const captureRendered = () => {
   return JSON.stringify({ url: location.href, navigation, form, table, result, loadingNotices })
 }
 
-// The surface scan runs inside Chromium because only the page can resolve the declared locators; it returns raw attribute text as nested JSON.
-const captureSurface = (probe: ProbeDeclaration) => {
-  const visible = (node: Element | null) => {
-    const element = node instanceof HTMLElement ? node : null
-    const rendered = element?.checkVisibility() ?? false
-    const rectangles = element?.getClientRects()
-    const boxed = (rectangles?.length ?? 0) > 0
-
-    return rendered && boxed
-  }
-
-  const enabled = (node: Element | null) => {
-    const disabled = node?.matches(":disabled, [aria-disabled='true']") ?? true
-
-    return !disabled
-  }
-
-  const stateOf = (nodes: NodeListOf<Element>) => {
-    const first = nodes.item(0)
-    const shown = visible(first)
-    const usable = enabled(first)
-
-    return JSON.stringify({ count: nodes.length, visible: shown, enabled: usable })
-  }
-
-  const optionValue = (option: HTMLOptionElement) => option.getAttribute("value") ?? option.text
-
-  const controlEntry = (row: Element) => (control: ProbeDeclaration["actions"][number]["controls"][number]) => {
-    const nodes = row.querySelectorAll(control.locator)
-    const first = nodes.item(0)
-    const shown = visible(first)
-    const usable = enabled(first)
-    const options = first instanceof HTMLSelectElement ? globalThis.Array.from(first.options, optionValue) : []
-
-    return JSON.stringify({ name: control.name, count: nodes.length, visible: shown, enabled: usable, options })
-  }
-
-  const actionEntry = (row: Element) => (action: ProbeDeclaration["actions"][number]) => {
-    const triggers = row.querySelectorAll(action.trigger)
-    const trigger = stateOf(triggers)
-    const controls = globalThis.Array.from(action.controls, controlEntry(row))
-
-    return JSON.stringify({ id: action.id, trigger, controls })
-  }
-
-  const cellEntry = (row: Element) => (column: ProbeDeclaration["columns"][number]) => {
-    const cell = row.querySelector(column.locator)
-    const value = cell?.getAttribute(column.attribute) ?? null
-
-    return JSON.stringify({ column: column.column, value })
-  }
-
-  const rowEntry = (row: Element) => {
-    const identity = row.getAttribute(probe.identity) ?? ""
-    const cells = globalThis.Array.from(probe.columns, cellEntry(row))
-    const actions = globalThis.Array.from(probe.actions, actionEntry(row))
-
-    return JSON.stringify({ identity, cells, actions })
-  }
-
-  const readyNode = document.querySelector(probe.ready)
-  const refreshNodes = document.querySelectorAll(probe.refresh)
-  const rowNodes = document.querySelectorAll(probe.row)
-  const ready = Boolean(readyNode)
-  const refresh = stateOf(refreshNodes)
-  const rows = globalThis.Array.from(rowNodes, rowEntry)
-
-  return JSON.stringify({ path: location.pathname, ready, refresh, rows })
-}
-
 const loadingCleared = () => !document.querySelector(".admin-notice-loading")
 
 const settledOn = (ready: string) => {
@@ -420,6 +283,46 @@ const settledOn = (ready: string) => {
   const quiet = !loading
 
   return quiet && Boolean(settled)
+}
+
+const entryKey = ([key]: readonly [string, unknown]) => key
+
+/** Orders object entries by key because canonical JSON must not depend on construction order. */
+const byEntryKey = Order.mapInput(Order.String, entryKey)
+
+const canonicalEntry = ([key, value]: readonly [string, unknown]) => {
+  const name = JSON.stringify(key)
+  const text = canonical(value)
+
+  return `${name}:${text}`
+}
+
+const arrayCanonical = (values: ReadonlyArray<unknown>) => {
+  const items = pipe(values, Array.map(canonical), Array.join(","))
+
+  return `[${items}]`
+}
+
+const objectCanonical = (value: Payload) => {
+  const entries = pipe(value, Record.toEntries, Array.sort(byEntryKey), Array.map(canonicalEntry), Array.join(","))
+
+  return `{${entries}}`
+}
+
+const scalarCanonical = (value: unknown) => pipe(JSON.stringify(value), Option.fromUndefinedOr, Option.getOrElse(Function.constant(absent)))
+
+/** Key-sorted JSON because payload and action comparisons must ignore property order. */
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return arrayCanonical(value)
+
+  return Predicate.isObject(value) ? objectCanonical(value) : scalarCanonical(value)
+}
+
+const sameCanonical = (left: unknown) => (right: unknown) => {
+  const expected = canonical(left)
+  const actual = canonical(right)
+
+  return Equal.equals(expected, actual)
 }
 
 const messageOf = (cause: unknown) => Predicate.isError(cause) ? cause.message : String(cause)
@@ -453,8 +356,6 @@ const incompleteSubmission = runtimeError("Submission fields are incomplete or c
 const deadlineExceeded = runtimeError("Public response body exceeded the browser deadline")
 const exceeded = Effect.fail(deadlineExceeded)
 const noActions: ReadonlyArray<Action> = []
-const noOperations: ReadonlyArray<string> = []
-const noCandidates: ReadonlyArray<Candidate> = []
 const noOffers = HashMap.empty<string, Offered>()
 const noLists = HashMap.empty<string, ListTracking>()
 const noResult = Option.none<unknown>()
@@ -570,42 +471,6 @@ const operationCallOf = (origin: string, operation: string) => (response: Respon
   const requested = pipe(call, Option.map(Struct.get("operation")), Option.contains(operation))
 
   return publicCall && requested
-}
-
-const callEndpoint = (address: URL) => address.pathname.endsWith("/api/call")
-
-const requestsOperation = (operation: string) => (request: Request) => {
-  const method = request.method()
-  const posted = Equal.equals(method, "POST")
-  const requested = pipe(request, decodeCall, Option.map(Struct.get("operation")), Option.contains(operation))
-
-  return posted && requested
-}
-
-// Route steps only log their failure because the held click still observes the response or its absence and reports that as the submission outcome.
-const logRouteFailure = (cause: unknown) => Effect.logWarning("A held submission route step failed", cause)
-
-const settleRoute = (step: "abort" | "continue") => Effect.fn("BrowserSurface.settleRoute")(function* (route: Route) {
-  yield* Effect.tryPromise({ try: () => route[step](), catch: Function.identity })
-}, Effect.catch(logRouteFailure))
-
-const abortRoute = settleRoute("abort")
-
-const continueRoute = settleRoute("continue")
-
-// A held request continues only when its gate releases and is aborted when the gate fails, because a broken barrier must not let one competitor run alone.
-const releaseRoute = (route: Route) => (held: Effect.Effect<void, AcceptanceError>) => {
-  const aborted = abortRoute(route)
-  const continued = continueRoute(route)
-
-  return Effect.matchEffect(held, { onFailure: Function.constant(aborted), onSuccess: Function.constant(continued) })
-}
-
-const holdRoute = (matches: (request: Request) => boolean, held: Effect.Effect<void, AcceptanceError>) => (route: Route) => {
-  const request = route.request()
-  const released = releaseRoute(route)(held)
-
-  return matches(request) ? Effect.runPromise(released) : route.fallback()
 }
 
 const listCallOf = (origin: string) => (response: Response) => {
@@ -797,7 +662,6 @@ const openAction = (snapshot: string) => (entry: NavigationEntry) => Action.make
   inputCase: Option.none(),
   value: Option.none(),
   target: `navigation:${entry.operation}:${entry.target}`,
-  binding: Option.none(),
   snapshot,
 })
 
@@ -809,18 +673,15 @@ const observeAction = (snapshot: string) => (entry: NavigationEntry) => Action.m
   inputCase: Option.none(),
   value: Option.none(),
   target: `navigation:${entry.operation}:${entry.target}`,
-  binding: Option.none(),
   snapshot,
 })
 
-// A surface-bound scenario executes its operations only through its explicit binding because the generated form would bypass the surface under test.
 const navigationActions = (turn: Turn) => {
   const entries = Array.filter(turn.current.navigation, usableEntry)
   const preferred = preferredEntry(entries)
-  const operations = Option.isSome(turn.surface) ? noOperations : turn.offer.operations
 
   const opens = pipe(
-    operations,
+    turn.offer.operations,
     Array.dedupe,
     Array.filter(Predicate.not(formShown(turn.current))),
     Array.map(preferred),
@@ -918,7 +779,6 @@ const formActions = (candidate: Candidate, snapshot: string) => (form: Form) => 
     inputCase: Option.some(candidate.inputCase),
     value: Option.some(candidate.input),
     target: `payload:${candidate.inputCase}`,
-    binding: Option.none(),
     snapshot,
   })
 
@@ -930,7 +790,6 @@ const formActions = (candidate: Candidate, snapshot: string) => (form: Form) => 
     inputCase: Option.some(candidate.inputCase),
     value: Option.some(candidate.input),
     target: `submit:${candidate.inputCase}`,
-    binding: Option.none(),
     snapshot,
   })
 
@@ -954,7 +813,6 @@ const reloadAction = (snapshot: string) => Action.make({
   inputCase: Option.none(),
   value: Option.none(),
   target: "page",
-  binding: Option.none(),
   snapshot,
 })
 
@@ -966,165 +824,15 @@ const cannotProceed = (snapshot: string) => Action.make({
   inputCase: Option.none(),
   value: Option.none(),
   target: "scenario",
-  binding: Option.none(),
   snapshot,
 })
 
-const surfaceOpenAction = (surface: SurfaceBinding, snapshot: string) => {
-  const target = openTarget(surface)
-
-  return Action.make({
-    id: `surface:${surface.id}:open`,
-    description: `Open the ${surface.title} (${surface.path}), the application's authored page for this work`,
-    kind: "open",
-    operation: Option.none(),
-    inputCase: Option.none(),
-    value: Option.none(),
-    target: targetText(target, surface.path),
-    binding: Option.some(target),
-    snapshot,
-  })
-}
-
-const surfaceRowsAction = (surface: SurfaceBinding, snapshot: string) => {
-  const target = refreshTarget(surface)
-
-  return Action.make({
-    id: `surface:${surface.id}:rows`,
-    description: `Refresh the ${surface.title} rows (${surface.source}) to observe its current records`,
-    kind: "observe",
-    operation: Option.some(surface.source),
-    inputCase: Option.none(),
-    value: Option.none(),
-    target: targetText(target, surface.path),
-    binding: Option.some(target),
-    snapshot,
-  })
-}
-
-const usableState = (state: Pick<ElementState, "count" | "visible" | "enabled">) => {
-  const single = Equal.equals(state.count, 1)
-
-  return Array.every([single, state.visible, state.enabled], Boolean)
-}
-
-const cellValue = (cell: ScannedCell) => pipe(cell.value, Option.fromNullOr, Option.flatMap(parsedValue), Option.map(columnEntry(cell.column)))
-
-const surfaceRow = (scanned: ScannedRow) => pipe(
-  scanned.cells,
-  Array.map(cellValue),
-  Option.all,
-  Option.map(Record.fromEntries),
-  Option.map(rowWithColumns(scanned.identity)),
-)
-
-const rowWithColumns = (identity: string) => (columns: Payload) => SurfaceRow.make({ identity, columns })
-
-const scannedWith = (identity: string) => (row: ScannedRow) => Equal.equals(row.identity, identity)
-
-const identifiedAs = (id: string) => (item: Readonly<{ id: string }>) => Equal.equals(item.id, id)
-
-const actionStateOf = (id: string) => (row: ScannedRow) => Array.findFirst(row.actions, identifiedAs(id))
-
-const controlReady = (action: ActionBinding, input: Payload) => (control: ControlState) => {
-  const expected = controlText(action, input)(control.name)
-  const selectable = Array.isReadonlyArrayEmpty(control.options) || Array.contains(control.options, expected)
-
-  return usableState(control) && selectable
-}
-
-const actionReady = (action: ActionBinding, input: Payload) => (state: RowActionState) => {
-  const trigger = usableState(state.trigger)
-  const controls = Array.every(state.controls, controlReady(action, input))
-  const declared = Equal.equals(state.controls.length, action.controls.length)
-
-  return Array.every([trigger, controls, declared], Boolean)
-}
-
-const candidateIdentity = (action: ActionBinding, input: Payload) => pipe(identityFieldOf(action), Option.flatMap(fieldOfInput(input)), Option.filter(Predicate.isString))
-
-const fieldOfInput = (input: Payload) => (field: string) => Record.get(input, field)
-
-/** The single scanned row bound to the candidate's identity, never a position; none when absent or duplicated. */
-const boundRow = (scan: SurfaceScan) => (identity: string) => {
-  const rows = Array.filter(scan.rows, scannedWith(identity))
-  const single = Equal.equals(rows.length, 1)
-
-  return single ? Array.head(rows) : Option.none<ScannedRow>()
-}
-
-// A row action is offered only when its row identity, rendered identity column, composed payload, and every bound control agree exactly with the candidate, because any drift may mean a different target.
-const rowActionReady = (turn: SurfaceTurn, action: ActionBinding, candidate: Candidate) => (scanned: ScannedRow) => {
-  const row = surfaceRow(scanned)
-  const consistent = Option.exists(row, consistentRow(turn.binding))
-  const composed = Option.flatMap(row, composeFor(action, candidate.input))
-  const exact = Option.exists(composed, sameCanonical(candidate.input))
-  const ready = pipe(scanned, actionStateOf(action.id), Option.exists(actionReady(action, candidate.input)))
-
-  return Array.every([consistent, exact, ready], Boolean)
-}
-
-const composeFor = (action: ActionBinding, input: Payload) => (row: SurfaceRow) => composePayload(action, row, input)
-
-const surfaceRowAction = (turn: SurfaceTurn, candidate: Candidate, snapshot: string) => (action: ActionBinding) => {
-  const target = rowTarget(turn.binding, action)
-  const summary = summaryOf(candidate.input)
-  const identity = candidateIdentity(action, candidate.input)
-  const scanned = Option.flatMap(identity, boundRow(turn.scan))
-  const ready = Option.exists(scanned, rowActionReady(turn, action, candidate))
-
-  const offered = Action.make({
-    id: `surface:${turn.binding.id}:${action.id}:${candidate.inputCase}`,
-    description: `On the ${turn.binding.title}: ${action.description}. ${candidate.description} (${summary}); acts only on the row bound to this identity and captures the real public HTTP response`,
-    kind: "submit",
-    operation: Option.some(candidate.operation),
-    inputCase: Option.some(candidate.inputCase),
-    value: Option.some(candidate.input),
-    target: targetText(target, turn.binding.path),
-    binding: Option.some(target),
-    snapshot,
-  })
-
-  return ready ? Option.some(offered) : Option.none<Action>()
-}
-
-const candidateRowActions = (turn: SurfaceTurn, snapshot: string) => (candidate: Candidate) => pipe(
-  turn.binding.actions,
-  Array.filter(appliesTo(candidate.operation, candidate.input)),
-  Array.map(surfaceRowAction(turn, candidate, snapshot)),
-  Array.getSomes,
-)
-
-const onSurface = (turn: SurfaceTurn) => Equal.equals(turn.scan.path, turn.binding.path)
-
-const boundActions = (candidates: ReadonlyArray<Candidate>, snapshot: string) => (turn: SurfaceTurn) => {
-  const present = onSurface(turn)
-  const settled = present && turn.scan.ready
-  const refreshable = settled && usableState(turn.scan.refresh)
-  const open = present ? noActions : [surfaceOpenAction(turn.binding, snapshot)]
-  const rows = refreshable ? [surfaceRowsAction(turn.binding, snapshot)] : noActions
-  const operations = settled ? Array.flatMap(candidates, candidateRowActions(turn, snapshot)) : noActions
-
-  return Array.flatten([open, rows, operations])
-}
-
-const surfaceActions = (turn: Turn) => Option.match(turn.surface, { onNone: Function.constant(noActions), onSome: boundActions(turn.offer.candidates, turn.snapshot) })
-
-// A surface listing never claims completeness because the custom page does not prove it shows every record.
-const surfaceListing = (turn: SurfaceTurn) => {
-  const rows = pipe(turn.scan.rows, Array.map(surfaceRow), Array.getSomes, Array.map(Struct.get("columns")))
-
-  return Listing.make({ operation: turn.binding.source, resource: `surface:${turn.binding.id}`, loaded: turn.scan.ready, unfiltered: true, complete: false, rows })
-}
-
 const interactiveActions = (turn: Turn) => {
   const navigation = navigationActions(turn)
-  const generated = Option.isSome(turn.surface) ? noCandidates : turn.offer.candidates
-  const forms = Array.flatMap(generated, candidateActions(turn))
-  const custom = surfaceActions(turn)
+  const forms = Array.flatMap(turn.offer.candidates, candidateActions(turn))
   const reload = turn.offer.reload ? [reloadAction(turn.snapshot)] : noActions
 
-  return Array.flatten([navigation, forms, custom, reload])
+  return Array.flatten([navigation, forms, reload])
 }
 
 const offeredActions = (turn: Turn) => {
@@ -1221,205 +929,7 @@ const decodeRendered = Schema.decodeUnknownEffect(RenderedJsonSchema)
 
 const encodeRendered = Schema.encodeEffect(RenderedJsonSchema)
 
-const decodeSurfaceScan = Schema.decodeUnknownEffect(SurfaceScanJsonSchema)
-
-const encodeSurfaceScan = Schema.encodeEffect(SurfaceScanJsonSchema)
-
-const probeControl = (control: ControlBinding) => ProbeControl.make({ name: control.name, locator: control.element.locator })
-
-const probeAction = (action: ActionBinding) => ProbeAction.make({ id: action.id, trigger: action.trigger.locator, controls: Array.map(action.controls, probeControl) })
-
-const probeOf = (surface: SurfaceBinding) => SurfaceProbe.make({
-  ready: surface.ready,
-  row: surface.collection.row.locator,
-  identity: surface.collection.identity,
-  columns: surface.collection.columns,
-  refresh: surface.refresh.locator,
-  actions: Array.map(surface.actions, probeAction),
-})
-
-const encodeProbe = Schema.encodeEffect(SurfaceProbe)
-
-const attributeEntrySelector = ([attribute, value]: readonly [string, string]) => attributeSelector(attribute, value)
-
-const attributesSelector = (attributes: Readonly<Record<string, string>>) => pipe(attributes, Record.toEntries, Array.sort(byEntryKey), Array.map(attributeEntrySelector), Array.join(""))
-
-const nameText = (name: string) => {
-  const quoted = JSON.stringify(name)
-
-  return `[name=${quoted}]`
-}
-
-/** Describes a semantic target as role, exact accessible name, and attributes because repair provenance must name what was matched. */
-const semanticText = (semantics: ElementSemantics, extra: Readonly<Record<string, string>>) => {
-  const attributes = Record.union(semantics.attributes, extra, Function.identity)
-  const named = pipe(semantics.name, Option.map(nameText), Option.getOrElse(Function.constant("")))
-  const selector = attributesSelector(attributes)
-
-  return `role=${semantics.role}${named}${selector}`
-}
-
-const isRowPart = (part: TargetPart) => Equal.equals(part.part, "row")
-
-const identityOfAction = (action: Action) => (row: RowIdentity) => pipe(action.value, Option.flatMap(Record.get(row.field)), Option.filter(Predicate.isString))
-
-const boundIdentity = (action: Action, target: CustomTarget) => Option.flatMap(target.row, identityOfAction(action))
-
-const noAttributes = Record.empty<string, string>()
-
-const identityAttribute = ([row, value]: readonly [RowIdentity, string]) => Record.singleton(row.attribute, value)
-
-const identityAttributes = (target: CustomTarget, identity: Option.Option<string>) => pipe(
-  Option.all([target.row, identity]),
-  Option.map(identityAttribute),
-  Option.getOrElse(Function.constant(noAttributes)),
-)
-
-const failedPart = (check: LocatorCheck) => !Equal.equals(check.recordedMatches, 1)
-
-const repairedPart = (check: LocatorCheck) => {
-  const current = Equal.equals(check.currentMatches, 1)
-  const semantic = Equal.equals(check.semanticMatches, 1)
-
-  return Array.every([current, semantic, check.sameElement], Boolean)
-}
-
-const describeCheck = (check: LocatorCheck) => `${check.part}: recorded ${check.recorded} matched ${check.recordedMatches}; current ${check.current} matched ${check.currentMatches}; semantic ${check.semantic} matched ${check.semanticMatches}${check.sameElement ? " (same element as the current binding)" : ""}`
-
-const describeRecorded = (check: LocatorCheck) => `${check.part} ${check.recorded} matches ${check.recordedMatches} element(s)`
-
-const repairFailure = (message: string) => AcceptanceError.make({ boundary: "repair", message })
-
-const notRepairable = repairFailure("Only custom-binding actions with declared locators can be diagnosed or repaired")
-
-const wrongRow = runtimeError("The bound row's identity, rendered identity column, payload, or controls no longer match the approved candidate; refusing a possibly wrong target")
-
-const semanticMismatch = runtimeError("The bound element no longer has its declared role, accessible name, or application attributes")
-
-const unboundSurface = runtimeError("The action names a custom surface this scenario is not bound to")
-
-const asRepairFailure = (error: AcceptanceError) => repairFailure(error.message)
-
-const anyName: NonNullable<Parameters<Page["getByRole"]>[1]> = {}
-
-const exactName = (name: string): NonNullable<Parameters<Page["getByRole"]>[1]> => ({ name, exact: true })
-
-/** Resolves an element by role, exact accessible name, and application attributes only, never by presentation. */
-const semanticLocator = (page: Page, semantics: ElementSemantics, extra: Readonly<Record<string, string>>) => (scope: Page | Locator) => {
-  const options = Option.match(semantics.name, { onNone: Function.constant(anyName), onSome: exactName })
-  const byRole = scope.getByRole(semantics.role, options)
-  const attributes = Record.union(semantics.attributes, extra, Function.identity)
-  const selector = attributesSelector(attributes)
-  const unattributed = Equal.equals(selector, "")
-  const attributed = page.locator(selector)
-
-  return unattributed ? byRole : byRole.and(attributed)
-}
-
-const isLocator = (input: unknown): input is Locator => Predicate.hasProperty(input, "and")
-
-const LocatorSchema = Schema.declare(isLocator)
-
-/** One bound part on the live page: its declared and semantic locators and their descriptions, because checks must compare and name both. */
-class LocatedPart extends Schema.Class<LocatedPart>("LocatedPart")({
-  part: TargetPart,
-  declaredText: Schema.String,
-  semanticText: Schema.String,
-  declared: LocatorSchema,
-  semantic: LocatorSchema,
-}) {}
-
-const rowScoped = (rowText: string) => (text: string) => `${rowText} >> ${text}`
-
-/** The declared selector of a part: row-scoped parts are CSS descendants of the identity-filtered row, the row itself carries the identity filter. */
-const declaredSelector = (rowSelector: string, identitySelector: string) => (part: TargetPart) => {
-  if (part.scoped) return `${rowSelector} ${part.locator}`
-
-  return isRowPart(part) ? `${part.locator}${identitySelector}` : part.locator
-}
-
-const partExtra = (extra: Readonly<Record<string, string>>) => (part: TargetPart) => isRowPart(part) ? extra : noAttributes
-
-const AttributeValuesSchema = Schema.Record(Schema.String, Schema.String)
-
-/** The identity-filtered row a row-scoped part resolves within, with its semantic description. */
-class RowScope extends Schema.Class<RowScope>("RowScope")({
-  selector: Schema.String,
-  semanticText: Schema.String,
-  extra: AttributeValuesSchema,
-}) {}
-
-const OptionalLocatorSchema = Schema.Option(LocatorSchema)
-
-class SemanticRow extends Schema.Class<SemanticRow>("SemanticRow")({ locator: OptionalLocatorSchema }) {}
-
-const locatePart = (page: Page, scope: RowScope, row: SemanticRow) => (part: TargetPart) => {
-  const { extra } = scope
-  const identitySelector = attributesSelector(extra)
-  const selector = declaredSelector(scope.selector, identitySelector)(part)
-  const own = partExtra(extra)(part)
-  const scoped = part.scoped ? row.locator : Option.none<Locator>()
-  const root = Option.getOrElse(scoped, Function.constant<Page | Locator>(page))
-  const semantic = semanticLocator(page, part.semantics, own)(root)
-  const ownText = semanticText(part.semantics, own)
-  const description = part.scoped ? rowScoped(scope.semanticText)(ownText) : ownText
-  const declared = page.locator(selector)
-
-  return LocatedPart.make({ part, declaredText: selector, semanticText: description, declared, semantic })
-}
-
-const withSuffix = (suffix: string) => (text: string) => `${text}${suffix}`
-
-const rowSemanticOf = (page: Page, extra: Readonly<Record<string, string>>) => (part: TargetPart) => semanticLocator(page, part.semantics, extra)(page)
-
-const rowSemanticTextOf = (extra: Readonly<Record<string, string>>) => (part: TargetPart) => semanticText(part.semantics, extra)
-
-/** Every part's declared locator scoped to the bound row identity, plus its semantic locator, because checks must compare both on the live page. */
-const locatorsFor = (page: Page) => (target: CustomTarget, identity: Option.Option<string>) => {
-  const extra = identityAttributes(target, identity)
-  const identitySelector = attributesSelector(extra)
-  const rowPart = Array.findFirst(target.parts, isRowPart)
-  const selector = pipe(rowPart, Option.map(Struct.get("locator")), Option.map(withSuffix(identitySelector)), Option.getOrElse(Function.constant("")))
-  const locator = Option.map(rowPart, rowSemanticOf(page, extra))
-  const description = pipe(rowPart, Option.map(rowSemanticTextOf(extra)), Option.getOrElse(Function.constant("")))
-  const scope = RowScope.make({ selector, semanticText: description, extra })
-  const row = SemanticRow.make({ locator })
-
-  return Array.map(target.parts, locatePart(page, scope, row))
-}
-
-const describeCount = ([located, matches]: readonly [LocatedPart, number]) => `${located.part.part} ${located.declaredText} matches ${matches} element(s)`
-
-const controlNamed = (name: string) => (control: ControlBinding) => Equal.equals(`control:${control.name}`, name)
-
-const controlOfPart = (action: ActionBinding) => (part: TargetPart) => Array.findFirst(action.controls, controlNamed(part.part))
-
-const actionBindingOf = (surface: SurfaceBinding, target: CustomTarget) => Array.findFirst(surface.actions, identifiedAs(target.action))
-
-const partNamed = (name: string) => (located: LocatedPart) => Equal.equals(located.part.part, name)
-
-const isControlPart = (located: LocatedPart) => located.part.part.startsWith("control:")
-
-const surfaceNamed = (id: string) => (turn: SurfaceTurn) => Equal.equals(turn.binding.id, id)
-
 const now = Effect.map(DateTime.now, DateTime.formatIso)
-
-const isoAt = (millis: number) => pipe(DateTime.make(millis), Option.map(DateTime.formatIso))
-
-const nonNegative = Order.max(Order.Number)(0)
-
-/** The request's own sent and received instants from the browser's resource timing because overlapping races are judged by when each request was in flight; absent timing stays absent. */
-const exchangeOf = (request: Request) => {
-  const timing = request.timing()
-  const finished = timing.responseEnd >= 0
-  const requested = nonNegative(timing.requestStart)
-  const sent = isoAt(timing.startTime + requested)
-  const received = finished ? isoAt(timing.startTime + timing.responseEnd) : Option.none<string>()
-  const both = Option.all([sent, received])
-  const exchange = ([sentAt, receivedAt]: readonly [string, string]) => Exchange.make({ sentAt, receivedAt })
-
-  return Option.map(both, exchange)
-}
 
 const closeBrowser = (browser: Browser) => Effect.promise(() => browser.close())
 
@@ -1487,44 +997,11 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     return yield* pipe(text, decodeRendered, Effect.mapError(failure("runtime")))
   })
 
-  const surfaceScan = Effect.fn("BrowserSurface.surfaceScan")(function* (surface: SurfaceBinding) {
-    const probe = yield* pipe(surface, probeOf, encodeProbe, Effect.mapError(failure("runtime")))
-    const text = yield* Effect.tryPromise({ try: () => page.evaluate(captureSurface, probe), catch: failure("runtime") })
-    const scan = yield* pipe(text, decodeSurfaceScan, Effect.mapError(failure("runtime")))
-
-    return SurfaceTurn.make({ binding: surface, scan })
-  })
-
-  const surfaceState = () => pipe(target.surface, Option.map(surfaceScan), Effect.transposeOption)
-  const scanText = (surface: Option.Option<SurfaceTurn>) => pipe(surface, Option.map(flow(Struct.get("scan"), encodeSurfaceScan)), Effect.transposeOption, Effect.map(Option.getOrElse(Function.constant(""))), Effect.mapError(failure("runtime")))
-
-  // The snapshot covers the bound surface too because a changed custom row or control must make offered actions stale.
-  const snapshot = Effect.fn("BrowserSurface.snapshot")(function* (current: Rendered, surface: Option.Option<SurfaceTurn>) {
+  const snapshot = Effect.fn("BrowserSurface.snapshot")(function* (current: Rendered) {
     const counter = yield* Ref.get(epoch)
     const text = yield* pipe(current, encodeRendered, Effect.mapError(failure("runtime")))
-    const custom = yield* scanText(surface)
 
-    return digestOf(counter, `${text}\n${custom}`)
-  })
-
-  const surfacePath = Option.map(target.surface, Struct.get("path"))
-
-  const onSurfacePage = Effect.fn("BrowserSurface.onSurfacePage")(function* () {
-    const address = page.url()
-    const location = yield* Effect.try({ try: () => new URL(address), catch: failure("runtime") })
-
-    return Option.contains(surfacePath, location.pathname)
-  })
-
-  // The surface's own ready selector settles it because a custom page has no generated loading notices to wait for.
-  const awaitSurface = (surface: SurfaceBinding) => settled(surface.ready)
-
-  // A reloaded or reopened page settles on whichever surface it shows because the custom surface has no generated navigation.
-  const loaded = Effect.fn("BrowserSurface.loaded")(function* (boundary: string) {
-    const custom = yield* onSurfacePage()
-    const surface = Option.filter(target.surface, Function.constant(custom))
-
-    yield* Option.match(surface, { onNone: () => started(boundary), onSome: flow(awaitSurface, Effect.asVoid, Effect.mapError(rebound(boundary))) })
+    return digestOf(counter, text)
   })
 
   const currentListing = Effect.fn("BrowserSurface.listing")(function* (current: Rendered) {
@@ -1596,9 +1073,6 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
   const view = Effect.fn("BrowserSurface.view")(function* (reloaded: boolean, screenshot: string) {
     const current = yield* state()
     const listed = yield* currentListing(current)
-    const surface = yield* surfaceState()
-    const shown = Option.filter(surface, onSurface)
-    const observed = Option.match(shown, { onNone: Function.constant(listed), onSome: surfaceListing })
     const destination = resolve(artifacts, screenshot)
     const directory = resolve(destination, "..")
     const path = relative(artifacts, destination)
@@ -1616,12 +1090,12 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     const survived = yield* Ref.get(pageReloaded)
 
     return Observation.make({
-      operation: observed.operation,
-      resource: observed.resource,
-      loaded: observed.loaded,
-      unfiltered: observed.unfiltered,
-      complete: observed.complete,
-      rows: observed.rows,
+      operation: listed.operation,
+      resource: listed.resource,
+      loaded: listed.loaded,
+      unfiltered: listed.unfiltered,
+      complete: listed.complete,
+      rows: listed.rows,
       reloaded: reloaded && survived,
       screenshot: Option.some(destination),
     })
@@ -1631,15 +1105,6 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
 
   const capture = Effect.fn("BrowserSurface.capture")(function* (operation: string, reloaded: boolean, screenshot: string) {
     if (!isListOperation(operation)) return yield* unlistedOperation
-
-    const custom = yield* onSurfacePage()
-
-    // Observations always go through the generated lists because custom surfaces are exercised, not trusted as evidence.
-    if (custom) {
-      yield* advance()
-      yield* Effect.tryPromise({ try: () => page.goto(target.url, { waitUntil: "domcontentloaded" }), catch: failure("runtime") })
-      yield* started("runtime")
-    }
 
     const current = yield* state()
 
@@ -1664,10 +1129,9 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
 
     yield* requireOrigin(current)
 
-    const surface = yield* surfaceState()
-    const hash = yield* snapshot(current, surface)
+    const hash = yield* snapshot(current)
     const listed = yield* currentListing(current)
-    const turn = Turn.make({ offer, current, listed, surface, snapshot: hash })
+    const turn = Turn.make({ offer, current, listed, snapshot: hash })
     const offered = offeredActions(turn)
 
     if (offered.length > maximumActions) return yield* oversizedCatalog
@@ -1704,7 +1168,7 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     yield* advance()
     yield* Ref.update(lists, HashMap.map(forget))
     yield* Effect.tryPromise({ try: () => page.reload({ waitUntil: "domcontentloaded" }), catch: failure("runtime") })
-    yield* loaded("runtime")
+    yield* started("runtime")
     yield* Ref.set(pageReloaded, true)
 
     return Option.none<Submission>()
@@ -1784,6 +1248,26 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     return Option.none<Submission>()
   })
 
+  // The response is the awaited call of the candidate's own operation, captured before any follow-up refresh, because only that request proves what was submitted.
+  const submissionOf = Effect.fn("BrowserSurface.submissionOf")(function* (response: Response, candidate: Candidate) {
+    const request = response.request()
+    const call = yield* pipe(request, decodeRequest, Effect.mapError(failure("runtime")))
+    const envelope = yield* pipe(response, decodeEnvelope, Effect.result)
+    const settlement = yield* pipe(submissionReady, waitUntilSettled, Effect.result)
+    const at = yield* now
+    const answered = Result.match(envelope, { onFailure: undecodedResponse, onSuccess: bodyError })
+    const result = Result.match(envelope, { onFailure: Function.constant(noResult), onSuccess: resultOf })
+    const sameInput = sameCanonical(call.input)(candidate.input)
+    const sameOperation = Equal.equals(call.operation, candidate.operation)
+    const exact = sameInput && sameOperation
+    const observed = Result.match(settlement, { onFailure: unsettledInterface(answered), onSuccess: Function.constant(answered) })
+    const error = exact ? observed : submittedMismatch(answered)
+    const status = response.status()
+    const submission = Submission.make({ inputCase: candidate.inputCase, operation: call.operation, input: call.input, status, result, error, at })
+
+    return Option.some(submission)
+  })
+
   const submit = Effect.fn("BrowserSurface.submit")(function* (action: Action, candidate: Candidate, form: Form, locator: Locator) {
     const targeted = Equal.equals(action.target, `submit:${candidate.inputCase}`)
     const exact = Option.exists(action.value, sameCanonical(candidate.input))
@@ -1798,62 +1282,9 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     yield* requireAvailable(button)
     yield* advance()
 
-    const gate = yield* RequestGate
-    const clicking = clickAwaiting(button, candidate.operation, submissionTimeout)
-    const [response] = yield* Option.match(gate, { onNone: Function.constant(clicking), onSome: heldWhile(clicking, candidate) })
-    const settle = pipe(submissionReady, waitUntilSettled)
+    const [response] = yield* clickAwaiting(button, candidate.operation, submissionTimeout)
 
-    return yield* submissionOf(response, candidate, settle)
-  })
-
-  const unroute = Effect.fn("BrowserSurface.unroute")(function* (handler: (route: Route) => Promise<void>) {
-    yield* Effect.tryPromise({ try: () => page.unroute(callEndpoint, handler), catch: Function.identity })
-  }, Effect.catch(logRouteFailure))
-
-  /**
-   * Routes the candidate's own call through the lane's hold while the unchanged click runs, because a concurrent barrier must release
-   * requests that are already pending at the network boundary; other calls pass through and the route is removed once the click settles.
-   */
-  const heldWhile = <A>(clicking: Effect.Effect<A, AcceptanceError>, candidate: Candidate) => (hold: (inputCase: string) => Effect.Effect<void, AcceptanceError>) => {
-    const matches = requestsOperation(candidate.operation)
-    const held = hold(candidate.inputCase)
-    const handler = holdRoute(matches, held)
-    const routed = Effect.tryPromise({ try: () => page.route(callEndpoint, handler), catch: failure("runtime") })
-    const unrouted = unroute(handler)
-
-    return pipe(routed, Effect.andThen(clicking), Effect.ensuring(unrouted))
-  }
-
-  const feedbackOf = (rendered: Result.Result<Rendered, AcceptanceError>) => pipe(
-    Result.getSuccess(rendered),
-    Option.flatMap(Struct.get("result")),
-    Option.map(flow(Struct.get("shown"), Text.trim)),
-    Option.filter(Text.isNonEmpty),
-  )
-
-  // The response is the awaited call of the candidate's own operation, captured before any follow-up refresh, because only that request proves what was submitted.
-  const submissionOf = Effect.fn("BrowserSurface.submissionOf")(function* (response: Response, candidate: Candidate, settle: Effect.Effect<unknown, unknown>) {
-    const request = response.request()
-    const call = yield* pipe(request, decodeRequest, Effect.mapError(failure("runtime")))
-    const envelope = yield* pipe(response, decodeEnvelope, Effect.result)
-    const exchange = exchangeOf(request)
-    const settlement = yield* Effect.result(settle)
-    const rendering = state()
-    const rendered = yield* Effect.result(rendering)
-    const feedback = feedbackOf(rendered)
-    const at = yield* now
-    const answered = Result.match(envelope, { onFailure: undecodedResponse, onSuccess: bodyError })
-    const result = Result.match(envelope, { onFailure: Function.constant(noResult), onSuccess: resultOf })
-    const sameInput = sameCanonical(call.input)(candidate.input)
-    const sameOperation = Equal.equals(call.operation, candidate.operation)
-    const exact = sameInput && sameOperation
-    const differs = !exact
-    const observed = Result.match(settlement, { onFailure: unsettledInterface(answered), onSuccess: Function.constant(answered) })
-    const error = differs ? submittedMismatch(answered) : observed
-    const status = response.status()
-    const submission = Submission.make({ inputCase: candidate.inputCase, operation: call.operation, input: call.input, status, result, error, at, exchange, feedback })
-
-    return Option.some(submission)
+    return yield* submissionOf(response, candidate)
   })
 
   const operate = Effect.fn("BrowserSurface.operate")(function* (action: Action, binding: Offered, current: Rendered) {
@@ -1869,187 +1300,6 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     return yield* Equal.equals(action.kind, "fill") ? fill(action, candidate, form, locator) : submit(action, candidate, form, locator)
   })
 
-  const count = (locator: Locator) => Effect.tryPromise({ try: () => locator.count(), catch: failure("runtime") })
-  const locate = locatorsFor(page)
-
-  const requireSemantics = Effect.fn("BrowserSurface.requireSemantics")(function* (located: LocatedPart) {
-    const both = located.declared.and(located.semantic)
-    const matched = yield* count(both)
-
-    if (!Equal.equals(matched, 1)) return yield* semanticMismatch
-  })
-
-  const requireLocated = Effect.fn("BrowserSurface.requireLocated")(function* (located: LocatedPart) {
-    yield* requireAvailable(located.declared)
-    yield* requireSemantics(located)
-  })
-
-  const diagnose = Effect.fn("BrowserSurface.diagnose")(function* (recorded: Action) {
-    const target = yield* required(recorded.binding, notRepairable)
-    const identity = boundIdentity(recorded, target)
-    const located = locate(target, identity)
-    const counts = yield* pipe(located, Array.map(Struct.get("declared")), Effect.forEach(count))
-    const pairs = Array.zip(located, counts)
-
-    return pipe(pairs, Array.map(describeCount), Array.join("; "))
-  }, Effect.mapError(rebound("browser.diagnose")))
-
-  const checkPart = Effect.fn("BrowserSurface.checkPart")(function* ([before, after]: readonly [LocatedPart, LocatedPart]) {
-    const shared = after.semantic.and(after.declared)
-    const recordedMatches = yield* count(before.declared)
-    const currentMatches = yield* count(after.declared)
-    const semanticMatches = yield* count(after.semantic)
-    const sharedMatches = yield* count(shared)
-
-    return LocatorCheck.make({
-      part: after.part.part,
-      recorded: before.declaredText,
-      recordedMatches,
-      current: after.declaredText,
-      currentMatches,
-      semantic: after.semanticText,
-      semanticMatches,
-      sameElement: Equal.equals(sharedMatches, 1),
-    })
-  })
-
-  /**
-   * Verifies a repair on the live page: some recorded locator must no longer resolve to exactly one element, and every part's semantic
-   * target must resolve to exactly one element that is the current binding's element. Anything else refuses the repair.
-   */
-  const repair = Effect.fn("BrowserSurface.repair")(function* (recorded: Action, current: Action) {
-    const recordedTarget = yield* required(recorded.binding, notRepairable)
-    const currentTarget = yield* required(current.binding, notRepairable)
-    const identity = boundIdentity(current, currentTarget)
-    const recordedIdentity = boundIdentity(recorded, recordedTarget)
-    const sameIdentity = Equal.equals(identity, recordedIdentity)
-    const sameParts = Equal.equals(recordedTarget.parts.length, currentTarget.parts.length)
-    const comparable = sameIdentity && sameParts
-
-    if (!comparable) return yield* repairFailure("The repaired action does not target the recorded row with the same bound elements")
-
-    const recordedLocated = locate(recordedTarget, identity)
-    const currentLocated = locate(currentTarget, identity)
-    const pairs = Array.zip(recordedLocated, currentLocated)
-    const checks = yield* Effect.forEach(pairs, checkPart)
-    const failed = Array.filter(checks, failedPart)
-    const summary = pipe(checks, Array.map(describeCheck), Array.join("; "))
-    const unrepaired = !Array.every(checks, repairedPart)
-
-    if (Array.isReadonlyArrayEmpty(failed)) return yield* repairFailure(`Every recorded locator still resolves to exactly one element, so the unavailability is not a locator failure: ${summary}`)
-
-    if (unrepaired) return yield* repairFailure(`The declared semantic target does not resolve to exactly the current binding's element: ${summary}`)
-
-    const failure = pipe(failed, Array.map(describeRecorded), Array.join("; "))
-
-    return LocatorRepair.make({
-      surface: currentTarget.surface,
-      action: currentTarget.action,
-      operation: current.operation,
-      inputCase: current.inputCase,
-      identity,
-      originalTarget: recorded.target,
-      repairedTarget: current.target,
-      failure,
-      semantics: currentTarget.parts,
-      checks,
-    })
-  }, Effect.mapError(asRepairFailure))
-
-  const openSurface = Effect.fn("BrowserSurface.openSurface")(function* (surface: SurfaceBinding) {
-    const destination = yield* Effect.try({ try: () => new URL(surface.path, url.origin).href, catch: failure("runtime") })
-
-    yield* advance()
-    yield* Effect.tryPromise({ try: () => page.goto(destination, { waitUntil: "domcontentloaded" }), catch: failure("runtime") })
-    yield* awaitSurface(surface)
-
-    return Option.none<Submission>()
-  })
-
-  const refreshSurface = Effect.fn("BrowserSurface.refreshSurface")(function* (surface: SurfaceBinding, target: CustomTarget) {
-    const unbound = Option.none<string>()
-    const located = locate(target, unbound)
-    const first = Array.head(located)
-    const refresh = yield* required(first, unavailableTarget)
-
-    yield* requireLocated(refresh)
-    yield* advance()
-    yield* clickAwaiting(refresh.declared, surface.source, timeout)
-    yield* awaitSurface(surface)
-
-    return Option.none<Submission>()
-  })
-
-  const enterText = (kind: ControlBinding["kind"], field: Locator) => (text: string) => {
-    const select = Equal.equals(kind, "select")
-    const selected = Effect.tryPromise({ try: () => field.selectOption(text), catch: failure("runtime") })
-    const filled = Effect.tryPromise({ try: () => field.fill(text), catch: failure("runtime") })
-
-    return select ? Effect.asVoid(selected) : filled
-  }
-
-  const fillRowControl = (action: ActionBinding, input: Payload) => Effect.fn("BrowserSurface.fillRowControl")(function* (located: LocatedPart) {
-    const declared = controlOfPart(action)(located.part)
-    const control = yield* required(declared, unavailableTarget)
-    const text = controlText(action, input)(control.name)
-
-    yield* requireLocated(located)
-    yield* enterText(control.kind, located.declared)(text)
-
-    const retained = yield* Effect.tryPromise({ try: () => located.declared.inputValue(), catch: failure("runtime") })
-
-    if (!Equal.equals(retained, text)) return yield* unretainedControl
-  })
-
-  // A row action re-checks identity, payload, and controls against a fresh scan, then acts only inside the bound row, because a stale or swapped row must never execute.
-  const operateRow = Effect.fn("BrowserSurface.operateRow")(function* (action: Action, target: CustomTarget, offered: Offered, turn: SurfaceTurn) {
-    const candidate = yield* required(offered.candidate, unapprovedPayload)
-    const declared = actionBindingOf(turn.binding, target)
-    const bound = yield* required(declared, unapprovedPayload)
-    const exact = Option.exists(action.value, sameCanonical(candidate.input))
-    const requested = Option.contains(action.operation, candidate.operation)
-    const approved = exact && requested
-
-    if (!approved) return yield* unapprovedPayload
-
-    const claimed = candidateIdentity(bound, candidate.input)
-    const identity = yield* required(claimed, wrongRow)
-    const single = boundRow(turn.scan)(identity)
-    const scanned = yield* required(single, wrongRow)
-    const ready = rowActionReady(turn, bound, candidate)(scanned)
-
-    if (!ready) return yield* wrongRow
-
-    const bindingIdentity = Option.some(identity)
-    const located = locate(target, bindingIdentity)
-    const rowPart = Array.findFirst(located, partNamed("row"))
-    const triggerPart = Array.findFirst(located, partNamed("trigger"))
-    const row = yield* required(rowPart, wrongRow)
-    const trigger = yield* required(triggerPart, unavailableTarget)
-    const controls = Array.filter(located, isControlPart)
-
-    yield* requireLocated(row)
-    yield* advance()
-    yield* Effect.forEach(controls, fillRowControl(bound, candidate.input), { discard: true })
-    yield* requireLocated(trigger)
-
-    const [response] = yield* clickAwaiting(trigger.declared, candidate.operation, submissionTimeout)
-    const settle = settled(bound.settle)
-
-    return yield* submissionOf(response, candidate, settle)
-  })
-
-  const operateSurface = Effect.fn("BrowserSurface.operateSurface")(function* (action: Action, target: CustomTarget, offered: Offered, surface: Option.Option<SurfaceTurn>) {
-    const named = Option.filter(surface, surfaceNamed(target.surface))
-    const turn = yield* required(named, unboundSurface)
-
-    if (Equal.equals(target.action, "open")) return yield* openSurface(turn.binding)
-
-    if (Equal.equals(target.action, "rows")) return yield* refreshSurface(turn.binding, target)
-
-    return yield* operateRow(action, target, offered, turn)
-  })
-
   const execute = Effect.fn("BrowserSurface.execute")(function* (action: Action) {
     const offered = yield* Ref.get(offers)
     const found = HashMap.get(offered, action.id)
@@ -2060,16 +1310,13 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     if (!Equal.equals(offeredKey, requestedKey)) return yield* alteredAction
 
     const current = yield* state()
-    const surface = yield* surfaceState()
-    const hash = yield* snapshot(current, surface)
+    const hash = yield* snapshot(current)
 
     if (!Equal.equals(hash, action.snapshot)) return yield* staleSnapshot
 
     yield* requireOrigin(current)
 
     if (Equal.equals(action.kind, "cannot-proceed")) return yield* modelCannotProceed
-
-    if (Option.isSome(action.binding)) return yield* operateSurface(action, action.binding.value, binding, surface)
 
     const navigation = Array.contains(navigationKinds, action.kind)
 
@@ -2080,7 +1327,7 @@ const makeSurface = Effect.fn("BrowserSurface.make")(function* (target: BrowserT
     return yield* operate(action, binding, current)
   }, Effect.mapError(rebound("browser.execute")))
 
-  return BrowserSurface.of({ authenticate, observe, capture, actions, execute, diagnose, repair })
+  return BrowserSurface.of({ authenticate, observe, capture, actions, execute })
 })
 
 export const browserLayer = (target: BrowserTarget) => pipe(target, makeSurface, Layer.effect(BrowserSurface))

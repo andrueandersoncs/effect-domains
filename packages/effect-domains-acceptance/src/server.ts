@@ -40,7 +40,7 @@ const ReplySchema = Schema.Struct({ result: OptionalValueSchema, error: Optional
 
 interface Reply extends Schema.Schema.Type<typeof ReplySchema> {}
 
-export class CallResponse extends Schema.Class<CallResponse>("CallResponse")({
+class CallResponse extends Schema.Class<CallResponse>("CallResponse")({
   status: Schema.Int,
   result: OptionalValueSchema,
   error: OptionalValueSchema,
