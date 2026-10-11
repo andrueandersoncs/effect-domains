@@ -62,7 +62,7 @@ export EXECUTION_ID='returned-execution-id'
 `GenerateDiscard` means **durably accepted**, not completed. Acceptance and dispatch are separate: the application transaction inserts an `accepted` outbox row, and a scoped relay retries native workflow dispatch with the deterministic execution ID. The workflow waits five seconds before rendering; with `operatorApproval`, it then waits for an explicit release. Polling distinguishes the application and engine states:
 
 - `{ "_tag": "Pending", "stage": "accepted" | "dispatched" | "writing" }`
-- `{ "_tag": "Recoverable", "reason": "..." }` for a suspended infrastructure failure
+- `{ "_tag": "Recoverable", "reason": "..." }` only for a workflow suspended by a failure (resume it with `ReportExport.GenerateResume`); a suspension without a failure cause, such as the durable release delay, reports `Pending`
 - `{ "_tag": "Cancelled" }`
 - `{ "_tag": "Failed", "reason": "..." }`
 - `{ "_tag": "Unknown" }` only when the application execution row does not exist

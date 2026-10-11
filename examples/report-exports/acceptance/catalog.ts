@@ -191,6 +191,8 @@ const completionContexts = Array.drop(contexts, 1)
 const completionCapabilities = Array.drop(capabilities, 1)
 const completionStories = Array.drop(stories, 3)
 const completionApprovals = Array.map([...completionDeclarations, ...completionContexts, ...completionCapabilities, ...completionStories], qualified)
+const currentDeclarations: ReadonlyArray<Revision> = [{ id: catalogId, revision: catalogRevision, provenance, approval }, ...actors, ...contexts, ...needs, ...capabilities, ...features, ...requirements, ...stories, ...scenarios]
+const userApprovals = Array.map(currentDeclarations, qualified)
 
 const approvals: Declaration["approvals"] = [{
   id: "report-exports-generation-approval",
@@ -204,6 +206,12 @@ const approvals: Declaration["approvals"] = [{
   on: "2026-10-10",
   basis: "AP-15 of docs/wiki/story-driven-acceptance.md binds documented completion policy. docs/examples.md (Report exports): \"Acceptance writes an application outbox row; it is not completion. Wait for `Succeeded` and inspect the returned artifact path.\" examples/report-exports/README.md: GenerateDiscard means durably accepted, not completed, and polling distinguishes Pending stage accepted, dispatched, and writing from Succeeded, recorded only after the durable artifact result; Keep polling until the result has _tag Succeeded, then open the returned artifactPath, whose JSON has report, release, lines, and totals keys with debit and credit kept separate; artifact writing creates <REPORT_EXPORTS_OUTPUT_DIR>/<executionId>.json atomically and never overwrites it (immutable); an automatic artifact has releasedBy null; ReportExport.Generate returns the report result directly without Poll's _tag wrapper; Poll is an operator operation. The catalog and the Report exports feature changed only to add the complete-export capability, its story, context, requirement, and scenario; the AP-13 generation obligations are unchanged. No controlled clock is needed: the documented five-second durable delay is real and completes well inside the declared 60-second watch deadline, so no production clock or fault switch is used.",
   approves: completionApprovals,
+}, {
+  id: "report-exports-user-approval",
+  by: "user",
+  on: "2026-10-11",
+  basis: "The user approved, in the 2026-10-11 review of the AP-17 open items, every implementation-recorded declaration as recorded, including RE-COMPLETES and the eventual-completion scenario, and decided that ReportExport.Poll must report a normal durable wait as Pending and reserve Recoverable for a workflow suspended by a failure. This record approves every current declaration of catalog revision 2.",
+  approves: userApprovals,
 }]
 
 export const reportExportsCatalog: Declaration = {

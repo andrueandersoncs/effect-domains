@@ -7,7 +7,8 @@ const historyPolicy = "examples/support-cases/README.md#resolve-and-inspect-hist
 const reviewProposal = "docs/wiki/story-driven-acceptance.md#ap-15; proposed by the implementation agent for product review"
 const revision = "1"
 const attemptRevision = "2"
-const catalogRevision = "6"
+const catalogRevision = "7"
+const revisedRaceCatalogRevision = "6"
 const recordedCatalogRevision = "5"
 const raceRevision = "2"
 const deskCatalogRevision = "4"
@@ -18,7 +19,6 @@ const assessedRevision = "3"
 const correctedNarrativeRevision = "3"
 const catalogId = "support-cases-slice-b"
 const approval = "approved"
-const proposal = "proposed"
 
 type Declaration = typeof Catalog.Encoded
 type ScenarioDeclaration = Declaration["scenarios"][number]
@@ -285,7 +285,7 @@ const refusalFeedbackRequirement: Declaration["requirements"][number] = {
   id: "SC-REFUSAL-FEEDBACK",
   revision,
   provenance: reviewProposal,
-  approval: proposal,
+  approval,
   text: "Refusal feedback shown to the operator names why the lifecycle command was refused.",
   evaluator: "rubric-assessment",
   evaluatorRevision: "1",
@@ -298,7 +298,7 @@ const refusalRubric: Declaration["rubrics"][number] = {
   id: "refusal-feedback-clarity",
   revision,
   provenance: reviewProposal,
-  approval: proposal,
+  approval,
   criteria: [
     "Names the lifecycle command that was refused",
     "Names the reason for the refusal, such as a version conflict",
@@ -310,7 +310,7 @@ const refusalRubric: Declaration["rubrics"][number] = {
     { level: "clear", meaning: "The feedback names the refused command and the reason, and tells the operator what to do next." },
   ],
   threshold: "clear",
-  reviewer: "product owner (not yet assigned)",
+  reviewer: "user (approved 2026-10-11)",
 }
 
 const actors: Declaration["actors"] = [
@@ -395,7 +395,8 @@ const preparedSubjectRevised: ReadonlyArray<Revision> = [reportedProblem, lifecy
 const deskChanged: ReadonlyArray<Revision> = [catalogDeclaration, ...preparedSubjectRevised, deskScenario]
 const policyDerived: ReadonlyArray<Revision> = [raceRequirement, chronologyRequirement, competingOperators, raceStory, ...raceScenarios, resolveStory, lifecycleScenario, deskScenario]
 const recordedChanges: ReadonlyArray<Revision> = [reportedProblem, staleScenario]
-const raceRevised: ReadonlyArray<Revision> = [catalogDeclaration, raceRequirement, raceStory, ...raceScenarios]
+const raceRevisedObligations: ReadonlyArray<Revision> = [raceRequirement, raceStory, ...raceScenarios]
+const raceRevised: ReadonlyArray<Revision> = [catalogDeclaration, ...raceRevisedObligations]
 const raceRevisedIds = Array.map(raceRevised, qualified)
 const introduced: ReadonlyArray<Revision> = [raceRequirement, chronologyRequirement, competingOperators, raceStory, ...raceScenarios]
 const introducedIds = Array.map(introduced, qualified)
@@ -437,7 +438,8 @@ const firstRaceName = (declaration: Revision) => {
 
 const policyApprovals = Array.map(policyDerived, firstRaceName)
 const recordedApprovals = [atRevision(recordedCatalogRevision)(catalogDeclaration), ...Array.map(recordedChanges, qualified)]
-const raceRevisionApprovals = Array.map(raceRevised, qualified)
+const raceRevisionApprovals = [atRevision(revisedRaceCatalogRevision)(catalogDeclaration), ...Array.map(raceRevisedObligations, qualified)]
+const userApprovals = Array.map([...declarations, refusalFeedbackRequirement, refusalRubric], qualified)
 
 const approvals: Declaration["approvals"] = [
   {
@@ -488,6 +490,13 @@ const approvals: Declaration["approvals"] = [
     on: "2026-10-10",
     basis: "AP-15 revised SC-RACE, its story settle-competing-assignments, and race-round-1..3 after ap-15-support-exploration-2 and its replay showed, in all three rounds, the same-version loser refused with InvalidSupportCaseTransition rather than VersionConflict: transition guards run before the version-guarded update (packages/effect-domains/src/resource/compiler.ts) and SQLite serializes transactions, so the loser meets the winner's committed state. Both refusals are documented in examples/support-cases/README.md (\"A stale `expectedVersion` fails with `VersionConflict` and appends no event\"; \"An invalid edge fails with `InvalidSupportCaseTransition`\"), so the loser may be refused with either and must change nothing; the single winner, its one history event and one audit record at version+1, the losing agent's absence, and preservation are unchanged, and the single-winner evaluator moved to revision 2. Note (not an open decision): neither the README nor the domain documents which refusal takes precedence; each round's evidence records the refusal observed.",
     approves: raceRevisionApprovals,
+  },
+  {
+    id: "support-cases-user-approval",
+    by: "user",
+    on: "2026-10-11",
+    basis: "The user approved, in the 2026-10-11 review of the AP-17 open items, every implementation-recorded declaration as recorded (including SC-RACE@2, SC-CHRONOLOGY, the lifecycle requirement revisions, and the desk and race scenarios) and the refusal-feedback-clarity rubric and SC-REFUSAL-FEEDBACK as written; the user also chose to document, rather than change, that transition refusals take precedence over version conflicts. This record approves every current declaration of catalog revision 7.",
+    approves: userApprovals,
   },
 ]
 

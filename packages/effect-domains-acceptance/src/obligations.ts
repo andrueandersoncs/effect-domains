@@ -18,6 +18,12 @@ export const platformObligations: typeof Catalog.Encoded = {
     on: "2026-10-10",
     basis: "Accepted story-driven acceptance design approved on 2026-10-08 (docs/wiki/story-driven-acceptance.md#declarative-product-model): shared platform contracts are referenced with parameter bindings rather than copied, and preservation of unrelated records is an observation-and-evaluation obligation; recorded by AP-12 from the preservation obligations both slices already approved.",
     approves: [`${id}@${revision}`, "PLATFORM-PRESERVE@1"],
+  }, {
+    id: "platform-obligations-user-approval",
+    by: "user",
+    on: "2026-10-11",
+    basis: "The user approved PLATFORM-PRESERVE as recorded in the 2026-10-11 review of the AP-17 open items.",
+    approves: [`${id}@${revision}`, "PLATFORM-PRESERVE@1"],
   }],
   actors: [],
   contexts: [],

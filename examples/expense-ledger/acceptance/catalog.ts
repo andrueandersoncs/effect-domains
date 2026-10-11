@@ -144,6 +144,12 @@ const approvals: Declaration["approvals"] = [{
   on: "2026-10-10",
   basis: "AP-13 of docs/wiki/story-driven-acceptance.md and the read-only probe of examples/expense-ledger: expenses.record decodes the published Expense schema with a three-uppercase-letter currency pattern, a lowercase currency is rejected by the codec with HTTP 400, and expenses.totals raises InvalidExpenseDateRange in its handler for a reversed range (HTTP 422).",
   approves: currentApprovals,
+}, {
+  id: "expense-ledger-user-approval",
+  by: "user",
+  on: "2026-10-11",
+  basis: "The user approved, in the 2026-10-11 review of the AP-17 open items, every implementation-recorded declaration of this catalog as recorded.",
+  approves: currentApprovals,
 }]
 
 export const expenseLedgerCatalog: Declaration = {

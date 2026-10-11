@@ -371,6 +371,13 @@ const applicationPollResult = (execution: ReportExportExecution) => pipe(
   Match.orElse(() => Option.none()),
 )
 
+/** A suspension carrying a failure cause is a recoverable failure; a cause-less suspension is a normal durable wait and stays Pending. */
+const recoverableFrom = (failure: Cause.Cause<unknown>) => {
+  const reason = Cause.pretty(failure)
+
+  return ReportExportPollResultSchema.cases.Recoverable.make({ reason })
+}
+
 const pollSpec = ReportOperatorCommand.define({
   name: "Poll",
   payload: ReportExportExecutionInputSchema,
@@ -411,18 +418,10 @@ const poll = Command.implement(
       Match.value(result.value),
       Match.tagsExhaustive({
         Suspended: ({ cause }) => {
+          const pending = ReportExportPollResultSchema.cases.Pending.make({ stage: execution.status })
+          const polled = pipe(Option.fromNullishOr(cause), Option.match({ onNone: Function.constant(pending), onSome: recoverableFrom }))
 
-          const reason = pipe(
-            Option.fromNullishOr(cause),
-            Option.match({
-              onNone: Function.constant("Workflow suspended"),
-              onSome: Cause.pretty,
-            }),
-          )
-
-          const recoverable = ReportExportPollResultSchema.cases.Recoverable.make({ reason })
-
-          return Effect.succeed(recoverable)
+          return Effect.succeed(polled)
         },
         Complete: ({ exit }) => Exit.match(exit, {
           onFailure: (cause) => {

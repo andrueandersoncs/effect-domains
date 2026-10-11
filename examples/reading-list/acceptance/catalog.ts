@@ -5,7 +5,8 @@ const provenance = "docs/wiki/story-driven-acceptance.md#slice-a-reading-list"
 const revision = "1"
 const representationRevision = "2"
 const priorCatalogRevision = "3"
-const catalogRevision = "4"
+const assessedCatalogRevision = "4"
+const catalogRevision = "5"
 const assessedRevision = "3"
 const assessedScenario = "rating-above"
 const clarityRubric = "rating-rejection-clarity"
@@ -168,7 +169,7 @@ const clarity: RequirementDeclaration = {
   id: clarityRequirement,
   revision,
   provenance: "docs/wiki/story-driven-acceptance.md#ap-15",
-  approval: "proposed",
+  approval,
   text: "The rejection feedback for an out-of-range rating is understandable to the reader.",
   evaluator: "rubric-assessment",
   evaluatorRevision: revision,
@@ -191,7 +192,7 @@ const rubrics: Declaration["rubrics"] = [{
   id: clarityRubric,
   revision,
   provenance: "docs/wiki/story-driven-acceptance.md#ap-15",
-  approval: "proposed",
+  approval,
   criteria: [
     "Says the rating was not accepted.",
     "Says the allowed rating range or why the rating was refused.",
@@ -203,7 +204,7 @@ const rubrics: Declaration["rubrics"] = [{
     { level: "understandable", meaning: "The feedback plainly says the rating was not accepted and why or what range is allowed, without claiming success." },
   ],
   threshold: "understandable",
-  reviewer: "product owner (not yet assigned)",
+  reviewer: "user (approved 2026-10-11)",
 }]
 
 const stories: Declaration["stories"] = [
@@ -217,7 +218,9 @@ const unchanged: ReadonlyArray<Revision> = [...actors, ...contexts, ...needs, ..
 const originalApprovals = Array.map(representationChanged, atRevision(revision))
 const representationApprovals = Array.map(representationChanged, atRevision(representationRevision))
 const structureApprovals = [`${catalogId}@${priorCatalogRevision}`, `${assessedScenario}@${representationRevision}`, ...Array.map(unchanged, qualified)]
-const assessmentApprovals = [`${catalogId}@${catalogRevision}`, `${assessedScenario}@${assessedRevision}`]
+const assessmentApprovals = [`${catalogId}@${assessedCatalogRevision}`, `${assessedScenario}@${assessedRevision}`]
+const current: ReadonlyArray<Revision> = [{ id: catalogId, revision: catalogRevision, provenance, approval }, ...actors, ...contexts, ...needs, ...capabilities, ...features, ...textFixtures, ...requirements, ...rubrics, ...stories, ...scenarios]
+const userApprovals = Array.map(current, qualified)
 
 const approvals: Declaration["approvals"] = [
   {
@@ -247,6 +250,13 @@ const approvals: Declaration["approvals"] = [
     on: "2026-10-10",
     basis: "AP-15 of docs/wiki/story-driven-acceptance.md: rating-above references the proposed qualitative requirement RL-REJECT-CLARITY under assessments only; its inputs, goal, gating requirements, evaluators, and verdict semantics are unchanged, and the catalog revision changed only to declare the proposed rubric and requirement.",
     approves: assessmentApprovals,
+  },
+  {
+    id: "reading-list-user-approval",
+    by: "user",
+    on: "2026-10-11",
+    basis: "The user approved, in the 2026-10-11 review of the AP-17 open items, every implementation-recorded declaration as recorded and the rating-rejection-clarity rubric and RL-REJECT-CLARITY as written. This record approves every current declaration of catalog revision 5.",
+    approves: userApprovals,
   },
 ]
 

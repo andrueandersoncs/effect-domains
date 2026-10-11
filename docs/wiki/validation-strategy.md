@@ -32,6 +32,35 @@ The slice removes duplicate storage schemas, ordinary read/query plumbing, initi
 
 ## Verification Record
 
+### 2026-10-11 (UTC): User decisions and closing evidence (AP-17 follow-up)
+
+After the AP-17 review the user answered its open questions:
+
+- **Approvals.** All implementation-recorded declarations were approved as recorded. Each catalog and the platform obligations now end with a `*-user-approval` record (`by: "user"`, `on: "2026-10-11"`) that approves every current declaration. The earlier implementation-agent records stay unchanged as history. Approving the rubrics changed declaration states, so the Support Cases catalog moved to revision 7 and Reading List to revision 5.
+- **Rubrics.** `refusal-feedback-clarity@1`, `SC-REFUSAL-FEEDBACK@1`, `rating-rejection-clarity@1`, and `RL-REJECT-CLARITY@1` were approved as written. Their assessments now report a pass or fail labelled "model assessment (approved rubric)". They stay non-gating and never count toward a scenario verdict or the exit code.
+- **report-exports `Poll`.** Fixed in [`workflow.ts`](../../examples/report-exports/workflow.ts): a `Suspended` result with no cause (a normal durable wait such as the release delay) now reports `Pending` with the execution's stage, and only a suspension carrying a failure cause reports `Recoverable`. The [README](../../examples/report-exports/README.md) states the distinction.
+- **Support Cases refusal precedence.** The current behavior is documented in the [README](../../examples/support-cases/README.md#resolve-and-inspect-history) without changing it: transition checks run before the version check, so a concurrent same-version loser normally receives `InvalidSupportCaseTransition`. `SC-RACE@2` keeps accepting either documented refusal.
+- **Scope.** Discoverability runs (goal-only, without operation hints) and authenticated custom surfaces are outside the supported scope; this is a human-approved amendment.
+- **Repository lint.** The pre-existing repository-wide lint and `lint:architecture` failures are left as they are.
+
+All runs below used the final tree (2026-10-11 12:50–12:56 UTC):
+
+| Run | Exit | Result |
+| --- | --- | --- |
+| `bun run reading-list:acceptance --output data/acceptance/ap-18-rl` / `--replay … ap-18-rl-replay` | 0 / 0 | 9 scenarios, 24/24 pass; 36 real decisions; replay 0 decisions; `RL-REJECT-CLARITY` model assessment **pass** (rated "understandable", confidence 0.8) |
+| `bun run support-cases:acceptance … ap-18-sc` / `… ap-18-sc-replay` | 0 / 0 | 13 scenarios, 38/38 pass; 73 real decisions; each race round has one winner and the loser is refused with `InvalidSupportCaseTransition`; `SC-REFUSAL-FEEDBACK` model assessment **fail** (rated "partially-clear", confidence 0.41, below the "clear" threshold) |
+| `bun run expense-ledger:acceptance … ap-18-el` / `… ap-18-el-replay` | 0 / 0 | 3 scenarios, 7/7 pass |
+| `bun run report-exports:acceptance … ap-18-re` / `… ap-18-re-replay` | 0 / 0 | 4 scenarios, 10/10 pass; `RE-COMPLETES` passes in both, observing `Undiscovered → Pending dispatched → Succeeded` with no `Recoverable` |
+| `bun run reading-list:acceptance --faults … ap-18-rl-faults` | 0 | 5/5 defects detected, 0 false acceptance, 4/4 controls truthful, 5/5 clean controls pass |
+| `bun run support-cases:acceptance --faults … ap-18-sc-faults` | 0 | 4/4 defects detected, 0 false acceptance, 3/3 controls truthful, 5/5 clean controls pass |
+| `bun run acceptance:query qa --application all` | 0 | Current build: reading-list 9/9, support-cases 13/13, expense-ledger 3/3, report-exports 4/4; both assessments are listed under their approved rubrics |
+
+The held-out calibration from the AP-17 record still applies: it depends on neither the catalogs nor `Poll`.
+
+**Product finding (Support Cases).** Under the approved rubric, the stale-version refusal feedback is rated only "partially-clear". The model assessment is non-gating, so it does not change any obligation result, but the application currently misses its approved qualitative requirement. The finding is left to the application owner.
+
+Checks on the final tree: `bun run typecheck`, `bun run test` (259 tests in 57 files), and `bun run format:check` passed; `better-typescript` reported zero diagnostics in `packages/effect-domains-acceptance`, `apps/acceptance-console`, and the reading-list, support-cases, expense-ledger, and report-exports workspaces.
+
 ### 2026-10-11 (UTC): Full-completion review evidence (AP-17)
 
 Before the review, two declaration-validation gaps from AP-12 were closed: catalog validation now rejects interpretations the interpreter cannot apply (a native strategy on an incompatible field, a literal the field schema does not decode on a native-valid input, a model-assessed requirement used as an obligation, an assessment bound to a non-assessment evaluator), and `acceptance:query gaps` reports partition coverage per operation—overlapping input cases, unexercised enum members, and unexercised boundary strategies—labelled "declared-vocabulary coverage; not exhaustiveness". Package tests no longer leak temporary directories.

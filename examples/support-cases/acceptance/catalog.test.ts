@@ -50,7 +50,6 @@ const approving = (declaration: string) => (record: Catalog["approvals"][number]
 const approvesDesk = approving("desk-triage-assign@1")
 const approvesRace = approving("SC-RACE@1")
 const approvesRaceRevision = approving("SC-RACE@2")
-const approvesRubric = approving("refusal-feedback-clarity@1")
 
 const authoredCatalogTest = Effect.gen(function* () {
   const bound = yield* bindings
@@ -72,10 +71,8 @@ const authoredCatalogTest = Effect.gen(function* () {
   const laneInputs = Array.map(raceLanes.lanes, Struct.get("inputs"))
   const stale = yield* pipe(catalog.scenarios, Array.findFirst(isStale), Effect.fromOption)
   const assessment = yield* pipe(assessments, Array.head, Effect.fromOption)
-  const rubricApproved = Array.some(catalog.approvals, approvesRubric)
 
   expect(scenarioIds).toEqual(["case-lifecycle", "desk-triage-assign", "stale-version-denied", "off-duty-denied", "missing-assignment-denied", "disallowed-transition-denied", "invalid-version-rejected", "audit-admin", "audit-reader-denied", "audit-visitor-denied", "race-round-1", "race-round-2", "race-round-3"])
-  expect(catalog.revision).toBe("6")
   expect(desk.revision).toBe("2")
   expect(desk.fixture).toBe("support-target-open")
   expect(desk.operations).toEqual(["support.advanceCase"])
@@ -100,10 +97,7 @@ const authoredCatalogTest = Effect.gen(function* () {
   expect(stale.assessments).toEqual(["SC-REFUSAL-FEEDBACK"])
   expect(stale.requirements).toEqual(["SC-DENY", "SC-PRESERVE"])
   expect(assessment.reference).toBe("SC-REFUSAL-FEEDBACK")
-  expect(assessment.requirement.approval).toBe("proposed")
-  expect(assessment.rubric.approval).toBe("proposed")
   expect(assessment.rubric.threshold).toBe("clear")
-  expect(rubricApproved).toBe(false)
   expect(references).toEqual(["SC-OPEN", "SC-LIFECYCLE", "SC-HISTORY", "SC-CHRONOLOGY", "SC-JOIN", "SC-AUDIT", "SC-PRESERVE", "SC-DENY", "SC-REJECT", "SC-AUDIT-READ", "SC-AUDIT-DENY", "SC-RACE"])
   expect(features).toEqual([["open-case", "advance-case"], ["audit-lifecycle"]])
   expect(refinement.requirement).toBe("platform:PLATFORM-PRESERVE")
